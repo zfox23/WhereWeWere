@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   MapPin,
   Camera,
@@ -161,6 +162,8 @@ function HeatmapMap({ data }: { data: MapDataPoint[] }) {
 }
 
 function CountriesList({ data }: { data: CountryStats[] }) {
+  const navigate = useNavigate();
+
   if (data.length === 0) return null;
 
   return (
@@ -174,9 +177,12 @@ function CountriesList({ data }: { data: CountryStats[] }) {
           <li key={item.country} className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-900">{item.country}</span>
             <div className="text-right">
-              <span className="text-sm font-semibold text-primary-600">
+              <button
+                onClick={() => navigate(`/?country=${encodeURIComponent(item.country)}`)}
+                className="text-sm font-semibold text-primary-600 hover:text-primary-700 hover:underline"
+              >
                 {item.checkin_count} check-in{item.checkin_count !== 1 ? 's' : ''}
-              </span>
+              </button>
               <span className="text-xs text-gray-400 ml-2">
                 {item.unique_venues} venue{item.unique_venues !== 1 ? 's' : ''}
               </span>
@@ -189,6 +195,7 @@ function CountriesList({ data }: { data: CountryStats[] }) {
 }
 
 export default function Profile() {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<StatsType | null>(null);
   const [streak, setStreak] = useState<Streak | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
@@ -274,7 +281,12 @@ export default function Profile() {
       </div>
 
       {/* Activity heatmap */}
-      <Heatmap days={heatmapDays} year={heatmapYear} onYearChange={setHeatmapYear} />
+      <Heatmap
+        days={heatmapDays}
+        year={heatmapYear}
+        onYearChange={setHeatmapYear}
+        onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
+      />
     </div>
   );
 }

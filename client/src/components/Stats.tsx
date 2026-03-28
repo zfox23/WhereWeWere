@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   MapPin,
   Camera,
@@ -41,7 +42,29 @@ export function StatCard({
   );
 }
 
+function formatDateShort(dateStr: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(dateStr + 'T12:00:00'));
+}
+
 export function StreakCard({ streak }: { streak: Streak }) {
+  const navigate = useNavigate();
+
+  const handleCurrentClick = () => {
+    if (streak.current_streak > 0 && streak.current_streak_start && streak.current_streak_end) {
+      navigate(`/?from=${streak.current_streak_start}&to=${streak.current_streak_end}`);
+    }
+  };
+
+  const handleLongestClick = () => {
+    if (streak.longest_streak > 0 && streak.longest_streak_start && streak.longest_streak_end) {
+      navigate(`/?from=${streak.longest_streak_start}&to=${streak.longest_streak_end}`);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
@@ -53,17 +76,39 @@ export function StreakCard({ streak }: { streak: Streak }) {
           <p className="text-xs text-gray-500 uppercase tracking-wide">
             Current
           </p>
-          <p className="text-xl font-bold text-orange-600">
-            {streak.current_streak} day{streak.current_streak !== 1 ? 's' : ''}
-          </p>
+          {streak.current_streak > 0 ? (
+            <button onClick={handleCurrentClick} className="text-left group">
+              <p className="text-xl font-bold text-orange-600 group-hover:underline">
+                {streak.current_streak} day{streak.current_streak !== 1 ? 's' : ''}
+              </p>
+              {streak.current_streak_start && streak.current_streak_end && (
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  {formatDateShort(streak.current_streak_start)} — {formatDateShort(streak.current_streak_end)}
+                </p>
+              )}
+            </button>
+          ) : (
+            <p className="text-xl font-bold text-orange-600">0 days</p>
+          )}
         </div>
         <div>
           <p className="text-xs text-gray-500 uppercase tracking-wide">
             Longest
           </p>
-          <p className="text-xl font-bold text-gray-900">
-            {streak.longest_streak} day{streak.longest_streak !== 1 ? 's' : ''}
-          </p>
+          {streak.longest_streak > 0 ? (
+            <button onClick={handleLongestClick} className="text-left group">
+              <p className="text-xl font-bold text-gray-900 group-hover:underline">
+                {streak.longest_streak} day{streak.longest_streak !== 1 ? 's' : ''}
+              </p>
+              {streak.longest_streak_start && streak.longest_streak_end && (
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  {formatDateShort(streak.longest_streak_start)} — {formatDateShort(streak.longest_streak_end)}
+                </p>
+              )}
+            </button>
+          ) : (
+            <p className="text-xl font-bold text-gray-900">0 days</p>
+          )}
         </div>
       </div>
       {streak.last_checkin && (
@@ -81,6 +126,8 @@ export function StreakCard({ streak }: { streak: Streak }) {
 }
 
 export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
+  const navigate = useNavigate();
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
@@ -97,9 +144,12 @@ export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
                 {i + 1}
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">
+                <button
+                  onClick={() => navigate(`/?venue_id=${venue.venue_id}`)}
+                  className="text-sm font-medium text-gray-900 truncate hover:text-primary-600 hover:underline text-left"
+                >
                   {venue.venue_name}
-                </p>
+                </button>
                 {venue.category_name && (
                   <p className="text-xs text-gray-500">{venue.category_name}</p>
                 )}
@@ -116,6 +166,7 @@ export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
 }
 
 export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
+  const navigate = useNavigate();
   const maxCount = Math.max(...data.map((d) => d.checkin_count), 1);
 
   return (
@@ -129,9 +180,13 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
       ) : (
         <div className="space-y-2.5">
           {data.map((item) => (
-            <div key={item.category_name}>
+            <button
+              key={item.category_name}
+              onClick={() => navigate(`/?category=${encodeURIComponent(item.category_name)}`)}
+              className="block w-full text-left group"
+            >
               <div className="flex items-center justify-between mb-0.5">
-                <span className="text-xs font-medium text-gray-700 truncate">
+                <span className="text-xs font-medium text-gray-700 truncate group-hover:text-primary-600 group-hover:underline">
                   {item.category_name}
                 </span>
                 <span className="text-xs text-gray-500 shrink-0 ml-2">
@@ -146,7 +201,7 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
                   }}
                 />
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -154,7 +209,12 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
   );
 }
 
-export function Heatmap({ days, year, onYearChange }: { days: HeatmapDay[]; year: number; onYearChange?: (year: number) => void }) {
+export function Heatmap({ days, year, onYearChange, onDayClick }: {
+  days: HeatmapDay[];
+  year: number;
+  onYearChange?: (year: number) => void;
+  onDayClick?: (date: string) => void;
+}) {
   const dayMap = new Map(days.map((d) => [d.date, d.count]));
   const startDate = new Date(year, 0, 1);
   const endDate = new Date(year, 11, 31);
@@ -256,8 +316,13 @@ export function Heatmap({ days, year, onYearChange }: { days: HeatmapDay[]; year
                   key={di}
                   className={`w-[12px] h-[12px] rounded-sm ${
                     day ? getColor(day.count) : 'bg-transparent'
-                  }`}
+                  } ${day && day.count > 0 && onDayClick ? 'cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1' : ''}`}
                   title={day ? `${day.date}: ${day.count} check-in${day.count !== 1 ? 's' : ''}` : ''}
+                  onClick={() => {
+                    if (day && day.count > 0 && onDayClick) {
+                      onDayClick(day.date);
+                    }
+                  }}
                 />
               ))}
               {/* Pad incomplete weeks at the end */}
@@ -284,6 +349,7 @@ export function Heatmap({ days, year, onYearChange }: { days: HeatmapDay[]; year
 }
 
 export default function StatsView() {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<StatsType | null>(null);
   const [streak, setStreak] = useState<Streak | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
@@ -367,7 +433,12 @@ export default function StatsView() {
       </div>
 
       {/* Heatmap */}
-      <Heatmap days={heatmapDays} year={heatmapYear} onYearChange={setHeatmapYear} />
+      <Heatmap
+        days={heatmapDays}
+        year={heatmapYear}
+        onYearChange={setHeatmapYear}
+        onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
+      />
     </div>
   );
 }

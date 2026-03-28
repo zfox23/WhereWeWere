@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X } from 'lucide-react';
 import { checkins } from '../api/client';
 import { CheckIn } from '../types';
@@ -28,23 +28,48 @@ function groupByDate(items: CheckIn[]): Map<string, CheckIn[]> {
 }
 
 export default function Home() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<CheckIn[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [searchQuery, setSearchQuery] = useState('');
+  // Read filters from URL params
+  const searchQuery = searchParams.get('q') || '';
+  const fromDate = searchParams.get('from') || '';
+  const toDate = searchParams.get('to') || '';
+  const venueId = searchParams.get('venue_id') || '';
+  const category = searchParams.get('category') || '';
+  const country = searchParams.get('country') || '';
+
   const [showFilters, setShowFilters] = useState(false);
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+
+  // Show filters panel if any structured filter is active
+  useEffect(() => {
+    if (fromDate || toDate || venueId || category || country) {
+      setShowFilters(true);
+    }
+  }, []);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offsetRef = useRef(0);
 
+  const setFilter = useCallback((key: string, value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) {
+        next.set(key, value);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const fetchCheckins = useCallback(
-    async (offset: number, append: boolean, query?: string, from?: string, to?: string) => {
+    async (offset: number, append: boolean) => {
       if (append) {
         setLoadingMore(true);
       } else {
@@ -58,9 +83,12 @@ export default function Home() {
           limit: String(PAGE_SIZE),
           offset: String(offset),
         };
-        if (query?.trim()) params.q = query.trim();
-        if (from) params.from = from;
-        if (to) params.to = to + 'T23:59:59';
+        if (searchQuery.trim()) params.q = searchQuery.trim();
+        if (fromDate) params.from = fromDate;
+        if (toDate) params.to = toDate + 'T23:59:59';
+        if (venueId) params.venue_id = venueId;
+        if (category) params.category = category;
+        if (country) params.country = country;
 
         const data = await checkins.list(params);
         if (append) {
@@ -77,7 +105,7 @@ export default function Home() {
         setLoadingMore(false);
       }
     },
-    []
+    [searchQuery, fromDate, toDate, venueId, category, country]
   );
 
   // Initial load + reload on filter changes
@@ -86,13 +114,13 @@ export default function Home() {
 
     debounceRef.current = setTimeout(() => {
       offsetRef.current = 0;
-      fetchCheckins(0, false, searchQuery, fromDate, toDate);
+      fetchCheckins(0, false);
     }, 300);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [searchQuery, fromDate, toDate, fetchCheckins]);
+  }, [fetchCheckins]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -102,7 +130,7 @@ export default function Home() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
-          fetchCheckins(offsetRef.current, true, searchQuery, fromDate, toDate);
+          fetchCheckins(offsetRef.current, true);
         }
       },
       { threshold: 0.1 }
@@ -110,7 +138,7 @@ export default function Home() {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, searchQuery, fromDate, toDate, fetchCheckins]);
+  }, [hasMore, loading, loadingMore, fetchCheckins]);
 
   const handleDelete = async (id: string) => {
     try {
@@ -122,14 +150,24 @@ export default function Home() {
   };
 
   const clearFilters = () => {
-    setSearchQuery('');
-    setFromDate('');
-    setToDate('');
+    setSearchParams({}, { replace: true });
     setShowFilters(false);
   };
 
-  const hasActiveFilters = searchQuery || fromDate || toDate;
+  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country;
   const grouped = groupByDate(items);
+
+  // Build active filter pills for display
+  const filterPills: { label: string; key: string }[] = [];
+  if (venueId) filterPills.push({ label: `Venue: ${items[0]?.venue_name || venueId}`, key: 'venue_id' });
+  if (category) filterPills.push({ label: `Category: ${category}`, key: 'category' });
+  if (country) filterPills.push({ label: `Country: ${country}`, key: 'country' });
+  if (fromDate && toDate && fromDate === toDate) {
+    filterPills.push({ label: `Date: ${fromDate}`, key: 'from' });
+  } else {
+    if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
+    if (toDate) filterPills.push({ label: `Until: ${toDate}`, key: 'to' });
+  }
 
   return (
     <div className="space-y-4">
@@ -143,7 +181,7 @@ export default function Home() {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => setFilter('q', e.target.value)}
             placeholder="Search venues and notes..."
             className="w-full pl-10 pr-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
           />
@@ -160,11 +198,50 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Date range filters */}
+      {/* Active filter pills */}
+      {filterPills.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {filterPills.map((pill) => (
+            <span
+              key={pill.key}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-medium"
+            >
+              {pill.label}
+              <button
+                onClick={() => {
+                  if (pill.key === 'from' && fromDate === toDate) {
+                    setSearchParams((prev) => {
+                      const next = new URLSearchParams(prev);
+                      next.delete('from');
+                      next.delete('to');
+                      return next;
+                    }, { replace: true });
+                  } else {
+                    setFilter(pill.key, '');
+                  }
+                }}
+                className="hover:text-primary-900 ml-0.5"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          {filterPills.length > 1 && (
+            <button
+              onClick={clearFilters}
+              className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Expanded filters */}
       {showFilters && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Date Range</span>
+            <span className="text-sm font-medium text-gray-700">Filters</span>
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
@@ -181,7 +258,7 @@ export default function Home() {
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => setFilter('from', e.target.value)}
                 className="input"
               />
             </div>
@@ -190,8 +267,30 @@ export default function Home() {
               <input
                 type="date"
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => setFilter('to', e.target.value)}
                 className="input"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Category</label>
+              <input
+                type="text"
+                value={category}
+                onChange={(e) => setFilter('category', e.target.value)}
+                className="input"
+                placeholder="e.g. Restaurant"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Country</label>
+              <input
+                type="text"
+                value={country}
+                onChange={(e) => setFilter('country', e.target.value)}
+                className="input"
+                placeholder="e.g. United States"
               />
             </div>
           </div>
@@ -207,7 +306,7 @@ export default function Home() {
         <div className="text-center py-20">
           <p className="text-red-600 mb-4">{error}</p>
           <button
-            onClick={() => fetchCheckins(0, false, searchQuery, fromDate, toDate)}
+            onClick={() => fetchCheckins(0, false)}
             className="btn-primary"
           >
             Retry

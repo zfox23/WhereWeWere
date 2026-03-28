@@ -43,6 +43,18 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
+    if (req.query.category) {
+      conditions.push(`vc.name = $${paramIndex}`);
+      params.push(req.query.category);
+      paramIndex++;
+    }
+
+    if (req.query.country) {
+      conditions.push(`v.country = $${paramIndex}`);
+      params.push(req.query.country);
+      paramIndex++;
+    }
+
     if (req.query.q) {
       const searchQuery = req.query.q as string;
       conditions.push(

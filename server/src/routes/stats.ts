@@ -115,9 +115,20 @@ router.get('/streaks', async (req: Request, res: Response) => {
       }
     }
 
+    // Calculate current streak date range
+    let currentStreakStart: Date | null = null;
+    let currentStreakEnd: Date | null = null;
+    if (currentStreak > 0) {
+      currentStreakEnd = new Date(dates[0]);
+      currentStreakEnd.setHours(0, 0, 0, 0);
+      currentStreakStart = new Date(dates[currentStreak - 1]);
+      currentStreakStart.setHours(0, 0, 0, 0);
+    }
+
     // Calculate longest streak
     let longestStreak = 1;
     let tempStreak = 1;
+    let longestEnd = 0; // index of the start (most recent date) of longest streak
     for (let i = 1; i < dates.length; i++) {
       const prevDate = new Date(dates[i - 1]);
       const currDate = new Date(dates[i]);
@@ -128,16 +139,31 @@ router.get('/streaks', async (req: Request, res: Response) => {
       );
       if (diff === 1) {
         tempStreak++;
-        longestStreak = Math.max(longestStreak, tempStreak);
+        if (tempStreak > longestStreak) {
+          longestStreak = tempStreak;
+          longestEnd = i - tempStreak + 1; // dates are descending, so "end" is the more recent
+        }
       } else {
         tempStreak = 1;
       }
     }
 
+    // Longest streak date range (dates are descending)
+    const longestStreakEnd = new Date(dates[longestEnd]);
+    longestStreakEnd.setHours(0, 0, 0, 0);
+    const longestStreakStart = new Date(dates[longestEnd + longestStreak - 1]);
+    longestStreakStart.setHours(0, 0, 0, 0);
+
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
     res.json({
       current_streak: currentStreak,
       longest_streak: longestStreak,
       last_checkin_date: lastCheckinDate,
+      current_streak_start: currentStreakStart ? fmt(currentStreakStart) : null,
+      current_streak_end: currentStreakEnd ? fmt(currentStreakEnd) : null,
+      longest_streak_start: fmt(longestStreakStart),
+      longest_streak_end: fmt(longestStreakEnd),
     });
   } catch (err) {
     console.error('Error getting streaks:', err);
