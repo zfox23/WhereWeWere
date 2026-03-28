@@ -49,6 +49,7 @@ export default function MapView({
         center={center}
         zoom={zoom}
         scrollWheelZoom
+        attributionControl={false}
         className="w-full h-full"
         style={{ minHeight: '300px', height: '100%' }}
       >

@@ -105,7 +105,7 @@ function TopVenuesList({ venues }: { venues: TopVenue[] }) {
                 )}
               </div>
               <span className="text-sm font-semibold text-primary-600 shrink-0">
-                {venue.checkin_count}
+                {venue.checkin_count} check-in{venue.checkin_count !== 1 ? 's' : ''}
               </span>
             </li>
           ))}
@@ -135,7 +135,7 @@ function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
                   {item.category_name}
                 </span>
                 <span className="text-xs text-gray-500 shrink-0 ml-2">
-                  {item.checkin_count}
+                  {item.checkin_count} check-in{item.checkin_count !== 1 ? 's' : ''}
                 </span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-2">
