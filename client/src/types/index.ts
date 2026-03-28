@@ -1,0 +1,110 @@
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  display_name: string | null;
+  created_at: string;
+}
+
+export interface VenueCategory {
+  id: string;
+  name: string;
+  icon: string | null;
+  parent_id: string | null;
+}
+
+export interface Venue {
+  id: string;
+  name: string;
+  category_id: string | null;
+  category_name?: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  postal_code: string | null;
+  latitude: number;
+  longitude: number;
+  osm_id: string | null;
+  parent_venue_id: string | null;
+  parent_venue_name?: string;
+  child_venues?: { id: string; name: string }[];
+  checkin_count?: number;
+  created_at: string;
+}
+
+export interface CheckIn {
+  id: string;
+  user_id: string;
+  venue_id: string;
+  venue_name?: string;
+  venue_category?: string;
+  venue_latitude?: number;
+  venue_longitude?: number;
+  parent_venue_id?: string;
+  parent_venue_name?: string;
+  notes: string | null;
+  rating: number | null;
+  checked_in_at: string;
+  photo_count?: number;
+  photos?: Photo[];
+  created_at: string;
+}
+
+export interface Photo {
+  id: string;
+  checkin_id: string;
+  file_path: string;
+  original_filename: string | null;
+  mime_type: string | null;
+  caption: string | null;
+  url: string;
+  created_at: string;
+}
+
+export interface NearbyVenue {
+  name: string;
+  category: string;
+  latitude: number;
+  longitude: number;
+  address: string | null;
+  osm_id: string;
+  source: 'local' | 'osm';
+  id?: string; // only for local venues
+}
+
+export interface Stats {
+  total_checkins: number;
+  unique_venues: number;
+  total_photos: number;
+  days_with_checkins: number;
+  member_since: string;
+}
+
+export interface Streak {
+  current_streak: number;
+  longest_streak: number;
+  last_checkin: string | null;
+}
+
+export interface TopVenue {
+  venue_id: string;
+  venue_name: string;
+  category_name: string | null;
+  checkin_count: number;
+}
+
+export interface CategoryBreakdown {
+  category_name: string;
+  checkin_count: number;
+}
+
+export interface HeatmapDay {
+  date: string;
+  count: number;
+}
+
+export interface SearchResults {
+  venues: Venue[];
+  checkins: CheckIn[];
+}

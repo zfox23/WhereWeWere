@@ -1,0 +1,383 @@
+import { Router, Request, Response } from 'express';
+import { query } from '../db';
+import { searchNearbyVenues, findEnclosingVenue } from '../services/overpass';
+
+const router = Router();
+
+// GET / - list venues with optional search, category filter, pagination
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const { search, category, limit = '50', offset = '0' } = req.query;
+    const params: unknown[] = [];
+    const conditions: string[] = [];
+    let paramIndex = 1;
+
+    if (search) {
+      conditions.push(`v.search_vector @@ plainto_tsquery('english', $${paramIndex})`);
+      params.push(search);
+      paramIndex++;
+    }
+
+    if (category) {
+      conditions.push(`vc.name = $${paramIndex}`);
+      params.push(category);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rankSelect = search
+      ? `, ts_rank(v.search_vector, plainto_tsquery('english', $1)) AS rank`
+      : '';
+    const orderBy = search ? 'ORDER BY rank DESC' : 'ORDER BY v.created_at DESC';
+
+    params.push(parseInt(limit as string, 10));
+    const limitParam = `$${paramIndex}`;
+    paramIndex++;
+
+    params.push(parseInt(offset as string, 10));
+    const offsetParam = `$${paramIndex}`;
+
+    const sql = `
+      SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
+             v.latitude, v.longitude, v.osm_id, v.created_at, v.updated_at,
+             vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon
+             ${rankSelect}
+      FROM venues v
+      LEFT JOIN venue_categories vc ON v.category_id = vc.id
+      ${whereClause}
+      ${orderBy}
+      LIMIT ${limitParam} OFFSET ${offsetParam}
+    `;
+
+    const result = await query(sql, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error listing venues:', err);
+    res.status(500).json({ error: 'Failed to list venues' });
+  }
+});
+
+// GET /nearby - search nearby venues from DB and optionally OSM
+router.get('/nearby', async (req: Request, res: Response) => {
+  try {
+    const { lat, lon, radius = '500', search } = req.query;
+
+    if (!lat || !lon) {
+      return res.status(400).json({ error: 'lat and lon are required' });
+    }
+
+    const latNum = parseFloat(lat as string);
+    const lonNum = parseFloat(lon as string);
+    const radiusMeters = parseInt(radius as string, 10);
+
+    if (isNaN(latNum) || isNaN(lonNum)) {
+      return res.status(400).json({ error: 'lat and lon must be valid numbers' });
+    }
+
+    // Search local DB using Haversine distance
+    const dbParams: unknown[] = [latNum, lonNum, radiusMeters];
+    let searchCondition = '';
+    if (search) {
+      searchCondition = `AND v.search_vector @@ plainto_tsquery('english', $4)`;
+      dbParams.push(search);
+    }
+
+    const dbSql = `
+      SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
+             v.latitude, v.longitude, v.osm_id, v.created_at, v.updated_at,
+             vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
+             (6371000 * acos(
+               cos(radians($1)) * cos(radians(v.latitude)) *
+               cos(radians(v.longitude) - radians($2)) +
+               sin(radians($1)) * sin(radians(v.latitude))
+             )) AS distance,
+             'local' AS source
+      FROM venues v
+      LEFT JOIN venue_categories vc ON v.category_id = vc.id
+      WHERE (6371000 * acos(
+               cos(radians($1)) * cos(radians(v.latitude)) *
+               cos(radians(v.longitude) - radians($2)) +
+               sin(radians($1)) * sin(radians(v.latitude))
+             )) <= $3
+      ${searchCondition}
+      ORDER BY distance ASC
+      LIMIT 50
+    `;
+
+    const dbResult = await query(dbSql, dbParams);
+    const localVenues = dbResult.rows;
+
+    // Also query Overpass API
+    let osmVenues: Array<Record<string, unknown>> = [];
+    try {
+      const osmResults = await searchNearbyVenues(
+        latNum,
+        lonNum,
+        search as string | undefined,
+        radiusMeters
+      );
+
+      // Filter out OSM results that already exist in local DB by osm_id
+      const localOsmIds = new Set(
+        localVenues.filter((v: { osm_id: string | null }) => v.osm_id).map((v: { osm_id: string }) => v.osm_id)
+      );
+
+      osmVenues = osmResults
+        .filter((r) => !localOsmIds.has(r.osm_id))
+        .map((r) => ({
+          ...r,
+          source: 'osm',
+        }));
+    } catch (osmErr) {
+      // If Overpass fails, just return local results
+      console.error('Overpass API error (non-fatal):', osmErr);
+    }
+
+    res.json([...localVenues, ...osmVenues]);
+  } catch (err) {
+    console.error('Error searching nearby venues:', err);
+    res.status(500).json({ error: 'Failed to search nearby venues' });
+  }
+});
+
+// GET /categories - list all venue categories
+router.get('/categories', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT id, name, icon, parent_id, created_at
+       FROM venue_categories
+       ORDER BY name ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error listing categories:', err);
+    res.status(500).json({ error: 'Failed to list categories' });
+  }
+});
+
+// GET /:id - get single venue with check-in count
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(
+      `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
+              v.latitude, v.longitude, v.osm_id, v.parent_venue_id,
+              v.created_at, v.updated_at,
+              vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
+              pv.name AS parent_venue_name,
+              COUNT(c.id)::int AS checkin_count
+       FROM venues v
+       LEFT JOIN venue_categories vc ON v.category_id = vc.id
+       LEFT JOIN venues pv ON v.parent_venue_id = pv.id
+       LEFT JOIN checkins c ON c.venue_id = v.id
+       WHERE v.id = $1
+       GROUP BY v.id, vc.id, pv.name`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Venue not found' });
+    }
+
+    const venue = result.rows[0];
+
+    // Fetch child venues (e.g. terminals inside an airport)
+    const childrenResult = await query(
+      `SELECT id, name FROM venues WHERE parent_venue_id = $1 ORDER BY name`,
+      [id]
+    );
+    venue.child_venues = childrenResult.rows;
+
+    res.json(venue);
+  } catch (err) {
+    console.error('Error getting venue:', err);
+    res.status(500).json({ error: 'Failed to get venue' });
+  }
+});
+
+// POST / - create venue
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const {
+      name, category_id, address, city, state, country,
+      postal_code, latitude, longitude, osm_id,
+    } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    if (latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ error: 'latitude and longitude are required' });
+    }
+
+    const result = await query(
+      `INSERT INTO venues (name, category_id, address, city, state, country,
+                           postal_code, latitude, longitude, osm_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [name, category_id || null, address || null, city || null, state || null,
+       country || null, postal_code || null, latitude, longitude, osm_id || null]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating venue:', err);
+    res.status(500).json({ error: 'Failed to create venue' });
+  }
+});
+
+// PUT /:id - update venue
+router.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      name, category_id, address, city, state, country,
+      postal_code, latitude, longitude, osm_id,
+    } = req.body;
+
+    const result = await query(
+      `UPDATE venues
+       SET name = COALESCE($2, name),
+           category_id = COALESCE($3, category_id),
+           address = COALESCE($4, address),
+           city = COALESCE($5, city),
+           state = COALESCE($6, state),
+           country = COALESCE($7, country),
+           postal_code = COALESCE($8, postal_code),
+           latitude = COALESCE($9, latitude),
+           longitude = COALESCE($10, longitude),
+           osm_id = COALESCE($11, osm_id),
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, name, category_id, address, city, state, country,
+       postal_code, latitude, longitude, osm_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Venue not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating venue:', err);
+    res.status(500).json({ error: 'Failed to update venue' });
+  }
+});
+
+// POST /import-osm - import a venue from OSM data
+router.post('/import-osm', async (req: Request, res: Response) => {
+  try {
+    const { name, category, latitude, longitude, address, osm_id } = req.body;
+
+    if (!name || !osm_id) {
+      return res.status(400).json({ error: 'name and osm_id are required' });
+    }
+
+    // Check if a venue with this osm_id already exists
+    const existing = await query(
+      'SELECT * FROM venues WHERE osm_id = $1',
+      [osm_id]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.json(existing.rows[0]);
+    }
+
+    // Try to find a matching category
+    let categoryId: string | null = null;
+    if (category) {
+      const catResult = await query(
+        'SELECT id FROM venue_categories WHERE name = $1',
+        [category]
+      );
+      if (catResult.rows.length > 0) {
+        categoryId = catResult.rows[0].id;
+      }
+    }
+
+    // Parse address string into components if it's a comma-separated string
+    let city: string | null = null;
+    let state: string | null = null;
+    let addressLine: string | null = address || null;
+
+    if (address && typeof address === 'string') {
+      const parts = address.split(',').map((p: string) => p.trim());
+      if (parts.length >= 3) {
+        addressLine = parts[0];
+        city = parts[1];
+        state = parts[2];
+      } else if (parts.length === 2) {
+        addressLine = parts[0];
+        city = parts[1];
+      }
+    }
+
+    const insertResult = await query(
+      `INSERT INTO venues (name, category_id, address, city, state, latitude, longitude, osm_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [name, categoryId, addressLine, city, state, latitude, longitude, osm_id]
+    );
+
+    const childVenue = insertResult.rows[0];
+
+    // Try to find an enclosing parent venue (e.g. the airport containing a terminal)
+    if (latitude && longitude) {
+      try {
+        const enclosing = await findEnclosingVenue(
+          parseFloat(latitude), parseFloat(longitude), osm_id
+        );
+        if (enclosing) {
+          // Upsert the parent venue
+          let parentVenue;
+          const existingParent = await query(
+            'SELECT id, name FROM venues WHERE osm_id = $1',
+            [enclosing.osm_id]
+          );
+          if (existingParent.rows.length > 0) {
+            parentVenue = existingParent.rows[0];
+          } else {
+            let parentCategoryId: string | null = null;
+            if (enclosing.category) {
+              const catRes = await query(
+                'SELECT id FROM venue_categories WHERE name = $1',
+                [enclosing.category]
+              );
+              if (catRes.rows.length > 0) parentCategoryId = catRes.rows[0].id;
+            }
+            const parentInsert = await query(
+              `INSERT INTO venues (name, category_id, address, latitude, longitude, osm_id)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id, name`,
+              [enclosing.name, parentCategoryId, enclosing.address,
+               enclosing.latitude, enclosing.longitude, enclosing.osm_id]
+            );
+            parentVenue = parentInsert.rows[0];
+          }
+
+          // Link child to parent
+          await query(
+            'UPDATE venues SET parent_venue_id = $1 WHERE id = $2',
+            [parentVenue.id, childVenue.id]
+          );
+          childVenue.parent_venue_id = parentVenue.id;
+          childVenue.parent_venue_name = parentVenue.name;
+        }
+      } catch (parentErr) {
+        // Non-fatal — venue was created, just no parent link
+        console.error('Parent venue lookup failed (non-fatal):', parentErr);
+      }
+    }
+
+    res.status(201).json(childVenue);
+  } catch (err) {
+    console.error('Error importing OSM venue:', err);
+    res.status(500).json({ error: 'Failed to import OSM venue' });
+  }
+});
+
+export const venuesRouter = router;

@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wherewewere
+      POSTGRES_PASSWORD: wherewewere
+      POSTGRES_DB: wherewewere
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://wherewewere:wherewewere@db:5432/wherewewere
+      PORT: 3001
+      NODE_ENV: production
+      PHOTOS_DIR: /data/photos
+      SESSION_SECRET: change-me-in-production
+      BASE_URL: http://localhost:3001
+    ports:
+      - "3001:3001"
+    volumes:
+      - photos:/data/photos
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "5173:80"
+
+volumes:
+  pgdata:
+  photos:

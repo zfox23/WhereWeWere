@@ -1,0 +1,1 @@
+- [Project Overview](project_overview.md) — Self-hosted Swarm replacement: React+Express+Postgres monorepo, REST API at /api/v1/, OSM integration
