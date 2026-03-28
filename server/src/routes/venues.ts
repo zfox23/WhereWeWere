@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { searchNearbyVenues, findEnclosingVenue } from '../services/overpass';
+import { reverseGeocode } from '../services/nominatim';
 
 const router = Router();
 
@@ -377,6 +378,45 @@ router.post('/import-osm', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error importing OSM venue:', err);
     res.status(500).json({ error: 'Failed to import OSM venue' });
+  }
+});
+
+// POST /geocode - reverse geocode venues missing country data
+router.post('/geocode', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT id, latitude, longitude FROM venues
+       WHERE country IS NULL OR TRIM(country) = ''
+       LIMIT 50`
+    );
+
+    let updated = 0;
+    for (const venue of result.rows) {
+      const geo = await reverseGeocode(
+        parseFloat(venue.latitude),
+        parseFloat(venue.longitude)
+      );
+      if (geo.country) {
+        await query(
+          `UPDATE venues SET
+            country = $1,
+            state = COALESCE(NULLIF(TRIM(state), ''), $2),
+            city = COALESCE(NULLIF(TRIM(city), ''), $3)
+           WHERE id = $4`,
+          [geo.country, geo.state || null, geo.city || null, venue.id]
+        );
+        updated++;
+      }
+    }
+
+    const remaining = await query(
+      `SELECT COUNT(*)::int AS count FROM venues WHERE country IS NULL OR TRIM(country) = ''`
+    );
+
+    res.json({ updated, remaining: remaining.rows[0].count });
+  } catch (err) {
+    console.error('Error geocoding venues:', err);
+    res.status(500).json({ error: 'Geocoding failed' });
   }
 });
 

@@ -51,6 +51,8 @@ export const venues = {
   categories: () => request<any[]>('/venues/categories'),
   importOsm: (data: any) =>
     request<any>('/venues/import-osm', { method: 'POST', body: JSON.stringify(data) }),
+  geocode: () =>
+    request<{ updated: number; remaining: number }>('/venues/geocode', { method: 'POST' }),
 };
 
 // Stats

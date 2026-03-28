@@ -1,7 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText } from 'lucide-react';
-import { settings, importApi } from '../api/client';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Globe } from 'lucide-react';
+import { settings, importApi, venues } from '../api/client';
 import type { UserSettings, ImportResult } from '../types';
+
+async function runGeocodeBackfill(
+  onProgress: (msg: string) => void,
+  onDone: () => void
+) {
+  let remaining = Infinity;
+  let totalUpdated = 0;
+  while (remaining > 0) {
+    const res = await venues.geocode();
+    totalUpdated += res.updated;
+    remaining = res.remaining;
+    if (res.updated === 0) break;
+    onProgress(`Geocoded ${totalUpdated} venues, ${remaining} remaining...`);
+  }
+  onDone();
+}
 
 function SwarmImportSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -10,12 +26,26 @@ function SwarmImportSection() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeMsg, setGeocodeMsg] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     setSelectedFiles(files);
     setResult(null);
     setImportError(null);
+  };
+
+  const startGeocode = () => {
+    setGeocoding(true);
+    setGeocodeMsg('Starting geocoding...');
+    runGeocodeBackfill(
+      (msg) => setGeocodeMsg(msg),
+      () => {
+        setGeocoding(false);
+        setGeocodeMsg('Geocoding complete!');
+      }
+    );
   };
 
   const handleImport = async () => {
@@ -28,6 +58,10 @@ function SwarmImportSection() {
       setResult(data);
       setSelectedFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      // Auto-trigger geocoding after import
+      if (data.imported > 0) {
+        startGeocode();
+      }
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Import failed');
     } finally {
@@ -145,6 +179,36 @@ function SwarmImportSection() {
           )}
         </div>
       )}
+
+      {geocodeMsg && (
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          {geocoding ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+          {geocodeMsg}
+        </div>
+      )}
+
+      <div className="border-t border-gray-100 pt-4">
+        <button
+          onClick={startGeocode}
+          disabled={geocoding || importing}
+          className="btn-secondary text-sm"
+        >
+          {geocoding ? (
+            <>
+              <Loader2 size={14} className="animate-spin mr-2" />
+              Geocoding...
+            </>
+          ) : (
+            <>
+              <Globe size={14} className="mr-2" />
+              Resolve Missing Countries
+            </>
+          )}
+        </button>
+        <p className="text-xs text-gray-400 mt-1">
+          Uses Nominatim to look up country, state, and city for venues missing location data.
+        </p>
+      </div>
     </div>
   );
 }
