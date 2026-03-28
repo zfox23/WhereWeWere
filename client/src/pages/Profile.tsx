@@ -183,6 +183,7 @@ export default function Profile() {
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
   const [categories, setCategories] = useState<CategoryBreakdown[]>([]);
   const [heatmapDays, setHeatmapDays] = useState<HeatmapDay[]>([]);
+  const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
   const [countries, setCountries] = useState<CountryStats[]>([]);
   const [mapData, setMapData] = useState<MapDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -196,7 +197,7 @@ export default function Profile() {
           stats.streaks(USER_ID),
           stats.topVenues(USER_ID, 10),
           stats.categoryBreakdown(USER_ID),
-          stats.heatmap(USER_ID, new Date().getFullYear()),
+          stats.heatmap(USER_ID, heatmapYear),
           stats.countries(USER_ID),
           stats.mapData(USER_ID),
         ]);
@@ -219,6 +220,10 @@ export default function Profile() {
     }
     loadData();
   }, []);
+
+  useEffect(() => {
+    stats.heatmap(USER_ID, heatmapYear).then(setHeatmapDays).catch(console.error);
+  }, [heatmapYear]);
 
   if (loading) {
     return (
@@ -258,7 +263,7 @@ export default function Profile() {
       </div>
 
       {/* Activity heatmap */}
-      <Heatmap days={heatmapDays} />
+      <Heatmap days={heatmapDays} year={heatmapYear} onYearChange={setHeatmapYear} />
     </div>
   );
 }

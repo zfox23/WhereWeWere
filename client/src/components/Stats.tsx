@@ -154,9 +154,8 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
   );
 }
 
-export function Heatmap({ days }: { days: HeatmapDay[] }) {
+export function Heatmap({ days, year, onYearChange }: { days: HeatmapDay[]; year: number; onYearChange?: (year: number) => void }) {
   const dayMap = new Map(days.map((d) => [d.date, d.count]));
-  const year = new Date().getFullYear();
   const startDate = new Date(year, 0, 1);
   const endDate = new Date(year, 11, 31);
 
@@ -198,12 +197,34 @@ export function Heatmap({ days }: { days: HeatmapDay[] }) {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
+  const currentYear = new Date().getFullYear();
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
-        <CalendarDays size={16} className="text-green-600" />
-        {year} Activity
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+          <CalendarDays size={16} className="text-green-600" />
+          {year} Activity
+        </h3>
+        {onYearChange && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onYearChange(year - 1)}
+              className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+            >
+              &larr; {year - 1}
+            </button>
+            {year < currentYear && (
+              <button
+                onClick={() => onYearChange(year + 1)}
+                className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+              >
+                {year + 1} &rarr;
+              </button>
+            )}
+          </div>
+        )}
+      </div>
       <div className="overflow-x-auto">
         {/* Month labels */}
         <div className="flex gap-[3px] mb-1 ml-0">
@@ -265,6 +286,7 @@ export default function StatsView() {
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
   const [categories, setCategories] = useState<CategoryBreakdown[]>([]);
   const [heatmapDays, setHeatmapDays] = useState<HeatmapDay[]>([]);
+  const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -276,7 +298,7 @@ export default function StatsView() {
           stats.streaks(USER_ID),
           stats.topVenues(USER_ID, 10),
           stats.categoryBreakdown(USER_ID),
-          stats.heatmap(USER_ID, new Date().getFullYear()),
+          stats.heatmap(USER_ID, heatmapYear),
         ]);
         setSummary(s);
         setStreak(st);
@@ -291,6 +313,10 @@ export default function StatsView() {
     }
     loadStats();
   }, []);
+
+  useEffect(() => {
+    stats.heatmap(USER_ID, heatmapYear).then(setHeatmapDays).catch(console.error);
+  }, [heatmapYear]);
 
   if (loading) {
     return (
@@ -338,7 +364,7 @@ export default function StatsView() {
       </div>
 
       {/* Heatmap */}
-      <Heatmap days={heatmapDays} />
+      <Heatmap days={heatmapDays} year={heatmapYear} onYearChange={setHeatmapYear} />
     </div>
   );
 }
