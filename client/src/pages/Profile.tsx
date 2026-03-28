@@ -6,7 +6,7 @@ import {
   Loader2,
   Globe,
 } from 'lucide-react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, useMapEvents, Popup as LeafletPopup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.heat';
@@ -46,16 +46,18 @@ function HeatLayer({ data }: { data: MapDataPoint[] }) {
     ]);
 
     layerRef.current = L.heatLayer(points, {
-      radius: 25,
-      blur: 15,
+      radius: 30,
+      blur: 20,
       maxZoom: 17,
+      minOpacity: 0.6,
       max: Math.max(...data.map((d) => d.checkin_count), 1),
       gradient: {
-        0.0: '#22c55e',
-        0.25: '#84cc16',
-        0.5: '#eab308',
-        0.75: '#f97316',
-        1.0: '#ef4444',
+        0.0: '#059669',
+        0.2: '#16a34a',
+        0.4: '#ca8a04',
+        0.6: '#ea580c',
+        0.8: '#dc2626',
+        1.0: '#991b1b',
       },
     }).addTo(map);
 
@@ -67,6 +69,49 @@ function HeatLayer({ data }: { data: MapDataPoint[] }) {
   }, [data, map]);
 
   return null;
+}
+
+function MapClickHandler({ data }: { data: MapDataPoint[] }) {
+  const [popup, setPopup] = useState<{ latlng: L.LatLng; venues: MapDataPoint[] } | null>(null);
+  const map = useMapEvents({
+    click: (e) => {
+      const zoom = map.getZoom();
+      // Search radius in degrees, shrinks as you zoom in
+      const radiusDeg = 200 / Math.pow(2, zoom);
+      const nearby = data.filter((d) => {
+        const dlat = d.latitude - e.latlng.lat;
+        const dlng = d.longitude - e.latlng.lng;
+        return Math.sqrt(dlat * dlat + dlng * dlng) <= radiusDeg;
+      }).sort((a, b) => b.checkin_count - a.checkin_count).slice(0, 10);
+
+      if (nearby.length > 0) {
+        setPopup({ latlng: e.latlng, venues: nearby });
+      } else {
+        setPopup(null);
+      }
+    },
+  });
+
+  if (!popup) return null;
+
+  return (
+    <LeafletPopup position={popup.latlng} eventHandlers={{ remove: () => setPopup(null) }}>
+      <div className="text-sm max-w-[240px]">
+        <p className="font-semibold text-gray-700 mb-1">{popup.venues.length} venue{popup.venues.length !== 1 ? 's' : ''} nearby</p>
+        <ul className="space-y-1.5 max-h-48 overflow-y-auto">
+          {popup.venues.map((v) => (
+            <li key={v.venue_id}>
+              <p className="font-medium text-gray-900">{v.venue_name}</p>
+              <p className="text-xs text-gray-500">
+                {v.checkin_count} check-in{v.checkin_count !== 1 ? 's' : ''}
+                {v.dates.length > 0 && ` — last ${v.dates[0]}`}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </LeafletPopup>
+  );
 }
 
 function HeatmapMap({ data }: { data: MapDataPoint[] }) {
@@ -86,8 +131,9 @@ function HeatmapMap({ data }: { data: MapDataPoint[] }) {
           <MapPin size={16} className="text-primary-600" />
           All Check-ins
         </h3>
+        <p className="text-xs text-gray-400 mt-0.5">Click anywhere on the map to see nearby venues</p>
       </div>
-      <div className="h-[400px]">
+      <div className="h-[500px]">
         <MapContainer
           center={center}
           zoom={4}
@@ -98,15 +144,16 @@ function HeatmapMap({ data }: { data: MapDataPoint[] }) {
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <HeatLayer data={data} />
+          <MapClickHandler data={data} />
         </MapContainer>
       </div>
       <div className="px-4 py-2 flex items-center gap-2 text-[10px] text-gray-400 justify-end">
         <span>Fewer</span>
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#22c55e' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#84cc16' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#eab308' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#f97316' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ef4444' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#059669' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#16a34a' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ca8a04' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ea580c' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#991b1b' }} />
         <span>More</span>
       </div>
     </div>
