@@ -1,7 +1,153 @@
-import { useState, useEffect } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle } from 'lucide-react';
-import { settings } from '../api/client';
-import type { UserSettings } from '../types';
+import { useState, useEffect, useRef } from 'react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText } from 'lucide-react';
+import { settings, importApi } from '../api/client';
+import type { UserSettings, ImportResult } from '../types';
+
+function SwarmImportSection() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setSelectedFiles(files);
+    setResult(null);
+    setImportError(null);
+  };
+
+  const handleImport = async () => {
+    if (selectedFiles.length === 0) return;
+    setImporting(true);
+    setResult(null);
+    setImportError(null);
+    try {
+      const data = await importApi.swarm(selectedFiles);
+      setResult(data);
+      setSelectedFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+      <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        <Upload size={20} className="text-gray-600" />
+        Swarm Import
+      </h2>
+      <p className="text-sm text-gray-500">
+        Import your check-in history from Swarm CSV export files. Upload all your CSV files at once for batch import.
+      </p>
+
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
+      >
+        <Upload size={24} className="mx-auto text-gray-400 mb-2" />
+        <p className="text-sm text-gray-600">
+          {selectedFiles.length > 0
+            ? `${selectedFiles.length} file${selectedFiles.length !== 1 ? 's' : ''} selected`
+            : 'Click to select CSV files'}
+        </p>
+        <p className="text-xs text-gray-400 mt-1">Up to 9 CSV files</p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv"
+          multiple
+          onChange={handleFileChange}
+          className="hidden"
+        />
+      </div>
+
+      {selectedFiles.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {selectedFiles.map((f, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-xs text-gray-700"
+              >
+                <FileText size={12} />
+                {f.name}
+              </span>
+            ))}
+          </div>
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            className="btn-primary"
+          >
+            {importing ? (
+              <>
+                <Loader2 size={16} className="animate-spin mr-2" />
+                Importing...
+              </>
+            ) : (
+              <>
+                <Upload size={16} className="mr-2" />
+                Import {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''}
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {importError && (
+        <div className="flex items-center gap-2 text-sm text-red-600">
+          <AlertCircle size={16} />
+          {importError}
+        </div>
+      )}
+
+      {result && (
+        <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm text-green-600">
+            <Check size={16} />
+            Import complete
+          </div>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{result.imported}</p>
+              <p className="text-xs text-gray-500">Imported</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{result.skipped}</p>
+              <p className="text-xs text-gray-500">Skipped</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{result.total_errors}</p>
+              <p className="text-xs text-gray-500">Errors</p>
+            </div>
+          </div>
+          {result.errors.length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowErrors(!showErrors)}
+                className="text-xs text-primary-600 hover:text-primary-700"
+              >
+                {showErrors ? 'Hide' : 'Show'} error details
+              </button>
+              {showErrors && (
+                <ul className="mt-2 space-y-1 text-xs text-red-600 max-h-40 overflow-y-auto">
+                  {result.errors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Settings() {
   const [data, setData] = useState<UserSettings | null>(null);
@@ -194,18 +340,8 @@ export default function Settings() {
         </button>
       </div>
 
-      {/* Import Section - placeholder for Commit 3 */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4" id="import-section">
-        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-          Swarm Import
-        </h2>
-        <p className="text-sm text-gray-500">
-          Import your check-in history from Swarm CSV export files. Upload all your CSV files at once for batch import.
-        </p>
-        <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-400">
-          <p className="text-sm">Import functionality coming soon.</p>
-        </div>
-      </div>
+      {/* Import Section */}
+      <SwarmImportSection />
     </div>
   );
 }

@@ -77,6 +77,23 @@ export const search = {
     request<any>(`/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`),
 };
 
+// Import
+export const importApi = {
+  swarm: async (files: File[]) => {
+    const form = new FormData();
+    files.forEach((f) => form.append('files', f));
+    const res = await fetch(`${API_BASE}/import/swarm`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(error.message || `Import failed: ${res.status}`);
+    }
+    return res.json();
+  },
+};
+
 // Settings
 export const settings = {
   get: () => request<any>('/settings'),

@@ -124,6 +124,13 @@ export interface MapDataPoint {
   dates: string[];
 }
 
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+  total_errors: number;
+}
+
 export interface UserSettings {
   username: string;
   email: string;
