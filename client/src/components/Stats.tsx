@@ -159,11 +159,14 @@ export function Heatmap({ days, year, onYearChange }: { days: HeatmapDay[]; year
   const startDate = new Date(year, 0, 1);
   const endDate = new Date(year, 11, 31);
 
-  // Build array of all days in the year
+  // Build array of all days in the year using local dates to match server YYYY-MM-DD format
   const allDays: { date: string; count: number }[] = [];
   const cursor = new Date(startDate);
   while (cursor <= endDate) {
-    const dateStr = cursor.toISOString().slice(0, 10);
+    const y = cursor.getFullYear();
+    const m = String(cursor.getMonth() + 1).padStart(2, '0');
+    const d = String(cursor.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
     allDays.push({ date: dateStr, count: dayMap.get(dateStr) || 0 });
     cursor.setDate(cursor.getDate() + 1);
   }

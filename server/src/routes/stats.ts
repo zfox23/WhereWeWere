@@ -217,7 +217,7 @@ router.get('/heatmap', async (req: Request, res: Response) => {
     const yearNum = parseInt(year as string, 10);
 
     const result = await query(
-      `SELECT DATE(checked_in_at AT TIME ZONE 'UTC') AS date,
+      `SELECT TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
