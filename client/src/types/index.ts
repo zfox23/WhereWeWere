@@ -140,3 +140,21 @@ export interface UserSettings {
   immich_url: string | null;
   immich_api_key: string | null;
 }
+
+export interface Job {
+  id: string;
+  type: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: {
+    phase?: string;
+    updated?: number;
+    remaining?: number;
+    message?: string;
+    geocoded?: number;
+    categorized?: number;
+  };
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}

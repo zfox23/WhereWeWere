@@ -10,6 +10,7 @@ import { statsRouter } from './routes/stats';
 import { searchRouter } from './routes/search';
 import { settingsRouter } from './routes/settings';
 import { importRouter } from './routes/import';
+import { jobsRouter } from './routes/jobs';
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/search', searchRouter);
 app.use('/api/v1/settings', settingsRouter);
 app.use('/api/v1/import/swarm', importRouter);
+app.use('/api/v1/jobs', jobsRouter);
 
 // In production, serve client
 if (config.nodeEnv === 'production') {

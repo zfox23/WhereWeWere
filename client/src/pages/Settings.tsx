@@ -1,54 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Globe, Tag } from 'lucide-react';
-import { settings, importApi, venues } from '../api/client';
-import type { UserSettings, ImportResult } from '../types';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play } from 'lucide-react';
+import { settings, importApi, jobs } from '../api/client';
+import type { UserSettings, ImportResult, Job } from '../types';
 
-async function runBackfill(
-  fn: () => Promise<{ updated: number; remaining: number }>,
-  onProgress: (msg: string) => void,
-  label: string
-): Promise<void> {
-  let remaining = Infinity;
-  let totalUpdated = 0;
-  while (remaining > 0) {
-    const res = await fn();
-    totalUpdated += res.updated;
-    remaining = res.remaining;
-    if (res.updated === 0) break;
-    onProgress(`${label}: ${totalUpdated} updated, ${remaining} remaining...`);
-  }
-}
-
-function SwarmImportSection() {
+function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
-  const [backfilling, setBackfilling] = useState(false);
-  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     setSelectedFiles(files);
     setResult(null);
     setImportError(null);
-  };
-
-  const startBackfill = async () => {
-    setBackfilling(true);
-    setBackfillMsg('Resolving countries...');
-    try {
-      await runBackfill(() => venues.geocode(), (m) => setBackfillMsg(m), 'Countries');
-      setBackfillMsg('Categorizing venues...');
-      await runBackfill(() => venues.categorize(), (m) => setBackfillMsg(m), 'Categories');
-      setBackfillMsg('Done!');
-    } catch {
-      setBackfillMsg('Backfill encountered an error.');
-    } finally {
-      setBackfilling(false);
-    }
   };
 
   const handleImport = async () => {
@@ -61,9 +28,12 @@ function SwarmImportSection() {
       setResult(data);
       setSelectedFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      // Auto-trigger backfill after import
       if (data.imported > 0) {
-        startBackfill();
+        // Auto-trigger server-side backfill
+        try {
+          await jobs.start('backfill');
+        } catch { /* ignore if already running */ }
+        onImportComplete?.();
       }
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Import failed');
@@ -182,36 +152,144 @@ function SwarmImportSection() {
           )}
         </div>
       )}
+    </div>
+  );
+}
 
-      {backfillMsg && (
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          {backfilling ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-          {backfillMsg}
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+}
+
+function JobStatusIcon({ status }: { status: Job['status'] }) {
+  switch (status) {
+    case 'pending':
+      return <Clock size={16} className="text-gray-400" />;
+    case 'running':
+      return <Loader2 size={16} className="animate-spin text-blue-500" />;
+    case 'completed':
+      return <CheckCircle2 size={16} className="text-green-500" />;
+    case 'failed':
+      return <XCircle size={16} className="text-red-500" />;
+  }
+}
+
+function JobsSection({ refreshKey }: { refreshKey: number }) {
+  const [jobList, setJobList] = useState<Job[]>([]);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadJobs = async () => {
+    try {
+      const data = await jobs.list();
+      setJobList(data);
+    } catch (err) {
+      console.error('Failed to load jobs:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadJobs();
+  }, [refreshKey]);
+
+  // Poll while any job is running
+  useEffect(() => {
+    const hasActive = jobList.some((j) => j.status === 'pending' || j.status === 'running');
+    if (!hasActive) return;
+    const interval = setInterval(loadJobs, 3000);
+    return () => clearInterval(interval);
+  }, [jobList]);
+
+  const startBackfill = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      await jobs.start('backfill');
+      await loadJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start job');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const hasActiveJob = jobList.some((j) => j.status === 'pending' || j.status === 'running');
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+      <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        <Cog size={20} className="text-gray-600" />
+        Jobs
+      </h2>
+      <p className="text-sm text-gray-500">
+        Run background tasks to enrich venue data. The backfill job uses Nominatim and OpenStreetMap to resolve missing countries and categories.
+      </p>
+
+      <button
+        onClick={startBackfill}
+        disabled={starting || hasActiveJob}
+        className="btn-primary"
+      >
+        {starting ? (
+          <>
+            <Loader2 size={16} className="animate-spin mr-2" />
+            Starting...
+          </>
+        ) : (
+          <>
+            <Play size={16} className="mr-2" />
+            Start Backfill Job
+          </>
+        )}
+      </button>
+
+      {error && (
+        <div className="flex items-center gap-2 text-sm text-red-600">
+          <AlertCircle size={16} />
+          {error}
         </div>
       )}
 
-      <div className="border-t border-gray-100 pt-4">
-        <button
-          onClick={startBackfill}
-          disabled={backfilling || importing}
-          className="btn-secondary text-sm"
-        >
-          {backfilling ? (
-            <>
-              <Loader2 size={14} className="animate-spin mr-2" />
-              Resolving...
-            </>
-          ) : (
-            <>
-              <Globe size={14} className="mr-2" />
-              Resolve Missing Countries &amp; Categories
-            </>
-          )}
-        </button>
-        <p className="text-xs text-gray-400 mt-1">
-          Uses Nominatim and OpenStreetMap to look up country data and venue categories.
-        </p>
-      </div>
+      {jobList.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Jobs</h3>
+          <div className="divide-y divide-gray-100">
+            {jobList.map((job) => (
+              <div key={job.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <JobStatusIcon status={job.status} />
+                    <span className="text-sm font-medium text-gray-900 capitalize">{job.type}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                      job.status === 'completed' ? 'bg-green-50 text-green-700' :
+                      job.status === 'running' ? 'bg-blue-50 text-blue-700' :
+                      job.status === 'failed' ? 'bg-red-50 text-red-700' :
+                      'bg-gray-50 text-gray-600'
+                    }`}>
+                      {job.status}
+                    </span>
+                  </div>
+                  <span className="text-xs text-gray-400">{formatRelativeTime(job.created_at)}</span>
+                </div>
+                {job.progress?.message && (
+                  <p className="text-xs text-gray-500 mt-1 ml-6">{job.progress.message}</p>
+                )}
+                {job.error && (
+                  <p className="text-xs text-red-500 mt-1 ml-6">{job.error}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -219,6 +297,7 @@ function SwarmImportSection() {
 export default function Settings() {
   const [data, setData] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [jobRefreshKey, setJobRefreshKey] = useState(0);
 
   // Profile form
   const [username, setUsername] = useState('');
@@ -408,7 +487,10 @@ export default function Settings() {
       </div>
 
       {/* Import Section */}
-      <SwarmImportSection />
+      <SwarmImportSection onImportComplete={() => setJobRefreshKey((k) => k + 1)} />
+
+      {/* Jobs Section */}
+      <JobsSection refreshKey={jobRefreshKey} />
     </div>
   );
 }

@@ -98,6 +98,14 @@ export const importApi = {
   },
 };
 
+// Jobs
+export const jobs = {
+  list: () => request<any[]>('/jobs'),
+  get: (id: string) => request<any>(`/jobs/${id}`),
+  start: (type: string) =>
+    request<any>('/jobs', { method: 'POST', body: JSON.stringify({ type }) }),
+};
+
 // Settings
 export const settings = {
   get: () => request<any>('/settings'),
