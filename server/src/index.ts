@@ -8,6 +8,7 @@ import { checkinsRouter } from './routes/checkins';
 import { venuesRouter } from './routes/venues';
 import { statsRouter } from './routes/stats';
 import { searchRouter } from './routes/search';
+import { settingsRouter } from './routes/settings';
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use('/api/v1/checkins', checkinsRouter);
 app.use('/api/v1/venues', venuesRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/search', searchRouter);
+app.use('/api/v1/settings', settingsRouter);
 
 // In production, serve client
 if (config.nodeEnv === 'production') {

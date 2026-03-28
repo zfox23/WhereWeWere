@@ -65,10 +65,23 @@ export const stats = {
     request<any[]>(`/stats/category-breakdown?user_id=${userId}`),
   heatmap: (userId: string, year: number) =>
     request<any[]>(`/stats/heatmap?user_id=${userId}&year=${year}`),
+  countries: (userId: string) =>
+    request<any[]>(`/stats/countries?user_id=${userId}`),
+  mapData: (userId: string) =>
+    request<any[]>(`/stats/map-data?user_id=${userId}`),
 };
 
 // Search
 export const search = {
   query: (q: string, type = 'all', limit = 20) =>
     request<any>(`/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`),
+};
+
+// Settings
+export const settings = {
+  get: () => request<any>('/settings'),
+  update: (data: any) =>
+    request<any>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  updateProfile: (data: any) =>
+    request<any>('/settings/profile', { method: 'PUT', body: JSON.stringify(data) }),
 };

@@ -1,14 +1,11 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, MapPin, Clock, BarChart3, Search, BookOpen } from 'lucide-react';
+import { Home, User, Settings } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
-  { to: '/check-in', label: 'Check In', icon: MapPin },
-  { to: '/history', label: 'History', icon: Clock },
-  { to: '/stats', label: 'Stats', icon: BarChart3 },
-  { to: '/search', label: 'Search', icon: Search },
-  { to: '/docs', label: 'Docs', icon: BookOpen },
+  { to: '/profile', label: 'Profile', icon: User },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 function isActive(pathname: string, to: string) {

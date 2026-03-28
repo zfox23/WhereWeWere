@@ -108,3 +108,28 @@ export interface SearchResults {
   venues: Venue[];
   checkins: CheckIn[];
 }
+
+export interface CountryStats {
+  country: string;
+  checkin_count: number;
+  unique_venues: number;
+}
+
+export interface MapDataPoint {
+  venue_id: string;
+  venue_name: string;
+  latitude: number;
+  longitude: number;
+  checkin_count: number;
+  dates: string[];
+}
+
+export interface UserSettings {
+  username: string;
+  email: string;
+  display_name: string | null;
+  dawarich_url: string | null;
+  dawarich_api_key: string | null;
+  immich_url: string | null;
+  immich_api_key: string | null;
+}

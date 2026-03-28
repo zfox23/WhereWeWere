@@ -272,4 +272,61 @@ router.get('/monthly', async (req: Request, res: Response) => {
   }
 });
 
+// GET /countries?user_id= - check-ins grouped by country
+router.get('/countries', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id is required' });
+    }
+
+    const result = await query(
+      `SELECT COALESCE(v.country, 'Unknown') AS country,
+              COUNT(c.id)::int AS checkin_count,
+              COUNT(DISTINCT c.venue_id)::int AS unique_venues
+       FROM checkins c
+       JOIN venues v ON c.venue_id = v.id
+       WHERE c.user_id = $1
+       GROUP BY v.country
+       ORDER BY checkin_count DESC`,
+      [user_id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting countries:', err);
+    res.status(500).json({ error: 'Failed to get countries' });
+  }
+});
+
+// GET /map-data?user_id= - all venue locations with checkin counts for heatmap map
+router.get('/map-data', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id is required' });
+    }
+
+    const result = await query(
+      `SELECT v.id AS venue_id, v.name AS venue_name,
+              v.latitude, v.longitude,
+              COUNT(c.id)::int AS checkin_count,
+              ARRAY_AGG(DISTINCT DATE(c.checked_in_at AT TIME ZONE 'UTC') ORDER BY DATE(c.checked_in_at AT TIME ZONE 'UTC') DESC) AS dates
+       FROM checkins c
+       JOIN venues v ON c.venue_id = v.id
+       WHERE c.user_id = $1
+       GROUP BY v.id
+       ORDER BY checkin_count DESC`,
+      [user_id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting map data:', err);
+    res.status(500).json({ error: 'Failed to get map data' });
+  }
+});
+
 export const statsRouter = router;

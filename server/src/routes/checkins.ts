@@ -43,6 +43,16 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
+    if (req.query.q) {
+      const searchQuery = req.query.q as string;
+      conditions.push(
+        `(c.search_vector @@ plainto_tsquery('english', $${paramIndex})
+         OR v.search_vector @@ plainto_tsquery('english', $${paramIndex}))`
+      );
+      params.push(searchQuery);
+      paramIndex++;
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     params.push(parseInt(limit as string, 10));

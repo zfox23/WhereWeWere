@@ -19,7 +19,7 @@ import type {
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
-function StatCard({
+export function StatCard({
   icon: Icon,
   label,
   value,
@@ -41,7 +41,7 @@ function StatCard({
   );
 }
 
-function StreakCard({ streak }: { streak: Streak }) {
+export function StreakCard({ streak }: { streak: Streak }) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
@@ -80,7 +80,7 @@ function StreakCard({ streak }: { streak: Streak }) {
   );
 }
 
-function TopVenuesList({ venues }: { venues: TopVenue[] }) {
+export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
@@ -115,7 +115,7 @@ function TopVenuesList({ venues }: { venues: TopVenue[] }) {
   );
 }
 
-function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
+export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
   const maxCount = Math.max(...data.map((d) => d.checkin_count), 1);
 
   return (
@@ -154,7 +154,7 @@ function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
   );
 }
 
-function Heatmap({ days }: { days: HeatmapDay[] }) {
+export function Heatmap({ days }: { days: HeatmapDay[] }) {
   const dayMap = new Map(days.map((d) => [d.date, d.count]));
   const year = new Date().getFullYear();
   const startDate = new Date(year, 0, 1);
