@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   MapPin,
   Camera,
@@ -6,9 +6,10 @@ import {
   Loader2,
   Globe,
 } from 'lucide-react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import 'leaflet.heat';
 import { stats } from '../api/client';
 import {
   StatCard,
@@ -29,50 +30,46 @@ import type {
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
-function getHeatColor(count: number, min: number, max: number): string {
-  if (max === min) return '#22c55e';
-  const ratio = (count - min) / (max - min);
-  const r = ratio < 0.5 ? Math.round(255 * ratio * 2) : 255;
-  const g = ratio < 0.5 ? 255 : Math.round(255 * (1 - (ratio - 0.5) * 2));
-  return `rgb(${r}, ${g}, 0)`;
-}
-
-function HeatmapMapInner({
-  data,
-  onBoundsChange,
-}: {
-  data: MapDataPoint[];
-  onBoundsChange: (bounds: L.LatLngBounds) => void;
-}) {
-  const map = useMapEvents({
-    moveend: () => {
-      onBoundsChange(map.getBounds());
-    },
-  });
+function HeatLayer({ data }: { data: MapDataPoint[] }) {
+  const map = useMap();
+  const layerRef = useRef<L.HeatLayer | null>(null);
 
   useEffect(() => {
-    onBoundsChange(map.getBounds());
-  }, [map, onBoundsChange]);
+    if (layerRef.current) {
+      map.removeLayer(layerRef.current);
+    }
+
+    const points: L.HeatLatLngTuple[] = data.map((d) => [
+      d.latitude,
+      d.longitude,
+      d.checkin_count,
+    ]);
+
+    layerRef.current = L.heatLayer(points, {
+      radius: 25,
+      blur: 15,
+      maxZoom: 17,
+      max: Math.max(...data.map((d) => d.checkin_count), 1),
+      gradient: {
+        0.0: '#22c55e',
+        0.25: '#84cc16',
+        0.5: '#eab308',
+        0.75: '#f97316',
+        1.0: '#ef4444',
+      },
+    }).addTo(map);
+
+    return () => {
+      if (layerRef.current) {
+        map.removeLayer(layerRef.current);
+      }
+    };
+  }, [data, map]);
 
   return null;
 }
 
 function HeatmapMap({ data }: { data: MapDataPoint[] }) {
-  const [bounds, setBounds] = useState<L.LatLngBounds | null>(null);
-
-  const visibleData = useMemo(() => {
-    if (!bounds) return data;
-    return data.filter((d) =>
-      bounds.contains(L.latLng(d.latitude, d.longitude))
-    );
-  }, [data, bounds]);
-
-  const { min, max } = useMemo(() => {
-    if (visibleData.length === 0) return { min: 0, max: 1 };
-    const counts = visibleData.map((d) => d.checkin_count);
-    return { min: Math.min(...counts), max: Math.max(...counts) };
-  }, [visibleData]);
-
   const center = useMemo((): [number, number] => {
     if (data.length === 0) return [40.7128, -74.006];
     const avgLat = data.reduce((s, d) => s + d.latitude, 0) / data.length;
@@ -100,49 +97,16 @@ function HeatmapMap({ data }: { data: MapDataPoint[] }) {
           style={{ height: '100%' }}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          <HeatmapMapInner data={data} onBoundsChange={setBounds} />
-          {data.map((point) => (
-            <CircleMarker
-              key={point.venue_id}
-              center={[point.latitude, point.longitude]}
-              radius={Math.max(6, Math.min(14, 6 + (point.checkin_count / Math.max(max, 1)) * 8))}
-              fillColor={getHeatColor(point.checkin_count, min, max)}
-              color={getHeatColor(point.checkin_count, min, max)}
-              fillOpacity={0.8}
-              weight={2}
-              opacity={1}
-            >
-              <Popup>
-                <div className="text-sm">
-                  <p className="font-semibold">{point.venue_name}</p>
-                  <p className="text-gray-600">
-                    {point.checkin_count} check-in{point.checkin_count !== 1 ? 's' : ''}
-                  </p>
-                  {point.dates.length > 0 && (
-                    <div className="mt-1 max-h-24 overflow-y-auto">
-                      {point.dates.slice(0, 10).map((d) => (
-                        <p key={d} className="text-xs text-gray-400">{d}</p>
-                      ))}
-                      {point.dates.length > 10 && (
-                        <p className="text-xs text-gray-400">
-                          +{point.dates.length - 10} more
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </Popup>
-            </CircleMarker>
-          ))}
+          <HeatLayer data={data} />
         </MapContainer>
       </div>
       <div className="px-4 py-2 flex items-center gap-2 text-[10px] text-gray-400 justify-end">
         <span>Fewer</span>
         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#22c55e' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#80c000' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ff0' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ff8000' }} />
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ff0000' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#84cc16' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#eab308' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#f97316' }} />
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ef4444' }} />
         <span>More</span>
       </div>
     </div>
