@@ -1,22 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Globe } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Globe, Tag } from 'lucide-react';
 import { settings, importApi, venues } from '../api/client';
 import type { UserSettings, ImportResult } from '../types';
 
-async function runGeocodeBackfill(
+async function runBackfill(
+  fn: () => Promise<{ updated: number; remaining: number }>,
   onProgress: (msg: string) => void,
-  onDone: () => void
-) {
+  label: string
+): Promise<void> {
   let remaining = Infinity;
   let totalUpdated = 0;
   while (remaining > 0) {
-    const res = await venues.geocode();
+    const res = await fn();
     totalUpdated += res.updated;
     remaining = res.remaining;
     if (res.updated === 0) break;
-    onProgress(`Geocoded ${totalUpdated} venues, ${remaining} remaining...`);
+    onProgress(`${label}: ${totalUpdated} updated, ${remaining} remaining...`);
   }
-  onDone();
 }
 
 function SwarmImportSection() {
@@ -26,8 +26,8 @@ function SwarmImportSection() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
-  const [geocoding, setGeocoding] = useState(false);
-  const [geocodeMsg, setGeocodeMsg] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -36,16 +36,19 @@ function SwarmImportSection() {
     setImportError(null);
   };
 
-  const startGeocode = () => {
-    setGeocoding(true);
-    setGeocodeMsg('Starting geocoding...');
-    runGeocodeBackfill(
-      (msg) => setGeocodeMsg(msg),
-      () => {
-        setGeocoding(false);
-        setGeocodeMsg('Geocoding complete!');
-      }
-    );
+  const startBackfill = async () => {
+    setBackfilling(true);
+    setBackfillMsg('Resolving countries...');
+    try {
+      await runBackfill(() => venues.geocode(), (m) => setBackfillMsg(m), 'Countries');
+      setBackfillMsg('Categorizing venues...');
+      await runBackfill(() => venues.categorize(), (m) => setBackfillMsg(m), 'Categories');
+      setBackfillMsg('Done!');
+    } catch {
+      setBackfillMsg('Backfill encountered an error.');
+    } finally {
+      setBackfilling(false);
+    }
   };
 
   const handleImport = async () => {
@@ -58,9 +61,9 @@ function SwarmImportSection() {
       setResult(data);
       setSelectedFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      // Auto-trigger geocoding after import
+      // Auto-trigger backfill after import
       if (data.imported > 0) {
-        startGeocode();
+        startBackfill();
       }
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Import failed');
@@ -180,33 +183,33 @@ function SwarmImportSection() {
         </div>
       )}
 
-      {geocodeMsg && (
+      {backfillMsg && (
         <div className="flex items-center gap-2 text-sm text-gray-600">
-          {geocoding ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
-          {geocodeMsg}
+          {backfilling ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+          {backfillMsg}
         </div>
       )}
 
       <div className="border-t border-gray-100 pt-4">
         <button
-          onClick={startGeocode}
-          disabled={geocoding || importing}
+          onClick={startBackfill}
+          disabled={backfilling || importing}
           className="btn-secondary text-sm"
         >
-          {geocoding ? (
+          {backfilling ? (
             <>
               <Loader2 size={14} className="animate-spin mr-2" />
-              Geocoding...
+              Resolving...
             </>
           ) : (
             <>
               <Globe size={14} className="mr-2" />
-              Resolve Missing Countries
+              Resolve Missing Countries &amp; Categories
             </>
           )}
         </button>
         <p className="text-xs text-gray-400 mt-1">
-          Uses Nominatim to look up country, state, and city for venues missing location data.
+          Uses Nominatim and OpenStreetMap to look up country data and venue categories.
         </p>
       </div>
     </div>

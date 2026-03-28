@@ -420,4 +420,63 @@ router.post('/geocode', async (_req: Request, res: Response) => {
   }
 });
 
+// POST /categorize - categorize uncategorized venues using Overpass
+router.post('/categorize', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT id, name, latitude, longitude FROM venues
+       WHERE category_id IS NULL
+       LIMIT 20`
+    );
+
+    let updated = 0;
+    for (const venue of result.rows) {
+      try {
+        const lat = parseFloat(venue.latitude);
+        const lng = parseFloat(venue.longitude);
+        const nearby = await searchNearbyVenues(lat, lng, venue.name, 200);
+
+        // Find the best match by name similarity
+        const nameLower = venue.name.toLowerCase();
+        const match = nearby.find(
+          (n) => n.name.toLowerCase() === nameLower
+        ) || nearby.find(
+          (n) => nameLower.includes(n.name.toLowerCase()) || n.name.toLowerCase().includes(nameLower)
+        );
+
+        if (match && match.category) {
+          // Find or create the category
+          let catResult = await query(
+            'SELECT id FROM venue_categories WHERE name = $1',
+            [match.category]
+          );
+          if (catResult.rows.length === 0) {
+            catResult = await query(
+              'INSERT INTO venue_categories (name) VALUES ($1) RETURNING id',
+              [match.category]
+            );
+          }
+          await query(
+            'UPDATE venues SET category_id = $1 WHERE id = $2',
+            [catResult.rows[0].id, venue.id]
+          );
+          updated++;
+        }
+      } catch (venueErr) {
+        // Skip individual venue errors (e.g. Overpass timeout)
+        console.error(`Failed to categorize venue ${venue.id}:`, venueErr);
+      }
+    }
+
+    const remaining = await query(
+      'SELECT COUNT(*)::int AS count FROM venues WHERE category_id IS NULL'
+    );
+
+    res.json({ updated, remaining: remaining.rows[0].count });
+  } catch (err) {
+    console.error('Error categorizing venues:', err);
+    res.status(500).json({ error: 'Categorization failed' });
+  }
+});
+
 export const venuesRouter = router;

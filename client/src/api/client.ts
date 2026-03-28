@@ -53,6 +53,8 @@ export const venues = {
     request<any>('/venues/import-osm', { method: 'POST', body: JSON.stringify(data) }),
   geocode: () =>
     request<{ updated: number; remaining: number }>('/venues/geocode', { method: 'POST' }),
+  categorize: () =>
+    request<{ updated: number; remaining: number }>('/venues/categorize', { method: 'POST' }),
 };
 
 // Stats
