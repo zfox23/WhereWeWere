@@ -155,7 +155,7 @@ router.get('/top-venues', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `SELECT v.id, v.name, v.address, v.city, v.state,
+      `SELECT v.id AS venue_id, v.name AS venue_name, v.address, v.city, v.state,
               vc.name AS category_name, vc.icon AS category_icon,
               COUNT(c.id)::int AS checkin_count,
               MAX(c.checked_in_at) AS last_checkin
@@ -186,7 +186,7 @@ router.get('/category-breakdown', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `SELECT COALESCE(vc.name, 'Uncategorized') AS category,
+      `SELECT COALESCE(vc.name, 'Uncategorized') AS category_name,
               vc.icon AS category_icon,
               COUNT(c.id)::int AS checkin_count
        FROM checkins c

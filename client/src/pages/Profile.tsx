@@ -206,7 +206,11 @@ export default function Profile() {
         setCategories(cb);
         setHeatmapDays(hm);
         setCountries(co);
-        setMapData(md);
+        setMapData(md.map((d: any) => ({
+          ...d,
+          latitude: Number(d.latitude),
+          longitude: Number(d.longitude),
+        })));
       } catch (err) {
         console.error('Failed to load profile data:', err);
       } finally {
