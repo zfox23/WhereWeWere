@@ -92,7 +92,7 @@ function SwarmImportSection() {
             ? `${selectedFiles.length} file${selectedFiles.length !== 1 ? 's' : ''} selected`
             : 'Click to select CSV files'}
         </p>
-        <p className="text-xs text-gray-400 mt-1">Up to 9 CSV files</p>
+        <p className="text-xs text-gray-400 mt-1">Select your CSV files</p>
         <input
           ref={fileInputRef}
           type="file"

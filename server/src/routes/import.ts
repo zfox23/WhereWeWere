@@ -90,7 +90,7 @@ async function findOrCreateVenue(
 }
 
 // POST / - import Swarm CSV files
-router.post('/', csvUpload.array('files', 9), async (req: Request, res: Response) => {
+router.post('/', csvUpload.array('files', 100), async (req: Request, res: Response) => {
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) {
     return res.status(400).json({ error: 'No CSV files provided' });
