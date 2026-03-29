@@ -226,7 +226,22 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
   const cancelJob = async (id: string) => {
     try {
       await jobs.cancel(id);
-      await loadJobs();
+      // Mark as cancelling optimistically in the UI
+      setJobList((prev) =>
+        prev.map((j) =>
+          j.id === id ? { ...j, progress: { ...j.progress, message: 'Cancelling...' } } : j
+        )
+      );
+      // Poll quickly until the job is actually cancelled/completed
+      const pollCancel = async (retries: number) => {
+        const data = await jobs.list();
+        setJobList(data);
+        const job = data.find((j: Job) => j.id === id);
+        if (job && (job.status === 'pending' || job.status === 'running') && retries > 0) {
+          setTimeout(() => pollCancel(retries - 1), 1000);
+        }
+      };
+      pollCancel(15);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to cancel job');
     }

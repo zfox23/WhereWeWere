@@ -34,7 +34,7 @@ async function updateJobProgress(jobId: string, progress: JobProgress) {
   );
 }
 
-async function geocodeBatch(): Promise<{ updated: number; remaining: number }> {
+async function geocodeBatch(jobId: string): Promise<{ updated: number; remaining: number }> {
   const result = await query(
     `SELECT id, latitude, longitude FROM venues
      WHERE country IS NULL OR TRIM(country) = ''
@@ -43,6 +43,7 @@ async function geocodeBatch(): Promise<{ updated: number; remaining: number }> {
 
   let updated = 0;
   for (const venue of result.rows) {
+    if (isJobCancelled(jobId)) throw new Error('cancelled');
     const geo = await reverseGeocode(
       parseFloat(venue.latitude),
       parseFloat(venue.longitude)
@@ -71,7 +72,7 @@ function normalizeForMatch(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-async function categorizeBatch(): Promise<{ updated: number; remaining: number }> {
+async function categorizeBatch(jobId: string): Promise<{ updated: number; remaining: number }> {
   const result = await query(
     `SELECT id, name, latitude, longitude FROM venues
      WHERE category_id IS NULL
@@ -80,6 +81,7 @@ async function categorizeBatch(): Promise<{ updated: number; remaining: number }
 
   let updated = 0;
   for (const venue of result.rows) {
+    if (isJobCancelled(jobId)) throw new Error('cancelled');
     try {
       const lat = parseFloat(venue.latitude);
       const lng = parseFloat(venue.longitude);
@@ -152,7 +154,7 @@ export async function runBackfillJob(jobId: string): Promise<void> {
     let geoRemaining = Infinity;
     while (geoRemaining > 0) {
       if (isJobCancelled(jobId)) throw new Error('cancelled');
-      const batch = await geocodeBatch();
+      const batch = await geocodeBatch(jobId);
       totalGeoUpdated += batch.updated;
       geoRemaining = batch.remaining;
       if (batch.updated === 0) break;
@@ -169,7 +171,7 @@ export async function runBackfillJob(jobId: string): Promise<void> {
     let catRemaining = Infinity;
     while (catRemaining > 0) {
       if (isJobCancelled(jobId)) throw new Error('cancelled');
-      const batch = await categorizeBatch();
+      const batch = await categorizeBatch(jobId);
       totalCatUpdated += batch.updated;
       catRemaining = batch.remaining;
       if (batch.updated === 0) break;
