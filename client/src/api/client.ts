@@ -69,6 +69,12 @@ export const stats = {
     request<any[]>(`/stats/busiest-days?user_id=${userId}`),
   topCities: (userId: string) =>
     request<any[]>(`/stats/top-cities?user_id=${userId}`),
+  insights: (userId: string) =>
+    request<any[]>(`/stats/insights?user_id=${userId}`),
+  reflections: (userId: string) =>
+    request<any[]>(`/stats/reflections?user_id=${userId}`),
+  additionalStats: (userId: string) =>
+    request<any>(`/stats/additional-stats?user_id=${userId}`),
 };
 
 // Search

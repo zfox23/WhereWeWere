@@ -462,4 +462,292 @@ router.get('/top-cities', async (req: Request, res: Response) => {
   }
 });
 
+// GET /insights?user_id= - derived insights from check-in patterns
+router.get('/insights', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const insights: { title: string; description: string; icon: string }[] = [];
+
+    // Favorite day of week
+    const dowResult = await query(
+      `SELECT EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC')::int AS dow,
+              COUNT(*)::int AS count
+       FROM checkins WHERE user_id = $1
+       GROUP BY dow ORDER BY count DESC LIMIT 1`,
+      [user_id]
+    );
+    if (dowResult.rows.length > 0) {
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const favDay = dayNames[dowResult.rows[0].dow];
+      insights.push({
+        title: `${favDay} Explorer`,
+        description: `You check in most on ${favDay}s — ${dowResult.rows[0].count} check-ins and counting!`,
+        icon: 'calendar',
+      });
+    }
+
+    // Favorite time of day
+    const todResult = await query(
+      `SELECT
+         CASE
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 5 AND 11 THEN 'Morning'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 12 AND 16 THEN 'Afternoon'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 17 AND 20 THEN 'Evening'
+           ELSE 'Night'
+         END AS period,
+         COUNT(*)::int AS count
+       FROM checkins WHERE user_id = $1
+       GROUP BY period ORDER BY count DESC LIMIT 1`,
+      [user_id]
+    );
+    if (todResult.rows.length > 0) {
+      const period = todResult.rows[0].period;
+      const labels: Record<string, string> = {
+        Morning: 'Early Bird — you love mornings!',
+        Afternoon: 'Afternoon Adventurer — peak activity after lunch.',
+        Evening: 'Evening Explorer — your adventures pick up at sunset.',
+        Night: 'Night Owl — the city comes alive for you after dark.',
+      };
+      insights.push({
+        title: labels[period] || `${period} person`,
+        description: `${todResult.rows[0].count} of your check-ins happen in the ${period.toLowerCase()}.`,
+        icon: 'clock',
+      });
+    }
+
+    // Loyalty score — how often they return to the same venue
+    const loyaltyResult = await query(
+      `SELECT v.name AS venue_name, COUNT(c.id)::int AS visits
+       FROM checkins c JOIN venues v ON c.venue_id = v.id
+       WHERE c.user_id = $1
+       GROUP BY v.id, v.name ORDER BY visits DESC LIMIT 1`,
+      [user_id]
+    );
+    if (loyaltyResult.rows.length > 0 && loyaltyResult.rows[0].visits >= 3) {
+      const v = loyaltyResult.rows[0];
+      insights.push({
+        title: 'Loyal Regular',
+        description: `You've been to ${v.venue_name} ${v.visits} times — it's clearly a favorite!`,
+        icon: 'heart',
+      });
+    }
+
+    // Explorer vs creature-of-habit ratio
+    const explorerResult = await query(
+      `SELECT COUNT(DISTINCT venue_id)::int AS unique_venues, COUNT(*)::int AS total
+       FROM checkins WHERE user_id = $1`,
+      [user_id]
+    );
+    if (explorerResult.rows.length > 0 && explorerResult.rows[0].total > 0) {
+      const { unique_venues, total } = explorerResult.rows[0];
+      const ratio = unique_venues / total;
+      if (ratio > 0.7) {
+        insights.push({
+          title: 'True Explorer',
+          description: `${Math.round(ratio * 100)}% of your check-ins are at unique venues — you rarely visit the same place twice!`,
+          icon: 'compass',
+        });
+      } else if (ratio < 0.3) {
+        insights.push({
+          title: 'Creature of Habit',
+          description: `You love your go-to spots! Only ${Math.round(ratio * 100)}% of check-ins are at new places.`,
+          icon: 'home',
+        });
+      }
+    }
+
+    // Weekend vs weekday
+    const weekendResult = await query(
+      `SELECT
+         COUNT(*) FILTER (WHERE EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC') IN (0, 6))::int AS weekend,
+         COUNT(*) FILTER (WHERE EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC') NOT IN (0, 6))::int AS weekday
+       FROM checkins WHERE user_id = $1`,
+      [user_id]
+    );
+    if (weekendResult.rows.length > 0) {
+      const { weekend, weekday } = weekendResult.rows[0];
+      if (weekend > weekday) {
+        insights.push({
+          title: 'Weekend Warrior',
+          description: `${weekend} weekend check-ins vs ${weekday} weekday — you save the best for Saturday & Sunday.`,
+          icon: 'sun',
+        });
+      } else if (weekday > weekend * 2) {
+        insights.push({
+          title: 'Weekday Wanderer',
+          description: `${weekday} weekday check-ins vs ${weekend} weekend — you keep busy during the work week!`,
+          icon: 'briefcase',
+        });
+      }
+    }
+
+    // Average check-ins per active day
+    const avgResult = await query(
+      `SELECT COUNT(*)::float / GREATEST(COUNT(DISTINCT DATE(checked_in_at AT TIME ZONE 'UTC')), 1) AS avg_per_day
+       FROM checkins WHERE user_id = $1`,
+      [user_id]
+    );
+    if (avgResult.rows.length > 0) {
+      const avg = parseFloat(avgResult.rows[0].avg_per_day);
+      if (avg >= 3) {
+        insights.push({
+          title: 'Power Checker',
+          description: `You average ${avg.toFixed(1)} check-ins per active day — always on the move!`,
+          icon: 'zap',
+        });
+      }
+    }
+
+    // Country count
+    const countryCountResult = await query(
+      `SELECT COUNT(DISTINCT v.country)::int AS countries
+       FROM checkins c JOIN venues v ON c.venue_id = v.id
+       WHERE c.user_id = $1 AND v.country IS NOT NULL AND TRIM(v.country) != ''`,
+      [user_id]
+    );
+    if (countryCountResult.rows.length > 0 && countryCountResult.rows[0].countries >= 2) {
+      const cnt = countryCountResult.rows[0].countries;
+      insights.push({
+        title: 'Globe Trotter',
+        description: `You've checked in across ${cnt} countries — the world is your playground!`,
+        icon: 'globe',
+      });
+    }
+
+    res.json(insights);
+  } catch (err) {
+    console.error('Error getting insights:', err);
+    res.status(500).json({ error: 'Failed to get insights' });
+  }
+});
+
+// GET /reflections?user_id= - check-ins from this date in past years
+router.get('/reflections', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const currentYear = now.getFullYear();
+
+    // Find check-ins on this month/day in all prior years
+    const result = await query(
+      `SELECT c.id, c.notes, c.rating, c.checked_in_at,
+              v.name AS venue_name, v.city, v.country,
+              vc.name AS venue_category
+       FROM checkins c
+       JOIN venues v ON c.venue_id = v.id
+       LEFT JOIN venue_categories vc ON v.category_id = vc.id
+       WHERE c.user_id = $1
+         AND TO_CHAR(c.checked_in_at AT TIME ZONE 'UTC', 'MM-DD') = $2
+         AND EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE 'UTC') < $3
+       ORDER BY c.checked_in_at DESC`,
+      [user_id, `${month}-${day}`, currentYear]
+    );
+
+    // Group by year
+    const byYear: Record<number, any[]> = {};
+    for (const row of result.rows) {
+      const year = new Date(row.checked_in_at).getFullYear();
+      if (!byYear[year]) byYear[year] = [];
+      byYear[year].push(row);
+    }
+
+    const reflections = Object.entries(byYear)
+      .map(([year, checkins]) => ({
+        year: parseInt(year),
+        years_ago: currentYear - parseInt(year),
+        checkins,
+      }))
+      .sort((a, b) => b.year - a.year);
+
+    res.json(reflections);
+  } catch (err) {
+    console.error('Error getting reflections:', err);
+    res.status(500).json({ error: 'Failed to get reflections' });
+  }
+});
+
+// GET /additional-stats?user_id= - extra fun stats
+router.get('/additional-stats', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    // Average rating
+    const avgRating = await query(
+      `SELECT ROUND(AVG(rating)::numeric, 1)::float AS avg_rating,
+              COUNT(rating)::int AS rated_count
+       FROM checkins WHERE user_id = $1 AND rating IS NOT NULL`,
+      [user_id]
+    );
+
+    // Most common category
+    const topCategory = await query(
+      `SELECT COALESCE(vc.name, 'Uncategorized') AS name, COUNT(*)::int AS count
+       FROM checkins c JOIN venues v ON c.venue_id = v.id
+       LEFT JOIN venue_categories vc ON v.category_id = vc.id
+       WHERE c.user_id = $1
+       GROUP BY vc.name ORDER BY count DESC LIMIT 1`,
+      [user_id]
+    );
+
+    // Longest gap between check-ins
+    const gapResult = await query(
+      `SELECT DATE(checked_in_at AT TIME ZONE 'UTC') AS d
+       FROM checkins WHERE user_id = $1
+       ORDER BY checked_in_at`,
+      [user_id]
+    );
+    let longestGap = 0;
+    let gapStart = '';
+    let gapEnd = '';
+    const dates = gapResult.rows.map((r: any) => r.d);
+    for (let i = 1; i < dates.length; i++) {
+      const diff = Math.floor(
+        (new Date(dates[i]).getTime() - new Date(dates[i - 1]).getTime()) / (1000 * 60 * 60 * 24)
+      );
+      if (diff > longestGap) {
+        longestGap = diff;
+        gapStart = new Date(dates[i - 1]).toISOString().slice(0, 10);
+        gapEnd = new Date(dates[i]).toISOString().slice(0, 10);
+      }
+    }
+
+    // Venues visited only once
+    const oneTimers = await query(
+      `SELECT COUNT(*)::int AS count FROM (
+         SELECT venue_id FROM checkins WHERE user_id = $1
+         GROUP BY venue_id HAVING COUNT(*) = 1
+       ) sub`,
+      [user_id]
+    );
+
+    // First ever check-in
+    const firstCheckin = await query(
+      `SELECT c.checked_in_at, v.name AS venue_name
+       FROM checkins c JOIN venues v ON c.venue_id = v.id
+       WHERE c.user_id = $1
+       ORDER BY c.checked_in_at ASC LIMIT 1`,
+      [user_id]
+    );
+
+    res.json({
+      avg_rating: avgRating.rows[0]?.avg_rating || null,
+      rated_count: avgRating.rows[0]?.rated_count || 0,
+      top_category: topCategory.rows[0] || null,
+      longest_gap: { days: longestGap, start: gapStart, end: gapEnd },
+      one_time_venues: oneTimers.rows[0]?.count || 0,
+      first_checkin: firstCheckin.rows[0] || null,
+    });
+  } catch (err) {
+    console.error('Error getting additional stats:', err);
+    res.status(500).json({ error: 'Failed to get additional stats' });
+  }
+});
+
 export const statsRouter = router;

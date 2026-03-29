@@ -9,6 +9,16 @@ import {
   Building2,
   Calendar,
   Sun,
+  Lightbulb,
+  History,
+  Star,
+  Compass,
+  Heart,
+  Home as HomeIcon,
+  Zap,
+  Briefcase,
+  TrendingUp,
+  Hash,
 } from 'lucide-react';
 import { MapContainer, TileLayer, useMap, useMapEvents, Popup as LeafletPopup } from 'react-leaflet';
 import L from 'leaflet';
@@ -168,6 +178,16 @@ interface DayOfWeekData { day: string; count: number }
 interface TimeOfDayData { period: string; count: number }
 interface BusiestDayData { date: string; count: number }
 interface CityData { city: string; country: string; checkin_count: number; unique_venues: number }
+interface InsightData { title: string; description: string; icon: string }
+interface ReflectionYear { year: number; years_ago: number; checkins: { id: string; venue_name: string; venue_category?: string; city?: string; country?: string; notes?: string; rating?: number; checked_in_at: string }[] }
+interface AdditionalStatsData {
+  avg_rating: number | null;
+  rated_count: number;
+  top_category: { name: string; count: number } | null;
+  longest_gap: { days: number; start: string; end: string };
+  one_time_venues: number;
+  first_checkin: { venue_name: string; checked_in_at: string } | null;
+}
 
 const TIME_ICONS: Record<string, React.ElementType> = { Morning: Sun, Afternoon: Sun, Evening: Clock, Night: Clock };
 const TIME_COLORS: Record<string, string> = {
@@ -305,6 +325,165 @@ function TopCities({ data }: { data: CityData[] }) {
   );
 }
 
+const INSIGHT_ICONS: Record<string, React.ElementType> = {
+  calendar: Calendar,
+  clock: Clock,
+  heart: Heart,
+  compass: Compass,
+  home: HomeIcon,
+  sun: Sun,
+  briefcase: Briefcase,
+  zap: Zap,
+  globe: Globe,
+};
+
+function InsightsSection({ data }: { data: InsightData[] }) {
+  if (data.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+        <Lightbulb size={16} className="text-amber-500" />
+        Insights
+      </h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {data.map((insight, i) => {
+          const Icon = INSIGHT_ICONS[insight.icon] || Lightbulb;
+          return (
+            <div key={i} className="flex items-start gap-3 p-3 bg-amber-50/50 rounded-lg border border-amber-100">
+              <Icon size={18} className="text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-gray-900">{insight.title}</p>
+                <p className="text-xs text-gray-600 mt-0.5">{insight.description}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
+  if (data.length === 0) return null;
+
+  function formatTime(dateStr: string) {
+    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(dateStr));
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+        <History size={16} className="text-purple-500" />
+        On This Day
+      </h3>
+      <p className="text-xs text-gray-500 mb-4">Reflecting on where you were in years past.</p>
+      <div className="space-y-4">
+        {data.map((year) => (
+          <div key={year.year}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
+                {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago
+              </span>
+              <span className="text-xs text-gray-400">{year.year}</span>
+            </div>
+            <div className="space-y-2 ml-2 border-l-2 border-purple-100 pl-3">
+              {year.checkins.map((c) => (
+                <div key={c.id} className="text-sm">
+                  <p className="font-medium text-gray-900">{c.venue_name}</p>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    {c.venue_category && <span className="text-purple-600">{c.venue_category}</span>}
+                    {c.city && <span>{c.city}{c.country ? `, ${c.country}` : ''}</span>}
+                    <span>{formatTime(c.checked_in_at)}</span>
+                  </div>
+                  {c.notes && <p className="text-xs text-gray-600 mt-0.5 italic">"{c.notes}"</p>}
+                  {c.rating && (
+                    <div className="flex items-center gap-0.5 mt-0.5">
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Star key={s} size={10} className={s <= c.rating! ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
+  if (!data) return null;
+
+  function formatDate(dateStr: string) {
+    if (!dateStr) return '';
+    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(dateStr + 'T12:00:00'));
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+        <TrendingUp size={16} className="text-emerald-500" />
+        More Stats
+      </h3>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {data.avg_rating != null && (
+          <div>
+            <div className="flex items-center gap-1 text-gray-500 mb-0.5">
+              <Star size={12} />
+              <span className="text-xs font-medium uppercase tracking-wide">Avg Rating</span>
+            </div>
+            <p className="text-xl font-bold text-gray-900">{data.avg_rating}</p>
+            <p className="text-[10px] text-gray-400">{data.rated_count} rated check-ins</p>
+          </div>
+        )}
+        {data.top_category && (
+          <div>
+            <div className="flex items-center gap-1 text-gray-500 mb-0.5">
+              <Hash size={12} />
+              <span className="text-xs font-medium uppercase tracking-wide">Top Category</span>
+            </div>
+            <p className="text-base font-bold text-gray-900">{data.top_category.name}</p>
+            <p className="text-[10px] text-gray-400">{data.top_category.count} check-ins</p>
+          </div>
+        )}
+        <div>
+          <div className="flex items-center gap-1 text-gray-500 mb-0.5">
+            <MapPin size={12} />
+            <span className="text-xs font-medium uppercase tracking-wide">One-Timers</span>
+          </div>
+          <p className="text-xl font-bold text-gray-900">{data.one_time_venues}</p>
+          <p className="text-[10px] text-gray-400">venues visited once</p>
+        </div>
+        {data.longest_gap.days > 0 && (
+          <div>
+            <div className="flex items-center gap-1 text-gray-500 mb-0.5">
+              <Calendar size={12} />
+              <span className="text-xs font-medium uppercase tracking-wide">Longest Gap</span>
+            </div>
+            <p className="text-xl font-bold text-gray-900">{data.longest_gap.days} days</p>
+            <p className="text-[10px] text-gray-400">{formatDate(data.longest_gap.start)} — {formatDate(data.longest_gap.end)}</p>
+          </div>
+        )}
+        {data.first_checkin && (
+          <div className="col-span-2">
+            <div className="flex items-center gap-1 text-gray-500 mb-0.5">
+              <Clock size={12} />
+              <span className="text-xs font-medium uppercase tracking-wide">First Check-in</span>
+            </div>
+            <p className="text-base font-bold text-gray-900">{data.first_checkin.venue_name}</p>
+            <p className="text-[10px] text-gray-400">
+              {new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(data.first_checkin.checked_in_at))}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CountriesList({ data }: { data: CountryStats[] }) {
   const navigate = useNavigate();
 
@@ -352,13 +531,16 @@ export default function Profile() {
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDayData[]>([]);
   const [busiestDays, setBusiestDays] = useState<BusiestDayData[]>([]);
   const [topCities, setTopCities] = useState<CityData[]>([]);
+  const [insights, setInsights] = useState<InsightData[]>([]);
+  const [reflections, setReflections] = useState<ReflectionYear[]>([]);
+  const [additionalStats, setAdditionalStats] = useState<AdditionalStatsData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       try {
-        const [s, st, tv, cb, hm, co, md, dow, tod, bd, tc] = await Promise.all([
+        const [s, st, tv, cb, hm, co, md, dow, tod, bd, tc, ins, ref, as_] = await Promise.all([
           stats.summary(USER_ID),
           stats.streaks(USER_ID),
           stats.topVenues(USER_ID, 10),
@@ -370,6 +552,9 @@ export default function Profile() {
           stats.timeOfDay(USER_ID),
           stats.busiestDays(USER_ID),
           stats.topCities(USER_ID),
+          stats.insights(USER_ID),
+          stats.reflections(USER_ID),
+          stats.additionalStats(USER_ID),
         ]);
         setSummary(s);
         setStreak(st);
@@ -386,6 +571,9 @@ export default function Profile() {
         setTimeOfDay(tod);
         setBusiestDays(bd);
         setTopCities(tc);
+        setInsights(ins);
+        setReflections(ref);
+        setAdditionalStats(as_);
       } catch (err) {
         console.error('Failed to load profile data:', err);
       } finally {
@@ -449,8 +637,17 @@ export default function Profile() {
         <TopCities data={topCities} />
       </div>
 
+      {/* Additional Stats */}
+      <AdditionalStats data={additionalStats} />
+
       {/* Countries */}
       <CountriesList data={countries} />
+
+      {/* Insights */}
+      <InsightsSection data={insights} />
+
+      {/* Reflections — On This Day */}
+      <ReflectionsSection data={reflections} />
 
       {/* Heatmap Map */}
       <HeatmapMap data={mapData} />
