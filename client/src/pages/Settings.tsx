@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff } from 'lucide-react';
 import { settings, importApi, jobs } from '../api/client';
+import { useTheme } from '../contexts/ThemeContext';
 import type { UserSettings, ImportResult, Job } from '../types';
 
 function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => void }) {
@@ -411,6 +412,8 @@ export default function Settings() {
     }
   };
 
+  const { theme: currentTheme, setTheme } = useTheme();
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -458,6 +461,37 @@ export default function Settings() {
           {profileSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
           Save Profile
         </button>
+      </div>
+
+      {/* Appearance Section */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          <Sun size={20} className="text-primary-600" />
+          Appearance
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Choose your preferred color scheme.
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { value: 'system' as const, label: 'Follow System', icon: Monitor },
+            { value: 'light' as const, label: 'Light', icon: Sun },
+            { value: 'dark' as const, label: 'Dark', icon: Moon },
+          ]).map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              onClick={() => setTheme(value)}
+              className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
+                currentTheme === value
+                  ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                  : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+              }`}
+            >
+              <Icon size={20} />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Integrations Section */}

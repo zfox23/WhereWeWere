@@ -11,7 +11,12 @@ router.get('/', async (_req: Request, res: Response) => {
     const result = await query(
       `SELECT u.username, u.email, u.display_name,
               us.dawarich_url, us.dawarich_api_key,
-              us.immich_url, us.immich_api_key
+              us.immich_url, us.immich_api_key,
+              COALESCE(us.theme, 'system') AS theme,
+              COALESCE(us.notifications_enabled, true) AS notifications_enabled,
+              COALESCE(us.notify_streak_reminder, true) AS notify_streak_reminder,
+              COALESCE(us.notify_weekly_summary, true) AS notify_weekly_summary,
+              COALESCE(us.notify_milestone, true) AS notify_milestone
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.id = $1`,
@@ -32,19 +37,34 @@ router.get('/', async (_req: Request, res: Response) => {
 // PUT / - update integration settings
 router.put('/', async (req: Request, res: Response) => {
   try {
-    const { dawarich_url, dawarich_api_key, immich_url, immich_api_key } = req.body;
+    const {
+      dawarich_url, dawarich_api_key, immich_url, immich_api_key,
+      theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone,
+    } = req.body;
 
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
          immich_url = COALESCE($4, user_settings.immich_url),
          immich_api_key = COALESCE($5, user_settings.immich_api_key),
+         theme = COALESCE($6, user_settings.theme),
+         notifications_enabled = COALESCE($7, user_settings.notifications_enabled),
+         notify_streak_reminder = COALESCE($8, user_settings.notify_streak_reminder),
+         notify_weekly_summary = COALESCE($9, user_settings.notify_weekly_summary),
+         notify_milestone = COALESCE($10, user_settings.notify_milestone),
          updated_at = NOW()
        RETURNING *`,
-      [USER_ID, dawarich_url ?? null, dawarich_api_key ?? null, immich_url ?? null, immich_api_key ?? null]
+      [
+        USER_ID,
+        dawarich_url ?? null, dawarich_api_key ?? null,
+        immich_url ?? null, immich_api_key ?? null,
+        theme ?? null,
+        notifications_enabled ?? null, notify_streak_reminder ?? null,
+        notify_weekly_summary ?? null, notify_milestone ?? null,
+      ]
     );
 
     res.json(result.rows[0]);
