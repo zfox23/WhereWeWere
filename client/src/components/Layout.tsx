@@ -18,11 +18,11 @@ export default function Layout({ children }: { children: ReactNode }) {
   const isHomePage = pathname === '/';
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16 md:pb-0 flex flex-col">
-      {/* Top nav */}
-      <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-amber-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 pb-16 md:pb-0 flex flex-col">
+      {/* Top nav — glass header */}
+      <header className="sticky top-0 z-50 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-b border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03]">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link to="/" className="text-xl font-bold text-primary-600">
+          <Link to="/" className="text-xl font-bold bg-gradient-to-r from-primary-600 to-amber-500 bg-clip-text text-transparent">
             WhereWeWere
           </Link>
           <nav className="hidden md:flex items-center gap-1">
@@ -30,10 +30,10 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Link
                 key={to}
                 to={to}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
                   isActive(pathname, to)
-                    ? 'bg-primary-50 text-primary-700'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    ? 'bg-primary-500/10 text-primary-700 dark:text-primary-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/60 dark:hover:bg-gray-800/60 hover:text-gray-900 dark:hover:text-gray-200'
                 }`}
               >
                 <Icon size={16} />
@@ -49,15 +49,15 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       {/* Footer — hidden on homepage */}
       {!isHomePage && (
-        <footer className="bg-white border-t border-gray-200 mt-8">
+        <footer className="bg-white/50 dark:bg-gray-900/50 backdrop-blur-md border-t border-white/40 dark:border-gray-700/40 mt-8">
           <div className="max-w-5xl mx-auto px-4 py-10">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-8">
               <div>
-                <Link to="/" className="text-lg font-bold text-primary-600 flex items-center gap-2">
-                  <MapPin size={20} />
+                <Link to="/" className="text-lg font-bold bg-gradient-to-r from-primary-600 to-amber-500 bg-clip-text text-transparent flex items-center gap-2">
+                  <MapPin size={20} className="text-primary-600" />
                   WhereWeWere
                 </Link>
-                <p className="text-sm text-gray-500 mt-2 max-w-xs">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 max-w-xs">
                   A self-hosted check-in tracker for the places that matter to you.
                 </p>
               </div>
@@ -66,19 +66,19 @@ export default function Layout({ children }: { children: ReactNode }) {
                   <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Navigate</h4>
                   <ul className="space-y-2">
                     <li>
-                      <Link to="/" className="text-sm text-gray-600 hover:text-primary-600 transition-colors flex items-center gap-1.5">
+                      <Link to="/" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
                         <Home size={14} />
                         Home
                       </Link>
                     </li>
                     <li>
-                      <Link to="/profile" className="text-sm text-gray-600 hover:text-primary-600 transition-colors flex items-center gap-1.5">
+                      <Link to="/profile" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
                         <User size={14} />
                         Profile
                       </Link>
                     </li>
                     <li>
-                      <Link to="/settings" className="text-sm text-gray-600 hover:text-primary-600 transition-colors flex items-center gap-1.5">
+                      <Link to="/settings" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
                         <Settings size={14} />
                         Settings
                       </Link>
@@ -89,18 +89,18 @@ export default function Layout({ children }: { children: ReactNode }) {
                   <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Resources</h4>
                   <ul className="space-y-2">
                     <li>
-                      <Link to="/docs" className="text-sm text-gray-600 hover:text-primary-600 transition-colors flex items-center gap-1.5">
+                      <Link to="/docs" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
                         <BookOpen size={14} />
                         Documentation
                       </Link>
                     </li>
                     <li>
-                      <Link to="/docs/getting-started" className="text-sm text-gray-600 hover:text-primary-600 transition-colors">
+                      <Link to="/docs/getting-started" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors">
                         Getting Started
                       </Link>
                     </li>
                     <li>
-                      <Link to="/docs/api/checkins" className="text-sm text-gray-600 hover:text-primary-600 transition-colors">
+                      <Link to="/docs/api/checkins" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors">
                         API Reference
                       </Link>
                     </li>
@@ -108,22 +108,22 @@ export default function Layout({ children }: { children: ReactNode }) {
                 </div>
               </div>
             </div>
-            <div className="border-t border-gray-100 mt-8 pt-6 text-center">
+            <div className="border-t border-gray-100 dark:border-gray-800 mt-8 pt-6 text-center">
               <p className="text-xs text-gray-400">WhereWeWere — your places, your data, your server.</p>
             </div>
           </div>
         </footer>
       )}
 
-      {/* Bottom nav (mobile) */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 z-50">
+      {/* Bottom nav (mobile) — glass */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-t border-white/40 dark:border-gray-700/40 z-50">
         <div className="flex justify-around">
           {navItems.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}
-              className={`flex flex-col items-center py-2 px-3 text-xs ${
-                isActive(pathname, to) ? 'text-primary-600' : 'text-gray-500'
+              className={`flex flex-col items-center py-2 px-3 text-xs transition-colors ${
+                isActive(pathname, to) ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400'
               }`}
             >
               <Icon size={20} />

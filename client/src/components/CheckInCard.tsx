@@ -57,7 +57,7 @@ export default function CheckInCard({ checkin, onDelete, immichUrl }: CheckInCar
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 hover:shadow-md transition-shadow">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 hover:shadow-md transition-all">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           {/* Venue name */}

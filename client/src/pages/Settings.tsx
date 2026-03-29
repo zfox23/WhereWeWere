@@ -43,8 +43,8 @@ function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => voi
   };
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-      <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
         <Upload size={20} className="text-gray-600" />
         Swarm Import
       </h2>
@@ -250,8 +250,8 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
   const hasActiveJob = jobList.some((j) => j.status === 'pending' || j.status === 'running');
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-      <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
         <Cog size={20} className="text-gray-600" />
         Jobs
       </h2>
@@ -421,11 +421,11 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
 
       {/* Profile Section */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <User size={20} className="text-gray-600" />
           Profile
         </h2>
@@ -461,8 +461,8 @@ export default function Settings() {
       </div>
 
       {/* Integrations Section */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <Link2 size={20} className="text-gray-600" />
           Integrations
         </h2>

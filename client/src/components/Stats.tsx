@@ -29,7 +29,7 @@ export function StatCard({
   value: string | number;
 }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <div className="flex items-center gap-2 text-gray-500 mb-1">
         <Icon size={16} />
         <span className="text-xs font-medium uppercase tracking-wide">
@@ -65,7 +65,7 @@ export function StreakCard({ streak }: { streak: Streak }) {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <Flame size={16} className="text-orange-500" />
         Streaks
@@ -128,7 +128,7 @@ export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
   const navigate = useNavigate();
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <Trophy size={16} className="text-yellow-500" />
         Top Venues
@@ -169,7 +169,7 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
   const maxCount = Math.max(...data.map((d) => d.checkin_count), 1);
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <BarChart3 size={16} className="text-indigo-500" />
         Categories
@@ -262,7 +262,7 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
   const currentYear = new Date().getFullYear();
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <div className="flex items-center justify-start mb-3">
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
           <CalendarDays size={16} className="text-green-600" />

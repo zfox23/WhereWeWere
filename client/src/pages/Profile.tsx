@@ -139,7 +139,7 @@ function HeatmapMap({ data }: { data: MapDataPoint[] }) {
   if (data.length === 0) return null;
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] overflow-hidden">
       <div className="p-4 pb-2">
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
           <MapPin size={16} className="text-primary-600" />
@@ -200,7 +200,7 @@ const TIME_COLORS: Record<string, string> = {
 function DayOfWeekChart({ data }: { data: DayOfWeekData[] }) {
   const max = Math.max(...data.map((d) => d.count), 1);
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <Calendar size={16} className="text-violet-500" />
         Day of Week
@@ -226,7 +226,7 @@ function DayOfWeekChart({ data }: { data: DayOfWeekData[] }) {
 function TimeOfDayChart({ data }: { data: TimeOfDayData[] }) {
   const total = data.reduce((s, d) => s + d.count, 0) || 1;
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <Clock size={16} className="text-sky-500" />
         Time of Day
@@ -262,7 +262,7 @@ function BusiestDays({ data }: { data: BusiestDayData[] }) {
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <CalendarDays size={16} className="text-rose-500" />
         Busiest Days
@@ -293,7 +293,7 @@ function TopCities({ data }: { data: CityData[] }) {
   const max = Math.max(...data.map((d) => d.checkin_count), 1);
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <Building2 size={16} className="text-teal-500" />
         Top Cities
@@ -341,7 +341,7 @@ function InsightsSection({ data }: { data: InsightData[] }) {
   if (data.length === 0) return null;
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <Lightbulb size={16} className="text-amber-500" />
         Insights
@@ -372,7 +372,7 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <History size={16} className="text-purple-500" />
         On This Day
@@ -423,7 +423,7 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <TrendingUp size={16} className="text-emerald-500" />
         More Stats
@@ -490,7 +490,7 @@ function CountriesList({ data }: { data: CountryStats[] }) {
   if (data.length === 0) return null;
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
         <Globe size={16} className="text-blue-500" />
         Countries
@@ -597,7 +597,7 @@ export default function Profile() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Profile</h1>
 
       {/* Summary grid */}
       {summary && (

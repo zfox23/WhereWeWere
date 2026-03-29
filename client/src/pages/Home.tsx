@@ -191,15 +191,15 @@ export default function Home() {
             value={searchQuery}
             onChange={(e) => setFilter('q', e.target.value)}
             placeholder="Search venues and notes..."
-            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+            className="w-full pl-10 pr-4 py-3 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/40 dark:border-gray-700/40 rounded-2xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none shadow-sm shadow-black/[0.03] dark:text-gray-100"
           />
         </div>
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`px-3 py-3 rounded-xl border transition-colors ${
+          className={`px-3 py-3 rounded-2xl border transition-all backdrop-blur-xl ${
             showFilters || hasActiveFilters
-              ? 'bg-primary-50 border-primary-300 text-primary-600'
-              : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+              ? 'bg-primary-50/70 border-primary-300/60 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
+              : 'bg-white/70 dark:bg-gray-900/70 border-white/40 dark:border-gray-700/40 text-gray-600 dark:text-gray-400 hover:bg-white/90 dark:hover:bg-gray-800/90 shadow-sm shadow-black/[0.03]'
           }`}
         >
           <SlidersHorizontal size={18} />
@@ -247,7 +247,7 @@ export default function Home() {
 
       {/* Expanded filters */}
       {showFilters && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-700">Filters</span>
             {hasActiveFilters && (
@@ -321,7 +321,7 @@ export default function Home() {
           </button>
         </div>
       ) : items.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-8 text-center">
           <MapPin size={40} className="mx-auto text-gray-300 mb-3" />
           <p className="text-gray-500 mb-4">
             {hasActiveFilters ? 'No check-ins match your filters.' : 'No check-ins yet. Start exploring!'}
@@ -366,7 +366,7 @@ export default function Home() {
       {/* FAB */}
       <Link
         to="/check-in"
-        className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 w-14 h-14 bg-primary-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-primary-700 transition-colors"
+        className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-primary-500/30 hover:shadow-xl hover:shadow-primary-500/40 hover:scale-105 transition-all"
       >
         <Plus size={24} />
       </Link>

@@ -20,21 +20,46 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm;
   }
   .btn-secondary {
-    @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-primary-500;
+    @apply btn bg-white/70 text-gray-700 border border-gray-200/60 hover:bg-white/90 focus:ring-primary-500 backdrop-blur-sm;
   }
   .btn-danger {
     @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
   }
   .input {
-    @apply block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500;
+    @apply block w-full rounded-xl border border-gray-200/60 bg-white/70 px-3 py-2 text-sm shadow-sm backdrop-blur-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 transition-colors;
   }
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden;
+    @apply bg-white/70 rounded-2xl shadow-sm border border-white/40 overflow-hidden backdrop-blur-md;
+  }
+
+  /* Glass card used for sections */
+  .glass {
+    @apply bg-white/60 backdrop-blur-xl border border-white/40 shadow-lg shadow-black/[0.03];
+  }
+  .glass-subtle {
+    @apply bg-white/40 backdrop-blur-md border border-white/30;
+  }
+
+  /* Dark mode overrides */
+  .dark body {
+    @apply bg-gray-950;
+  }
+  .dark .btn-secondary {
+    @apply bg-gray-800/70 text-gray-200 border-gray-700/60 hover:bg-gray-800/90;
+  }
+  .dark .input {
+    @apply border-gray-700/60 bg-gray-800/70 text-gray-100 focus:border-primary-500;
+  }
+  .dark .glass {
+    @apply bg-gray-900/60 border-gray-700/40 shadow-black/10;
+  }
+  .dark .glass-subtle {
+    @apply bg-gray-900/40 border-gray-700/30;
   }
 }
