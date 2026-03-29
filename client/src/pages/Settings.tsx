@@ -361,6 +361,14 @@ export default function Settings() {
   const [integrationSaving, setIntegrationSaving] = useState(false);
   const [integrationMsg, setIntegrationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Notifications
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [notifyStreak, setNotifyStreak] = useState(true);
+  const [notifyWeekly, setNotifyWeekly] = useState(true);
+  const [notifyMilestone, setNotifyMilestone] = useState(true);
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifMsg, setNotifMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   useEffect(() => {
     async function loadSettings() {
       try {
@@ -372,6 +380,10 @@ export default function Settings() {
         setDawarichApiKey(s.dawarich_api_key || '');
         setImmichUrl(s.immich_url || '');
         setImmichApiKey(s.immich_api_key || '');
+        setNotificationsEnabled(s.notifications_enabled ?? true);
+        setNotifyStreak(s.notify_streak_reminder ?? true);
+        setNotifyWeekly(s.notify_weekly_summary ?? true);
+        setNotifyMilestone(s.notify_milestone ?? true);
       } catch (err) {
         console.error('Failed to load settings:', err);
       } finally {
@@ -409,6 +421,24 @@ export default function Settings() {
       setIntegrationMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });
     } finally {
       setIntegrationSaving(false);
+    }
+  };
+
+  const saveNotifications = async () => {
+    setNotifSaving(true);
+    setNotifMsg(null);
+    try {
+      await settings.update({
+        notifications_enabled: notificationsEnabled,
+        notify_streak_reminder: notifyStreak,
+        notify_weekly_summary: notifyWeekly,
+        notify_milestone: notifyMilestone,
+      });
+      setNotifMsg({ type: 'success', text: 'Notification preferences saved.' });
+    } catch (err) {
+      setNotifMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });
+    } finally {
+      setNotifSaving(false);
     }
   };
 
@@ -492,6 +522,102 @@ export default function Settings() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Notifications Section */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          {notificationsEnabled ? <Bell size={20} className="text-primary-600" /> : <BellOff size={20} className="text-gray-400" />}
+          Notifications
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Control which notifications you receive.
+        </p>
+
+        <div className="space-y-3">
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Notifications</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Master toggle for all notifications</p>
+            </div>
+            <button
+              onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+              className={`relative w-11 h-6 rounded-full transition-colors ${
+                notificationsEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
+              }`} />
+            </button>
+          </label>
+
+          <div className={`space-y-3 transition-opacity ${notificationsEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+            <div className="border-t border-gray-100 dark:border-gray-800 pt-3" />
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Streak Reminders</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Remind you to check in to keep your streak alive</p>
+              </div>
+              <button
+                onClick={() => setNotifyStreak(!notifyStreak)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  notifyStreak ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  notifyStreak ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </label>
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Weekly Summary</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">A recap of your check-ins from the past week</p>
+              </div>
+              <button
+                onClick={() => setNotifyWeekly(!notifyWeekly)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  notifyWeekly ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  notifyWeekly ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </label>
+
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Milestones</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Celebrate when you hit check-in milestones (100, 500, etc.)</p>
+              </div>
+              <button
+                onClick={() => setNotifyMilestone(!notifyMilestone)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  notifyMilestone ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  notifyMilestone ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </label>
+          </div>
+        </div>
+
+        {notifMsg && (
+          <div className={`flex items-center gap-2 text-sm ${notifMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+            {notifMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+            {notifMsg.text}
+          </div>
+        )}
+        <button onClick={saveNotifications} disabled={notifSaving} className="btn-primary">
+          {notifSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+          Save Notifications
+        </button>
       </div>
 
       {/* Integrations Section */}
