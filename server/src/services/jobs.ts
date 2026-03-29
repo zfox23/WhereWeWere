@@ -2,11 +2,14 @@ import { query } from '../db';
 import { reverseGeocode } from './nominatim';
 import { searchNearbyVenues } from './overpass';
 
+const USER_ID = '00000000-0000-0000-0000-000000000001';
+
 export interface JobProgress {
   phase?: string;
   updated?: number;
   remaining?: number;
   message?: string;
+  [key: string]: unknown;
 }
 
 async function updateJobProgress(jobId: string, progress: JobProgress) {
@@ -149,6 +152,111 @@ export async function runBackfillJob(jobId: string): Promise<void> {
     );
   } catch (err: any) {
     console.error(`Job ${jobId} failed:`, err);
+    await query(
+      `UPDATE jobs SET status = 'failed', completed_at = NOW(), error = $1 WHERE id = $2`,
+      [err.message || String(err), jobId]
+    );
+  }
+}
+
+async function getDawarichSettings(): Promise<{ url: string; apiKey: string } | null> {
+  const result = await query(
+    `SELECT dawarich_url, dawarich_api_key FROM user_settings WHERE user_id = $1`,
+    [USER_ID]
+  );
+  if (result.rows.length === 0) return null;
+  const { dawarich_url, dawarich_api_key } = result.rows[0];
+  if (!dawarich_url || !dawarich_api_key) return null;
+  return { url: dawarich_url.replace(/\/+$/, ''), apiKey: dawarich_api_key };
+}
+
+export async function runDawarichExportJob(jobId: string): Promise<void> {
+  try {
+    await query(
+      `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1`,
+      [jobId]
+    );
+
+    const settings = await getDawarichSettings();
+    if (!settings) {
+      throw new Error('Dawarich URL and API key are not configured. Update them in Settings > Integrations.');
+    }
+
+    // Fetch all venues with coordinates
+    const venuesResult = await query(
+      `SELECT name, latitude, longitude FROM venues
+       WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+       ORDER BY name`
+    );
+    const allVenues = venuesResult.rows;
+
+    // Fetch existing places from Dawarich to avoid duplicates
+    const existingRes = await fetch(`${settings.url}/api/v1/places?api_key=${settings.apiKey}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!existingRes.ok) {
+      throw new Error(`Failed to fetch existing Dawarich places: ${existingRes.status} ${existingRes.statusText}`);
+    }
+    const existingPlaces = (await existingRes.json()) as Array<{ name: string }>;
+    const existingNames = new Set(existingPlaces.map((p) => p.name.toLowerCase()));
+
+    const toExport = allVenues.filter((v: any) => !existingNames.has(v.name.toLowerCase()));
+
+    await updateJobProgress(jobId, {
+      phase: 'exporting',
+      message: `Found ${allVenues.length} venues, ${toExport.length} new to export (${existingNames.size} already exist in Dawarich).`,
+    });
+
+    let exported = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const venue of toExport) {
+      try {
+        const res = await fetch(`${settings.url}/api/v1/places?api_key=${settings.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            name: venue.name,
+            latitude: parseFloat(venue.latitude),
+            longitude: parseFloat(venue.longitude),
+          }),
+        });
+
+        if (res.ok) {
+          exported++;
+        } else {
+          const errText = await res.text().catch(() => '');
+          console.error(`Dawarich export failed for "${venue.name}": ${res.status} ${errText.slice(0, 100)}`);
+          failed++;
+        }
+      } catch (venueErr) {
+        console.error(`Dawarich export error for "${venue.name}":`, venueErr);
+        failed++;
+      }
+
+      if ((exported + failed) % 10 === 0) {
+        await updateJobProgress(jobId, {
+          phase: 'exporting',
+          message: `Exporting: ${exported} created, ${failed} failed, ${toExport.length - exported - failed} remaining`,
+          exported,
+          failed,
+        });
+      }
+    }
+
+    await query(
+      `UPDATE jobs SET status = 'completed', completed_at = NOW(), progress = $1 WHERE id = $2`,
+      [JSON.stringify({
+        phase: 'done',
+        message: `Complete. Exported ${exported} places to Dawarich. ${skipped} skipped, ${failed} failed.`,
+        exported,
+        skipped: existingNames.size,
+        failed,
+      }), jobId]
+    );
+  } catch (err: any) {
+    console.error(`Dawarich export job ${jobId} failed:`, err);
     await query(
       `UPDATE jobs SET status = 'failed', completed_at = NOW(), error = $1 WHERE id = $2`,
       [err.message || String(err), jobId]

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { runBackfillJob } from '../services/jobs';
+import { runBackfillJob, runDawarichExportJob } from '../services/jobs';
 
 const router = Router();
 
@@ -43,8 +43,9 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { type } = req.body;
 
-    if (type !== 'backfill') {
-      return res.status(400).json({ error: 'Unknown job type. Supported: backfill' });
+    const supportedTypes = ['backfill', 'dawarich-export'];
+    if (!supportedTypes.includes(type)) {
+      return res.status(400).json({ error: `Unknown job type. Supported: ${supportedTypes.join(', ')}` });
     }
 
     // Check if there's already a running job of this type
@@ -66,7 +67,8 @@ router.post('/', async (req: Request, res: Response) => {
     const job = result.rows[0];
 
     // Fire and forget — run in the background
-    runBackfillJob(job.id).catch((err) => {
+    const runner = type === 'dawarich-export' ? runDawarichExportJob : runBackfillJob;
+    runner(job.id).catch((err) => {
       console.error(`Background job ${job.id} threw:`, err);
     });
 

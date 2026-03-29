@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send } from 'lucide-react';
 import { settings, importApi, jobs } from '../api/client';
 import type { UserSettings, ImportResult, Job } from '../types';
 
@@ -208,11 +208,11 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
     return () => clearInterval(interval);
   }, [jobList]);
 
-  const startBackfill = async () => {
+  const startJob = async (type: string) => {
     setStarting(true);
     setError(null);
     try {
-      await jobs.start('backfill');
+      await jobs.start(type);
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start job');
@@ -230,26 +230,36 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
         Jobs
       </h2>
       <p className="text-sm text-gray-500">
-        Run background tasks to enrich venue data. The backfill job uses Nominatim and OpenStreetMap to resolve missing countries and categories.
+        Run background tasks to enrich venue data or sync with external services.
       </p>
 
-      <button
-        onClick={startBackfill}
-        disabled={starting || hasActiveJob}
-        className="btn-primary"
-      >
-        {starting ? (
-          <>
-            <Loader2 size={16} className="animate-spin mr-2" />
-            Starting...
-          </>
-        ) : (
-          <>
-            <Play size={16} className="mr-2" />
-            Start Backfill Job
-          </>
-        )}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => startJob('backfill')}
+          disabled={starting || hasActiveJob}
+          className="btn-primary"
+        >
+          {starting ? (
+            <>
+              <Loader2 size={16} className="animate-spin mr-2" />
+              Starting...
+            </>
+          ) : (
+            <>
+              <Play size={16} className="mr-2" />
+              Backfill Venues
+            </>
+          )}
+        </button>
+        <button
+          onClick={() => startJob('dawarich-export')}
+          disabled={starting || hasActiveJob}
+          className="btn-secondary"
+        >
+          <Send size={16} className="mr-2" />
+          Export to Dawarich
+        </button>
+      </div>
 
       {error && (
         <div className="flex items-center gap-2 text-sm text-red-600">
