@@ -7,6 +7,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      srcDir: 'src',
+      filename: 'sw-custom.ts',
+      strategies: 'injectManifest',
+      injectRegister: 'auto',
       includeAssets: ['icon-192.svg', 'icon-512.svg'],
       manifest: {
         name: 'WhereWeWere',
@@ -32,34 +36,8 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/unpkg\.com\/leaflet/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'leaflet-cdn',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/[abc]\.tile\.openstreetmap\.org/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'osm-tiles',
-              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 7 },
-            },
-          },
-          {
-            urlPattern: /\/api\/v1\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 5 },
-            },
-          },
-        ],
       },
     }),
   ],

@@ -50,7 +50,11 @@ export default function CheckIn() {
       {!selectedVenue ? (
         <div className="space-y-4">
           <p className="text-gray-600">Where are you?</p>
-          <VenueSearch onSelect={handleVenueSelect} />
+          <VenueSearch
+            onSelect={handleVenueSelect}
+            initialLat={searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : undefined}
+            initialLon={searchParams.get('lon') ? parseFloat(searchParams.get('lon')!) : undefined}
+          />
         </div>
       ) : (
         <div className="space-y-4">

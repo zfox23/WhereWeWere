@@ -12,9 +12,11 @@ export interface SelectedVenue {
 
 interface VenueSearchProps {
   onSelect: (venue: SelectedVenue) => void;
+  initialLat?: number;
+  initialLon?: number;
 }
 
-export default function VenueSearch({ onSelect }: VenueSearchProps) {
+export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueSearchProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<NearbyVenue[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,8 +34,12 @@ export default function VenueSearch({ onSelect }: VenueSearchProps) {
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Get user geolocation on mount
+  // Get user geolocation on mount (or use provided initial coords)
   useEffect(() => {
+    if (initialLat !== undefined && initialLon !== undefined) {
+      setCoords({ lat: initialLat, lon: initialLon });
+      return;
+    }
     if (!navigator.geolocation) {
       setLocationError('Geolocation is not supported by your browser.');
       return;
@@ -47,7 +53,7 @@ export default function VenueSearch({ onSelect }: VenueSearchProps) {
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, []);
+  }, [initialLat, initialLon]);
 
   // Load categories for custom venue form
   useEffect(() => {
