@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin,
-  Camera,
   CalendarDays,
   Flame,
   Trophy,
@@ -399,7 +398,7 @@ export default function StatsView() {
     <div className="space-y-6">
       {/* Summary grid */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <StatCard
             icon={MapPin}
             label="Check-ins"
@@ -409,11 +408,6 @@ export default function StatsView() {
             icon={MapPin}
             label="Unique Venues"
             value={summary.unique_venues}
-          />
-          <StatCard
-            icon={Camera}
-            label="Photos"
-            value={summary.total_photos}
           />
           <StatCard
             icon={CalendarDays}

@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin,
-  Camera,
   CalendarDays,
   Loader2,
   Globe,
@@ -414,10 +413,9 @@ export default function Profile() {
 
       {/* Summary grid */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <StatCard icon={MapPin} label="Check-ins" value={summary.total_checkins} />
           <StatCard icon={MapPin} label="Unique Venues" value={summary.unique_venues} />
-          <StatCard icon={Camera} label="Photos" value={summary.total_photos} />
           <StatCard icon={CalendarDays} label="Active Days" value={summary.days_with_checkins} />
         </div>
       )}

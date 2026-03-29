@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Star, Upload, Loader2, MapPin } from 'lucide-react';
+import { useState } from 'react';
+import { Star, Loader2, MapPin } from 'lucide-react';
 import { checkins } from '../api/client';
 import VenueSearch from './VenueSearch';
 
@@ -25,11 +25,9 @@ export default function CheckInForm({
   const [notes, setNotes] = useState('');
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
-  const [photos, setPhotos] = useState<File[]>([]);
   const [alsoCheckinParent, setAlsoCheckinParent] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleVenueSelect = (venue: { id: string; name: string }) => {
     setVenueId(venue.id);
@@ -39,12 +37,6 @@ export default function CheckInForm({
   const handleClearVenue = () => {
     setVenueId('');
     setVenueName('');
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setPhotos(Array.from(e.target.files));
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -67,11 +59,6 @@ export default function CheckInForm({
         also_checkin_parent: alsoCheckinParent && !!parentVenueId,
       });
 
-      // Upload photos if any
-      if (photos.length > 0) {
-        await checkins.uploadPhotos(newCheckin.id, photos);
-      }
-
       // Reset form
       if (!initialVenueId) {
         setVenueId('');
@@ -79,10 +66,6 @@ export default function CheckInForm({
       }
       setNotes('');
       setRating(0);
-      setPhotos([]);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
 
       onSuccess?.();
     } catch (err) {
@@ -187,44 +170,6 @@ export default function CheckInForm({
             </span>
           )}
         </div>
-      </div>
-
-      {/* Photo upload */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1.5">
-          Photos
-        </label>
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
-        >
-          <Upload size={20} className="mx-auto text-gray-400 mb-1" />
-          <p className="text-sm text-gray-500">
-            {photos.length > 0
-              ? `${photos.length} file${photos.length !== 1 ? 's' : ''} selected`
-              : 'Click to select photos'}
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={handleFileChange}
-            className="hidden"
-          />
-        </div>
-        {photos.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {photos.map((f, i) => (
-              <span
-                key={i}
-                className="inline-block text-xs bg-gray-100 text-gray-600 rounded px-2 py-0.5 truncate max-w-[150px]"
-              >
-                {f.name}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Error */}

@@ -16,9 +16,6 @@ router.get('/summary', async (req: Request, res: Response) => {
       `SELECT
          COUNT(c.id)::int AS total_checkins,
          COUNT(DISTINCT c.venue_id)::int AS unique_venues,
-         (SELECT COUNT(*)::int FROM checkin_photos cp
-          JOIN checkins c2 ON cp.checkin_id = c2.id
-          WHERE c2.user_id = $1) AS total_photos,
          COUNT(DISTINCT DATE(c.checked_in_at AT TIME ZONE 'UTC'))::int AS days_with_checkins,
          u.created_at AS member_since
        FROM checkins c
@@ -38,7 +35,6 @@ router.get('/summary', async (req: Request, res: Response) => {
       return res.json({
         total_checkins: 0,
         unique_venues: 0,
-        total_photos: 0,
         days_with_checkins: 0,
         member_since: userResult.rows.length > 0
           ? userResult.rows[0].created_at

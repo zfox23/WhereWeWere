@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Star, MapPin, Image, Trash2, Clock, Pencil, Camera } from 'lucide-react';
+import { Star, MapPin, Trash2, Clock, Pencil, Camera } from 'lucide-react';
 import type { CheckIn } from '../types';
 
 interface CheckInCardProps {
@@ -104,18 +104,12 @@ export default function CheckInCard({ checkin, onDelete, immichUrl }: CheckInCar
             </p>
           )}
 
-          {/* Rating and photo count */}
-          <div className="flex items-center gap-4 mt-2">
-            {checkin.rating != null && checkin.rating > 0 && (
+          {/* Rating */}
+          {checkin.rating != null && checkin.rating > 0 && (
+            <div className="mt-2">
               <StarRating rating={checkin.rating} />
-            )}
-            {checkin.photo_count != null && checkin.photo_count > 0 && (
-              <span className="flex items-center gap-1 text-xs text-gray-500">
-                <Image size={13} />
-                {checkin.photo_count} photo{checkin.photo_count !== 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Immich photo links */}
           {immichUrl && (

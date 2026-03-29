@@ -46,19 +46,6 @@ export interface CheckIn {
   notes: string | null;
   rating: number | null;
   checked_in_at: string;
-  photo_count?: number;
-  photos?: Photo[];
-  created_at: string;
-}
-
-export interface Photo {
-  id: string;
-  checkin_id: string;
-  file_path: string;
-  original_filename: string | null;
-  mime_type: string | null;
-  caption: string | null;
-  url: string;
   created_at: string;
 }
 
@@ -76,7 +63,6 @@ export interface NearbyVenue {
 export interface Stats {
   total_checkins: number;
   unique_venues: number;
-  total_photos: number;
   days_with_checkins: number;
   member_since: string;
 }

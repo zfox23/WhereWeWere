@@ -23,18 +23,6 @@ export const checkins = {
     request<any>(`/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     request<void>(`/checkins/${id}`, { method: 'DELETE' }),
-  uploadPhotos: async (checkinId: string, files: File[]) => {
-    const form = new FormData();
-    files.forEach((f) => form.append('photos', f));
-    const res = await fetch(`${API_BASE}/checkins/${checkinId}/photos`, {
-      method: 'POST',
-      body: form,
-    });
-    if (!res.ok) throw new Error('Photo upload failed');
-    return res.json();
-  },
-  deletePhoto: (checkinId: string, photoId: string) =>
-    request<void>(`/checkins/${checkinId}/photos/${photoId}`, { method: 'DELETE' }),
 };
 
 // Venues

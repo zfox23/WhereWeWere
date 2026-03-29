@@ -1,9 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { upload } from '../middleware/upload';
-import fs from 'fs';
-import path from 'path';
-import { config } from '../config';
 
 const router = Router();
 
@@ -79,15 +75,12 @@ router.get('/', async (req: Request, res: Response) => {
              c.checked_in_at, c.created_at, c.updated_at,
              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
              vc.name AS venue_category,
-             pv.id AS parent_venue_id, pv.name AS parent_venue_name,
-             COUNT(cp.id)::int AS photo_count
+             pv.id AS parent_venue_id, pv.name AS parent_venue_name
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
       LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-      LEFT JOIN checkin_photos cp ON cp.checkin_id = c.id
       ${whereClause}
-      GROUP BY c.id, v.name, v.latitude, v.longitude, vc.name, pv.id, pv.name
       ORDER BY c.checked_in_at DESC
       LIMIT ${limitParam} OFFSET ${offsetParam}
     `;
@@ -126,18 +119,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    const photosResult = await query(
-      `SELECT id, file_path, original_filename, mime_type, caption, created_at
-       FROM checkin_photos
-       WHERE checkin_id = $1
-       ORDER BY created_at ASC`,
-      [id]
-    );
-
-    const checkin = checkinResult.rows[0];
-    checkin.photos = photosResult.rows;
-
-    res.json(checkin);
+    res.json(checkinResult.rows[0]);
   } catch (err) {
     console.error('Error getting check-in:', err);
     res.status(500).json({ error: 'Failed to get check-in' });
@@ -234,12 +216,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    // Get associated photos to clean up files
-    const photosResult = await query(
-      'SELECT file_path FROM checkin_photos WHERE checkin_id = $1',
-      [id]
-    );
-
     const result = await query(
       'DELETE FROM checkins WHERE id = $1 RETURNING id',
       [id]
@@ -249,97 +225,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    // Clean up photo files from disk
-    for (const photo of photosResult.rows) {
-      const filePath = path.resolve(config.photosDir, photo.file_path);
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      } catch (fileErr) {
-        console.error('Error deleting photo file:', fileErr);
-      }
-    }
-
     res.json({ message: 'Check-in deleted', id });
   } catch (err) {
     console.error('Error deleting check-in:', err);
     res.status(500).json({ error: 'Failed to delete check-in' });
-  }
-});
-
-// POST /:id/photos - upload photos for a check-in
-router.post('/:id/photos', upload.array('photos', 4), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-
-    // Verify the check-in exists
-    const checkinResult = await query(
-      'SELECT id FROM checkins WHERE id = $1',
-      [id]
-    );
-
-    if (checkinResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Check-in not found' });
-    }
-
-    const files = req.files as Express.Multer.File[];
-    if (!files || files.length === 0) {
-      return res.status(400).json({ error: 'No photos provided' });
-    }
-
-    const photos = [];
-    for (const file of files) {
-      const result = await query(
-        `INSERT INTO checkin_photos (checkin_id, file_path, original_filename, mime_type, caption)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [id, file.filename, file.originalname, file.mimetype, null]
-      );
-      photos.push(result.rows[0]);
-    }
-
-    res.status(201).json(photos);
-  } catch (err) {
-    console.error('Error uploading photos:', err);
-    res.status(500).json({ error: 'Failed to upload photos' });
-  }
-});
-
-// DELETE /:id/photos/:photoId - delete a specific photo
-router.delete('/:id/photos/:photoId', async (req: Request, res: Response) => {
-  try {
-    const { id, photoId } = req.params;
-
-    const photoResult = await query(
-      'SELECT file_path FROM checkin_photos WHERE id = $1 AND checkin_id = $2',
-      [photoId, id]
-    );
-
-    if (photoResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Photo not found' });
-    }
-
-    // Delete from database
-    await query(
-      'DELETE FROM checkin_photos WHERE id = $1 AND checkin_id = $2',
-      [photoId, id]
-    );
-
-    // Delete file from disk
-    const filePath = path.resolve(config.photosDir, photoResult.rows[0].file_path);
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (fileErr) {
-      console.error('Error deleting photo file:', fileErr);
-    }
-
-    res.json({ message: 'Photo deleted', id: photoId });
-  } catch (err) {
-    console.error('Error deleting photo:', err);
-    res.status(500).json({ error: 'Failed to delete photo' });
   }
 });
 

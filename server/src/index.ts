@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { config } from './config';
 import { pool } from './db';
 import { checkinsRouter } from './routes/checkins';
 import { venuesRouter } from './routes/venues';
@@ -16,12 +15,6 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-// Ensure photos directory exists
-fs.mkdirSync(config.photosDir, { recursive: true });
-
-// Serve photo files
-app.use('/api/v1/photos/file', express.static(config.photosDir));
 
 // API routes
 app.use('/api/v1/checkins', checkinsRouter);
