@@ -52,6 +52,10 @@ async function geocodeBatch(): Promise<{ updated: number; remaining: number }> {
   return { updated, remaining: remaining.rows[0].count };
 }
 
+function normalizeForMatch(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 async function categorizeBatch(): Promise<{ updated: number; remaining: number }> {
   const result = await query(
     `SELECT id, name, latitude, longitude FROM venues
@@ -64,14 +68,30 @@ async function categorizeBatch(): Promise<{ updated: number; remaining: number }
     try {
       const lat = parseFloat(venue.latitude);
       const lng = parseFloat(venue.longitude);
-      const nearby = await searchNearbyVenues(lat, lng, venue.name, 200);
 
-      const nameLower = venue.name.toLowerCase();
-      const match = nearby.find(
-        (n) => n.name.toLowerCase() === nameLower
-      ) || nearby.find(
-        (n) => nameLower.includes(n.name.toLowerCase()) || n.name.toLowerCase().includes(nameLower)
+      // Search without name filter at a small radius to avoid regex injection
+      // issues and find all nearby POIs for local matching
+      const nearby = await searchNearbyVenues(lat, lng, undefined, 150);
+
+      const venueNorm = normalizeForMatch(venue.name);
+
+      // 1. Exact normalized match
+      let match = nearby.find(
+        (n) => normalizeForMatch(n.name) === venueNorm
       );
+
+      // 2. Partial match (one contains the other)
+      if (!match) {
+        match = nearby.find((n) => {
+          const nNorm = normalizeForMatch(n.name);
+          return venueNorm.includes(nNorm) || nNorm.includes(venueNorm);
+        });
+      }
+
+      // 3. If only one POI nearby, use it regardless of name
+      if (!match && nearby.length === 1) {
+        match = nearby[0];
+      }
 
       if (match && match.category) {
         let catResult = await query(
@@ -90,6 +110,9 @@ async function categorizeBatch(): Promise<{ updated: number; remaining: number }
         );
         updated++;
       }
+
+      // Small delay between Overpass requests to avoid rate limiting
+      await new Promise((r) => setTimeout(r, 1100));
     } catch (venueErr) {
       console.error(`Failed to categorize venue ${venue.id}:`, venueErr);
     }
