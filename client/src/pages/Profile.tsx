@@ -265,21 +265,6 @@ export default function Profile() {
         </div>
       )}
 
-      {/* Streaks */}
-      {streak && <StreakCard streak={streak} />}
-
-      {/* Heatmap Map */}
-      <HeatmapMap data={mapData} />
-
-      {/* Countries */}
-      <CountriesList data={countries} />
-
-      {/* Top venues and categories */}
-      <div className="grid md:grid-cols-2 gap-4">
-        <TopVenuesList venues={topVenues} />
-        <CategoryChart data={categories} />
-      </div>
-
       {/* Activity heatmap */}
       <Heatmap
         days={heatmapDays}
@@ -287,6 +272,21 @@ export default function Profile() {
         onYearChange={setHeatmapYear}
         onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
       />
+
+      {/* Streaks */}
+      {streak && <StreakCard streak={streak} />}
+
+      {/* Top venues and categories */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <TopVenuesList venues={topVenues} />
+        <CategoryChart data={categories} />
+      </div>
+
+      {/* Countries */}
+      <CountriesList data={countries} />
+
+      {/* Heatmap Map */}
+      <HeatmapMap data={mapData} />
     </div>
   );
 }

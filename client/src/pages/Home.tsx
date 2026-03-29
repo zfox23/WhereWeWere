@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X } from 'lucide-react';
-import { checkins } from '../api/client';
+import { checkins, settings } from '../api/client';
 import { CheckIn } from '../types';
 import CheckInCard from '../components/CheckInCard';
 
@@ -34,6 +34,14 @@ export default function Home() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [immichUrl, setImmichUrl] = useState<string | null>(null);
+
+  // Fetch Immich URL from settings
+  useEffect(() => {
+    settings.get().then((s) => {
+      if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
+    }).catch(() => {});
+  }, []);
 
   // Read filters from URL params
   const searchQuery = searchParams.get('q') || '';
@@ -338,6 +346,7 @@ export default function Home() {
                     key={checkin.id}
                     checkin={checkin}
                     onDelete={handleDelete}
+                    immichUrl={immichUrl}
                   />
                 ))}
               </div>

@@ -77,7 +77,7 @@ router.get('/', async (req: Request, res: Response) => {
     const sql = `
       SELECT c.id, c.user_id, c.venue_id, c.notes, c.rating,
              c.checked_in_at, c.created_at, c.updated_at,
-             v.name AS venue_name,
+             v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
              vc.name AS venue_category,
              pv.id AS parent_venue_id, pv.name AS parent_venue_name,
              COUNT(cp.id)::int AS photo_count
@@ -87,7 +87,7 @@ router.get('/', async (req: Request, res: Response) => {
       LEFT JOIN venues pv ON v.parent_venue_id = pv.id
       LEFT JOIN checkin_photos cp ON cp.checkin_id = c.id
       ${whereClause}
-      GROUP BY c.id, v.name, vc.name, pv.id, pv.name
+      GROUP BY c.id, v.name, v.latitude, v.longitude, vc.name, pv.id, pv.name
       ORDER BY c.checked_in_at DESC
       LIMIT ${limitParam} OFFSET ${offsetParam}
     `;

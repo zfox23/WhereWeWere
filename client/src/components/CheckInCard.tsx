@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
-import { Star, MapPin, Image, Trash2, Clock, Pencil } from 'lucide-react';
+import { Star, MapPin, Image, Trash2, Clock, Pencil, Camera } from 'lucide-react';
 import type { CheckIn } from '../types';
 
 interface CheckInCardProps {
   checkin: CheckIn;
   onDelete?: (id: string) => void;
+  immichUrl?: string | null;
 }
 
 function formatDate(dateStr: string): string {
@@ -36,7 +37,19 @@ function StarRating({ rating }: { rating: number }) {
   );
 }
 
-export default function CheckInCard({ checkin, onDelete }: CheckInCardProps) {
+function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {
+  const t = new Date(checkedInAt);
+  const takenAfter = new Date(t.getTime() - 60 * 60 * 1000).toISOString();
+  const takenBefore = new Date(t.getTime() + 3 * 60 * 60 * 1000).toISOString();
+  const query = JSON.stringify({ takenAfter, takenBefore });
+  return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
+}
+
+function buildImmichMapUrl(immichUrl: string, lat: number, lng: number): string {
+  return `${immichUrl}/map#15/${lat}/${lng}`;
+}
+
+export default function CheckInCard({ checkin, onDelete, immichUrl }: CheckInCardProps) {
   const handleDelete = () => {
     if (onDelete && window.confirm('Delete this check-in?')) {
       onDelete(checkin.id);
@@ -103,6 +116,32 @@ export default function CheckInCard({ checkin, onDelete }: CheckInCardProps) {
               </span>
             )}
           </div>
+
+          {/* Immich photo links */}
+          {immichUrl && (
+            <div className="flex items-center gap-3 mt-2">
+              <a
+                href={buildImmichTimeUrl(immichUrl, checkin.checked_in_at)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+              >
+                <Clock size={12} />
+                Photos by time
+              </a>
+              {checkin.venue_latitude != null && checkin.venue_longitude != null && (
+                <a
+                  href={buildImmichMapUrl(immichUrl, Number(checkin.venue_latitude), Number(checkin.venue_longitude))}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  <Camera size={12} />
+                  Photos nearby
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Action buttons */}

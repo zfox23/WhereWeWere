@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { MapPin, Tag, Navigation, Loader2, AlertCircle } from 'lucide-react';
-import { venues, checkins } from '../api/client';
+import { venues, checkins, settings } from '../api/client';
 import { Venue, CheckIn } from '../types';
 import CheckInCard from '../components/CheckInCard';
 import MapView from '../components/MapView';
@@ -14,6 +14,13 @@ export default function VenueDetail() {
   const [venueCheckins, setVenueCheckins] = useState<CheckIn[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [immichUrl, setImmichUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    settings.get().then((s) => {
+      if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
+    }).catch(() => {});
+  }, []);
 
   const fetchData = async () => {
     if (!id) return;
@@ -171,6 +178,7 @@ export default function VenueDetail() {
                 key={checkin.id}
                 checkin={checkin}
                 onDelete={handleDelete}
+                immichUrl={immichUrl}
               />
             ))}
           </div>

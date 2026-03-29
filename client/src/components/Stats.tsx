@@ -264,7 +264,7 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-start mb-3">
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
           <CalendarDays size={16} className="text-green-600" />
           {year} Activity

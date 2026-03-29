@@ -33,11 +33,11 @@ On March 27, 2026, I purchased one month of Claude Code Pro in an attempt to vib
             - A GitHub-like heatmap of yearly activity
             - Checkins per country
             - A map showing me all of my checkins. Tapping on a location pin lets me see how many times and when I've checked in to that place. Location pins are coded by color like a heatmap: of all the currently-visible location pins, red pins are checked into most within the visible area, and green pins are checked into least within the visible area
-        3. Settings
-            - Lets me change my username and password
-            - Lets me import Swarm CSV data
-            - Lets me specify my Dawarich URL and API key
-            - Lets me specify my Immich URL and API key
+    3. Settings
+        - Lets me change my username and password
+        - Lets me import Swarm CSV data
+        - Lets me specify my Dawarich URL and API key
+        - Lets me specify my Immich URL and API key
 - UI/UX improvements
     - On Docs page, code blocks show up as white text with a white highlighted background
     - Remove Leaflet text/link on embedded maps
