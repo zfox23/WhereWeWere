@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle } from 'lucide-react';
 import { settings, importApi, jobs } from '../api/client';
 import type { UserSettings, ImportResult, Job } from '../types';
 
@@ -179,6 +179,8 @@ function JobStatusIcon({ status }: { status: Job['status'] }) {
       return <CheckCircle2 size={16} className="text-green-500" />;
     case 'failed':
       return <XCircle size={16} className="text-red-500" />;
+    case 'cancelled':
+      return <Ban size={16} className="text-amber-500" />;
   }
 }
 
@@ -218,6 +220,15 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
       setError(err instanceof Error ? err.message : 'Failed to start job');
     } finally {
       setStarting(false);
+    }
+  };
+
+  const cancelJob = async (id: string) => {
+    try {
+      await jobs.cancel(id);
+      await loadJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel job');
     }
   };
 
@@ -287,12 +298,23 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
                       {job.status}
                     </span>
                   </div>
-                  <span className="text-xs text-gray-400">{formatRelativeTime(job.created_at)}</span>
+                  <div className="flex items-center gap-2">
+                    {(job.status === 'pending' || job.status === 'running') && (
+                      <button
+                        onClick={() => cancelJob(job.id)}
+                        className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium"
+                      >
+                        <StopCircle size={13} />
+                        Cancel
+                      </button>
+                    )}
+                    <span className="text-xs text-gray-400">{formatRelativeTime(job.created_at)}</span>
+                  </div>
                 </div>
                 {job.progress?.message && (
                   <p className="text-xs text-gray-500 mt-1 ml-6">{job.progress.message}</p>
                 )}
-                {job.error && (
+                {job.error && job.status !== 'cancelled' && (
                   <p className="text-xs text-red-500 mt-1 ml-6">{job.error}</p>
                 )}
               </div>

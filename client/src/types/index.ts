@@ -148,7 +148,7 @@ export interface UserSettings {
 export interface Job {
   id: string;
   type: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: {
     phase?: string;
     updated?: number;

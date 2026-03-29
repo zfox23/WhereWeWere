@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { runBackfillJob, runDawarichExportJob } from '../services/jobs';
+import { runBackfillJob, runDawarichExportJob, requestJobCancellation } from '../services/jobs';
 
 const router = Router();
 
@@ -76,6 +76,39 @@ router.post('/', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error creating job:', err);
     res.status(500).json({ error: 'Failed to create job' });
+  }
+});
+
+// POST /:id/cancel - cancel a running/pending job
+router.post('/:id/cancel', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT id, status FROM jobs WHERE id = $1`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    const job = result.rows[0];
+    if (job.status !== 'pending' && job.status !== 'running') {
+      return res.status(400).json({ error: 'Job is not active' });
+    }
+
+    // Signal the in-memory runner to stop
+    requestJobCancellation(job.id);
+
+    // If pending (not yet started), mark cancelled immediately
+    if (job.status === 'pending') {
+      await query(
+        `UPDATE jobs SET status = 'cancelled', completed_at = NOW(), error = 'Job was cancelled by user.' WHERE id = $1`,
+        [job.id]
+      );
+    }
+
+    res.json({ message: 'Cancellation requested' });
+  } catch (err) {
+    console.error('Error cancelling job:', err);
+    res.status(500).json({ error: 'Failed to cancel job' });
   }
 });
 

@@ -4,6 +4,21 @@ import { searchNearbyVenues } from './overpass';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
+// In-memory cancellation signals — checked between batches
+const cancelledJobs = new Set<string>();
+
+export function requestJobCancellation(jobId: string) {
+  cancelledJobs.add(jobId);
+}
+
+function isJobCancelled(jobId: string): boolean {
+  return cancelledJobs.has(jobId);
+}
+
+function cleanupCancellation(jobId: string) {
+  cancelledJobs.delete(jobId);
+}
+
 export interface JobProgress {
   phase?: string;
   updated?: number;
@@ -136,6 +151,7 @@ export async function runBackfillJob(jobId: string): Promise<void> {
     let totalGeoUpdated = 0;
     let geoRemaining = Infinity;
     while (geoRemaining > 0) {
+      if (isJobCancelled(jobId)) throw new Error('cancelled');
       const batch = await geocodeBatch();
       totalGeoUpdated += batch.updated;
       geoRemaining = batch.remaining;
@@ -152,6 +168,7 @@ export async function runBackfillJob(jobId: string): Promise<void> {
     let totalCatUpdated = 0;
     let catRemaining = Infinity;
     while (catRemaining > 0) {
+      if (isJobCancelled(jobId)) throw new Error('cancelled');
       const batch = await categorizeBatch();
       totalCatUpdated += batch.updated;
       catRemaining = batch.remaining;
@@ -174,10 +191,12 @@ export async function runBackfillJob(jobId: string): Promise<void> {
       }), jobId]
     );
   } catch (err: any) {
-    console.error(`Job ${jobId} failed:`, err);
+    cleanupCancellation(jobId);
+    const isCancelled = err.message === 'cancelled';
+    console.error(`Job ${jobId} ${isCancelled ? 'cancelled' : 'failed'}:`, isCancelled ? '' : err);
     await query(
-      `UPDATE jobs SET status = 'failed', completed_at = NOW(), error = $1 WHERE id = $2`,
-      [err.message || String(err), jobId]
+      `UPDATE jobs SET status = $1, completed_at = NOW(), error = $2 WHERE id = $3`,
+      [isCancelled ? 'cancelled' : 'failed', isCancelled ? 'Job was cancelled by user.' : (err.message || String(err)), jobId]
     );
   }
 }
@@ -235,6 +254,7 @@ export async function runDawarichExportJob(jobId: string): Promise<void> {
     let failed = 0;
 
     for (const venue of toExport) {
+      if (isJobCancelled(jobId)) throw new Error('cancelled');
       try {
         const res = await fetch(`${settings.url}/api/v1/places?api_key=${settings.apiKey}`, {
           method: 'POST',
@@ -279,10 +299,12 @@ export async function runDawarichExportJob(jobId: string): Promise<void> {
       }), jobId]
     );
   } catch (err: any) {
-    console.error(`Dawarich export job ${jobId} failed:`, err);
+    cleanupCancellation(jobId);
+    const isCancelled = err.message === 'cancelled';
+    console.error(`Dawarich export job ${jobId} ${isCancelled ? 'cancelled' : 'failed'}:`, isCancelled ? '' : err);
     await query(
-      `UPDATE jobs SET status = 'failed', completed_at = NOW(), error = $1 WHERE id = $2`,
-      [err.message || String(err), jobId]
+      `UPDATE jobs SET status = $1, completed_at = NOW(), error = $2 WHERE id = $3`,
+      [isCancelled ? 'cancelled' : 'failed', isCancelled ? 'Job was cancelled by user.' : (err.message || String(err)), jobId]
     );
   }
 }

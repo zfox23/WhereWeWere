@@ -73,6 +73,14 @@ export const stats = {
     request<any[]>(`/stats/countries?user_id=${userId}`),
   mapData: (userId: string) =>
     request<any[]>(`/stats/map-data?user_id=${userId}`),
+  dayOfWeek: (userId: string) =>
+    request<any[]>(`/stats/day-of-week?user_id=${userId}`),
+  timeOfDay: (userId: string) =>
+    request<any[]>(`/stats/time-of-day?user_id=${userId}`),
+  busiestDays: (userId: string) =>
+    request<any[]>(`/stats/busiest-days?user_id=${userId}`),
+  topCities: (userId: string) =>
+    request<any[]>(`/stats/top-cities?user_id=${userId}`),
 };
 
 // Search
@@ -104,6 +112,8 @@ export const jobs = {
   get: (id: string) => request<any>(`/jobs/${id}`),
   start: (type: string) =>
     request<any>('/jobs', { method: 'POST', body: JSON.stringify({ type }) }),
+  cancel: (id: string) =>
+    request<any>(`/jobs/${id}/cancel`, { method: 'POST' }),
 };
 
 // Settings
