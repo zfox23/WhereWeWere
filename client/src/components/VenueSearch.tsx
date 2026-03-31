@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, MapPin, Plus, Loader2 } from 'lucide-react';
 import { venues } from '../api/client';
+import { useLocation } from '../contexts/LocationContext';
 import type { NearbyVenue, VenueCategory } from '../types';
 
 export interface SelectedVenue {
@@ -17,6 +18,7 @@ interface VenueSearchProps {
 }
 
 export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueSearchProps) {
+  const prefetched = useLocation();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<NearbyVenue[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,6 +27,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
   const [categories, setCategories] = useState<VenueCategory[]>([]);
+  const usedPrefetchRef = useRef(false);
 
   // Custom venue form state
   const [customName, setCustomName] = useState('');
@@ -34,10 +37,20 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Get user geolocation on mount (or use provided initial coords)
+  // Get user geolocation on mount (or use provided initial coords or prefetched coords)
   useEffect(() => {
     if (initialLat !== undefined && initialLon !== undefined) {
       setCoords({ lat: initialLat, lon: initialLon });
+      return;
+    }
+    // Use prefetched coords if available
+    if (prefetched.coords) {
+      setCoords(prefetched.coords);
+      // Use prefetched venues as initial results
+      if (prefetched.nearbyVenues && !usedPrefetchRef.current) {
+        usedPrefetchRef.current = true;
+        setResults(prefetched.nearbyVenues);
+      }
       return;
     }
     if (!navigator.geolocation) {
@@ -53,7 +66,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, [initialLat, initialLon]);
+  }, [initialLat, initialLon, prefetched.coords, prefetched.nearbyVenues]);
 
   // Load categories for custom venue form
   useEffect(() => {

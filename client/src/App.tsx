@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { LocationProvider } from './contexts/LocationContext';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import CheckIn from './pages/CheckIn';
@@ -18,6 +19,7 @@ import ApiSearch from './pages/docs/ApiSearch';
 export default function App() {
   return (
     <ThemeProvider>
+    <LocationProvider>
     <Layout>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -34,6 +36,7 @@ export default function App() {
         <Route path="/docs/api/search" element={<DocsLayout><ApiSearch /></DocsLayout>} />
       </Routes>
     </Layout>
+    </LocationProvider>
     </ThemeProvider>
   );
 }
