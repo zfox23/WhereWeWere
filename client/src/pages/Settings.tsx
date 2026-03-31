@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download } from 'lucide-react';
 import { settings, importApi, jobs } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import type { UserSettings, ImportResult, Job } from '../types';
@@ -711,6 +711,25 @@ export default function Settings() {
           {integrationSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
           Save Integrations
         </button>
+      </div>
+
+      {/* Export Section */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          <Download size={20} className="text-gray-600 dark:text-gray-400" />
+          Export Data
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Download all your check-in data as a JSON file.
+        </p>
+        <a
+          href="/api/v1/checkins/export"
+          download
+          className="btn-primary inline-flex items-center gap-2"
+        >
+          <Download size={16} />
+          Export JSON
+        </a>
       </div>
 
       {/* Import Section */}
