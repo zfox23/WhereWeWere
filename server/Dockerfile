@@ -11,6 +11,5 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY server/src/db/migrations ./dist/db/migrations
-RUN mkdir -p /data/photos
 EXPOSE 3001
 CMD ["node", "dist/index.js"]

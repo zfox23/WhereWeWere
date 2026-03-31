@@ -13,7 +13,6 @@ WhereWeWere is a self-hosted Foursquare Swarm replacement for single-user/small-
 - Backend: Express + TypeScript + PostgreSQL (via node-pg)
 - Monorepo with npm workspaces (server/ and client/)
 - RESTful API versioned at /api/v1/
-- Photos stored on local filesystem (configurable PHOTOS_DIR for Docker volume mounts)
 - OpenStreetMap Overpass API for venue discovery
 - Docker Compose for self-hosting (postgis, server, client/nginx)
 

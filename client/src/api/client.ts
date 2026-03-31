@@ -110,6 +110,26 @@ export const jobs = {
     request<any>(`/jobs/${id}/cancel`, { method: 'POST' }),
 };
 
+// Immich photos
+export const immich = {
+  photos: (checkinId: string) =>
+    request<{ assets: { id: string; thumbhash: string | null; originalFileName: string }[] }>(
+      `/immich/photos/${checkinId}`
+    ),
+  photosForCheckins: (checkinIds: string[]) =>
+    request<Record<string, { id: string; thumbhash: string | null; originalFileName: string }[]>>(
+      `/immich/photos?checkin_ids=${checkinIds.join(',')}`
+    ),
+  thumbnailUrl: (assetId: string, size: 'thumbnail' | 'preview' = 'thumbnail') =>
+    `${API_BASE}/immich/thumbnail/${assetId}?size=${size}`,
+};
+
+// Scrobbles
+export const scrobbles = {
+  forCheckins: (checkinIds: string[]) =>
+    request<Record<string, any[]>>(`/scrobbles?checkin_ids=${checkinIds.join(',')}`),
+};
+
 // Settings
 export const settings = {
   get: () => request<any>('/settings'),

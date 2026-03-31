@@ -377,7 +377,6 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
         <History size={16} className="text-purple-500" />
         On This Day
       </h3>
-      <p className="text-xs text-gray-500 mb-4">Reflecting on where you were in years past.</p>
       <div className="space-y-4">
         {data.map((year) => (
           <div key={year.year}>

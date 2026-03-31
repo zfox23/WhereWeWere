@@ -3,7 +3,7 @@ export default function ApiCheckins() {
     <div>
       <h1>Check-ins API</h1>
       <p className="text-lg text-gray-600 mt-2 mb-8">
-        Create, read, update, and delete check-ins. Manage photos attached to check-ins.
+        Create, read, update, and delete check-ins.
       </p>
       <p>Base path: <code>/api/v1/checkins</code></p>
 
@@ -12,7 +12,7 @@ export default function ApiCheckins() {
         <code className="text-emerald-600 bg-emerald-50 !px-2 !py-1 rounded mr-2">GET</code>
         /api/v1/checkins
       </h2>
-      <p>List check-ins, newest first, with joined venue information and photo count.</p>
+      <p>List check-ins, newest first, with joined venue information.</p>
 
       <h3>Query Parameters</h3>
       <table>
@@ -38,7 +38,6 @@ export default function ApiCheckins() {
     "notes": "Great latte today",
     "rating": 4,
     "checked_in_at": "2026-03-27T14:30:00.000Z",
-    "photo_count": 2,
     "created_at": "2026-03-27T14:30:00.000Z",
     "updated_at": "2026-03-27T14:30:00.000Z"
   }
@@ -49,7 +48,7 @@ export default function ApiCheckins() {
         <code className="text-emerald-600 bg-emerald-50 !px-2 !py-1 rounded mr-2">GET</code>
         /api/v1/checkins/:id
       </h2>
-      <p>Get a single check-in with full venue details and an array of attached photos.</p>
+      <p>Get a single check-in with full venue details.</p>
 
       <h3>Path Parameters</h3>
       <table>
@@ -76,16 +75,6 @@ export default function ApiCheckins() {
   "notes": "Great latte today",
   "rating": 4,
   "checked_in_at": "2026-03-27T14:30:00.000Z",
-  "photos": [
-    {
-      "id": "uuid",
-      "file_path": "a1b2c3d4.jpg",
-      "original_filename": "latte.jpg",
-      "mime_type": "image/jpeg",
-      "caption": null,
-      "created_at": "2026-03-27T14:30:05.000Z"
-    }
-  ],
   "created_at": "2026-03-27T14:30:00.000Z",
   "updated_at": "2026-03-27T14:30:00.000Z"
 }`}</code></pre>
@@ -165,65 +154,10 @@ export default function ApiCheckins() {
         <code className="text-red-600 bg-red-50 !px-2 !py-1 rounded mr-2">DELETE</code>
         /api/v1/checkins/:id
       </h2>
-      <p>Delete a check-in. All associated photos are removed from disk and database (cascade).</p>
+      <p>Delete a check-in.</p>
 
       <h3>Response <code>200 OK</code></h3>
       <pre><code>{`{ "message": "Check-in deleted", "id": "uuid" }`}</code></pre>
-
-      {/* ---- UPLOAD PHOTOS ---- */}
-      <h2 id="upload-photos">
-        <code className="text-blue-600 bg-blue-50 !px-2 !py-1 rounded mr-2">POST</code>
-        /api/v1/checkins/:id/photos
-      </h2>
-      <p>Upload up to 4 photos for a check-in.</p>
-
-      <h3>Request <span className="text-gray-400 font-normal">multipart/form-data</span></h3>
-      <table>
-        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>photos</code></td><td>file[]</td><td>1–4 image files (max 10 MB each, <code>image/*</code> only)</td></tr>
-        </tbody>
-      </table>
-
-      <h3>Example Request</h3>
-      <pre><code>{`curl -X POST http://localhost:3001/api/v1/checkins/:id/photos \\
-  -F "photos=@latte.jpg" \\
-  -F "photos=@storefront.png"`}</code></pre>
-
-      <h3>Response <code>201 Created</code></h3>
-      <pre><code>{`[
-  {
-    "id": "uuid",
-    "checkin_id": "uuid",
-    "file_path": "a1b2c3d4-5678-...",
-    "original_filename": "latte.jpg",
-    "mime_type": "image/jpeg",
-    "caption": null,
-    "created_at": "2026-03-27T14:30:05.000Z"
-  }
-]`}</code></pre>
-      <p>
-        Photos are served at <code>/api/v1/photos/file/:file_path</code>.
-      </p>
-
-      {/* ---- DELETE PHOTO ---- */}
-      <h2 id="delete-photo">
-        <code className="text-red-600 bg-red-50 !px-2 !py-1 rounded mr-2">DELETE</code>
-        /api/v1/checkins/:id/photos/:photoId
-      </h2>
-      <p>Delete a single photo. The file is removed from disk.</p>
-
-      <h3>Path Parameters</h3>
-      <table>
-        <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>id</code></td><td>uuid</td><td>Check-in ID</td></tr>
-          <tr><td><code>photoId</code></td><td>uuid</td><td>Photo ID</td></tr>
-        </tbody>
-      </table>
-
-      <h3>Response <code>200 OK</code></h3>
-      <pre><code>{`{ "message": "Photo deleted", "id": "uuid" }`}</code></pre>
     </div>
   );
 }

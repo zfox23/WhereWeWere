@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X } from 'lucide-react';
-import { checkins, settings } from '../api/client';
-import { CheckIn } from '../types';
+import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
+import { CheckIn, Scrobble, ImmichAsset } from '../types';
 import CheckInCard from '../components/CheckInCard';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -35,11 +35,15 @@ export default function Home() {
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
+  const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
+  const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
+  const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
 
-  // Fetch Immich URL from settings
+  // Fetch integration URLs from settings
   useEffect(() => {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
+      if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
     }).catch(() => {});
   }, []);
 
@@ -129,6 +133,26 @@ export default function Home() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [fetchCheckins]);
+
+  // Fetch scrobbles for loaded check-ins
+  useEffect(() => {
+    if (!malojaUrl || items.length === 0) return;
+    const newIds = items.map((c) => c.id).filter((id) => !(id in scrobblesMap));
+    if (newIds.length === 0) return;
+    scrobblesApi.forCheckins(newIds).then((data) => {
+      setScrobblesMap((prev) => ({ ...prev, ...data }));
+    }).catch(() => {});
+  }, [items, malojaUrl]);
+
+  // Fetch photos for loaded check-ins (batch with deduplication)
+  useEffect(() => {
+    if (!immichUrl || items.length === 0) return;
+    const newIds = items.map((c) => c.id).filter((id) => !(id in photosMap));
+    if (newIds.length === 0) return;
+    immichApi.photosForCheckins(newIds).then((data) => {
+      setPhotosMap((prev) => ({ ...prev, ...data }));
+    }).catch(() => {});
+  }, [items, immichUrl]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -347,6 +371,9 @@ export default function Home() {
                     checkin={checkin}
                     onDelete={handleDelete}
                     immichUrl={immichUrl}
+                    photos={photosMap[checkin.id] ?? null}
+                    scrobbles={scrobblesMap[checkin.id]}
+                    malojaUrl={malojaUrl}
                   />
                 ))}
               </div>

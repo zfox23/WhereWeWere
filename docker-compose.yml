@@ -24,13 +24,9 @@ services:
       DATABASE_URL: postgres://wherewewere:wherewewere@db:5432/wherewewere
       PORT: 3001
       NODE_ENV: production
-      PHOTOS_DIR: /data/photos
       SESSION_SECRET: change-me-in-production
-      BASE_URL: http://localhost:3001
     ports:
       - "3001:3001"
-    volumes:
-      - photos:/data/photos
 
   client:
     build:
@@ -44,4 +40,3 @@ services:
 
 volumes:
   pgdata:
-  photos:

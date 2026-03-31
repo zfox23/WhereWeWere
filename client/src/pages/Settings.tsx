@@ -358,6 +358,7 @@ export default function Settings() {
   const [dawarichApiKey, setDawarichApiKey] = useState('');
   const [immichUrl, setImmichUrl] = useState('');
   const [immichApiKey, setImmichApiKey] = useState('');
+  const [malojaUrl, setMalojaUrl] = useState('');
   const [integrationSaving, setIntegrationSaving] = useState(false);
   const [integrationMsg, setIntegrationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -380,6 +381,7 @@ export default function Settings() {
         setDawarichApiKey(s.dawarich_api_key || '');
         setImmichUrl(s.immich_url || '');
         setImmichApiKey(s.immich_api_key || '');
+        setMalojaUrl(s.maloja_url || '');
         setNotificationsEnabled(s.notifications_enabled ?? true);
         setNotifyStreak(s.notify_streak_reminder ?? true);
         setNotifyWeekly(s.notify_weekly_summary ?? true);
@@ -415,6 +417,7 @@ export default function Settings() {
         dawarich_api_key: dawarichApiKey || null,
         immich_url: immichUrl || null,
         immich_api_key: immichApiKey || null,
+        maloja_url: malojaUrl || null,
       });
       setIntegrationMsg({ type: 'success', text: 'Integration settings saved.' });
     } catch (err) {
@@ -677,6 +680,23 @@ export default function Settings() {
                   placeholder="Enter API key"
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Maloja</h3>
+            <p className="text-xs text-gray-500 mb-2">
+              Connect to your Maloja scrobble server to show what music you were listening to around each check-in.
+            </p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">URL</label>
+              <input
+                type="url"
+                value={malojaUrl}
+                onChange={(e) => setMalojaUrl(e.target.value)}
+                className="input"
+                placeholder="https://maloja.example.com"
+              />
             </div>
           </div>
         </div>

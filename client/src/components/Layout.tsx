@@ -108,9 +108,6 @@ export default function Layout({ children }: { children: ReactNode }) {
                 </div>
               </div>
             </div>
-            <div className="border-t border-gray-100 dark:border-gray-800 mt-8 pt-6 text-center">
-              <p className="text-xs text-gray-400">WhereWeWere — your places, your data, your server.</p>
-            </div>
           </div>
         </footer>
       )}

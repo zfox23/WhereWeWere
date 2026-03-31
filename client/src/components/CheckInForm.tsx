@@ -5,12 +5,21 @@ import VenueSearch from './VenueSearch';
 
 const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
 
+function toLocalDatetimeString(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 interface CheckInFormProps {
   venueId?: string;
   venueName?: string;
   parentVenueId?: string | null;
   parentVenueName?: string | null;
   onSuccess?: () => void;
+  editCheckinId?: string;
+  initialNotes?: string;
+  initialRating?: number;
+  initialCheckedInAt?: string;
 }
 
 export default function CheckInForm({
@@ -19,15 +28,25 @@ export default function CheckInForm({
   parentVenueId,
   parentVenueName,
   onSuccess,
+  editCheckinId,
+  initialNotes,
+  initialRating,
+  initialCheckedInAt,
 }: CheckInFormProps) {
   const [venueId, setVenueId] = useState(initialVenueId || '');
   const [venueName, setVenueName] = useState(initialVenueName || '');
-  const [notes, setNotes] = useState('');
-  const [rating, setRating] = useState(0);
+  const [notes, setNotes] = useState(initialNotes || '');
+  const [rating, setRating] = useState(initialRating || 0);
   const [hoverRating, setHoverRating] = useState(0);
+  const [checkedInAt, setCheckedInAt] = useState(() => {
+    if (initialCheckedInAt) return toLocalDatetimeString(new Date(initialCheckedInAt));
+    return toLocalDatetimeString(new Date());
+  });
   const [alsoCheckinParent, setAlsoCheckinParent] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isEditMode = !!editCheckinId;
 
   const handleVenueSelect = (venue: { id: string; name: string }) => {
     setVenueId(venue.id);
@@ -41,7 +60,7 @@ export default function CheckInForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!venueId) {
+    if (!venueId && !isEditMode) {
       setError('Please select a venue.');
       return;
     }
@@ -50,26 +69,35 @@ export default function CheckInForm({
     setError(null);
 
     try {
-      const newCheckin = await checkins.create({
-        user_id: HARDCODED_USER_ID,
-        venue_id: venueId,
-        notes: notes.trim() || null,
-        rating: rating > 0 ? rating : null,
-        checked_in_at: new Date().toISOString(),
-        also_checkin_parent: alsoCheckinParent && !!parentVenueId,
-      });
+      if (isEditMode) {
+        await checkins.update(editCheckinId!, {
+          notes: notes.trim() || null,
+          rating: rating > 0 ? rating : null,
+          checked_in_at: new Date(checkedInAt).toISOString(),
+        });
+      } else {
+        await checkins.create({
+          user_id: HARDCODED_USER_ID,
+          venue_id: venueId,
+          notes: notes.trim() || null,
+          rating: rating > 0 ? rating : null,
+          checked_in_at: new Date(checkedInAt).toISOString(),
+          also_checkin_parent: alsoCheckinParent && !!parentVenueId,
+        });
 
-      // Reset form
-      if (!initialVenueId) {
-        setVenueId('');
-        setVenueName('');
+        // Reset form
+        if (!initialVenueId) {
+          setVenueId('');
+          setVenueName('');
+        }
+        setNotes('');
+        setRating(0);
+        setCheckedInAt(toLocalDatetimeString(new Date()));
       }
-      setNotes('');
-      setRating(0);
 
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to check in.');
+      setError(err instanceof Error ? err.message : isEditMode ? 'Failed to update.' : 'Failed to check in.');
     } finally {
       setSubmitting(false);
     }
@@ -77,32 +105,34 @@ export default function CheckInForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Venue selection */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1.5">
-          Venue
-        </label>
-        {venueId ? (
-          <div className="flex items-center gap-2 px-3 py-2.5 bg-primary-50 border border-primary-200 rounded-lg">
-            <MapPin size={16} className="text-primary-600 shrink-0" />
-            <span className="text-sm font-medium text-primary-800 flex-1">
-              {venueName}
-            </span>
-            <button
-              type="button"
-              onClick={handleClearVenue}
-              className="text-xs text-primary-600 hover:text-primary-800 font-medium"
-            >
-              Change
-            </button>
-          </div>
-        ) : (
-          <VenueSearch onSelect={handleVenueSelect} />
-        )}
-      </div>
+      {/* Venue selection (hidden in edit mode) */}
+      {!isEditMode && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            Venue
+          </label>
+          {venueId ? (
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-primary-50 border border-primary-200 rounded-lg">
+              <MapPin size={16} className="text-primary-600 shrink-0" />
+              <span className="text-sm font-medium text-primary-800 flex-1">
+                {venueName}
+              </span>
+              <button
+                type="button"
+                onClick={handleClearVenue}
+                className="text-xs text-primary-600 hover:text-primary-800 font-medium"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <VenueSearch onSelect={handleVenueSelect} />
+          )}
+        </div>
+      )}
 
-      {/* Also check in at parent venue */}
-      {parentVenueName && parentVenueId && (
+      {/* Also check in at parent venue (hidden in edit mode) */}
+      {!isEditMode && parentVenueName && parentVenueId && (
         <label
           htmlFor="also-checkin-parent"
           className="flex items-center gap-3 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg cursor-pointer"
@@ -119,6 +149,23 @@ export default function CheckInForm({
           </span>
         </label>
       )}
+
+      {/* Time */}
+      <div>
+        <label
+          htmlFor="checkin-time"
+          className="block text-sm font-medium text-gray-700 mb-1.5"
+        >
+          Time
+        </label>
+        <input
+          type="datetime-local"
+          id="checkin-time"
+          value={checkedInAt}
+          onChange={(e) => setCheckedInAt(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+        />
+      </div>
 
       {/* Notes */}
       <div>
@@ -182,18 +229,18 @@ export default function CheckInForm({
       {/* Submit */}
       <button
         type="submit"
-        disabled={submitting || !venueId}
+        disabled={submitting || (!venueId && !isEditMode)}
         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-700 rounded-2xl hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-primary-500/20"
       >
         {submitting ? (
           <>
             <Loader2 size={16} className="animate-spin" />
-            Checking in...
+            {isEditMode ? 'Updating...' : 'Checking in...'}
           </>
         ) : (
           <>
             <MapPin size={16} />
-            Check In
+            {isEditMode ? 'Update Check In' : 'Check In'}
           </>
         )}
       </button>

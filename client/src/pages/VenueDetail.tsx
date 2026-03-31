@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { MapPin, Tag, Navigation, Loader2, AlertCircle } from 'lucide-react';
-import { venues, checkins, settings } from '../api/client';
-import { Venue, CheckIn } from '../types';
+import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
+import { Venue, CheckIn, Scrobble, ImmichAsset } from '../types';
 import CheckInCard from '../components/CheckInCard';
 import MapView from '../components/MapView';
 
@@ -15,10 +15,14 @@ export default function VenueDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
+  const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
+  const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
+  const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
 
   useEffect(() => {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
+      if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
     }).catch(() => {});
   }, []);
 
@@ -43,6 +47,24 @@ export default function VenueDetail() {
   useEffect(() => {
     fetchData();
   }, [id]);
+
+  // Fetch scrobbles for loaded check-ins
+  useEffect(() => {
+    if (!malojaUrl || venueCheckins.length === 0) return;
+    const ids = venueCheckins.map((c) => c.id);
+    scrobblesApi.forCheckins(ids).then((data) => {
+      setScrobblesMap(data);
+    }).catch(() => {});
+  }, [venueCheckins, malojaUrl]);
+
+  // Fetch photos for loaded check-ins (batch with deduplication)
+  useEffect(() => {
+    if (!immichUrl || venueCheckins.length === 0) return;
+    const ids = venueCheckins.map((c) => c.id);
+    immichApi.photosForCheckins(ids).then((data) => {
+      setPhotosMap(data);
+    }).catch(() => {});
+  }, [venueCheckins, immichUrl]);
 
   const handleDelete = async (checkinId: string) => {
     try {
@@ -179,6 +201,9 @@ export default function VenueDetail() {
                 checkin={checkin}
                 onDelete={handleDelete}
                 immichUrl={immichUrl}
+                photos={photosMap[checkin.id] ?? null}
+                scrobbles={scrobblesMap[checkin.id]}
+                malojaUrl={malojaUrl}
               />
             ))}
           </div>

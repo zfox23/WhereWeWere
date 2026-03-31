@@ -93,7 +93,7 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /:id - get single check-in with venue details and photos
+// GET /:id - get single check-in with venue details
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -181,7 +181,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { notes, rating } = req.body;
+    const { notes, rating, checked_in_at } = req.body;
 
     if (rating !== undefined && rating !== null) {
       const ratingNum = parseInt(rating, 10);
@@ -194,10 +194,11 @@ router.put('/:id', async (req: Request, res: Response) => {
       `UPDATE checkins
        SET notes = COALESCE($2, notes),
            rating = COALESCE($3, rating),
+           checked_in_at = COALESCE($4::timestamptz, checked_in_at),
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id, notes, rating]
+      [id, notes, rating, checked_in_at || null]
     );
 
     if (result.rows.length === 0) {
@@ -211,7 +212,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /:id - delete check-in (cascades to photos)
+// DELETE /:id - delete check-in
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

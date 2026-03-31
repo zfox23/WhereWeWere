@@ -1,55 +1,29 @@
 # WhereWeWere
 
-*WhereWeWere* is a Web application for mindfully journaling our presence in meaningful locations.
+*WhereWeWere* is a Web application for mindfully journaling our presence as we move through life.
+
+## Integrations
+
+WhereWeWere integrates with:
+
+- Immich, to show photos relevant to a check-in's location and time.
+- Maloja, to show musical scrobbles relevant to a check-in's time.
+- Dawarich, to show specific location history data associated with a given day or time around a checkin.
 
 ## Motivation
 
-I've been using Foursquare Swarm since ~2010, and it's starting to scare me how much data third parties have on me. That fear remains even though I've allowed those parties to have that data.
+I've been using Foursquare Swarm, Last.fm, Google Location History, Google Photos, and other similar services since ~2010, and it's starting to scare me how much data third parties have on me. That fear remains even though I've allowed those parties to have that data.
 
-I've begun a technological exodus, leaving third-party applications behind in exchange for self-hosted apps. This not always be the most economical choice, especially with hard drive prices skyrocketing, but it feels safer and more educational.s
+I've begun a technological exodus, leaving third-party applications behind in exchange for self-hosted apps. This not always be the most economical choice, especially with hard drive prices skyrocketing, but it feels safer and more educational.
 
-On March 27, 2026, I purchased one month of Claude Code Pro in an attempt to vibe code a Swarm replacement. This repository is the result of that initial experiment.
+On March 27, 2026, I purchased one month of Claude Code Pro in an attempt to vibe code a Swarm replacement. I also want to integrate data from other systems I've used for the past several years. This repository is the result of that experiment.
 
-## TODO as of 2026-03-27
-### P1
-- Import Swarm checkin feature:
-    ```
-    I want to import my previous checkins from Swarm. I downloaded my checkin data and it was saved across nine different CSV files. I have attached truncated versions of all nine checkin CSV files. Please implement a Swarm CSV to WhereWeWere import function, allowing me to upload all nine `checkins*.csv` files at the same time for batch import.
-    ```
-- Reorganize app into new pages:
-    1. Home
-        - Shows an infinitely-scrollable feed of recent checkins
-        - Has a search field at the top, letting me filter checkins by venue name or note content from within the same text field, and lets me filter by checkins created between a date range ("before" or "after" fields are both optional) 
-        - Lets me press a Floating Action Button to add a new checkin
-    2. Profile
-        - Shows me stats:
-            - Number of checkins
-            - Number of unique venues
-            - Number of active days
-            - Current active day streak
-            - All-time best active day streak
-            - Top venues by venue category
-            - Top venues by venue name
-            - A GitHub-like heatmap of yearly activity
-            - Checkins per country
-            - A map showing me all of my checkins. Tapping on a location pin lets me see how many times and when I've checked in to that place. Location pins are coded by color like a heatmap: of all the currently-visible location pins, red pins are checked into most within the visible area, and green pins are checked into least within the visible area
-    3. Settings
-        - Lets me change my username and password
-        - Lets me import Swarm CSV data
-        - Lets me specify my Dawarich URL and API key
-        - Lets me specify my Immich URL and API key
-- UI/UX improvements
-    - On Docs page, code blocks show up as white text with a white highlighted background
-    - Remove Leaflet text/link on embedded maps
-    - "Stats" page > "Top Venues" is missing label text
-    - "Stats" page > "Categories" is missing label text
-
-### P2
-- Installable PWA support
-
-### P3
-- Figure out if it's possible to recreate Swarm's feature where it suggests checkins if I'm in a particular place for long enough
-- If user has specified a Dawarich URL and API key, allow user to press a button in Settings to export checkin data to Dawarich Places
-- Immich integration:
-    - Click a button which links to Immich to see all photos taken near this checkin's location
-    - Click a button which links to Immich to see all photos taken at around the time of the checkin (say, plus three hours and minus one hour)
+## TODO as of 2026-03-30
+- If the user has set up Dawarich integration in Settings, show all dates on the homepage timeline, even if there are no checkins for that day. Then, let the user click on the text corresponding to any day's timestamp to see the user's location history on that day on Dawarich.  Similarly, if the user clicks on a timestamp associated with the checkin, they should be sent to Dawarich to see their timeline two hours before and two hours after that checkin. An example link to Dawarich for seeing the map associated with all of March 23, 2026 is `https://map.home.mydomain.io/map/v2?start_at=2026-03-23T00%253A00&end_at=2026-03-23T23%253A59`.
+- Create a new route which, given a checkin ID, displays a single checkin and its associated data. Add a new "link" icon next to the Edit button which links to that specific checkin's page.
+- Remove the "delete" button on the main checkin card, instead relocating the delete functionality to the checkin's edit page.
+- Begin searching for nearby locations as soon as the user first navigates to the webapp. The goal here is to speed up the location search on the `/check-in` page. If the user has moved "significantly" between first navigating to the webapp and navigating to `check-in`, re-search for nearby locations.
+- There seems to be a bug on the checkin page where all of the locations are disabled and unclickable. Perhaps this has to do with the `disabled={importing === venue.osm_id}` logic in `VenueSearch.tsx`. Please fix this bug.
+- I don't want scrobbles to repeat when I'm looking at multiple checkin cards at the same time. For example, right now, I'm seeing the same song associated with two checkins made within ten minutes, when I only want to see the scrobble closest in time to one of those checkins. Help me come up with some logic for choosing which scrobbles to show so that it's more likely a scrobble will be associated with one and only one given checkin. This logic does not apply if I'm looking at only a single checkin.
+- There are a few contrast issues with dark mode - please do a full pass on colors to make sure that text and icons still show up cleanly while in dark mode.
+- I'm still having a problem where a previously-started job is uncancellable. I'm fairly confident the logic is fixed for future jobs, but I need to force-cancel the most recent job. Please tell me how to do that from the command line.

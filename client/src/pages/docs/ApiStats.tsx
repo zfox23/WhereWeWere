@@ -29,7 +29,6 @@ export default function ApiStats() {
       <pre><code>{`{
   "total_checkins": 237,
   "unique_venues": 84,
-  "total_photos": 52,
   "days_with_checkins": 143,
   "member_since": "2025-01-15T00:00:00.000Z"
 }`}</code></pre>

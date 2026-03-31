@@ -1,20 +1,41 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, MapPin } from 'lucide-react';
+import { ArrowLeft, MapPin, Loader2 } from 'lucide-react';
 import VenueSearch from '../components/VenueSearch';
 import type { SelectedVenue } from '../components/VenueSearch';
 import CheckInForm from '../components/CheckInForm';
-import { venues } from '../api/client';
+import { venues, checkins } from '../api/client';
+import type { CheckIn as CheckInType } from '../types';
 
 export default function CheckIn() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
+  const editId = searchParams.get('edit');
   const [selectedVenue, setSelectedVenue] = useState<SelectedVenue | null>(null);
+  const [editCheckin, setEditCheckin] = useState<CheckInType | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+
+  // Edit mode: fetch existing check-in
+  useEffect(() => {
+    if (!editId) return;
+    setEditLoading(true);
+    checkins.get(editId).then((data) => {
+      setEditCheckin(data);
+      setSelectedVenue({
+        id: data.venue_id,
+        name: data.venue_name || 'Unknown Venue',
+        parent_venue_id: data.parent_venue_id ?? null,
+        parent_venue_name: data.parent_venue_name ?? null,
+      });
+    }).catch((err) => {
+      console.error('Failed to load check-in for editing:', err);
+    }).finally(() => setEditLoading(false));
+  }, [editId]);
 
   // Pre-fill venue from query params (e.g., from VenueDetail page)
-  // Fetch full venue details to get parent info
   useEffect(() => {
+    if (editId) return; // edit mode handles venue separately
     const venueId = searchParams.get('venueId');
     const venueName = searchParams.get('venueName');
     if (venueId && venueName) {
@@ -29,7 +50,7 @@ export default function CheckIn() {
         setSelectedVenue({ id: venueId, name: venueName });
       });
     }
-  }, [searchParams]);
+  }, [searchParams, editId]);
 
   const handleVenueSelect = (venue: SelectedVenue) => {
     setSelectedVenue(venue);
@@ -43,11 +64,21 @@ export default function CheckIn() {
     setSelectedVenue(null);
   };
 
+  if (editLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="animate-spin text-primary-600" size={32} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Check In</h1>
+      <h1 className="text-2xl font-bold text-gray-900">
+        {editId ? 'Edit Check In' : 'Check In'}
+      </h1>
 
-      {!selectedVenue ? (
+      {!selectedVenue && !editId ? (
         <div className="space-y-4">
           <p className="text-gray-600">Where are you?</p>
           <VenueSearch
@@ -56,7 +87,7 @@ export default function CheckIn() {
             initialLon={searchParams.get('lon') ? parseFloat(searchParams.get('lon')!) : undefined}
           />
         </div>
-      ) : (
+      ) : selectedVenue ? (
         <div className="space-y-4">
           {/* Selected venue header */}
           <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between">
@@ -73,16 +104,20 @@ export default function CheckIn() {
                     </span>
                   )}
                 </p>
-                <p className="text-sm text-gray-500">Selected venue</p>
+                <p className="text-sm text-gray-500">
+                  {editId ? 'Venue' : 'Selected venue'}
+                </p>
               </div>
             </div>
-            <button
-              onClick={handleChangeVenue}
-              className="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:text-primary-700 font-medium"
-            >
-              <ArrowLeft size={14} />
-              Change venue
-            </button>
+            {!editId && (
+              <button
+                onClick={handleChangeVenue}
+                className="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:text-primary-700 font-medium"
+              >
+                <ArrowLeft size={14} />
+                Change venue
+              </button>
+            )}
           </div>
 
           {/* Check-in form */}
@@ -92,9 +127,13 @@ export default function CheckIn() {
             parentVenueId={selectedVenue.parent_venue_id}
             parentVenueName={selectedVenue.parent_venue_name}
             onSuccess={handleSuccess}
+            editCheckinId={editId || undefined}
+            initialNotes={editCheckin?.notes || ''}
+            initialRating={editCheckin?.rating || 0}
+            initialCheckedInAt={editCheckin?.checked_in_at}
           />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

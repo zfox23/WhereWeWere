@@ -95,40 +95,12 @@ docker compose up db -d`}</code></pre>
             <td>Set to <code>production</code> to serve client build from server</td>
           </tr>
           <tr>
-            <td><code>PHOTOS_DIR</code></td>
-            <td><code>./uploads</code></td>
-            <td>Absolute path for photo storage. Mount as a Docker volume in production.</td>
-          </tr>
-          <tr>
             <td><code>SESSION_SECRET</code></td>
             <td><code>dev-secret</code></td>
             <td>Secret for session signing. <strong>Change in production.</strong></td>
           </tr>
-          <tr>
-            <td><code>BASE_URL</code></td>
-            <td><code>http://localhost:3001</code></td>
-            <td>Public base URL of the API server</td>
-          </tr>
         </tbody>
       </table>
-
-      <h2 id="photo-storage">Photo Storage</h2>
-      <p>
-        Photos are stored on the local filesystem at the path specified by <code>PHOTOS_DIR</code>.
-        In Docker Compose, this is mapped to a named volume:
-      </p>
-      <pre><code>{`volumes:
-  - photos:/data/photos`}</code></pre>
-      <p>
-        To use a bind mount to a specific host directory instead (e.g., for backups), replace the volume mapping:
-      </p>
-      <pre><code>{`volumes:
-  - /path/on/host/photos:/data/photos`}</code></pre>
-      <p>
-        Photos are served by the API at <code>/api/v1/photos/file/:filename</code>.
-        Each uploaded file is renamed to a UUID with its original extension preserved,
-        so there are no filename collisions.
-      </p>
 
       <h2 id="database">Database</h2>
       <p>

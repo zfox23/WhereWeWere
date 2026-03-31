@@ -129,11 +129,24 @@ export interface UserSettings {
   dawarich_api_key: string | null;
   immich_url: string | null;
   immich_api_key: string | null;
+  maloja_url: string | null;
   theme: 'system' | 'light' | 'dark';
   notifications_enabled: boolean;
   notify_streak_reminder: boolean;
   notify_weekly_summary: boolean;
   notify_milestone: boolean;
+}
+
+export interface ImmichAsset {
+  id: string;
+  thumbhash: string | null;
+  originalFileName: string;
+}
+
+export interface Scrobble {
+  artists: string[];
+  title: string;
+  time: number;
 }
 
 export interface Job {

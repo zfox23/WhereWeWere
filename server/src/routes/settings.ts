@@ -12,6 +12,7 @@ router.get('/', async (_req: Request, res: Response) => {
       `SELECT u.username, u.email, u.display_name,
               us.dawarich_url, us.dawarich_api_key,
               us.immich_url, us.immich_api_key,
+              us.maloja_url,
               COALESCE(us.theme, 'system') AS theme,
               COALESCE(us.notifications_enabled, true) AS notifications_enabled,
               COALESCE(us.notify_streak_reminder, true) AS notify_streak_reminder,
@@ -38,29 +39,31 @@ router.get('/', async (_req: Request, res: Response) => {
 router.put('/', async (req: Request, res: Response) => {
   try {
     const {
-      dawarich_url, dawarich_api_key, immich_url, immich_api_key,
+      dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
       theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone,
     } = req.body;
 
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
          immich_url = COALESCE($4, user_settings.immich_url),
          immich_api_key = COALESCE($5, user_settings.immich_api_key),
-         theme = COALESCE($6, user_settings.theme),
-         notifications_enabled = COALESCE($7, user_settings.notifications_enabled),
-         notify_streak_reminder = COALESCE($8, user_settings.notify_streak_reminder),
-         notify_weekly_summary = COALESCE($9, user_settings.notify_weekly_summary),
-         notify_milestone = COALESCE($10, user_settings.notify_milestone),
+         maloja_url = COALESCE($6, user_settings.maloja_url),
+         theme = COALESCE($7, user_settings.theme),
+         notifications_enabled = COALESCE($8, user_settings.notifications_enabled),
+         notify_streak_reminder = COALESCE($9, user_settings.notify_streak_reminder),
+         notify_weekly_summary = COALESCE($10, user_settings.notify_weekly_summary),
+         notify_milestone = COALESCE($11, user_settings.notify_milestone),
          updated_at = NOW()
        RETURNING *`,
       [
         USER_ID,
         dawarich_url ?? null, dawarich_api_key ?? null,
         immich_url ?? null, immich_api_key ?? null,
+        maloja_url ?? null,
         theme ?? null,
         notifications_enabled ?? null, notify_streak_reminder ?? null,
         notify_weekly_summary ?? null, notify_milestone ?? null,
