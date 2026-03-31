@@ -1,7 +1,18 @@
 import { Router, Request, Response } from 'express';
+import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
 
 const router = Router();
+
+function addTimezone(row: any): any {
+  if (row.venue_latitude != null && row.venue_longitude != null) {
+    const tzResults = findTimezone(Number(row.venue_latitude), Number(row.venue_longitude));
+    row.venue_timezone = tzResults[0] || null;
+  } else {
+    row.venue_timezone = null;
+  }
+  return row;
+}
 
 // GET / - list check-ins with venue info
 router.get('/', async (req: Request, res: Response) => {
@@ -86,7 +97,7 @@ router.get('/', async (req: Request, res: Response) => {
     `;
 
     const result = await query(sql, params);
-    res.json(result.rows);
+    res.json(result.rows.map(addTimezone));
   } catch (err) {
     console.error('Error listing check-ins:', err);
     res.status(500).json({ error: 'Failed to list check-ins' });
@@ -113,7 +124,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       []
     );
     res.setHeader('Content-Disposition', 'attachment; filename="wherewewere-export.json"');
-    res.json(result.rows);
+    res.json(result.rows.map(addTimezone));
   } catch (err) {
     console.error('Error exporting check-ins:', err);
     res.status(500).json({ error: 'Failed to export check-ins' });
@@ -146,7 +157,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    res.json(checkinResult.rows[0]);
+    res.json(addTimezone(checkinResult.rows[0]));
   } catch (err) {
     console.error('Error getting check-in:', err);
     res.status(500).json({ error: 'Failed to get check-in' });

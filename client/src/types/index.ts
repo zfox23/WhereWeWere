@@ -45,6 +45,7 @@ export interface CheckIn {
   parent_venue_name?: string;
   notes: string | null;
   rating: number | null;
+  venue_timezone?: string | null;
   checked_in_at: string;
   created_at: string;
 }

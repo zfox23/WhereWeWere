@@ -5,15 +5,17 @@ import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } fr
 import type { Scrobble, ImmichAsset } from '../types';
 import MapView from '../components/MapView';
 
-function formatDate(dateStr: string): string {
-  return new Intl.DateTimeFormat('en-US', {
+function formatDate(dateStr: string, timeZone?: string | null): string {
+  const options: Intl.DateTimeFormatOptions = {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(new Date(dateStr));
+    ...(timeZone ? { timeZone, timeZoneName: 'short' } : {}),
+  };
+  return new Intl.DateTimeFormat('en-US', options).format(new Date(dateStr));
 }
 
 function formatMalojaDate(dateStr: string): string {
@@ -172,7 +174,7 @@ export default function CheckInDetail() {
         <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <Clock size={14} />
           <time dateTime={checkin.checked_in_at}>
-            {formatDate(checkin.checked_in_at)}
+            {formatDate(checkin.checked_in_at, checkin.venue_timezone)}
           </time>
         </div>
 

@@ -13,16 +13,18 @@ interface CheckInCardProps {
   dawarichUrl?: string | null;
 }
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, timeZone?: string | null): string {
   const date = new Date(dateStr);
-  return new Intl.DateTimeFormat('en-US', {
+  const options: Intl.DateTimeFormatOptions = {
     weekday: 'short',
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(date);
+    ...(timeZone ? { timeZone, timeZoneName: 'short' } : {}),
+  };
+  return new Intl.DateTimeFormat('en-US', options).format(date);
 }
 
 function formatMalojaDate(dateStr: string): string {
@@ -211,7 +213,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
               title="View details"
             >
               <time dateTime={checkin.checked_in_at}>
-                {formatDate(checkin.checked_in_at)}
+                {formatDate(checkin.checked_in_at, checkin.venue_timezone)}
               </time>
             </Link>
           </div>
