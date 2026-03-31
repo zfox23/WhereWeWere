@@ -637,7 +637,7 @@ router.get('/reflections', async (req: Request, res: Response) => {
     // Find check-ins on this month/day in all prior years
     const result = await query(
       `SELECT c.id, c.notes, c.rating, c.checked_in_at,
-              v.name AS venue_name, v.city, v.country,
+              v.id AS venue_id, v.name AS venue_name, v.city, v.country,
               vc.name AS venue_category
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   MapPin,
   CalendarDays,
@@ -179,7 +179,7 @@ interface TimeOfDayData { period: string; count: number }
 interface BusiestDayData { date: string; count: number }
 interface CityData { city: string; country: string; checkin_count: number; unique_venues: number }
 interface InsightData { title: string; description: string; icon: string }
-interface ReflectionYear { year: number; years_ago: number; checkins: { id: string; venue_name: string; venue_category?: string; city?: string; country?: string; notes?: string; rating?: number; checked_in_at: string }[] }
+interface ReflectionYear { year: number; years_ago: number; checkins: { id: string; venue_id: string; venue_name: string; venue_category?: string; city?: string; country?: string; notes?: string; rating?: number; checked_in_at: string }[] }
 interface AdditionalStatsData {
   avg_rating: number | null;
   rated_count: number;
@@ -365,10 +365,17 @@ function InsightsSection({ data }: { data: InsightData[] }) {
 }
 
 function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
+  const navigate = useNavigate();
   if (data.length === 0) return null;
 
   function formatTime(dateStr: string) {
     return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(dateStr));
+  }
+
+  function handleYearClick(checkins: ReflectionYear['checkins']) {
+    if (checkins.length === 0) return;
+    const date = checkins[0].checked_in_at.slice(0, 10);
+    navigate(`/?from=${date}&to=${date}`);
   }
 
   return (
@@ -381,15 +388,18 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
         {data.map((year) => (
           <div key={year.year}>
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-full">
+              <button
+                onClick={() => handleYearClick(year.checkins)}
+                className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+              >
                 {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago
-              </span>
+              </button>
               <span className="text-xs text-gray-400">{year.year}</span>
             </div>
             <div className="space-y-2 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
               {year.checkins.map((c) => (
                 <div key={c.id} className="text-sm">
-                  <p className="font-medium text-gray-900 dark:text-gray-100">{c.venue_name}</p>
+                  <Link to={`/venues/${c.venue_id}`} className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">{c.venue_name}</Link>
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     {c.venue_category && <span className="text-purple-600 dark:text-purple-400">{c.venue_category}</span>}
                     {c.city && <span>{c.city}{c.country ? `, ${c.country}` : ''}</span>}
