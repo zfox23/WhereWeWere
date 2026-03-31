@@ -10,6 +10,7 @@ interface CheckInCardProps {
   photos?: ImmichAsset[] | null;
   scrobbles?: Scrobble[];
   malojaUrl?: string | null;
+  dawarichUrl?: string | null;
 }
 
 function formatDate(dateStr: string): string {
@@ -57,6 +58,16 @@ function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {
 
 function buildImmichMapUrl(immichUrl: string, lat: number, lng: number): string {
   return `${immichUrl}/map#15/${lat}/${lng}`;
+}
+
+function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): string {
+  const t = new Date(checkedInAt);
+  const startTime = new Date(t.getTime() - 2 * 60 * 60 * 1000);
+  const endTime = new Date(t.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 16);
+  const start = encodeURIComponent(encodeURIComponent(fmt(startTime)));
+  const end = encodeURIComponent(encodeURIComponent(fmt(endTime)));
+  return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
 }
 
 function buildMalojaTrackUrl(malojaUrl: string, artists: string[], title?: string): string {
@@ -136,7 +147,7 @@ function PhotoStrip({ assets, moreUrl, immichUrl }: { assets: ImmichAsset[]; mor
   );
 }
 
-export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl }: CheckInCardProps) {
+export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl, dawarichUrl }: CheckInCardProps) {
   // Self-fetch photos as fallback when parent doesn't manage them (photos === undefined)
   const [selfFetchedAssets, setSelfFetchedAssets] = useState<ImmichAsset[] | null>(null);
 
@@ -194,9 +205,22 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
           {/* Date/time */}
           <div className="flex items-center gap-2 mt-2 text-sm text-gray-500 dark:text-gray-400">
             <Clock size={13} />
-            <time dateTime={checkin.checked_in_at}>
-              {formatDate(checkin.checked_in_at)}
-            </time>
+            {dawarichUrl ? (
+              <a
+                href={buildDawarichCheckinUrl(dawarichUrl, checkin.checked_in_at)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+              >
+                <time dateTime={checkin.checked_in_at}>
+                  {formatDate(checkin.checked_in_at)}
+                </time>
+              </a>
+            ) : (
+              <time dateTime={checkin.checked_in_at}>
+                {formatDate(checkin.checked_in_at)}
+              </time>
+            )}
           </div>
 
           {/* Notes */}

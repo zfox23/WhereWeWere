@@ -27,6 +27,35 @@ function groupByDate(items: CheckIn[]): Map<string, CheckIn[]> {
   return groups;
 }
 
+function fillDateGaps(grouped: Map<string, CheckIn[]>): Map<string, CheckIn[]> {
+  const dates = Array.from(grouped.keys()).sort();
+  if (dates.length < 2) return grouped;
+  const filled = new Map<string, CheckIn[]>();
+  const start = new Date(dates[0] + 'T12:00:00');
+  const end = new Date(dates[dates.length - 1] + 'T12:00:00');
+  for (let d = new Date(end); d >= start; d.setDate(d.getDate() - 1)) {
+    const key = d.toISOString().slice(0, 10);
+    filled.set(key, grouped.get(key) || []);
+  }
+  return filled;
+}
+
+function buildDawarichDayUrl(dawarichUrl: string, date: string): string {
+  const start = encodeURIComponent(encodeURIComponent(date + 'T00:00'));
+  const end = encodeURIComponent(encodeURIComponent(date + 'T23:59'));
+  return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
+}
+
+function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): string {
+  const t = new Date(checkedInAt);
+  const startTime = new Date(t.getTime() - 2 * 60 * 60 * 1000);
+  const endTime = new Date(t.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 16);
+  const start = encodeURIComponent(encodeURIComponent(fmt(startTime)));
+  const end = encodeURIComponent(encodeURIComponent(fmt(endTime)));
+  return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
+}
+
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<CheckIn[]>([]);
@@ -36,6 +65,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
+  const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
 
@@ -44,6 +74,7 @@ export default function Home() {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
       if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
+      if (s.dawarich_url) setDawarichUrl(s.dawarich_url.replace(/\/+$/, ''));
     }).catch(() => {});
   }, []);
 
@@ -178,7 +209,8 @@ export default function Home() {
   };
 
   const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country;
-  const grouped = groupByDate(items);
+  const rawGrouped = groupByDate(items);
+  const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
 
   // Build active filter pills for display
   const filterPills: { label: string; key: string }[] = [];
@@ -352,21 +384,37 @@ export default function Home() {
         <div className="space-y-4">
           {Array.from(grouped.entries()).map(([date, dateCheckins]) => (
             <div key={date}>
-              <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                {formatDateHeader(date)}
+              <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                {dawarichUrl ? (
+                  <a
+                    href={buildDawarichDayUrl(dawarichUrl, date)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                  >
+                    {formatDateHeader(date)}
+                  </a>
+                ) : (
+                  formatDateHeader(date)
+                )}
               </h2>
-              <div className="space-y-3">
-                {dateCheckins.map((checkin) => (
-                  <CheckInCard
-                    key={checkin.id}
-                    checkin={checkin}
-                    immichUrl={immichUrl}
-                    photos={photosMap[checkin.id] ?? null}
-                    scrobbles={scrobblesMap[checkin.id]}
-                    malojaUrl={malojaUrl}
-                  />
-                ))}
-              </div>
+              {dateCheckins.length > 0 ? (
+                <div className="space-y-3">
+                  {dateCheckins.map((checkin) => (
+                    <CheckInCard
+                      key={checkin.id}
+                      checkin={checkin}
+                      immichUrl={immichUrl}
+                      photos={photosMap[checkin.id] ?? null}
+                      scrobbles={scrobblesMap[checkin.id]}
+                      malojaUrl={malojaUrl}
+                      dawarichUrl={dawarichUrl}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 dark:text-gray-500 italic">No check-ins</p>
+              )}
             </div>
           ))}
         </div>
