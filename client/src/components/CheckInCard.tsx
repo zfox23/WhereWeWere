@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Star, MapPin, Clock, Pencil, Camera, Music, ChevronRight } from 'lucide-react';
+import { Star, MapPin, Clock, Pencil, Camera, Music, ChevronRight, Link2 } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
 import type { CheckIn, Scrobble, ImmichAsset } from '../types';
 
@@ -309,8 +309,15 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
         {/* Action buttons */}
         <div className="flex items-center gap-1 shrink-0">
           <Link
+            to={`/checkins/${checkin.id}`}
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
+            title="View details"
+          >
+            <Link2 size={14} />
+          </Link>
+          <Link
             to={`/check-in?edit=${checkin.id}`}
-            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
             title="Edit"
           >
             <Pencil size={14} />
