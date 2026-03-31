@@ -194,7 +194,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                     ? handleSelectLocal(venue)
                     : handleSelectOsm(venue)
                 }
-                disabled={importing === venue.osm_id}
+                disabled={importing !== null && importing === venue.osm_id}
                 className="w-full text-left px-3 py-2.5 hover:bg-gray-50 transition-colors disabled:opacity-50 flex items-start gap-2.5"
               >
                 <MapPin
