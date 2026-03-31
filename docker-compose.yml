@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
 
   server:
     build:
@@ -37,6 +37,3 @@ services:
       - server
     ports:
       - "5173:80"
-
-volumes:
-  pgdata:
