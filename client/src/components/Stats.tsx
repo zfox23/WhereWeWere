@@ -36,7 +36,7 @@ export function StatCard({
           {label}
         </span>
       </div>
-      <p className="text-2xl font-bold text-gray-900">{value}</p>
+      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
     </div>
   );
 }
@@ -66,7 +66,7 @@ export function StreakCard({ streak }: { streak: Streak }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Flame size={16} className="text-orange-500" />
         Streaks
       </h3>
@@ -106,7 +106,7 @@ export function StreakCard({ streak }: { streak: Streak }) {
               )}
             </button>
           ) : (
-            <p className="text-xl font-bold text-gray-900">0 days</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">0 days</p>
           )}
         </div>
       </div>
@@ -129,7 +129,7 @@ export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Trophy size={16} className="text-yellow-500" />
         Top Venues
       </h3>
@@ -145,7 +145,7 @@ export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
               <div className="flex-1 min-w-0">
                 <button
                   onClick={() => navigate(`/?venue_id=${venue.venue_id}`)}
-                  className="text-sm font-medium text-gray-900 truncate hover:text-primary-600 hover:underline text-left"
+                  className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate hover:text-primary-600 hover:underline text-left"
                 >
                   {venue.venue_name}
                 </button>
@@ -170,7 +170,7 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <BarChart3 size={16} className="text-indigo-500" />
         Categories
       </h3>
@@ -185,14 +185,14 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
               className="block w-full text-left group"
             >
               <div className="flex items-center justify-between mb-0.5">
-                <span className="text-xs font-medium text-gray-700 truncate group-hover:text-primary-600 group-hover:underline">
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate group-hover:text-primary-600 group-hover:underline">
                   {item.category_name}
                 </span>
                 <span className="text-xs text-gray-500 shrink-0 ml-2">
                   {item.checkin_count} check-in{item.checkin_count !== 1 ? 's' : ''}
                 </span>
               </div>
-              <div className="w-full bg-gray-100 rounded-full h-2">
+              <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
                 <div
                   className="bg-primary-500 h-2 rounded-full transition-all"
                   style={{
@@ -246,7 +246,7 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
   const maxCount = Math.max(...allDays.map((d) => d.count), 1);
 
   function getColor(count: number): string {
-    if (count === 0) return 'bg-gray-100';
+    if (count === 0) return 'bg-gray-100 dark:bg-gray-800';
     const ratio = count / maxCount;
     if (ratio <= 0.25) return 'bg-primary-200';
     if (ratio <= 0.5) return 'bg-primary-300';
@@ -264,7 +264,7 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <div className="flex items-center justify-start mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
           <CalendarDays size={16} className="text-green-600" />
           {year} Activity
         </h3>
@@ -335,7 +335,7 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
         {/* Legend */}
         <div className="flex items-center gap-1 mt-2 justify-end">
           <span className="text-[10px] text-gray-400 mr-1">Less</span>
-          <div className="w-[12px] h-[12px] rounded-sm bg-gray-100" />
+          <div className="w-[12px] h-[12px] rounded-sm bg-gray-100 dark:bg-gray-800" />
           <div className="w-[12px] h-[12px] rounded-sm bg-primary-200" />
           <div className="w-[12px] h-[12px] rounded-sm bg-primary-300" />
           <div className="w-[12px] h-[12px] rounded-sm bg-primary-500" />

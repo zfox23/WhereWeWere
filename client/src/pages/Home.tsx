@@ -296,7 +296,7 @@ export default function Home() {
           {filterPills.map((pill) => (
             <span
               key={pill.key}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-medium"
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 rounded-full text-xs font-medium"
             >
               {pill.label}
               <button
@@ -333,7 +333,7 @@ export default function Home() {
       {showFilters && (
         <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Filters</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}

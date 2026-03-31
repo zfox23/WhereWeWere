@@ -105,26 +105,26 @@ export default function VenueDetail() {
   return (
     <div className="space-y-6">
       {/* Venue Header */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 p-6">
         <div className="flex items-start justify-between">
           <div className="space-y-2">
             {venue.parent_venue_name && (
               <Link
                 to={`/venues/${venue.parent_venue_id}`}
-                className="text-sm text-primary-600 hover:underline"
+                className="text-sm text-primary-600 dark:text-primary-400 hover:underline"
               >
                 {venue.parent_venue_name}
               </Link>
             )}
-            <h1 className="text-2xl font-bold text-gray-900">{venue.name}</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{venue.name}</h1>
             {venue.category_name && (
-              <div className="flex items-center gap-1.5 text-sm text-gray-600">
+              <div className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400">
                 <Tag size={14} />
                 <span>{venue.category_name}</span>
               </div>
             )}
             {fullAddress && (
-              <div className="flex items-center gap-1.5 text-sm text-gray-500">
+              <div className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
                 <Navigation size={14} />
                 <span>{fullAddress}</span>
               </div>
@@ -146,7 +146,7 @@ export default function VenueDetail() {
       </div>
 
       {/* Map */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 overflow-hidden">
         <MapView
           center={[venue.latitude, venue.longitude]}
           zoom={15}
@@ -158,16 +158,16 @@ export default function VenueDetail() {
       {/* Child venues (e.g. terminals inside an airport) */}
       {venue.child_venues && venue.child_venues.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Places Inside</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">Places Inside</h2>
           <div className="grid gap-2 sm:grid-cols-2">
             {venue.child_venues.map((child) => (
               <Link
                 key={child.id}
                 to={`/venues/${child.id}`}
-                className="flex items-center gap-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <MapPin size={14} className="text-primary-500 shrink-0" />
-                <span className="text-sm font-medium text-gray-800">{child.name}</span>
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{child.name}</span>
               </Link>
             ))}
           </div>
@@ -176,11 +176,11 @@ export default function VenueDetail() {
 
       {/* Check-ins at this venue */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
           Your Check-ins Here
         </h2>
         {venueCheckins.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 p-8 text-center">
             <MapPin size={40} className="mx-auto text-gray-300 mb-3" />
             <p className="text-gray-500">You haven't checked in here yet.</p>
           </div>

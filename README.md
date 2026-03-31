@@ -30,3 +30,6 @@ On March 27, 2026, I purchased one month of Claude Code Pro in an attempt to vib
 - Please make day boundaries visually clearer when scrolling on the homescreen. Perhaps add a vertical line starting from the day's timestamp extending to the first checkin of that day.
 - Let me export my checkin data in JSON format from the Settings page.
 - If possible, let me put the database data in a `data` folder that I can change from `docker-compose.yml`. The goal here is to make it easy to migrate WhereWeWere from one system to another.
+- Venues and dates within "on this day" reflections should be clickable.
+
+Please create commits for each of these changes.

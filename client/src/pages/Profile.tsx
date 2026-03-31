@@ -141,7 +141,7 @@ function HeatmapMap({ data }: { data: MapDataPoint[] }) {
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] overflow-hidden">
       <div className="p-4 pb-2">
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
           <MapPin size={16} className="text-primary-600" />
           All Check-ins
         </h3>
@@ -201,7 +201,7 @@ function DayOfWeekChart({ data }: { data: DayOfWeekData[] }) {
   const max = Math.max(...data.map((d) => d.count), 1);
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Calendar size={16} className="text-violet-500" />
         Day of Week
       </h3>
@@ -209,13 +209,13 @@ function DayOfWeekChart({ data }: { data: DayOfWeekData[] }) {
         {data.map((d) => (
           <div key={d.day} className="flex items-center gap-2">
             <span className="text-xs text-gray-500 w-8 shrink-0">{d.day.slice(0, 3)}</span>
-            <div className="flex-1 bg-gray-100 rounded-full h-5 relative overflow-hidden">
+            <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-5 relative overflow-hidden">
               <div
                 className="bg-violet-500 h-full rounded-full transition-all"
                 style={{ width: `${(d.count / max) * 100}%` }}
               />
             </div>
-            <span className="text-xs font-medium text-gray-600 w-8 text-right">{d.count}</span>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400 w-8 text-right">{d.count}</span>
           </div>
         ))}
       </div>
@@ -227,7 +227,7 @@ function TimeOfDayChart({ data }: { data: TimeOfDayData[] }) {
   const total = data.reduce((s, d) => s + d.count, 0) || 1;
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Clock size={16} className="text-sky-500" />
         Time of Day
       </h3>
@@ -238,9 +238,9 @@ function TimeOfDayChart({ data }: { data: TimeOfDayData[] }) {
           return (
             <div key={d.period} className="text-center">
               <Icon size={20} className="mx-auto text-gray-400 mb-1" />
-              <p className="text-xs font-medium text-gray-700">{d.period}</p>
-              <p className="text-lg font-bold text-gray-900">{pct}%</p>
-              <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+              <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{d.period}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{pct}%</p>
+              <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 mt-1">
                 <div className={`${TIME_COLORS[d.period] || 'bg-gray-400'} h-full rounded-full`} style={{ width: `${pct}%` }} />
               </div>
               <p className="text-[10px] text-gray-400 mt-0.5">{d.count} check-in{d.count !== 1 ? 's' : ''}</p>
@@ -263,7 +263,7 @@ function BusiestDays({ data }: { data: BusiestDayData[] }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <CalendarDays size={16} className="text-rose-500" />
         Busiest Days
       </h3>
@@ -273,7 +273,7 @@ function BusiestDays({ data }: { data: BusiestDayData[] }) {
             <span className="text-sm font-bold text-gray-400 w-5 text-right">{i + 1}</span>
             <button
               onClick={() => navigate(`/?from=${d.date}&to=${d.date}`)}
-              className="flex-1 text-left text-sm text-gray-900 hover:text-primary-600 hover:underline"
+              className="flex-1 text-left text-sm text-gray-900 dark:text-gray-100 hover:text-primary-600 hover:underline"
             >
               {formatDate(d.date)}
             </button>
@@ -294,7 +294,7 @@ function TopCities({ data }: { data: CityData[] }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Building2 size={16} className="text-teal-500" />
         Top Cities
       </h3>
@@ -304,7 +304,7 @@ function TopCities({ data }: { data: CityData[] }) {
             <div className="flex items-center justify-between mb-0.5">
               <button
                 onClick={() => navigate(`/?q=${encodeURIComponent(d.city)}`)}
-                className="text-sm font-medium text-gray-900 hover:text-primary-600 hover:underline text-left truncate"
+                className="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 hover:underline text-left truncate"
               >
                 {d.city}
                 {d.country && <span className="text-xs text-gray-400 font-normal ml-1">{d.country}</span>}
@@ -315,7 +315,7 @@ function TopCities({ data }: { data: CityData[] }) {
                 {d.unique_venues} venue{d.unique_venues !== 1 ? 's' : ''}
               </span>
             </div>
-            <div className="w-full bg-gray-100 rounded-full h-1.5">
+            <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
               <div className="bg-teal-500 h-full rounded-full" style={{ width: `${(d.checkin_count / max) * 100}%` }} />
             </div>
           </li>
@@ -342,7 +342,7 @@ function InsightsSection({ data }: { data: InsightData[] }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Lightbulb size={16} className="text-amber-500" />
         Insights
       </h3>
@@ -350,11 +350,11 @@ function InsightsSection({ data }: { data: InsightData[] }) {
         {data.map((insight, i) => {
           const Icon = INSIGHT_ICONS[insight.icon] || Lightbulb;
           return (
-            <div key={i} className="flex items-start gap-3 p-3 bg-amber-50/50 rounded-lg border border-amber-100">
-              <Icon size={18} className="text-amber-600 shrink-0 mt-0.5" />
+            <div key={i} className="flex items-start gap-3 p-3 bg-amber-50/50 dark:bg-amber-900/20 rounded-lg border border-amber-100 dark:border-amber-800/40">
+              <Icon size={18} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-gray-900">{insight.title}</p>
-                <p className="text-xs text-gray-600 mt-0.5">{insight.description}</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{insight.title}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{insight.description}</p>
               </div>
             </div>
           );
@@ -373,7 +373,7 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <History size={16} className="text-purple-500" />
         On This Day
       </h3>
@@ -381,21 +381,21 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
         {data.map((year) => (
           <div key={year.year}>
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
+              <span className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-full">
                 {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago
               </span>
               <span className="text-xs text-gray-400">{year.year}</span>
             </div>
-            <div className="space-y-2 ml-2 border-l-2 border-purple-100 pl-3">
+            <div className="space-y-2 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
               {year.checkins.map((c) => (
                 <div key={c.id} className="text-sm">
-                  <p className="font-medium text-gray-900">{c.venue_name}</p>
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    {c.venue_category && <span className="text-purple-600">{c.venue_category}</span>}
+                  <p className="font-medium text-gray-900 dark:text-gray-100">{c.venue_name}</p>
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    {c.venue_category && <span className="text-purple-600 dark:text-purple-400">{c.venue_category}</span>}
                     {c.city && <span>{c.city}{c.country ? `, ${c.country}` : ''}</span>}
                     <span>{formatTime(c.checked_in_at)}</span>
                   </div>
-                  {c.notes && <p className="text-xs text-gray-600 mt-0.5 italic">"{c.notes}"</p>}
+                  {c.notes && <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 italic">"{c.notes}"</p>}
                   {c.rating && (
                     <div className="flex items-center gap-0.5 mt-0.5">
                       {[1, 2, 3, 4, 5].map((s) => (
@@ -423,7 +423,7 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <TrendingUp size={16} className="text-emerald-500" />
         More Stats
       </h3>
@@ -434,7 +434,7 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
               <Star size={12} />
               <span className="text-xs font-medium uppercase tracking-wide">Avg Rating</span>
             </div>
-            <p className="text-xl font-bold text-gray-900">{data.avg_rating}</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{data.avg_rating}</p>
             <p className="text-[10px] text-gray-400">{data.rated_count} rated check-ins</p>
           </div>
         )}
@@ -444,7 +444,7 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
               <Hash size={12} />
               <span className="text-xs font-medium uppercase tracking-wide">Top Category</span>
             </div>
-            <p className="text-base font-bold text-gray-900">{data.top_category.name}</p>
+            <p className="text-base font-bold text-gray-900 dark:text-gray-100">{data.top_category.name}</p>
             <p className="text-[10px] text-gray-400">{data.top_category.count} check-ins</p>
           </div>
         )}
@@ -453,7 +453,7 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
             <MapPin size={12} />
             <span className="text-xs font-medium uppercase tracking-wide">One-Timers</span>
           </div>
-          <p className="text-xl font-bold text-gray-900">{data.one_time_venues}</p>
+          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{data.one_time_venues}</p>
           <p className="text-[10px] text-gray-400">venues visited once</p>
         </div>
         {data.longest_gap.days > 0 && (
@@ -462,7 +462,7 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
               <Calendar size={12} />
               <span className="text-xs font-medium uppercase tracking-wide">Longest Gap</span>
             </div>
-            <p className="text-xl font-bold text-gray-900">{data.longest_gap.days} days</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{data.longest_gap.days} days</p>
             <p className="text-[10px] text-gray-400">{formatDate(data.longest_gap.start)} — {formatDate(data.longest_gap.end)}</p>
           </div>
         )}
@@ -472,7 +472,7 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
               <Clock size={12} />
               <span className="text-xs font-medium uppercase tracking-wide">First Check-in</span>
             </div>
-            <p className="text-base font-bold text-gray-900">{data.first_checkin.venue_name}</p>
+            <p className="text-base font-bold text-gray-900 dark:text-gray-100">{data.first_checkin.venue_name}</p>
             <p className="text-[10px] text-gray-400">
               {new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(data.first_checkin.checked_in_at))}
             </p>
@@ -490,14 +490,14 @@ function CountriesList({ data }: { data: CountryStats[] }) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Globe size={16} className="text-blue-500" />
         Countries
       </h3>
       <ul className="space-y-2">
         {data.map((item) => (
           <li key={item.country} className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-900">{item.country}</span>
+            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.country}</span>
             <div className="text-right">
               <button
                 onClick={() => navigate(`/?country=${encodeURIComponent(item.country)}`)}

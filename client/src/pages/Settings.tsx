@@ -46,19 +46,19 @@ function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => voi
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-        <Upload size={20} className="text-gray-600" />
+        <Upload size={20} className="text-gray-600 dark:text-gray-400" />
         Swarm Import
       </h2>
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-gray-500 dark:text-gray-400">
         Import your check-in history from Swarm CSV export files. Upload all your CSV files at once for batch import.
       </p>
 
       <div
         onClick={() => fileInputRef.current?.click()}
-        className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
+        className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 dark:hover:bg-primary-900/20 transition-colors"
       >
         <Upload size={24} className="mx-auto text-gray-400 mb-2" />
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-gray-600 dark:text-gray-400">
           {selectedFiles.length > 0
             ? `${selectedFiles.length} file${selectedFiles.length !== 1 ? 's' : ''} selected`
             : 'Click to select CSV files'}
@@ -80,7 +80,7 @@ function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => voi
             {selectedFiles.map((f, i) => (
               <span
                 key={i}
-                className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-xs text-gray-700"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-700 dark:text-gray-300"
               >
                 <FileText size={12} />
                 {f.name}
@@ -115,22 +115,22 @@ function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => voi
       )}
 
       {result && (
-        <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-          <div className="flex items-center gap-2 text-sm text-green-600">
+        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
             <Check size={16} />
             Import complete
           </div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
-              <p className="text-2xl font-bold text-gray-900">{result.imported}</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{result.imported}</p>
               <p className="text-xs text-gray-500">Imported</p>
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{result.skipped}</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{result.skipped}</p>
               <p className="text-xs text-gray-500">Skipped</p>
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{result.total_errors}</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{result.total_errors}</p>
               <p className="text-xs text-gray-500">Errors</p>
             </div>
           </div>
@@ -253,10 +253,10 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-        <Cog size={20} className="text-gray-600" />
+        <Cog size={20} className="text-gray-600 dark:text-gray-400" />
         Jobs
       </h2>
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-gray-500 dark:text-gray-400">
         Run background tasks to enrich venue data or sync with external services.
       </p>
 
@@ -298,18 +298,18 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
       {jobList.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Jobs</h3>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {jobList.map((job) => (
               <div key={job.id} className="py-3 first:pt-0 last:pb-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <JobStatusIcon status={job.status} />
-                    <span className="text-sm font-medium text-gray-900 capitalize">{job.type}</span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100 capitalize">{job.type}</span>
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                      job.status === 'completed' ? 'bg-green-50 text-green-700' :
-                      job.status === 'running' ? 'bg-blue-50 text-blue-700' :
-                      job.status === 'failed' ? 'bg-red-50 text-red-700' :
-                      'bg-gray-50 text-gray-600'
+                      job.status === 'completed' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                      job.status === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' :
+                      job.status === 'failed' ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                      'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                     }`}>
                       {job.status}
                     </span>
@@ -462,11 +462,11 @@ export default function Settings() {
       {/* Profile Section */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <User size={20} className="text-gray-600" />
+          <User size={20} className="text-gray-600 dark:text-gray-400" />
           Profile
         </h2>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
           <input
             type="text"
             value={username}
@@ -475,7 +475,7 @@ export default function Settings() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Name</label>
           <input
             type="text"
             value={displayName}
@@ -626,13 +626,13 @@ export default function Settings() {
       {/* Integrations Section */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Link2 size={20} className="text-gray-600" />
+          <Link2 size={20} className="text-gray-600 dark:text-gray-400" />
           Integrations
         </h2>
 
         <div className="space-y-4">
           <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Dawarich</h3>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Dawarich</h3>
             <div className="space-y-2">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">URL</label>
@@ -657,8 +657,8 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="border-t border-gray-100 pt-4">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Immich</h3>
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Immich</h3>
             <div className="space-y-2">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">URL</label>
@@ -683,8 +683,8 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="border-t border-gray-100 pt-4">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Maloja</h3>
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Maloja</h3>
             <p className="text-xs text-gray-500 mb-2">
               Connect to your Maloja scrobble server to show what music you were listening to around each check-in.
             </p>

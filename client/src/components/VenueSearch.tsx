@@ -178,26 +178,26 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search nearby venues..."
-          className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          className="w-full pl-9 pr-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
         />
       </div>
 
       {locationError && (
-        <p className="text-sm text-amber-600 bg-amber-50 rounded-md px-3 py-2">
+        <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 rounded-md px-3 py-2">
           {locationError}
         </p>
       )}
 
       {/* Results list */}
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-gray-500 py-3 justify-center">
+        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-3 justify-center">
           <Loader2 size={16} className="animate-spin" />
           Searching nearby...
         </div>
       )}
 
       {!loading && results.length > 0 && (
-        <ul className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden max-h-72 overflow-y-auto">
+        <ul className="divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden max-h-72 overflow-y-auto">
           {results.map((venue, i) => (
             <li key={`${venue.osm_id}-${i}`}>
               <button
@@ -208,7 +208,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                     : handleSelectOsm(venue)
                 }
                 disabled={importing !== null && importing === venue.osm_id}
-                className="w-full text-left px-3 py-2.5 hover:bg-gray-50 transition-colors disabled:opacity-50 flex items-start gap-2.5"
+                className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-start gap-2.5"
               >
                 <MapPin
                   size={16}
@@ -216,20 +216,20 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm text-gray-900 truncate">
+                    <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">
                       {venue.name}
                     </span>
                     <span
                       className={`shrink-0 inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${
                         venue.source === 'local'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-blue-100 text-blue-700'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                       }`}
                     >
                       {venue.source === 'local' ? 'Local' : 'OSM'}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5 truncate">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                     {[venue.category, venue.address]
                       .filter(Boolean)
                       .join(' \u00b7 ')}
@@ -248,7 +248,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       )}
 
       {!loading && results.length === 0 && coords && query && (
-        <p className="text-sm text-gray-500 text-center py-3">
+        <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-3">
           No venues found. Try a different search or create a custom venue.
         </p>
       )}
@@ -258,7 +258,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         <button
           type="button"
           onClick={() => setShowCreateForm(true)}
-          className="flex items-center gap-1.5 text-sm text-primary-600 hover:text-primary-700 font-medium"
+          className="flex items-center gap-1.5 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
         >
           <Plus size={14} />
           Create Custom Venue
@@ -266,9 +266,9 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       ) : (
         <form
           onSubmit={handleCreateCustom}
-          className="border border-gray-200 rounded-lg p-3 space-y-3 bg-gray-50"
+          className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50 dark:bg-gray-800"
         >
-          <h4 className="text-sm font-semibold text-gray-700">
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
             New Custom Venue
           </h4>
           <input
@@ -277,20 +277,20 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
             onChange={(e) => setCustomName(e.target.value)}
             placeholder="Venue name *"
             required
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 dark:text-gray-100 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
           <input
             type="text"
             value={customAddress}
             onChange={(e) => setCustomAddress(e.target.value)}
             placeholder="Address (optional)"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 dark:text-gray-100 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
           {categories.length > 0 && (
             <select
               value={customCategoryId}
               onChange={(e) => setCustomCategoryId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="">Select category (optional)</option>
               {categories.map((c) => (
@@ -311,7 +311,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
             <button
               type="button"
               onClick={() => setShowCreateForm(false)}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+              className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
             >
               Cancel
             </button>

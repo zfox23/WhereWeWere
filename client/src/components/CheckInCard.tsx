@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Star, MapPin, Clock, Pencil, Camera, Music, ChevronRight, Link2 } from 'lucide-react';
+import { Star, MapPin, Clock, Pencil, Camera, Music, ChevronRight, Link2, Map } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
 import type { CheckIn, Scrobble, ImmichAsset } from '../types';
 
@@ -157,7 +157,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
     let cancelled = false;
     immichApi.photos(checkin.id).then((data) => {
       if (!cancelled) setSelfFetchedAssets(data.assets);
-    }).catch(() => {});
+    }).catch(() => { });
     return () => { cancelled = true; };
   }, [checkin.id, immichUrl, photos]);
 
@@ -197,30 +197,23 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
 
           {/* Category badge */}
           {checkin.venue_category && (
-            <span className="inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full bg-primary-50 text-primary-700">
+            <span className="inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400">
               {checkin.venue_category}
             </span>
           )}
 
           {/* Date/time */}
-          <div className="flex items-center gap-2 mt-2 text-sm text-gray-500 dark:text-gray-400">
-            <Clock size={13} />
-            {dawarichUrl ? (
-              <a
-                href={buildDawarichCheckinUrl(dawarichUrl, checkin.checked_in_at)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-              >
-                <time dateTime={checkin.checked_in_at}>
-                  {formatDate(checkin.checked_in_at)}
-                </time>
-              </a>
-            ) : (
+          <div className="flex items-center gap-1.5 flex-wrap mt-2">
+            <Clock size={13} className='text-gray-500 shrink-0' />
+            <Link
+              to={`/checkins/${checkin.id}`}
+              className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
+              title="View details"
+            >
               <time dateTime={checkin.checked_in_at}>
                 {formatDate(checkin.checked_in_at)}
               </time>
-            )}
+            </Link>
           </div>
 
           {/* Notes */}
@@ -332,13 +325,17 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
 
         {/* Action buttons */}
         <div className="flex items-center gap-1 shrink-0">
-          <Link
-            to={`/checkins/${checkin.id}`}
-            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
-            title="View details"
-          >
-            <Link2 size={14} />
-          </Link>
+          {dawarichUrl && (
+            <a
+              href={buildDawarichCheckinUrl(dawarichUrl, checkin.checked_in_at)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
+              title='View on Dawarich'
+            >
+              <Map size={14} />
+            </a>
+          )}
           <Link
             to={`/check-in?edit=${checkin.id}`}
             className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"

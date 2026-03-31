@@ -74,13 +74,13 @@ export default function CheckIn() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
         {editId ? 'Edit Check In' : 'Check In'}
       </h1>
 
       {!selectedVenue && !editId ? (
         <div className="space-y-4">
-          <p className="text-gray-600">Where are you?</p>
+          <p className="text-gray-600 dark:text-gray-400">Where are you?</p>
           <VenueSearch
             onSelect={handleVenueSelect}
             initialLat={searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : undefined}
@@ -90,13 +90,13 @@ export default function CheckIn() {
       ) : selectedVenue ? (
         <div className="space-y-4">
           {/* Selected venue header */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between">
+          <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-primary-50 rounded-lg">
+              <div className="p-2 bg-primary-50 dark:bg-primary-900/30 rounded-lg">
                 <MapPin size={20} className="text-primary-600" />
               </div>
               <div>
-                <p className="font-semibold text-gray-900">
+                <p className="font-semibold text-gray-900 dark:text-gray-100">
                   {selectedVenue.name}
                   {selectedVenue.parent_venue_name && (
                     <span className="font-normal text-sm text-gray-400">
@@ -104,7 +104,7 @@ export default function CheckIn() {
                     </span>
                   )}
                 </p>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   {editId ? 'Venue' : 'Selected venue'}
                 </p>
               </div>
@@ -112,7 +112,7 @@ export default function CheckIn() {
             {!editId && (
               <button
                 onClick={handleChangeVenue}
-                className="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:text-primary-700 font-medium"
+                className="inline-flex items-center gap-1.5 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
               >
                 <ArrowLeft size={14} />
                 Change venue

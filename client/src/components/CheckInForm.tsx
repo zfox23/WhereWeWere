@@ -125,19 +125,19 @@ export default function CheckInForm({
       {/* Venue selection (hidden in edit mode) */}
       {!isEditMode && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
             Venue
           </label>
           {venueId ? (
-            <div className="flex items-center gap-2 px-3 py-2.5 bg-primary-50 border border-primary-200 rounded-lg">
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-primary-50 dark:bg-primary-900/30 border border-primary-200 dark:border-primary-700 rounded-lg">
               <MapPin size={16} className="text-primary-600 shrink-0" />
-              <span className="text-sm font-medium text-primary-800 flex-1">
+              <span className="text-sm font-medium text-primary-800 dark:text-primary-300 flex-1">
                 {venueName}
               </span>
               <button
                 type="button"
                 onClick={handleClearVenue}
-                className="text-xs text-primary-600 hover:text-primary-800 font-medium"
+                className="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium"
               >
                 Change
               </button>
@@ -152,7 +152,7 @@ export default function CheckInForm({
       {!isEditMode && parentVenueName && parentVenueId && (
         <label
           htmlFor="also-checkin-parent"
-          className="flex items-center gap-3 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg cursor-pointer"
+          className="flex items-center gap-3 px-3 py-2.5 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer"
         >
           <input
             type="checkbox"
@@ -161,7 +161,7 @@ export default function CheckInForm({
             onChange={(e) => setAlsoCheckinParent(e.target.checked)}
             className="rounded border-blue-300 text-blue-600 focus:ring-blue-500"
           />
-          <span className="text-sm text-blue-800">
+          <span className="text-sm text-blue-800 dark:text-blue-300">
             Also check in at <strong>{parentVenueName}</strong>
           </span>
         </label>
@@ -171,7 +171,7 @@ export default function CheckInForm({
       <div>
         <label
           htmlFor="checkin-time"
-          className="block text-sm font-medium text-gray-700 mb-1.5"
+          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
         >
           Time
         </label>
@@ -180,7 +180,7 @@ export default function CheckInForm({
           id="checkin-time"
           value={checkedInAt}
           onChange={(e) => setCheckedInAt(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
         />
       </div>
 
@@ -188,7 +188,7 @@ export default function CheckInForm({
       <div>
         <label
           htmlFor="checkin-notes"
-          className="block text-sm font-medium text-gray-700 mb-1.5"
+          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
         >
           Notes
         </label>
@@ -198,13 +198,13 @@ export default function CheckInForm({
           onChange={(e) => setNotes(e.target.value)}
           placeholder="What are you up to?"
           rows={3}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
         />
       </div>
 
       {/* Star rating */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
           Rating
         </label>
         <div className="flex items-center gap-1">
@@ -229,7 +229,7 @@ export default function CheckInForm({
             </button>
           ))}
           {rating > 0 && (
-            <span className="ml-2 text-xs text-gray-500">
+            <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
               {rating}/5
             </span>
           )}
@@ -238,7 +238,7 @@ export default function CheckInForm({
 
       {/* Error */}
       {error && (
-        <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">
+        <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-md px-3 py-2">
           {error}
         </p>
       )}
@@ -268,7 +268,7 @@ export default function CheckInForm({
           type="button"
           onClick={handleDelete}
           disabled={deleting}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-2xl hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl hover:bg-red-100 dark:hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           {deleting ? (
             <>
