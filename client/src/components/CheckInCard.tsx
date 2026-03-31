@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Star, MapPin, Trash2, Clock, Pencil, Camera, Music, ChevronRight } from 'lucide-react';
+import { Star, MapPin, Clock, Pencil, Camera, Music, ChevronRight } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
 import type { CheckIn, Scrobble, ImmichAsset } from '../types';
 
 interface CheckInCardProps {
   checkin: CheckIn;
-  onDelete?: (id: string) => void;
   immichUrl?: string | null;
   photos?: ImmichAsset[] | null;
   scrobbles?: Scrobble[];
@@ -137,7 +136,7 @@ function PhotoStrip({ assets, moreUrl, immichUrl }: { assets: ImmichAsset[]; mor
   );
 }
 
-export default function CheckInCard({ checkin, onDelete, immichUrl, photos, scrobbles, malojaUrl }: CheckInCardProps) {
+export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl }: CheckInCardProps) {
   // Self-fetch photos as fallback when parent doesn't manage them (photos === undefined)
   const [selfFetchedAssets, setSelfFetchedAssets] = useState<ImmichAsset[] | null>(null);
 
@@ -152,12 +151,6 @@ export default function CheckInCard({ checkin, onDelete, immichUrl, photos, scro
   }, [checkin.id, immichUrl, photos]);
 
   const resolvedAssets = photos !== undefined ? photos : selfFetchedAssets;
-
-  const handleDelete = () => {
-    if (onDelete && window.confirm('Delete this check-in?')) {
-      onDelete(checkin.id);
-    }
-  };
 
   const hasInSpace = immichUrl && checkin.venue_latitude != null && checkin.venue_longitude != null;
   const hasPhotos = resolvedAssets && resolvedAssets.length > 0;
@@ -322,15 +315,6 @@ export default function CheckInCard({ checkin, onDelete, immichUrl, photos, scro
           >
             <Pencil size={14} />
           </Link>
-          {onDelete && (
-            <button
-              onClick={handleDelete}
-              className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-              title="Delete"
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
         </div>
       </div>
     </div>

@@ -66,15 +66,6 @@ export default function VenueDetail() {
     }).catch(() => {});
   }, [venueCheckins, immichUrl]);
 
-  const handleDelete = async (checkinId: string) => {
-    try {
-      await checkins.delete(checkinId);
-      setVenueCheckins((prev) => prev.filter((c) => c.id !== checkinId));
-    } catch (err) {
-      console.error('Failed to delete check-in:', err);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -199,7 +190,6 @@ export default function VenueDetail() {
               <CheckInCard
                 key={checkin.id}
                 checkin={checkin}
-                onDelete={handleDelete}
                 immichUrl={immichUrl}
                 photos={photosMap[checkin.id] ?? null}
                 scrobbles={scrobblesMap[checkin.id]}

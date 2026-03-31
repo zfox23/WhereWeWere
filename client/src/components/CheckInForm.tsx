@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Star, Loader2, MapPin } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Star, Loader2, MapPin, Trash2 } from 'lucide-react';
 import { checkins } from '../api/client';
 import VenueSearch from './VenueSearch';
 
@@ -33,6 +34,7 @@ export default function CheckInForm({
   initialRating,
   initialCheckedInAt,
 }: CheckInFormProps) {
+  const navigate = useNavigate();
   const [venueId, setVenueId] = useState(initialVenueId || '');
   const [venueName, setVenueName] = useState(initialVenueName || '');
   const [notes, setNotes] = useState(initialNotes || '');
@@ -44,6 +46,7 @@ export default function CheckInForm({
   });
   const [alsoCheckinParent, setAlsoCheckinParent] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isEditMode = !!editCheckinId;
@@ -56,6 +59,20 @@ export default function CheckInForm({
   const handleClearVenue = () => {
     setVenueId('');
     setVenueName('');
+  };
+
+  const handleDelete = async () => {
+    if (!editCheckinId) return;
+    if (!window.confirm('Delete this check-in? This cannot be undone.')) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await checkins.delete(editCheckinId);
+      navigate('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete.');
+      setDeleting(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -244,6 +261,28 @@ export default function CheckInForm({
           </>
         )}
       </button>
+
+      {/* Delete button (edit mode only) */}
+      {isEditMode && (
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={deleting}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-2xl hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        >
+          {deleting ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              Deleting...
+            </>
+          ) : (
+            <>
+              <Trash2 size={16} />
+              Delete Check-in
+            </>
+          )}
+        </button>
+      )}
     </form>
   );
 }

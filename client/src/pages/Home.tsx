@@ -172,15 +172,6 @@ export default function Home() {
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, fetchCheckins]);
 
-  const handleDelete = async (id: string) => {
-    try {
-      await checkins.delete(id);
-      setItems((prev) => prev.filter((c) => c.id !== id));
-    } catch (err) {
-      console.error('Failed to delete check-in:', err);
-    }
-  };
-
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
     setShowFilters(false);
@@ -369,7 +360,6 @@ export default function Home() {
                   <CheckInCard
                     key={checkin.id}
                     checkin={checkin}
-                    onDelete={handleDelete}
                     immichUrl={immichUrl}
                     photos={photosMap[checkin.id] ?? null}
                     scrobbles={scrobblesMap[checkin.id]}
