@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X } from 'lucide-react';
 import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
@@ -174,6 +174,43 @@ export default function Home() {
       setScrobblesMap((prev) => ({ ...prev, ...data }));
     }).catch(() => {});
   }, [items, malojaUrl]);
+
+  // Deduplicate scrobbles across checkins: assign each scrobble to the closest checkin
+  const dedupedScrobblesMap = useMemo(() => {
+    if (items.length <= 1) return scrobblesMap;
+    // Build a map: scrobble key -> [{checkinId, checkinTimeMs, scrobble}]
+    const assignments: Map<number, { checkinId: string; checkinTimeMs: number; scrobble: Scrobble }[]> = new Map();
+    for (const item of items) {
+      const scrobbleList = scrobblesMap[item.id];
+      if (!scrobbleList) continue;
+      const checkinTimeMs = new Date(item.checked_in_at).getTime();
+      for (const s of scrobbleList) {
+        const key = s.time;
+        if (!assignments.has(key)) assignments.set(key, []);
+        assignments.get(key)!.push({ checkinId: item.id, checkinTimeMs, scrobble: s });
+      }
+    }
+    // For each scrobble, pick the closest checkin
+    const result: Record<string, Scrobble[]> = {};
+    for (const id of Object.keys(scrobblesMap)) {
+      result[id] = [];
+    }
+    for (const [, entries] of assignments) {
+      let best = entries[0];
+      for (const entry of entries) {
+        if (Math.abs(entry.scrobble.time * 1000 - entry.checkinTimeMs) < Math.abs(best.scrobble.time * 1000 - best.checkinTimeMs)) {
+          best = entry;
+        }
+      }
+      if (!result[best.checkinId]) result[best.checkinId] = [];
+      result[best.checkinId].push(best.scrobble);
+    }
+    // Sort each checkin's scrobbles by time
+    for (const id of Object.keys(result)) {
+      result[id].sort((a, b) => a.time - b.time);
+    }
+    return result;
+  }, [scrobblesMap, items]);
 
   // Fetch photos for loaded check-ins (batch with deduplication)
   useEffect(() => {
@@ -406,7 +443,7 @@ export default function Home() {
                       checkin={checkin}
                       immichUrl={immichUrl}
                       photos={photosMap[checkin.id] ?? null}
-                      scrobbles={scrobblesMap[checkin.id]}
+                      scrobbles={dedupedScrobblesMap[checkin.id]}
                       malojaUrl={malojaUrl}
                       dawarichUrl={dawarichUrl}
                     />
