@@ -418,25 +418,30 @@ export default function Home() {
           )}
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-0">
           {Array.from(grouped.entries()).map(([date, dateCheckins]) => (
-            <div key={date}>
-              <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                {dawarichUrl ? (
-                  <a
-                    href={buildDawarichDayUrl(dawarichUrl, date)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                  >
-                    {formatDateHeader(date)}
-                  </a>
-                ) : (
-                  formatDateHeader(date)
-                )}
-              </h2>
+            <div key={date} className="relative">
+              {/* Date header with timeline dot */}
+              <div className="flex items-center gap-3 py-2">
+                <div className="w-3 h-3 rounded-full bg-primary-500 shrink-0 ring-4 ring-primary-100 dark:ring-primary-900/30 relative z-10" />
+                <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                  {dawarichUrl ? (
+                    <a
+                      href={buildDawarichDayUrl(dawarichUrl, date)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                    >
+                      {formatDateHeader(date)}
+                    </a>
+                  ) : (
+                    formatDateHeader(date)
+                  )}
+                </h2>
+              </div>
+              {/* Checkin cards with vertical line */}
               {dateCheckins.length > 0 ? (
-                <div className="space-y-3">
+                <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-6 pb-4 space-y-3">
                   {dateCheckins.map((checkin) => (
                     <CheckInCard
                       key={checkin.id}
@@ -450,7 +455,9 @@ export default function Home() {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-gray-400 dark:text-gray-500 italic">No check-ins</p>
+                <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-6 pb-4">
+                  <p className="text-xs text-gray-400 dark:text-gray-500 italic">No check-ins</p>
+                </div>
               )}
             </div>
           ))}
