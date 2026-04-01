@@ -18,18 +18,21 @@ I've begun a technological exodus, leaving third-party applications behind in ex
 
 On March 27, 2026, I purchased one month of Claude Code Pro in an attempt to vibe code a Swarm replacement. I also want to integrate data from other systems I've used for the past several years. This repository is the result of that experiment.
 
-## TODO as of 2026-03-30
-- If the user has set up Dawarich integration in Settings, show all dates on the homepage timeline, even if there are no checkins for that day. Then, let the user click on the text corresponding to any day's timestamp to see the user's location history on that day on Dawarich.  Similarly, if the user clicks on a timestamp associated with the checkin, they should be sent to Dawarich to see their timeline two hours before and two hours after that checkin. An example link to Dawarich for seeing the map associated with all of March 23, 2026 is `https://map.home.mydomain.io/map/v2?start_at=2026-03-23T00%253A00&end_at=2026-03-23T23%253A59`.
-- Create a new route which, given a checkin ID, displays a single checkin and its associated data. Add a new "link" icon next to the Edit button which links to that specific checkin's page.
-- Remove the "delete" button on the main checkin card, instead relocating the delete functionality to the checkin's edit page.
-- Begin searching for nearby locations as soon as the user first navigates to the webapp. The goal here is to speed up the location search on the `/check-in` page. If the user has moved "significantly" between first navigating to the webapp and navigating to `check-in`, re-search for nearby locations.
-- There seems to be a bug on the checkin page where all of the locations are disabled and unclickable. Perhaps this has to do with the `disabled={importing === venue.osm_id}` logic in `VenueSearch.tsx`. Please fix this bug.
-- I don't want scrobbles to repeat when I'm looking at multiple checkin cards at the same time. For example, right now, I'm seeing the same song associated with two checkins made within ten minutes, when I only want to see the scrobble closest in time to one of those checkins. Help me come up with some logic for choosing which scrobbles to show so that it's more likely a scrobble will be associated with one and only one given checkin. This logic does not apply if I'm looking at only a single checkin.
-- There are a few contrast issues with dark mode - please do a full pass on colors to make sure that text and icons still show up cleanly while in dark mode.
-- I'm still having a problem where a previously-started job is uncancellable. I'm fairly confident the logic is fixed for future jobs, but I need to force-cancel the most recent job. Please tell me how to do that from the command line.
-- Please make day boundaries visually clearer when scrolling on the homescreen. Perhaps add a vertical line starting from the day's timestamp extending to the first checkin of that day.
-- Let me export my checkin data in JSON format from the Settings page.
-- If possible, let me put the database data in a `data` folder that I can change from `docker-compose.yml`. The goal here is to make it easy to migrate WhereWeWere from one system to another.
-- Venues and dates within "on this day" reflections should be clickable.
+## TODO as of 2026-04-01
+### First Task
+I want to be able to import `.daylio` Daylio export files instead of the less-functional Daylio `.csv` exports. Please remove all Daylio CSV importing functionality and replace it with `.daylio` importing functionality. `.daylio` files are ZIP files whose decompressed root contains a `backup.daylio` file, which is a base64-encoded JSON file. I have attached an example decoded `backup.daylio` as `backup.daylio.example.json`. You can ignore values associated with the keys "reminders", "writingTemplates", "milestones", "scales", and other key/value pairs that are not relevant to WhereWeWere. Note that the "id_tag_group" key/value pair within the "tags" array corresponds to the IDs within the objects comprising the "tag_groups" array.
 
-Please create commits for each of these changes.
+### Second Task
+- Add "Places" / "Moods" tabs to the Profile page
+- **Moods tab** requires:
+  - New server-side mood stats endpoints (daily avg mood, mood span, monthly mood breakdown, day-of-week avg mood, activity-mood correlations, year-in-pixels heatmap data)
+  - Line chart: avg mood per day over 1 or 3 months (X-axis = days, Y-axis = mood 1-5)
+  - Span chart: min/max mood range per day over 1 or 3 months (switchable with line chart)
+  - Mood count summary for the visible date range
+  - Monthly mood pie chart (count of each of the 5 moods)
+  - Count of each mood per month (numeric display)
+  - Day-of-week average mood bar chart
+  - Activity-mood correlations table/chart
+  - "Year in Pixels" chart: avg mood per day, based on existing `Heatmap` component pattern with mood-color squares
+
+Please also help me delete old Mood entries from the database and start completely fresh.
