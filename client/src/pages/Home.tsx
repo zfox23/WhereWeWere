@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X } from 'lucide-react';
-import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
-import { CheckIn, Scrobble, ImmichAsset } from '../types';
+import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile } from 'lucide-react';
+import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
+import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
+import MoodCheckInCard from '../components/MoodCheckInCard';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
@@ -17,8 +18,8 @@ function formatDateHeader(dateStr: string) {
   }).format(new Date(dateStr + 'T12:00:00'));
 }
 
-function groupByDate(items: CheckIn[]): Map<string, CheckIn[]> {
-  const groups = new Map<string, CheckIn[]>();
+function groupByDate(items: TimelineItem[]): Map<string, TimelineItem[]> {
+  const groups = new Map<string, TimelineItem[]>();
   for (const item of items) {
     const date = item.checked_in_at.slice(0, 10);
     if (!groups.has(date)) groups.set(date, []);
@@ -27,10 +28,10 @@ function groupByDate(items: CheckIn[]): Map<string, CheckIn[]> {
   return groups;
 }
 
-function fillDateGaps(grouped: Map<string, CheckIn[]>): Map<string, CheckIn[]> {
+function fillDateGaps(grouped: Map<string, TimelineItem[]>): Map<string, TimelineItem[]> {
   const dates = Array.from(grouped.keys()).sort();
   if (dates.length < 2) return grouped;
-  const filled = new Map<string, CheckIn[]>();
+  const filled = new Map<string, TimelineItem[]>();
   const start = new Date(dates[0] + 'T12:00:00');
   const end = new Date(dates[dates.length - 1] + 'T12:00:00');
   for (let d = new Date(end); d >= start; d.setDate(d.getDate() - 1)) {
@@ -46,19 +47,56 @@ function buildDawarichDayUrl(dawarichUrl: string, date: string): string {
   return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
 }
 
-function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): string {
-  const t = new Date(checkedInAt);
-  const startTime = new Date(t.getTime() - 2 * 60 * 60 * 1000);
-  const endTime = new Date(t.getTime() + 2 * 60 * 60 * 1000);
-  const fmt = (d: Date) => d.toISOString().slice(0, 16);
-  const start = encodeURIComponent(encodeURIComponent(fmt(startTime)));
-  const end = encodeURIComponent(encodeURIComponent(fmt(endTime)));
-  return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
+function ExpandableFAB() {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <>
+      {expanded && (
+        <div
+          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm"
+          onClick={() => setExpanded(false)}
+        />
+      )}
+
+      {expanded && (
+        <div className="fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <Link
+            to="/mood-check-in"
+            onClick={() => setExpanded(false)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium"
+          >
+            <Smile size={18} className="text-green-500" />
+            Mood
+          </Link>
+          <Link
+            to="/check-in"
+            onClick={() => setExpanded(false)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium"
+          >
+            <MapPin size={18} className="text-primary-500" />
+            Location
+          </Link>
+        </div>
+      )}
+
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-primary-500/30 hover:shadow-xl hover:shadow-primary-500/40 hover:scale-105 transition-all"
+      >
+        <Plus
+          size={24}
+          className="transition-transform duration-200"
+          style={{ transform: expanded ? 'rotate(45deg)' : 'none' }}
+        />
+      </button>
+    </>
+  );
 }
 
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [items, setItems] = useState<CheckIn[]>([]);
+  const [items, setItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -66,6 +104,7 @@ export default function Home() {
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
+  const [iconPack, setIconPack] = useState('emoji');
   const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
 
@@ -75,6 +114,7 @@ export default function Home() {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
       if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
       if (s.dawarich_url) setDawarichUrl(s.dawarich_url.replace(/\/+$/, ''));
+      if (s.mood_icon_pack) setIconPack(s.mood_icon_pack);
     }).catch(() => {});
   }, []);
 
@@ -111,7 +151,7 @@ export default function Home() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  const fetchCheckins = useCallback(
+  const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
       if (append) {
         setLoadingMore(true);
@@ -133,7 +173,7 @@ export default function Home() {
         if (category) params.category = category;
         if (country) params.country = country;
 
-        const data = await checkins.list(params);
+        const data = await timelineApi.list(params);
         if (append) {
           setItems((prev) => [...prev, ...data]);
         } else {
@@ -157,30 +197,35 @@ export default function Home() {
 
     debounceRef.current = setTimeout(() => {
       offsetRef.current = 0;
-      fetchCheckins(0, false);
+      fetchTimeline(0, false);
     }, 300);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [fetchCheckins]);
+  }, [fetchTimeline]);
 
-  // Fetch scrobbles for loaded check-ins
+  // Location items for scrobbles/photos
+  const locationItems = useMemo(
+    () => items.filter(i => i.type === 'location'),
+    [items]
+  );
+
+  // Fetch scrobbles for loaded location check-ins
   useEffect(() => {
-    if (!malojaUrl || items.length === 0) return;
-    const newIds = items.map((c) => c.id).filter((id) => !(id in scrobblesMap));
+    if (!malojaUrl || locationItems.length === 0) return;
+    const newIds = locationItems.map((c) => c.id).filter((id) => !(id in scrobblesMap));
     if (newIds.length === 0) return;
     scrobblesApi.forCheckins(newIds).then((data) => {
       setScrobblesMap((prev) => ({ ...prev, ...data }));
     }).catch(() => {});
-  }, [items, malojaUrl]);
+  }, [locationItems, malojaUrl]);
 
   // Deduplicate scrobbles across checkins: assign each scrobble to the closest checkin
   const dedupedScrobblesMap = useMemo(() => {
-    if (items.length <= 1) return scrobblesMap;
-    // Build a map: scrobble key -> [{checkinId, checkinTimeMs, scrobble}]
+    if (locationItems.length <= 1) return scrobblesMap;
     const assignments: Map<number, { checkinId: string; checkinTimeMs: number; scrobble: Scrobble }[]> = new Map();
-    for (const item of items) {
+    for (const item of locationItems) {
       const scrobbleList = scrobblesMap[item.id];
       if (!scrobbleList) continue;
       const checkinTimeMs = new Date(item.checked_in_at).getTime();
@@ -190,7 +235,6 @@ export default function Home() {
         assignments.get(key)!.push({ checkinId: item.id, checkinTimeMs, scrobble: s });
       }
     }
-    // For each scrobble, pick the closest checkin
     const result: Record<string, Scrobble[]> = {};
     for (const id of Object.keys(scrobblesMap)) {
       result[id] = [];
@@ -205,22 +249,21 @@ export default function Home() {
       if (!result[best.checkinId]) result[best.checkinId] = [];
       result[best.checkinId].push(best.scrobble);
     }
-    // Sort each checkin's scrobbles by time
     for (const id of Object.keys(result)) {
       result[id].sort((a, b) => a.time - b.time);
     }
     return result;
-  }, [scrobblesMap, items]);
+  }, [scrobblesMap, locationItems]);
 
-  // Fetch photos for loaded check-ins (batch with deduplication)
+  // Fetch photos for loaded location check-ins (batch with deduplication)
   useEffect(() => {
-    if (!immichUrl || items.length === 0) return;
-    const newIds = items.map((c) => c.id).filter((id) => !(id in photosMap));
+    if (!immichUrl || locationItems.length === 0) return;
+    const newIds = locationItems.map((c) => c.id).filter((id) => !(id in photosMap));
     if (newIds.length === 0) return;
     immichApi.photosForCheckins(newIds).then((data) => {
       setPhotosMap((prev) => ({ ...prev, ...data }));
     }).catch(() => {});
-  }, [items, immichUrl]);
+  }, [locationItems, immichUrl]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -230,7 +273,7 @@ export default function Home() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
-          fetchCheckins(offsetRef.current, true);
+          fetchTimeline(offsetRef.current, true);
         }
       },
       { threshold: 0.1 }
@@ -238,7 +281,7 @@ export default function Home() {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, fetchCheckins]);
+  }, [hasMore, loading, loadingMore, fetchTimeline]);
 
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
@@ -251,7 +294,10 @@ export default function Home() {
 
   // Build active filter pills for display
   const filterPills: { label: string; key: string }[] = [];
-  if (venueId) filterPills.push({ label: `Venue: ${items[0]?.venue_name || venueId}`, key: 'venue_id' });
+  if (venueId) {
+    const locationItem = items.find(i => i.type === 'location');
+    filterPills.push({ label: `Venue: ${locationItem?.venue_name || venueId}`, key: 'venue_id' });
+  }
   if (category) filterPills.push({ label: `Category: ${category}`, key: 'category' });
   if (country) filterPills.push({ label: `Country: ${country}`, key: 'country' });
   if (fromDate && toDate && fromDate === toDate) {
@@ -398,7 +444,7 @@ export default function Home() {
         <div className="text-center py-20">
           <p className="text-red-600 mb-4">{error}</p>
           <button
-            onClick={() => fetchCheckins(0, false)}
+            onClick={() => fetchTimeline(0, false)}
             className="btn-primary"
           >
             Retry
@@ -419,7 +465,7 @@ export default function Home() {
         </div>
       ) : (
         <div className="space-y-0">
-          {Array.from(grouped.entries()).map(([date, dateCheckins]) => (
+          {Array.from(grouped.entries()).map(([date, dateItems]) => (
             <div key={date} className="relative">
               {/* Date header with timeline dot */}
               <div className="flex items-center gap-3 py-2">
@@ -439,20 +485,43 @@ export default function Home() {
                   )}
                 </h2>
               </div>
-              {/* Checkin cards with vertical line */}
-              {dateCheckins.length > 0 ? (
+              {/* Cards with vertical line */}
+              {dateItems.length > 0 ? (
                 <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-6 pb-4 space-y-3">
-                  {dateCheckins.map((checkin) => (
-                    <CheckInCard
-                      key={checkin.id}
-                      checkin={checkin}
-                      immichUrl={immichUrl}
-                      photos={photosMap[checkin.id] ?? null}
-                      scrobbles={dedupedScrobblesMap[checkin.id]}
-                      malojaUrl={malojaUrl}
-                      dawarichUrl={dawarichUrl}
-                    />
-                  ))}
+                  {dateItems.map((item) =>
+                    item.type === 'mood' ? (
+                      <MoodCheckInCard
+                        key={item.id}
+                        item={item}
+                        iconPack={iconPack}
+                      />
+                    ) : (
+                      <CheckInCard
+                        key={item.id}
+                        checkin={{
+                          id: item.id,
+                          user_id: item.user_id,
+                          venue_id: item.venue_id!,
+                          venue_name: item.venue_name,
+                          venue_category: item.venue_category,
+                          venue_latitude: item.venue_latitude,
+                          venue_longitude: item.venue_longitude,
+                          venue_timezone: item.venue_timezone,
+                          parent_venue_id: item.parent_venue_id,
+                          parent_venue_name: item.parent_venue_name,
+                          notes: item.notes,
+                          rating: item.rating ?? null,
+                          checked_in_at: item.checked_in_at,
+                          created_at: item.created_at,
+                        }}
+                        immichUrl={immichUrl}
+                        photos={photosMap[item.id] ?? null}
+                        scrobbles={dedupedScrobblesMap[item.id]}
+                        malojaUrl={malojaUrl}
+                        dawarichUrl={dawarichUrl}
+                      />
+                    )
+                  )}
                 </div>
               ) : (
                 <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-6 pb-4">
@@ -473,12 +542,7 @@ export default function Home() {
       )}
 
       {/* FAB */}
-      <Link
-        to="/check-in"
-        className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-primary-500/30 hover:shadow-xl hover:shadow-primary-500/40 hover:scale-105 transition-all"
-      >
-        <Plus size={24} />
-      </Link>
+      <ExpandableFAB />
     </div>
   );
 }

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download } from 'lucide-react';
-import { settings, importApi, jobs } from '../api/client';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Plus, Pencil, Trash2, Smile } from 'lucide-react';
+import { settings, importApi, jobs, moodActivities } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
-import type { UserSettings, ImportResult, Job } from '../types';
+import { MoodIconRow } from '../components/MoodIcons';
+import type { UserSettings, ImportResult, Job, MoodActivityGroup } from '../types';
 
 function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -342,6 +343,246 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+function ActivityManagementSection() {
+  const [groups, setGroups] = useState<MoodActivityGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [addingActivityForGroup, setAddingActivityForGroup] = useState<string | null>(null);
+  const [newActivityName, setNewActivityName] = useState('');
+  const [editingGroup, setEditingGroup] = useState<string | null>(null);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editingActivity, setEditingActivity] = useState<string | null>(null);
+  const [editActivityName, setEditActivityName] = useState('');
+
+  useEffect(() => {
+    moodActivities.groups().then(setGroups).catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const handleAddGroup = async () => {
+    if (!newGroupName.trim()) return;
+    try {
+      const group = await moodActivities.createGroup({ name: newGroupName.trim() });
+      setGroups(prev => [...prev, { ...group, activities: [] }]);
+      setNewGroupName('');
+      setAddingGroup(false);
+    } catch (err) {
+      console.error('Failed to create group:', err);
+    }
+  };
+
+  const handleDeleteGroup = async (id: string) => {
+    if (!confirm('Delete this group and all its activities?')) return;
+    try {
+      await moodActivities.deleteGroup(id);
+      setGroups(prev => prev.filter(g => g.id !== id));
+    } catch (err) {
+      console.error('Failed to delete group:', err);
+    }
+  };
+
+  const handleRenameGroup = async (id: string) => {
+    if (!editGroupName.trim()) return;
+    try {
+      await moodActivities.updateGroup(id, { name: editGroupName.trim() });
+      setGroups(prev => prev.map(g => g.id === id ? { ...g, name: editGroupName.trim() } : g));
+      setEditingGroup(null);
+    } catch (err) {
+      console.error('Failed to rename group:', err);
+    }
+  };
+
+  const handleAddActivity = async (groupId: string) => {
+    if (!newActivityName.trim()) return;
+    try {
+      const activity = await moodActivities.createActivity({ group_id: groupId, name: newActivityName.trim() });
+      setGroups(prev => prev.map(g =>
+        g.id === groupId ? { ...g, activities: [...g.activities, activity] } : g
+      ));
+      setNewActivityName('');
+      setAddingActivityForGroup(null);
+    } catch (err) {
+      console.error('Failed to create activity:', err);
+    }
+  };
+
+  const handleDeleteActivity = async (activityId: string, groupId: string) => {
+    try {
+      await moodActivities.deleteActivity(activityId);
+      setGroups(prev => prev.map(g =>
+        g.id === groupId ? { ...g, activities: g.activities.filter(a => a.id !== activityId) } : g
+      ));
+    } catch (err) {
+      console.error('Failed to delete activity:', err);
+    }
+  };
+
+  const handleRenameActivity = async (activityId: string, groupId: string) => {
+    if (!editActivityName.trim()) return;
+    try {
+      await moodActivities.updateActivity(activityId, { name: editActivityName.trim() });
+      setGroups(prev => prev.map(g =>
+        g.id === groupId ? {
+          ...g,
+          activities: g.activities.map(a => a.id === activityId ? { ...a, name: editActivityName.trim() } : a),
+        } : g
+      ));
+      setEditingActivity(null);
+    } catch (err) {
+      console.error('Failed to rename activity:', err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6">
+        <Loader2 className="animate-spin text-gray-400 mx-auto" size={24} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+        <Cog size={20} className="text-gray-600 dark:text-gray-400" />
+        Mood Activities
+      </h2>
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        Manage activity groups and activities for mood check-ins.
+      </p>
+
+      {groups.length === 0 && !addingGroup && (
+        <p className="text-sm text-gray-400 italic">No activity groups yet.</p>
+      )}
+
+      <div className="space-y-4">
+        {groups.map((group) => (
+          <div key={group.id} className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              {editingGroup === group.id ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <input
+                    type="text"
+                    value={editGroupName}
+                    onChange={(e) => setEditGroupName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleRenameGroup(group.id)}
+                    className="input text-sm flex-1"
+                    autoFocus
+                  />
+                  <button onClick={() => handleRenameGroup(group.id)} className="text-primary-600 text-sm font-medium">Save</button>
+                  <button onClick={() => setEditingGroup(null)} className="text-gray-400 text-sm">Cancel</button>
+                </div>
+              ) : (
+                <>
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{group.name}</h3>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => { setEditingGroup(group.id); setEditGroupName(group.name); }}
+                      className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      title="Rename group"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteGroup(group.id)}
+                      className="p-1 text-gray-400 hover:text-red-500"
+                      title="Delete group"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {group.activities.map((act) => (
+                <span key={act.id} className="group inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+                  {editingActivity === act.id ? (
+                    <span className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={editActivityName}
+                        onChange={(e) => setEditActivityName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleRenameActivity(act.id, group.id)}
+                        className="bg-transparent text-xs w-20 outline-none"
+                        autoFocus
+                      />
+                      <button onClick={() => handleRenameActivity(act.id, group.id)} className="text-primary-500">
+                        <Check size={10} />
+                      </button>
+                    </span>
+                  ) : (
+                    <>
+                      <span
+                        className="cursor-pointer"
+                        onClick={() => { setEditingActivity(act.id); setEditActivityName(act.name); }}
+                      >
+                        {act.name}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteActivity(act.id, group.id)}
+                        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity"
+                      >
+                        <XCircle size={11} />
+                      </button>
+                    </>
+                  )}
+                </span>
+              ))}
+              {addingActivityForGroup === group.id ? (
+                <span className="inline-flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={newActivityName}
+                    onChange={(e) => setNewActivityName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddActivity(group.id)}
+                    placeholder="Name"
+                    className="px-2 py-0.5 text-xs rounded-full border border-gray-300 dark:border-gray-600 bg-transparent w-24 outline-none focus:border-primary-400"
+                    autoFocus
+                  />
+                  <button onClick={() => handleAddActivity(group.id)} className="text-primary-500"><Plus size={12} /></button>
+                  <button onClick={() => { setAddingActivityForGroup(null); setNewActivityName(''); }} className="text-gray-400 text-xs">Cancel</button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setAddingActivityForGroup(group.id)}
+                  className="px-2 py-0.5 text-xs rounded-full border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
+                >
+                  <Plus size={10} className="inline -mt-0.5" /> Add
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {addingGroup ? (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddGroup()}
+            placeholder="Group name"
+            className="input text-sm flex-1"
+            autoFocus
+          />
+          <button onClick={handleAddGroup} className="btn-primary text-sm px-3 py-1.5">Add</button>
+          <button onClick={() => { setAddingGroup(false); setNewGroupName(''); }} className="text-sm text-gray-400 hover:text-gray-600">Cancel</button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAddingGroup(true)}
+          className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 flex items-center gap-1"
+        >
+          <Plus size={14} /> Add Group
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [data, setData] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -526,6 +767,43 @@ export default function Settings() {
           ))}
         </div>
       </div>
+
+      {/* Mood Icon Pack */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          <Smile size={20} className="text-primary-600" />
+          Mood Icons
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Choose which icons represent your mood scale.
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { value: 'emoji' as const, label: 'Emoji' },
+            { value: 'lucide' as const, label: 'Rounded' },
+            { value: 'nature' as const, label: 'Nature' },
+          ]).map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={async () => {
+                await settings.update({ mood_icon_pack: value });
+                setData(prev => prev ? { ...prev, mood_icon_pack: value } : prev);
+              }}
+              className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
+                data?.mood_icon_pack === value
+                  ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                  : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+              }`}
+            >
+              <MoodIconRow pack={value} size={20} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Activity & Group Management */}
+      <ActivityManagementSection />
 
       {/* Notifications Section */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">

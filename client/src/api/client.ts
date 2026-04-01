@@ -130,6 +130,42 @@ export const scrobbles = {
     request<Record<string, any[]>>(`/scrobbles?checkin_ids=${checkinIds.join(',')}`),
 };
 
+// Mood Checkins
+export const moodCheckins = {
+  list: (params?: Record<string, string>) =>
+    request<any[]>(`/mood-checkins?${new URLSearchParams(params)}`),
+  get: (id: string) => request<any>(`/mood-checkins/${id}`),
+  create: (data: any) =>
+    request<any>('/mood-checkins', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) =>
+    request<any>(`/mood-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request<void>(`/mood-checkins/${id}`, { method: 'DELETE' }),
+};
+
+// Mood Activities
+export const moodActivities = {
+  groups: () => request<any[]>('/mood-activities/groups'),
+  createGroup: (data: any) =>
+    request<any>('/mood-activities/groups', { method: 'POST', body: JSON.stringify(data) }),
+  updateGroup: (id: string, data: any) =>
+    request<any>(`/mood-activities/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteGroup: (id: string) =>
+    request<void>(`/mood-activities/groups/${id}`, { method: 'DELETE' }),
+  createActivity: (data: any) =>
+    request<any>('/mood-activities/activities', { method: 'POST', body: JSON.stringify(data) }),
+  updateActivity: (id: string, data: any) =>
+    request<any>(`/mood-activities/activities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteActivity: (id: string) =>
+    request<void>(`/mood-activities/activities/${id}`, { method: 'DELETE' }),
+};
+
+// Timeline
+export const timeline = {
+  list: (params?: Record<string, string>) =>
+    request<any[]>(`/timeline?${new URLSearchParams(params)}`),
+};
+
 // Settings
 export const settings = {
   get: () => request<any>('/settings'),

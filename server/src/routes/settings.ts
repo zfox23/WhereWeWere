@@ -17,7 +17,8 @@ router.get('/', async (_req: Request, res: Response) => {
               COALESCE(us.notifications_enabled, true) AS notifications_enabled,
               COALESCE(us.notify_streak_reminder, true) AS notify_streak_reminder,
               COALESCE(us.notify_weekly_summary, true) AS notify_weekly_summary,
-              COALESCE(us.notify_milestone, true) AS notify_milestone
+              COALESCE(us.notify_milestone, true) AS notify_milestone,
+              COALESCE(us.mood_icon_pack, 'emoji') AS mood_icon_pack
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.id = $1`,
@@ -41,11 +42,12 @@ router.put('/', async (req: Request, res: Response) => {
     const {
       dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
       theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone,
+      mood_icon_pack,
     } = req.body;
 
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone, mood_icon_pack)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
@@ -57,6 +59,7 @@ router.put('/', async (req: Request, res: Response) => {
          notify_streak_reminder = COALESCE($9, user_settings.notify_streak_reminder),
          notify_weekly_summary = COALESCE($10, user_settings.notify_weekly_summary),
          notify_milestone = COALESCE($11, user_settings.notify_milestone),
+         mood_icon_pack = COALESCE($12, user_settings.mood_icon_pack),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -67,6 +70,7 @@ router.put('/', async (req: Request, res: Response) => {
         theme ?? null,
         notifications_enabled ?? null, notify_streak_reminder ?? null,
         notify_weekly_summary ?? null, notify_milestone ?? null,
+        mood_icon_pack ?? null,
       ]
     );
 

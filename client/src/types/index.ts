@@ -122,6 +122,52 @@ export interface ImportResult {
   total_errors: number;
 }
 
+export interface MoodActivityGroup {
+  id: string;
+  name: string;
+  display_order: number;
+  activities: MoodActivity[];
+}
+
+export interface MoodActivity {
+  id: string;
+  group_id: string;
+  name: string;
+  display_order: number;
+}
+
+export interface MoodCheckIn {
+  id: string;
+  user_id: string;
+  mood: number;
+  note: string | null;
+  activities: { id: string; name: string; group_name: string }[];
+  checked_in_at: string;
+  created_at: string;
+}
+
+export interface TimelineItem {
+  type: 'location' | 'mood';
+  id: string;
+  user_id: string;
+  checked_in_at: string;
+  created_at: string;
+  notes: string | null;
+  // Location fields
+  venue_id?: string;
+  venue_name?: string;
+  venue_category?: string;
+  venue_latitude?: number;
+  venue_longitude?: number;
+  venue_timezone?: string | null;
+  parent_venue_id?: string;
+  parent_venue_name?: string;
+  rating?: number | null;
+  // Mood fields
+  mood?: number;
+  activities?: { id: string; name: string; group_name: string }[] | null;
+}
+
 export interface UserSettings {
   username: string;
   email: string;
@@ -136,6 +182,7 @@ export interface UserSettings {
   notify_streak_reminder: boolean;
   notify_weekly_summary: boolean;
   notify_milestone: boolean;
+  mood_icon_pack: 'emoji' | 'lucide' | 'nature';
 }
 
 export interface ImmichAsset {

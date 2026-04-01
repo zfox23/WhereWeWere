@@ -13,6 +13,9 @@ import { importRouter } from './routes/import';
 import { jobsRouter } from './routes/jobs';
 import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
+import { moodCheckinsRouter } from './routes/mood-checkins';
+import { moodActivitiesRouter } from './routes/mood-activities';
+import { timelineRouter } from './routes/timeline';
 
 const app = express();
 
@@ -29,6 +32,9 @@ app.use('/api/v1/import/swarm', importRouter);
 app.use('/api/v1/jobs', jobsRouter);
 app.use('/api/v1/scrobbles', scrobblesRouter);
 app.use('/api/v1/immich', immichRouter);
+app.use('/api/v1/mood-checkins', moodCheckinsRouter);
+app.use('/api/v1/mood-activities', moodActivitiesRouter);
+app.use('/api/v1/timeline', timelineRouter);
 
 // In production, serve client
 if (config.nodeEnv === 'production') {
