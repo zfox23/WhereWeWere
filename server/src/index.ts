@@ -16,6 +16,7 @@ import { immichRouter } from './routes/immich';
 import { moodCheckinsRouter } from './routes/mood-checkins';
 import { moodActivitiesRouter } from './routes/mood-activities';
 import { timelineRouter } from './routes/timeline';
+import { importDaylioRouter } from './routes/import-daylio';
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use('/api/v1/immich', immichRouter);
 app.use('/api/v1/mood-checkins', moodCheckinsRouter);
 app.use('/api/v1/mood-activities', moodActivitiesRouter);
 app.use('/api/v1/timeline', timelineRouter);
+app.use('/api/v1/import/daylio', importDaylioRouter);
 
 // In production, serve client
 if (config.nodeEnv === 'production') {
