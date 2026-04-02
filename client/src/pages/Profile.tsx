@@ -19,6 +19,7 @@ import {
   Briefcase,
   TrendingUp,
   Hash,
+  SmilePlus,
 } from 'lucide-react';
 import { MapContainer, TileLayer, useMap, useMapEvents, Popup as LeafletPopup } from 'react-leaflet';
 import L from 'leaflet';
@@ -32,6 +33,7 @@ import {
   CategoryChart,
   Heatmap,
 } from '../components/Stats';
+import { MoodsTab } from '../components/MoodStats';
 import type {
   Stats as StatsType,
   Streak,
@@ -528,6 +530,7 @@ function CountriesList({ data }: { data: CountryStats[] }) {
 
 export default function Profile() {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'places' | 'moods'>('places');
   const [summary, setSummary] = useState<StatsType | null>(null);
   // const [streak, setStreak] = useState<Streak | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
@@ -608,6 +611,36 @@ export default function Profile() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Profile</h1>
 
+      {/* Tab bar */}
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('places')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === 'places'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          }`}
+        >
+          <MapPin size={14} />
+          Places
+        </button>
+        <button
+          onClick={() => setActiveTab('moods')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === 'moods'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          }`}
+        >
+          <SmilePlus size={14} />
+          Moods
+        </button>
+      </div>
+
+      {activeTab === 'moods' && <MoodsTab />}
+
+      {activeTab === 'places' && (
+        <>
       {/* Summary grid */}
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -660,6 +693,8 @@ export default function Profile() {
 
       {/* Heatmap Map */}
       <HeatmapMap data={mapData} />
+        </>
+      )}
     </div>
   );
 }
