@@ -100,7 +100,7 @@ export default function MoodCheckInPage() {
   return (
     <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 text-gray-900 dark:text-gray-100">
         <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
           <ArrowLeft size={20} />
         </button>
@@ -110,18 +110,18 @@ export default function MoodCheckInPage() {
       {/* Mood selector */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
         <div className="flex items-center justify-around">
-          {[1, 2, 3, 4, 5].map((m) => (
+          {[5, 4, 3, 2, 1].map((m) => (
             <button
               key={m}
               onClick={() => setMood(m)}
               className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all ${
                 mood === m
                   ? `scale-110 bg-gray-100 dark:bg-gray-800 ring-2 ring-offset-1 ${m === 1 ? 'ring-red-400' : m === 2 ? 'ring-orange-400' : m === 3 ? 'ring-yellow-400' : m === 4 ? 'ring-lime-400' : 'ring-green-400'}`
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-800/50 opacity-60 hover:opacity-100'
+                  : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
               }`}
             >
               <MoodIcon mood={m} pack={iconPack} size={32} />
-              <span className={`text-xs font-medium ${mood === m ? MOOD_COLORS[m] : 'text-gray-500'}`}>
+              <span className={`text-xs font-medium ${MOOD_COLORS[m]}`}>
                 {MOOD_LABELS[m]}
               </span>
             </button>
@@ -138,30 +138,29 @@ export default function MoodCheckInPage() {
             className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
           >
             <SettingsIcon size={14} />
-            Manage in Settings
           </Link>
         </div>
 
         {groups.map((group) => (
           <div key={group.id}>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+            <p className="text-base font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
               {group.name}
             </p>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-3">
               {group.activities.map((act) => (
                 <button
                   key={act.id}
                   onClick={() => toggleActivity(act.id)}
-                  className={`px-3 py-1 text-sm rounded-full border transition-all ${
+                  className={`px-1.5 py-1 text-sm rounded-xl border transition-all ${
                     selectedActivities.has(act.id)
                       ? 'bg-primary-500 text-white border-primary-500 shadow-sm shadow-primary-900/20'
                       : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-500'
                   }`}
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex flex-col items-center justify-center gap-1">
                     {act.icon ? (() => {
                       const IconComponent = resolveActivityIcon(act.icon);
-                      return IconComponent ? <IconComponent size={14} className="shrink-0 text-current" /> : null;
+                      return IconComponent ? <IconComponent size={32} className="shrink-0 text-current" /> : null;
                     })() : null}
                     {act.name}
                   </span>
@@ -191,7 +190,7 @@ export default function MoodCheckInPage() {
           type="datetime-local"
           value={checkedInAt}
           onChange={(e) => setCheckedInAt(e.target.value)}
-          className="input w-full"
+          className="input w-full text-gray-900 dark:text-gray-100"
         />
       </div>
 

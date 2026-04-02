@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
 import ActivityGroupManager from '../components/ActivityGroupManager';
 import { PushSettings } from '../components/PushSettings';
-import type { UserSettings, ImportResult, Job, MoodActivityGroup } from '../types';
+import type { UserSettings, ImportResult, Job, MoodActivityGroup, MoodActivity } from '../types';
 
 function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -569,6 +569,61 @@ export default function Settings() {
     loadActivityGroups();
   }, []);
 
+  const sortAllActivitiesAZ = async () => {
+    if (activityGroups.length === 0) return;
+
+    const confirmed = window.confirm(
+      'Change the sort order for all activities within all groups to alphabetical (A-Z)?'
+    );
+    if (!confirmed) return;
+
+    const sortedGroups = activityGroups.map((group) => {
+      const sortedActivities = [...group.activities]
+        .sort((a: MoodActivity, b: MoodActivity) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        )
+        .map((activity, index) => ({ ...activity, display_order: index }));
+
+      return {
+        ...group,
+        activities: sortedActivities,
+      };
+    });
+
+    const updates = sortedGroups.flatMap((group) => {
+      const originalGroup = activityGroups.find((g) => g.id === group.id);
+      if (!originalGroup) return [];
+
+      return group.activities
+        .map((activity, index) => ({
+          id: activity.id,
+          display_order: index,
+          changed: originalGroup.activities[index]?.id !== activity.id,
+        }))
+        .filter((activity) => activity.changed)
+        .map(({ id, display_order }) => ({ id, display_order }));
+    });
+
+    if (updates.length === 0) {
+      setActivityGroups(sortedGroups);
+      return;
+    }
+
+    try {
+      setActivityGroupsLoading(true);
+      await Promise.all(
+        updates.map((activity) =>
+          moodActivities.updateActivity(activity.id, { display_order: activity.display_order })
+        )
+      );
+      setActivityGroups(sortedGroups);
+    } catch (err) {
+      console.error('Failed to sort activities alphabetically:', err);
+    } finally {
+      setActivityGroupsLoading(false);
+    }
+  };
+
   const saveProfile = async () => {
     setProfileSaving(true);
     setProfileMsg(null);
@@ -953,10 +1008,20 @@ export default function Settings() {
 
           {/* Activity Groups Management */}
           <div id="mood-activities" className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-              <Cog size={20} className="text-gray-600 dark:text-gray-400" />
-              Mood Activities
-            </h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <Cog size={20} className="text-gray-600 dark:text-gray-400" />
+                Mood Activities
+              </h2>
+              <button
+                type="button"
+                onClick={sortAllActivitiesAZ}
+                disabled={activityGroupsLoading || activityGroups.length === 0}
+                className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Sort A&gt;Z
+              </button>
+            </div>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Manage and reorder your mood activity groups and activities. Click the palette icon to change an activity's icon.
             </p>

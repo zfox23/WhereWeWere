@@ -38,7 +38,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
     if (index === 0) return;
     const newGroups = [...groups];
     [newGroups[index], newGroups[index - 1]] = [newGroups[index - 1], newGroups[index]];
-    
+
     // Update orders
     setLoading(true);
     try {
@@ -58,7 +58,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
     if (index === groups.length - 1) return;
     const newGroups = [...groups];
     [newGroups[index], newGroups[index + 1]] = [newGroups[index + 1], newGroups[index]];
-    
+
     setLoading(true);
     try {
       await Promise.all([
@@ -79,7 +79,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
     const activities = [...newGroups[groupIndex].activities];
     [activities[activityIndex], activities[activityIndex - 1]] = [activities[activityIndex - 1], activities[activityIndex]];
     newGroups[groupIndex].activities = activities;
-    
+
     setLoading(true);
     try {
       await Promise.all([
@@ -101,7 +101,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
     const actArray = [...newGroups[groupIndex].activities];
     [actArray[activityIndex], actArray[activityIndex + 1]] = [actArray[activityIndex + 1], actArray[activityIndex]];
     newGroups[groupIndex].activities = actArray;
-    
+
     setLoading(true);
     try {
       await Promise.all([
@@ -122,7 +122,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
       await moodActivities.updateActivity(activityId, { icon });
       const newGroups = groups.map(group => ({
         ...group,
-        activities: group.activities.map(act => 
+        activities: group.activities.map(act =>
           act.id === activityId ? { ...act, icon } : act
         ),
       }));
@@ -234,13 +234,18 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
               {group.activities.map((activity, actIndex) => (
                 <div
                   key={activity.id}
-                  className="px-4 py-3 flex items-center justify-between bg-white dark:bg-gray-900/50 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  className="px-2 py-3 flex items-center justify-between bg-white dark:bg-gray-900/50 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     {activity.icon && (
-                      <div className="flex-shrink-0">
+                      <button
+                        onClick={() => setSelectedIconActivity(activity.id)}
+                        disabled={loading}
+                        title="Change icon"
+                        className="flex-shrink-0 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+                      >
                         {renderIcon(activity.icon)}
-                      </div>
+                      </button>
                     )}
                     <span className="text-sm text-gray-700 dark:text-gray-200 truncate">
                       {activity.name}
@@ -255,14 +260,6 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
                       className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded disabled:opacity-50"
                     >
                       <Trash2 size={16} className="text-gray-500 dark:text-gray-200 hover:text-red-600 dark:hover:text-red-300" />
-                    </button>
-                    <button
-                      onClick={() => setSelectedIconActivity(activity.id)}
-                      disabled={loading}
-                      title="Change icon"
-                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50"
-                    >
-                      <Palette size={16} className="text-gray-500 dark:text-gray-200" />
                     </button>
                     <button
                       onClick={() => moveActivityUp(groupIndex, actIndex)}
