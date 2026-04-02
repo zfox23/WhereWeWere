@@ -483,9 +483,22 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
 }
 
 export default function Settings() {
+  type SettingsTab = 'account' | 'mood' | 'integrations' | 'data';
+
+  const isSettingsTab = (value: string | null): value is SettingsTab => {
+    return value === 'account' || value === 'mood' || value === 'integrations' || value === 'data';
+  };
+
+  const getTabFromLocation = (): SettingsTab => {
+    if (window.location.hash === '#mood-activities') return 'mood';
+    const tabParam = new URLSearchParams(window.location.search).get('tab');
+    return isSettingsTab(tabParam) ? tabParam : 'account';
+  };
+
   const [data, setData] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [jobRefreshKey, setJobRefreshKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(getTabFromLocation);
   const [activityGroups, setActivityGroups] = useState<MoodActivityGroup[]>([]);
   const [activityGroupsLoading, setActivityGroupsLoading] = useState(false);
 
@@ -604,6 +617,28 @@ export default function Settings() {
 
   const { theme: currentTheme, setTheme } = useTheme();
 
+  useEffect(() => {
+    const syncTabFromLocation = () => {
+      setActiveTab(getTabFromLocation());
+    };
+
+    syncTabFromLocation();
+    window.addEventListener('popstate', syncTabFromLocation);
+    window.addEventListener('hashchange', syncTabFromLocation);
+
+    return () => {
+      window.removeEventListener('popstate', syncTabFromLocation);
+      window.removeEventListener('hashchange', syncTabFromLocation);
+    };
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('tab') === activeTab) return;
+    url.searchParams.set('tab', activeTab);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [activeTab]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -616,346 +651,388 @@ export default function Settings() {
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
 
-      {/* Profile Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4 scroll-mt-24">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <User size={20} className="text-gray-600 dark:text-gray-400" />
-          Profile
-        </h2>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="input"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Name</label>
-          <input
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className="input"
-            placeholder="Optional"
-          />
-        </div>
-        {profileMsg && (
-          <div className={`flex items-center gap-2 text-sm ${profileMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-            {profileMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
-            {profileMsg.text}
-          </div>
-        )}
-        <button onClick={saveProfile} disabled={profileSaving} className="btn-primary">
-          {profileSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
-          Save Profile
-        </button>
-      </div>
-
-      {/* Appearance Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Sun size={20} className="text-primary-600" />
-          Appearance
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Choose your preferred color scheme.
-        </p>
-        <div className="grid grid-cols-3 gap-2">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {([
-            { value: 'system' as const, label: 'Follow System', icon: Monitor },
-            { value: 'light' as const, label: 'Light', icon: Sun },
-            { value: 'dark' as const, label: 'Dark', icon: Moon },
+            { value: 'account' as const, label: 'Account', icon: User },
+            { value: 'mood' as const, label: 'Mood', icon: Smile },
+            { value: 'integrations' as const, label: 'Integrations', icon: Link2 },
+            { value: 'data' as const, label: 'Data', icon: Download },
           ]).map(({ value, label, icon: Icon }) => (
             <button
               key={value}
-              onClick={() => setTheme(value)}
-              className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
-                currentTheme === value
-                  ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                  : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-              }`}
-            >
-              <Icon size={20} />
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Mood Icon Pack */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Smile size={20} className="text-primary-600" />
-          Mood Icons
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Choose which icons represent your mood scale.
-        </p>
-        <div className="grid grid-cols-3 gap-2">
-          {([
-            { value: 'emoji' as const, label: 'Emoji' },
-            { value: 'lucide' as const, label: 'Rounded' },
-            { value: 'nature' as const, label: 'Nature' },
-          ]).map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={async () => {
-                await settings.update({ mood_icon_pack: value });
-                setData(prev => prev ? { ...prev, mood_icon_pack: value } : prev);
+              onClick={() => {
+                setActiveTab(value);
               }}
-              className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
-                data?.mood_icon_pack === value
-                  ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                  : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-medium transition-all ${
+                activeTab === value
+                  ? 'bg-primary-50 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                  : 'bg-white/50 dark:bg-gray-800/50 border border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
               }`}
             >
-              <MoodIconRow pack={value} size={20} />
+              <Icon size={16} />
               {label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Notifications Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          {notificationsEnabled ? <Bell size={20} className="text-primary-600" /> : <BellOff size={20} className="text-gray-400" />}
-          Notifications
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Control which notifications you receive.
-        </p>
-
-        <div className="space-y-3">
-          <label className="flex items-center justify-between cursor-pointer">
+      {activeTab === 'account' && (
+        <>
+          {/* Profile Section */}
+          <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4 scroll-mt-24">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <User size={20} className="text-gray-600 dark:text-gray-400" />
+              Profile
+            </h2>
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Notifications</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Master toggle for all notifications</p>
-            </div>
-            <button
-              onClick={() => setNotificationsEnabled(!notificationsEnabled)}
-              className={`relative w-11 h-6 rounded-full transition-colors ${
-                notificationsEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-              }`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
-              }`} />
-            </button>
-          </label>
-
-          <div className={`space-y-3 transition-opacity ${notificationsEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-            <div className="border-t border-gray-100 dark:border-gray-800 pt-3" />
-
-            <label className="flex items-center justify-between cursor-pointer">
-              <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Streak Reminders</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Remind you to check in to keep your streak alive</p>
-              </div>
-              <button
-                onClick={() => setNotifyStreak(!notifyStreak)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
-                  notifyStreak ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                }`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                  notifyStreak ? 'translate-x-5' : 'translate-x-0'
-                }`} />
-              </button>
-            </label>
-
-            <label className="flex items-center justify-between cursor-pointer">
-              <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Weekly Summary</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">A recap of your check-ins from the past week</p>
-              </div>
-              <button
-                onClick={() => setNotifyWeekly(!notifyWeekly)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
-                  notifyWeekly ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                }`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                  notifyWeekly ? 'translate-x-5' : 'translate-x-0'
-                }`} />
-              </button>
-            </label>
-
-            <label className="flex items-center justify-between cursor-pointer">
-              <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Milestones</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Celebrate when you hit check-in milestones (100, 500, etc.)</p>
-              </div>
-              <button
-                onClick={() => setNotifyMilestone(!notifyMilestone)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
-                  notifyMilestone ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                }`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                  notifyMilestone ? 'translate-x-5' : 'translate-x-0'
-                }`} />
-              </button>
-            </label>
-          </div>
-        </div>
-
-        {notifMsg && (
-          <div className={`flex items-center gap-2 text-sm ${notifMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-            {notifMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
-            {notifMsg.text}
-          </div>
-        )}
-        <button onClick={saveNotifications} disabled={notifSaving} className="btn-primary">
-          {notifSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
-          Save Notifications
-        </button>
-      </div>
-
-      {/* Integrations Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Link2 size={20} className="text-gray-600 dark:text-gray-400" />
-          Integrations
-        </h2>
-
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Dawarich</h3>
-            <div className="space-y-2">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">URL</label>
-                <input
-                  type="url"
-                  value={dawarichUrl}
-                  onChange={(e) => setDawarichUrl(e.target.value)}
-                  className="input"
-                  placeholder="https://dawarich.example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">API Key</label>
-                <input
-                  type="password"
-                  value={dawarichApiKey}
-                  onChange={(e) => setDawarichApiKey(e.target.value)}
-                  className="input"
-                  placeholder="Enter API key"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Immich</h3>
-            <div className="space-y-2">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">URL</label>
-                <input
-                  type="url"
-                  value={immichUrl}
-                  onChange={(e) => setImmichUrl(e.target.value)}
-                  className="input"
-                  placeholder="https://immich.example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">API Key</label>
-                <input
-                  type="password"
-                  value={immichApiKey}
-                  onChange={(e) => setImmichApiKey(e.target.value)}
-                  className="input"
-                  placeholder="Enter API key"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Maloja</h3>
-            <p className="text-xs text-gray-500 mb-2">
-              Connect to your Maloja scrobble server to show what music you were listening to around each check-in.
-            </p>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">URL</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
               <input
-                type="url"
-                value={malojaUrl}
-                onChange={(e) => setMalojaUrl(e.target.value)}
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="input"
-                placeholder="https://maloja.example.com"
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Name</label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="input"
+                placeholder="Optional"
+              />
+            </div>
+            {profileMsg && (
+              <div className={`flex items-center gap-2 text-sm ${profileMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                {profileMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+                {profileMsg.text}
+              </div>
+            )}
+            <button onClick={saveProfile} disabled={profileSaving} className="btn-primary">
+              {profileSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+              Save Profile
+            </button>
           </div>
-        </div>
 
-        {integrationMsg && (
-          <div className={`flex items-center gap-2 text-sm ${integrationMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-            {integrationMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
-            {integrationMsg.text}
+          {/* Appearance Section */}
+          <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Sun size={20} className="text-primary-600" />
+              Appearance
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Choose your preferred color scheme.
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { value: 'system' as const, label: 'Follow System', icon: Monitor },
+                { value: 'light' as const, label: 'Light', icon: Sun },
+                { value: 'dark' as const, label: 'Dark', icon: Moon },
+              ]).map(({ value, label, icon: Icon }) => (
+                <button
+                  key={value}
+                  onClick={() => setTheme(value)}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
+                    currentTheme === value
+                      ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                      : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  <Icon size={20} />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-        <button onClick={saveIntegrations} disabled={integrationSaving} className="btn-primary">
-          {integrationSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
-          Save Integrations
-        </button>
-      </div>
 
-      {/* Export Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Download size={20} className="text-gray-600 dark:text-gray-400" />
-          Export Data
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Download all your check-in data as a JSON file.
-        </p>
-        <a
-          href="/api/v1/checkins/export"
-          download
-          className="btn-primary inline-flex items-center gap-2"
-        >
-          <Download size={16} />
-          Export JSON
-        </a>
-      </div>
+          {/* Notifications Section */}
+          <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              {notificationsEnabled ? <Bell size={20} className="text-primary-600" /> : <BellOff size={20} className="text-gray-400" />}
+              Notifications
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Control which notifications you receive.
+            </p>
 
-      {/* Import Section */}
-      <SwarmImportSection onImportComplete={() => setJobRefreshKey((k) => k + 1)} />
+            <div className="space-y-3">
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Notifications</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Master toggle for all notifications</p>
+                </div>
+                <button
+                  onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${
+                    notificationsEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`} />
+                </button>
+              </label>
 
-      {/* Daylio Import Section */}
-      <DaylioImportSection />
+              <div className={`space-y-3 transition-opacity ${notificationsEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3" />
 
-      {/* Activity Groups Management */}
-      <div id="mood-activities" className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Cog size={20} className="text-gray-600 dark:text-gray-400" />
-          Mood Activities
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Manage and reorder your mood activity groups and activities. Click the palette icon to change an activity's icon.
-        </p>
-        {activityGroupsLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="animate-spin text-primary-600" size={24} />
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Streak Reminders</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Remind you to check in to keep your streak alive</p>
+                  </div>
+                  <button
+                    onClick={() => setNotifyStreak(!notifyStreak)}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${
+                      notifyStreak ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                      notifyStreak ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </label>
+
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Weekly Summary</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">A recap of your check-ins from the past week</p>
+                  </div>
+                  <button
+                    onClick={() => setNotifyWeekly(!notifyWeekly)}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${
+                      notifyWeekly ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                      notifyWeekly ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </label>
+
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Milestones</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Celebrate when you hit check-in milestones (100, 500, etc.)</p>
+                  </div>
+                  <button
+                    onClick={() => setNotifyMilestone(!notifyMilestone)}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${
+                      notifyMilestone ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                      notifyMilestone ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </label>
+              </div>
+            </div>
+
+            {notifMsg && (
+              <div className={`flex items-center gap-2 text-sm ${notifMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                {notifMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+                {notifMsg.text}
+              </div>
+            )}
+            <button onClick={saveNotifications} disabled={notifSaving} className="btn-primary">
+              {notifSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+              Save Notifications
+            </button>
           </div>
-        ) : activityGroups.length > 0 ? (
-          <ActivityGroupManager
-            groups={activityGroups}
-            onUpdate={setActivityGroups}
-          />
-        ) : (
-          <p className="text-sm text-gray-500 text-center py-8">
-            No activity groups created yet. Create one to get started!
-          </p>
-        )}
-      </div>
+        </>
+      )}
 
-      {/* Jobs Section */}
-      <JobsSection refreshKey={jobRefreshKey} />
+      {activeTab === 'mood' && (
+        <>
+          {/* Mood Icon Pack */}
+          <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Smile size={20} className="text-primary-600" />
+              Mood Icons
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Choose which icons represent your mood scale.
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { value: 'emoji' as const, label: 'Emoji' },
+                { value: 'lucide' as const, label: 'Rounded' },
+                { value: 'nature' as const, label: 'Nature' },
+              ]).map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={async () => {
+                    await settings.update({ mood_icon_pack: value });
+                    setData(prev => prev ? { ...prev, mood_icon_pack: value } : prev);
+                  }}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
+                    data?.mood_icon_pack === value
+                      ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                      : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  <MoodIconRow pack={value} size={20} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Activity Groups Management */}
+          <div id="mood-activities" className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Cog size={20} className="text-gray-600 dark:text-gray-400" />
+              Mood Activities
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Manage and reorder your mood activity groups and activities. Click the palette icon to change an activity's icon.
+            </p>
+            {activityGroupsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="animate-spin text-primary-600" size={24} />
+              </div>
+            ) : activityGroups.length > 0 ? (
+              <ActivityGroupManager
+                groups={activityGroups}
+                onUpdate={setActivityGroups}
+              />
+            ) : (
+              <p className="text-sm text-gray-500 text-center py-8">
+                No activity groups created yet. Create one to get started!
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
+      {activeTab === 'integrations' && (
+        <>
+          {/* Integrations Section */}
+          <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Link2 size={20} className="text-gray-600 dark:text-gray-400" />
+              Integrations
+            </h2>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Dawarich</h3>
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">URL</label>
+                    <input
+                      type="url"
+                      value={dawarichUrl}
+                      onChange={(e) => setDawarichUrl(e.target.value)}
+                      className="input"
+                      placeholder="https://dawarich.example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">API Key</label>
+                    <input
+                      type="password"
+                      value={dawarichApiKey}
+                      onChange={(e) => setDawarichApiKey(e.target.value)}
+                      className="input"
+                      placeholder="Enter API key"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Immich</h3>
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">URL</label>
+                    <input
+                      type="url"
+                      value={immichUrl}
+                      onChange={(e) => setImmichUrl(e.target.value)}
+                      className="input"
+                      placeholder="https://immich.example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">API Key</label>
+                    <input
+                      type="password"
+                      value={immichApiKey}
+                      onChange={(e) => setImmichApiKey(e.target.value)}
+                      className="input"
+                      placeholder="Enter API key"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Maloja</h3>
+                <p className="text-xs text-gray-500 mb-2">
+                  Connect to your Maloja scrobble server to show what music you were listening to around each check-in.
+                </p>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">URL</label>
+                  <input
+                    type="url"
+                    value={malojaUrl}
+                    onChange={(e) => setMalojaUrl(e.target.value)}
+                    className="input"
+                    placeholder="https://maloja.example.com"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {integrationMsg && (
+              <div className={`flex items-center gap-2 text-sm ${integrationMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                {integrationMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+                {integrationMsg.text}
+              </div>
+            )}
+            <button onClick={saveIntegrations} disabled={integrationSaving} className="btn-primary">
+              {integrationSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+              Save Integrations
+            </button>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'data' && (
+        <>
+          {/* Export Section */}
+          <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Download size={20} className="text-gray-600 dark:text-gray-400" />
+              Export Data
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Download all your check-in data as a JSON file.
+            </p>
+            <a
+              href="/api/v1/checkins/export"
+              download
+              className="btn-primary inline-flex items-center gap-2"
+            >
+              <Download size={16} />
+              Export JSON
+            </a>
+          </div>
+
+          {/* Import Section */}
+          <SwarmImportSection onImportComplete={() => setJobRefreshKey((k) => k + 1)} />
+
+          {/* Daylio Import Section */}
+          <DaylioImportSection />
+
+          {/* Jobs Section */}
+          <JobsSection refreshKey={jobRefreshKey} />
+        </>
+      )}
     </div>
   );
 }
