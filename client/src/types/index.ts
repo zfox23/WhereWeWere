@@ -134,6 +134,7 @@ export interface MoodActivity {
   group_id: string;
   name: string;
   display_order: number;
+  icon?: string | null;
 }
 
 export interface MoodCheckIn {
@@ -165,7 +166,7 @@ export interface TimelineItem {
   rating?: number | null;
   // Mood fields
   mood?: number;
-  activities?: { id: string; name: string; group_name: string }[] | null;
+  activities?: { id: string; name: string; group_name: string; icon?: string | null }[] | null;
 }
 
 export interface UserSettings {

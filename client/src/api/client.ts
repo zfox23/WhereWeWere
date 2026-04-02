@@ -108,10 +108,9 @@ export const importApi = {
     }
     return res.json();
   },
-  daylio: async (file: File, timezone: string) => {
+  daylio: async (file: File) => {
     const form = new FormData();
     form.append('file', file);
-    form.append('timezone', timezone);
     const res = await fetch(`${API_BASE}/import/daylio`, {
       method: 'POST',
       body: form,

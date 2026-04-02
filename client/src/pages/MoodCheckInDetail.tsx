@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Clock, Pencil, Trash2, Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
 import { moodCheckins, settings as settingsApi } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from '../components/MoodIcons';
+import { resolveActivityIcon } from '../utils/icons';
 
 function formatDate(dateStr: string): string {
   return new Intl.DateTimeFormat('en-US', {
@@ -74,7 +75,7 @@ export default function MoodCheckInDetail() {
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
       {/* Back button */}
-      <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mb-4">
+      <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white mb-4">
         <ArrowLeft size={16} /> Back
       </button>
 
@@ -95,8 +96,12 @@ export default function MoodCheckInDetail() {
             {checkin.activities.map((act: any) => (
               <span
                 key={act.id}
-                className="px-2.5 py-1 text-sm font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                className="px-2.5 py-1 text-sm font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center gap-1.5"
               >
+                {act.icon ? (() => {
+                  const IconComponent = resolveActivityIcon(act.icon);
+                  return IconComponent ? <IconComponent size={14} className="shrink-0 text-current" /> : null;
+                })() : null}
                 {act.name}
               </span>
             ))}

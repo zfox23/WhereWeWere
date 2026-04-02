@@ -2,11 +2,19 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Clock, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
+import { resolveActivityIcon } from '../utils/icons';
 import type { TimelineItem } from '../types';
 
 interface MoodCheckInCardProps {
   item: TimelineItem;
   iconPack?: string;
+}
+
+function renderIcon(iconName?: string): React.ReactNode {
+  if (!iconName) return null;
+  const IconComponent = resolveActivityIcon(iconName);
+  if (!IconComponent) return null;
+  return <IconComponent size={14} className="flex-shrink-0 text-current" />;
 }
 
 function formatDate(dateStr: string): string {
@@ -48,8 +56,9 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckI
               {activities.map((act) => (
                 <span
                   key={act.id}
-                  className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                  className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center gap-1"
                 >
+                  {act.icon && renderIcon(act.icon)}
                   {act.name}
                 </span>
               ))}

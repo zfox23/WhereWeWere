@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, Trash2, Plus, ArrowLeft } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Loader2, Trash2, ArrowLeft, Settings as SettingsIcon } from 'lucide-react';
 import { moodCheckins, moodActivities, settings as settingsApi } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
+import { resolveActivityIcon } from '../utils/icons';
 import type { MoodActivityGroup } from '../types';
 
 function toLocalDatetimeString(date: Date): string {
@@ -24,12 +25,6 @@ export default function MoodCheckInPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(!!editId);
-
-  // Inline add group/activity
-  const [addingGroupName, setAddingGroupName] = useState('');
-  const [showAddGroup, setShowAddGroup] = useState(false);
-  const [addingActivityGroupId, setAddingActivityGroupId] = useState<string | null>(null);
-  const [addingActivityName, setAddingActivityName] = useState('');
 
   useEffect(() => {
     moodActivities.groups().then(setGroups).catch(console.error);
@@ -56,34 +51,6 @@ export default function MoodCheckInPage() {
       else next.add(id);
       return next;
     });
-  };
-
-  const handleAddGroup = async () => {
-    if (!addingGroupName.trim()) return;
-    try {
-      const group = await moodActivities.createGroup({ name: addingGroupName.trim() });
-      setGroups(prev => [...prev, { ...group, activities: [] }]);
-      setAddingGroupName('');
-      setShowAddGroup(false);
-    } catch (err) {
-      console.error('Failed to create group:', err);
-    }
-  };
-
-  const handleAddActivity = async (groupId: string) => {
-    if (!addingActivityName.trim()) return;
-    try {
-      const activity = await moodActivities.createActivity({ group_id: groupId, name: addingActivityName.trim() });
-      setGroups(prev => prev.map(g =>
-        g.id === groupId
-          ? { ...g, activities: [...g.activities, activity] }
-          : g
-      ));
-      setAddingActivityName('');
-      setAddingActivityGroupId(null);
-    } catch (err) {
-      console.error('Failed to create activity:', err);
-    }
   };
 
   const handleSubmit = async () => {
@@ -164,7 +131,16 @@ export default function MoodCheckInPage() {
 
       {/* Activities */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Activities</h2>
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Activities</h2>
+          <Link
+            to="/settings#mood-activities"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
+          >
+            <SettingsIcon size={14} />
+            Manage in Settings
+          </Link>
+        </div>
 
         {groups.map((group) => (
           <div key={group.id}>
@@ -178,72 +154,22 @@ export default function MoodCheckInPage() {
                   onClick={() => toggleActivity(act.id)}
                   className={`px-3 py-1 text-sm rounded-full border transition-all ${
                     selectedActivities.has(act.id)
-                      ? 'bg-primary-500 text-white border-primary-500'
-                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-primary-300'
+                      ? 'bg-primary-500 text-white border-primary-500 shadow-sm shadow-primary-900/20'
+                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-500'
                   }`}
                 >
-                  {act.name}
+                  <span className="flex items-center gap-1.5">
+                    {act.icon ? (() => {
+                      const IconComponent = resolveActivityIcon(act.icon);
+                      return IconComponent ? <IconComponent size={14} className="shrink-0 text-current" /> : null;
+                    })() : null}
+                    {act.name}
+                  </span>
                 </button>
               ))}
-              {addingActivityGroupId === group.id ? (
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    value={addingActivityName}
-                    onChange={(e) => setAddingActivityName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddActivity(group.id)}
-                    placeholder="Activity name"
-                    className="px-2 py-1 text-sm rounded-full border border-gray-300 dark:border-gray-600 bg-transparent w-28 focus:outline-none focus:border-primary-400"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => handleAddActivity(group.id)}
-                    className="p-1 rounded-full text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20"
-                  >
-                    <Plus size={14} />
-                  </button>
-                  <button
-                    onClick={() => { setAddingActivityGroupId(null); setAddingActivityName(''); }}
-                    className="text-xs text-gray-400 hover:text-gray-600"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setAddingActivityGroupId(group.id)}
-                  className="px-2 py-1 text-sm rounded-full border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
-                >
-                  <Plus size={12} className="inline -mt-0.5" /> Add
-                </button>
-              )}
             </div>
           </div>
         ))}
-
-        {/* Add group */}
-        {showAddGroup ? (
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={addingGroupName}
-              onChange={(e) => setAddingGroupName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddGroup()}
-              placeholder="Group name"
-              className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent flex-1 focus:outline-none focus:border-primary-400"
-              autoFocus
-            />
-            <button onClick={handleAddGroup} className="btn-primary text-sm px-3 py-1.5">Add</button>
-            <button onClick={() => { setShowAddGroup(false); setAddingGroupName(''); }} className="text-sm text-gray-400 hover:text-gray-600">Cancel</button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setShowAddGroup(true)}
-            className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 flex items-center gap-1"
-          >
-            <Plus size={14} /> Add Group
-          </button>
-        )}
       </div>
 
       {/* Note */}
