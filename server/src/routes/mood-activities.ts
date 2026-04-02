@@ -12,7 +12,7 @@ router.get('/groups', async (_req: Request, res: Response) => {
       `SELECT g.id, g.name, g.display_order,
               COALESCE(
                 (SELECT json_agg(json_build_object(
-                  'id', a.id, 'name', a.name, 'group_id', a.group_id, 'display_order', a.display_order
+                  'id', a.id, 'name', a.name, 'group_id', a.group_id, 'display_order', a.display_order, 'icon', a.icon
                 ) ORDER BY a.display_order)
                 FROM mood_activities a WHERE a.group_id = g.id),
                 '[]'::json
@@ -107,7 +107,7 @@ router.delete('/groups/:id', async (req: Request, res: Response) => {
 // POST /activities - create activity
 router.post('/activities', async (req: Request, res: Response) => {
   try {
-    const { group_id, name } = req.body;
+    const { group_id, name, icon } = req.body;
     if (!group_id || !name) {
       return res.status(400).json({ error: 'group_id and name are required' });
     }
@@ -118,10 +118,10 @@ router.post('/activities', async (req: Request, res: Response) => {
     );
 
     const result = await query(
-      `INSERT INTO mood_activities (group_id, name, display_order)
-       VALUES ($1, $2, $3)
+      `INSERT INTO mood_activities (group_id, name, display_order, icon)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [group_id, name, maxOrder.rows[0].next_order]
+      [group_id, name, maxOrder.rows[0].next_order, icon || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -135,16 +135,17 @@ router.post('/activities', async (req: Request, res: Response) => {
 router.put('/activities/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, group_id, display_order } = req.body;
+    const { name, group_id, display_order, icon } = req.body;
 
     const result = await query(
       `UPDATE mood_activities
        SET name = COALESCE($2, name),
            group_id = COALESCE($3, group_id),
-           display_order = COALESCE($4, display_order)
+           display_order = COALESCE($4, display_order),
+           icon = CASE WHEN $5::varchar IS NOT NULL THEN $5 ELSE icon END
        WHERE id = $1
        RETURNING *`,
-      [id, name ?? null, group_id ?? null, display_order ?? null]
+      [id, name ?? null, group_id ?? null, display_order ?? null, icon ?? null]
     );
 
     if (result.rows.length === 0) {

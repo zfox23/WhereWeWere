@@ -49,7 +49,7 @@ router.get('/', async (req: Request, res: Response) => {
              mc.checked_in_at, mc.created_at, mc.updated_at,
              COALESCE(
                (SELECT json_agg(json_build_object(
-                 'id', ma.id, 'name', ma.name, 'group_name', mag.name
+                 'id', ma.id, 'name', ma.name, 'group_name', mag.name, 'icon', ma.icon
                ) ORDER BY mag.display_order, ma.display_order)
                FROM mood_checkin_activities mca
                JOIN mood_activities ma ON mca.activity_id = ma.id
@@ -81,7 +81,7 @@ router.get('/:id', async (req: Request, res: Response) => {
               mc.checked_in_at, mc.created_at, mc.updated_at,
               COALESCE(
                 (SELECT json_agg(json_build_object(
-                  'id', ma.id, 'name', ma.name, 'group_name', mag.name
+                  'id', ma.id, 'name', ma.name, 'group_name', mag.name, 'icon', ma.icon
                 ) ORDER BY mag.display_order, ma.display_order)
                 FROM mood_checkin_activities mca
                 JOIN mood_activities ma ON mca.activity_id = ma.id
