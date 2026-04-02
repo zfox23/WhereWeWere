@@ -446,12 +446,11 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
                   <div className="flex items-center gap-2">
                     <JobStatusIcon status={job.status} />
                     <span className="text-sm font-medium text-gray-900 dark:text-gray-100 capitalize">{job.type}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                      job.status === 'completed' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                      job.status === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' :
-                      job.status === 'failed' ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                      'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                    }`}>
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${job.status === 'completed' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                        job.status === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' :
+                          job.status === 'failed' ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                            'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                      }`}>
                       {job.status}
                     </span>
                   </div>
@@ -521,9 +520,6 @@ export default function Settings() {
 
   // Notifications
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [notifyStreak, setNotifyStreak] = useState(true);
-  const [notifyWeekly, setNotifyWeekly] = useState(true);
-  const [notifyMilestone, setNotifyMilestone] = useState(true);
   const [moodReminderTimes, setMoodReminderTimes] = useState<string[]>([]);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -541,9 +537,6 @@ export default function Settings() {
         setImmichApiKey(s.immich_api_key || '');
         setMalojaUrl(s.maloja_url || '');
         setNotificationsEnabled(s.notifications_enabled ?? true);
-        setNotifyStreak(s.notify_streak_reminder ?? true);
-        setNotifyWeekly(s.notify_weekly_summary ?? true);
-        setNotifyMilestone(s.notify_milestone ?? true);
         setMoodReminderTimes(Array.isArray(s.mood_reminder_times) ? s.mood_reminder_times : []);
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -673,9 +666,6 @@ export default function Settings() {
     try {
       await settings.update({
         notifications_enabled: notificationsEnabled,
-        notify_streak_reminder: notifyStreak,
-        notify_weekly_summary: notifyWeekly,
-        notify_milestone: notifyMilestone,
         mood_reminder_times: normalizedReminderTimes,
       });
       setMoodReminderTimes(normalizedReminderTimes);
@@ -737,11 +727,10 @@ export default function Settings() {
               onClick={() => {
                 setActiveTab(value);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-medium transition-all ${
-                activeTab === value
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-medium transition-all ${activeTab === value
                   ? 'bg-primary-50 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
                   : 'bg-white/50 dark:bg-gray-800/50 border border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-              }`}
+                }`}
             >
               <Icon size={16} />
               {label}
@@ -807,11 +796,10 @@ export default function Settings() {
                 <button
                   key={value}
                   onClick={() => setTheme(value)}
-                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
-                    currentTheme === value
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${currentTheme === value
                       ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
                       : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                  }`}
+                    }`}
                 >
                   <Icon size={20} />
                   {label}
@@ -834,74 +822,18 @@ export default function Settings() {
               <label className="flex items-center justify-between cursor-pointer">
                 <div>
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Notifications</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Master toggle for all notifications</p>
                 </div>
                 <button
                   onClick={() => setNotificationsEnabled(!notificationsEnabled)}
-                  className={`relative w-11 h-6 rounded-full transition-colors ${
-                    notificationsEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                  }`}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${notificationsEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
                 >
-                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                    notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
                 </button>
               </label>
 
               <div className={`space-y-3 transition-opacity ${notificationsEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                <div className="border-t border-gray-100 dark:border-gray-800 pt-3" />
-
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Streak Reminders</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Remind you to check in to keep your streak alive</p>
-                  </div>
-                  <button
-                    onClick={() => setNotifyStreak(!notifyStreak)}
-                    className={`relative w-11 h-6 rounded-full transition-colors ${
-                      notifyStreak ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                      notifyStreak ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </button>
-                </label>
-
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Weekly Summary</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">A recap of your check-ins from the past week</p>
-                  </div>
-                  <button
-                    onClick={() => setNotifyWeekly(!notifyWeekly)}
-                    className={`relative w-11 h-6 rounded-full transition-colors ${
-                      notifyWeekly ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                      notifyWeekly ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </button>
-                </label>
-
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Milestones</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Celebrate when you hit check-in milestones (100, 500, etc.)</p>
-                  </div>
-                  <button
-                    onClick={() => setNotifyMilestone(!notifyMilestone)}
-                    className={`relative w-11 h-6 rounded-full transition-colors ${
-                      notifyMilestone ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                      notifyMilestone ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </button>
-                </label>
-
                 <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
@@ -993,11 +925,10 @@ export default function Settings() {
                     await settings.update({ mood_icon_pack: value });
                     setData(prev => prev ? { ...prev, mood_icon_pack: value } : prev);
                   }}
-                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${
-                    data?.mood_icon_pack === value
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${data?.mood_icon_pack === value
                       ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
                       : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                  }`}
+                    }`}
                 >
                   <MoodIconRow pack={value} size={20} />
                   {label}

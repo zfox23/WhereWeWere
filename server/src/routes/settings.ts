@@ -31,9 +31,6 @@ router.get('/', async (_req: Request, res: Response) => {
               us.maloja_url,
               COALESCE(us.theme, 'system') AS theme,
               COALESCE(us.notifications_enabled, true) AS notifications_enabled,
-              COALESCE(us.notify_streak_reminder, true) AS notify_streak_reminder,
-              COALESCE(us.notify_weekly_summary, true) AS notify_weekly_summary,
-              COALESCE(us.notify_milestone, true) AS notify_milestone,
               COALESCE(us.mood_reminder_times, ARRAY[]::text[]) AS mood_reminder_times,
               COALESCE(us.mood_icon_pack, 'emoji') AS mood_icon_pack
        FROM users u
@@ -58,7 +55,7 @@ router.put('/', async (req: Request, res: Response) => {
   try {
     const {
       dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
-      theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone,
+      theme, notifications_enabled,
       mood_reminder_times,
       mood_icon_pack,
     } = req.body;
@@ -69,7 +66,8 @@ router.put('/', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone, mood_reminder_times, mood_icon_pack)
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled,
+      mood_reminder_times, mood_icon_pack)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
@@ -79,9 +77,6 @@ router.put('/', async (req: Request, res: Response) => {
          maloja_url = COALESCE($6, user_settings.maloja_url),
          theme = COALESCE($7, user_settings.theme),
          notifications_enabled = COALESCE($8, user_settings.notifications_enabled),
-         notify_streak_reminder = COALESCE($9, user_settings.notify_streak_reminder),
-         notify_weekly_summary = COALESCE($10, user_settings.notify_weekly_summary),
-         notify_milestone = COALESCE($11, user_settings.notify_milestone),
          mood_reminder_times = COALESCE($12::text[], user_settings.mood_reminder_times),
          mood_icon_pack = COALESCE($13, user_settings.mood_icon_pack),
          updated_at = NOW()
@@ -92,8 +87,7 @@ router.put('/', async (req: Request, res: Response) => {
         immich_url ?? null, immich_api_key ?? null,
         maloja_url ?? null,
         theme ?? null,
-        notifications_enabled ?? null, notify_streak_reminder ?? null,
-        notify_weekly_summary ?? null, notify_milestone ?? null,
+        notifications_enabled ?? null,
         normalizedReminderTimes,
         mood_icon_pack ?? null,
       ]
