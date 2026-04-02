@@ -411,7 +411,7 @@ router.get('/time-of-day', async (req: Request, res: Response) => {
   }
 });
 
-// GET /busiest-days?user_id= - top 5 calendar days by check-in count
+// GET /busiest-days?user_id= - top 10 calendar days by check-in count
 router.get('/busiest-days', async (req: Request, res: Response) => {
   try {
     const { user_id } = req.query;
@@ -424,7 +424,7 @@ router.get('/busiest-days', async (req: Request, res: Response) => {
        WHERE user_id = $1
        GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
        ORDER BY count DESC, date DESC
-       LIMIT 5`,
+       LIMIT 10`,
       [user_id]
     );
 
@@ -747,6 +747,155 @@ router.get('/additional-stats', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error getting additional stats:', err);
     res.status(500).json({ error: 'Failed to get additional stats' });
+  }
+});
+
+// GET /mood-daily?user_id=&from=&to= - avg/min/max mood per day for line/span chart
+router.get('/mood-daily', async (req: Request, res: Response) => {
+  try {
+    const { user_id, from, to } = req.query;
+    if (!user_id || !from || !to) return res.status(400).json({ error: 'user_id, from, and to are required' });
+
+    const result = await query(
+      `SELECT
+         TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
+         ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
+         MIN(mood)::int AS min_mood,
+         MAX(mood)::int AS max_mood,
+         COUNT(*)::int AS count
+       FROM mood_checkins
+       WHERE user_id = $1
+         AND checked_in_at >= $2::date
+         AND checked_in_at < ($3::date + INTERVAL '1 day')
+       GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
+       ORDER BY date ASC`,
+      [user_id, from, to]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting mood-daily:', err);
+    res.status(500).json({ error: 'Failed to get mood daily stats' });
+  }
+});
+
+// GET /mood-monthly?user_id=&year= - count of each mood per month
+router.get('/mood-monthly', async (req: Request, res: Response) => {
+  try {
+    const { user_id, year } = req.query;
+    if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
+
+    const yearNum = parseInt(year as string, 10);
+
+    const result = await query(
+      `SELECT
+         TO_CHAR(DATE_TRUNC('month', checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
+         mood,
+         COUNT(*)::int AS count
+       FROM mood_checkins
+       WHERE user_id = $1
+         AND EXTRACT(YEAR FROM checked_in_at AT TIME ZONE 'UTC') = $2
+       GROUP BY month, mood
+       ORDER BY month ASC, mood ASC`,
+      [user_id, yearNum]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting mood-monthly:', err);
+    res.status(500).json({ error: 'Failed to get mood monthly stats' });
+  }
+});
+
+// GET /mood-by-day-of-week?user_id= - avg mood per day of week
+router.get('/mood-by-day-of-week', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const result = await query(
+      `SELECT
+         EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC')::int AS dow,
+         ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
+         COUNT(*)::int AS count
+       FROM mood_checkins
+       WHERE user_id = $1
+       GROUP BY dow
+       ORDER BY dow`,
+      [user_id]
+    );
+
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dataMap = new Map(result.rows.map((r: any) => [r.dow, r]));
+    const data = dayNames.map((name, i) => ({
+      day: name,
+      avg_mood: (dataMap.get(i) as any)?.avg_mood ?? null,
+      count: (dataMap.get(i) as any)?.count ?? 0,
+    }));
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error getting mood-by-day-of-week:', err);
+    res.status(500).json({ error: 'Failed to get mood day-of-week stats' });
+  }
+});
+
+// GET /mood-activity-correlations?user_id= - avg mood per activity (min 2 checkins)
+router.get('/mood-activity-correlations', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const result = await query(
+      `SELECT
+         ma.id AS activity_id,
+         ma.name AS activity_name,
+         mag.name AS group_name,
+         ROUND(AVG(mc.mood)::numeric, 2)::float AS avg_mood,
+         COUNT(*)::int AS checkin_count
+       FROM mood_checkin_activities mca
+       JOIN mood_activities ma ON mca.activity_id = ma.id
+       JOIN mood_activity_groups mag ON ma.group_id = mag.id
+       JOIN mood_checkins mc ON mca.mood_checkin_id = mc.id
+       WHERE mc.user_id = $1
+       GROUP BY ma.id, ma.name, mag.name
+       HAVING COUNT(*) >= 2
+       ORDER BY avg_mood DESC`,
+      [user_id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting mood-activity-correlations:', err);
+    res.status(500).json({ error: 'Failed to get mood activity correlations' });
+  }
+});
+
+// GET /mood-heatmap?user_id=&year= - avg mood per day for year-in-pixels
+router.get('/mood-heatmap', async (req: Request, res: Response) => {
+  try {
+    const { user_id, year } = req.query;
+    if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
+
+    const yearNum = parseInt(year as string, 10);
+
+    const result = await query(
+      `SELECT
+         TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
+         ROUND(AVG(mood)::numeric, 1)::float AS avg_mood
+       FROM mood_checkins
+       WHERE user_id = $1
+         AND checked_in_at >= $2::date
+         AND checked_in_at < ($2::date + INTERVAL '1 year')
+       GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
+       ORDER BY date ASC`,
+      [user_id, `${yearNum}-01-01`]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting mood-heatmap:', err);
+    res.status(500).json({ error: 'Failed to get mood heatmap' });
   }
 });
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { Star, MapPin, Clock, Pencil, Camera, Music, ChevronRight, Link2, Map } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { Star, MapPin, Clock, Pencil, Camera, Music, ChevronRight, Link2, Map, Calendar } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
 import type { CheckIn, Scrobble, ImmichAsset } from '../types';
 
@@ -152,6 +152,9 @@ function PhotoStrip({ assets, moreUrl, immichUrl }: { assets: ImmichAsset[]; mor
 export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl, dawarichUrl }: CheckInCardProps) {
   // Self-fetch photos as fallback when parent doesn't manage them (photos === undefined)
   const [selfFetchedAssets, setSelfFetchedAssets] = useState<ImmichAsset[] | null>(null);
+  const { pathname } = useLocation();
+
+  const showOnThisDay = pathname.startsWith("/venues");
 
   useEffect(() => {
     if (photos !== undefined) return; // Parent manages photos
@@ -203,20 +206,6 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
               {checkin.venue_category}
             </span>
           )}
-
-          {/* Date/time */}
-          <div className="flex items-center gap-1.5 flex-wrap mt-2">
-            <Clock size={13} className='text-gray-500 shrink-0' />
-            <Link
-              to={`/checkins/${checkin.id}`}
-              className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-              title="View details"
-            >
-              <time dateTime={checkin.checked_in_at}>
-                {formatDate(checkin.checked_in_at, checkin.venue_timezone)}
-              </time>
-            </Link>
-          </div>
 
           {/* Notes */}
           {checkin.notes && (
@@ -323,6 +312,19 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
               </div>
             </div>
           )}
+
+          {/* Date/time */}
+          <div className="flex items-center gap-1.5 flex-wrap mt-2">
+            <Link
+              to={`/checkins/${checkin.id}`}
+              className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
+              title="View details"
+            >
+              <time dateTime={checkin.checked_in_at}>
+                {formatDate(checkin.checked_in_at, checkin.venue_timezone)}
+              </time>
+            </Link>
+          </div>
         </div>
 
         {/* Action buttons */}
@@ -338,6 +340,15 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
               <Map size={14} />
             </a>
           )}
+          { showOnThisDay &&
+            <Link
+              to={`/?from=${checkin.checked_in_at.substring(0, 10)}&to=${checkin.checked_in_at.substring(0, 10)}`}
+              className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
+              title="View day"
+            >
+              <Calendar size={14} />
+            </Link>
+          }
           <Link
             to={`/check-in?edit=${checkin.id}`}
             className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"

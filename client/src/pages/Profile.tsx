@@ -529,7 +529,7 @@ function CountriesList({ data }: { data: CountryStats[] }) {
 export default function Profile() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<StatsType | null>(null);
-  const [streak, setStreak] = useState<Streak | null>(null);
+  // const [streak, setStreak] = useState<Streak | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
   const [categories, setCategories] = useState<CategoryBreakdown[]>([]);
   const [heatmapDays, setHeatmapDays] = useState<HeatmapDay[]>([]);
@@ -540,18 +540,18 @@ export default function Profile() {
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDayData[]>([]);
   const [busiestDays, setBusiestDays] = useState<BusiestDayData[]>([]);
   const [topCities, setTopCities] = useState<CityData[]>([]);
-  const [insights, setInsights] = useState<InsightData[]>([]);
+  // const [insights, setInsights] = useState<InsightData[]>([]);
   const [reflections, setReflections] = useState<ReflectionYear[]>([]);
-  const [additionalStats, setAdditionalStats] = useState<AdditionalStatsData | null>(null);
+  // const [additionalStats, setAdditionalStats] = useState<AdditionalStatsData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       try {
-        const [s, st, tv, cb, hm, co, md, dow, tod, bd, tc, ins, ref, as_] = await Promise.all([
+        const [s, tv, cb, hm, co, md, dow, tod, bd, tc, ref] = await Promise.all([
           stats.summary(USER_ID),
-          stats.streaks(USER_ID),
+          // stats.streaks(USER_ID),
           stats.topVenues(USER_ID, 10),
           stats.categoryBreakdown(USER_ID),
           stats.heatmap(USER_ID, heatmapYear),
@@ -561,12 +561,12 @@ export default function Profile() {
           stats.timeOfDay(USER_ID),
           stats.busiestDays(USER_ID),
           stats.topCities(USER_ID),
-          stats.insights(USER_ID),
+          // stats.insights(USER_ID),
           stats.reflections(USER_ID),
-          stats.additionalStats(USER_ID),
+          // stats.additionalStats(USER_ID),
         ]);
         setSummary(s);
-        setStreak(st);
+        // setStreak(st);
         setTopVenues(tv);
         setCategories(cb);
         setHeatmapDays(hm);
@@ -580,9 +580,9 @@ export default function Profile() {
         setTimeOfDay(tod);
         setBusiestDays(bd);
         setTopCities(tc);
-        setInsights(ins);
+        // setInsights(ins);
         setReflections(ref);
-        setAdditionalStats(as_);
+        // setAdditionalStats(as_);
       } catch (err) {
         console.error('Failed to load profile data:', err);
       } finally {
@@ -626,7 +626,7 @@ export default function Profile() {
       />
 
       {/* Streaks */}
-      {streak && <StreakCard streak={streak} />}
+      {/* {streak && <StreakCard streak={streak} />} */}
 
       {/* Top venues and categories */}
       <div className="grid md:grid-cols-2 gap-4">
@@ -647,13 +647,13 @@ export default function Profile() {
       </div>
 
       {/* Additional Stats */}
-      <AdditionalStats data={additionalStats} />
+      {/* <AdditionalStats data={additionalStats} /> */}
 
       {/* Countries */}
       <CountriesList data={countries} />
 
       {/* Insights */}
-      <InsightsSection data={insights} />
+      {/* <InsightsSection data={insights} /> */}
 
       {/* Reflections — On This Day */}
       <ReflectionsSection data={reflections} />

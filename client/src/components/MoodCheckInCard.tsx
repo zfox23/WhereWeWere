@@ -79,7 +79,6 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckI
 
           {/* Timestamp */}
           <div className="flex items-center gap-1.5 flex-wrap mt-2">
-            <Clock size={13} className="text-gray-500 shrink-0" />
             <Link
               to={`/mood-checkins/${item.id}`}
               className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"

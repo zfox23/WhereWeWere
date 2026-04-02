@@ -36,3 +36,12 @@ I want to be able to import `.daylio` Daylio export files instead of the less-fu
   - "Year in Pixels" chart: avg mood per day, based on existing `Heatmap` component pattern with mood-color squares
 
 Please also help me delete old Mood entries from the database and start completely fresh.
+
+### Third Task
+When navigating from the home page to a different page (like a checkin detail page or the Profile page) and then back to the home page, my vertical scroll position is reset. Please add a feature to preserve my vertical scroll location when navigating between those pages.
+
+### 4
+Map should be full width of the screen on checkins detail and venue pages. Also show map on checkin page after selecting location.
+
+### Fourth Task
+Please update the Data Export function with all of the latest user data.

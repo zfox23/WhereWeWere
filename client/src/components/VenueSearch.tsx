@@ -70,7 +70,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
   // Load categories for custom venue form
   useEffect(() => {
-    venues.categories().then(setCategories).catch(() => {});
+    venues.categories().then(setCategories).catch(() => { });
   }, []);
 
   const searchNearby = useCallback(
@@ -220,11 +220,10 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                       {venue.name}
                     </span>
                     <span
-                      className={`shrink-0 inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${
-                        venue.source === 'local'
+                      className={`shrink-0 inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${venue.source === 'local'
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                           : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                      }`}
+                        }`}
                     >
                       {venue.source === 'local' ? 'Local' : 'OSM'}
                     </span>
@@ -235,7 +234,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                       .join(' \u00b7 ')}
                   </div>
                 </div>
-                {importing === venue.osm_id && (
+                {importing !== null && importing === venue.osm_id && (
                   <Loader2
                     size={14}
                     className="animate-spin text-gray-400 mt-1 shrink-0"

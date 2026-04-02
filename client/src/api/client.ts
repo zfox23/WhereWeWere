@@ -75,6 +75,16 @@ export const stats = {
     request<any[]>(`/stats/reflections?user_id=${userId}`),
   additionalStats: (userId: string) =>
     request<any>(`/stats/additional-stats?user_id=${userId}`),
+  moodDaily: (userId: string, from: string, to: string) =>
+    request<any[]>(`/stats/mood-daily?user_id=${userId}&from=${from}&to=${to}`),
+  moodMonthly: (userId: string, year: number) =>
+    request<any[]>(`/stats/mood-monthly?user_id=${userId}&year=${year}`),
+  moodByDayOfWeek: (userId: string) =>
+    request<any[]>(`/stats/mood-by-day-of-week?user_id=${userId}`),
+  moodActivityCorrelations: (userId: string) =>
+    request<any[]>(`/stats/mood-activity-correlations?user_id=${userId}`),
+  moodHeatmap: (userId: string, year: number) =>
+    request<any[]>(`/stats/mood-heatmap?user_id=${userId}&year=${year}`),
 };
 
 // Search

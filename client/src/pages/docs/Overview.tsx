@@ -28,7 +28,7 @@ export default function Overview() {
         <li><strong>Check-ins</strong> — Record visits to venues with timestamps, notes, star ratings, and photo uploads.</li>
         <li><strong>Venue database</strong> — Maintain your own venue directory with names, categories, addresses, and coordinates. Import from OpenStreetMap.</li>
         <li><strong>Timeline</strong> — Browse your personal check-in history with date filtering and infinite scroll.</li>
-        <li><strong>Statistics</strong> — Track streaks, most-visited venues, category breakdowns, and a GitHub-style activity heatmap.</li>
+        <li><strong>Statistics</strong> — Track most-visited venues, category breakdowns, and a GitHub-style activity heatmap.</li>
         <li><strong>Search</strong> — Full-text search across both venues and your check-in notes.</li>
         <li><strong>Maps</strong> — Interactive Leaflet maps showing check-in locations and nearby venues.</li>
         <li><strong>Self-hosted</strong> — Run everything on your own hardware via Docker Compose. Your data stays yours.</li>

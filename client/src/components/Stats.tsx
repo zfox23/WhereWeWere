@@ -350,7 +350,7 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
 export default function StatsView() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<StatsType | null>(null);
-  const [streak, setStreak] = useState<Streak | null>(null);
+  // const [streak, setStreak] = useState<Streak | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
   const [categories, setCategories] = useState<CategoryBreakdown[]>([]);
   const [heatmapDays, setHeatmapDays] = useState<HeatmapDay[]>([]);
@@ -361,15 +361,15 @@ export default function StatsView() {
     async function loadStats() {
       setLoading(true);
       try {
-        const [s, st, tv, cb, hm] = await Promise.all([
+        const [s, tv, cb, hm] = await Promise.all([
           stats.summary(USER_ID),
-          stats.streaks(USER_ID),
+          // stats.streaks(USER_ID),
           stats.topVenues(USER_ID, 10),
           stats.categoryBreakdown(USER_ID),
           stats.heatmap(USER_ID, heatmapYear),
         ]);
         setSummary(s);
-        setStreak(st);
+        // setStreak(st);
         setTopVenues(tv);
         setCategories(cb);
         setHeatmapDays(hm);
@@ -418,7 +418,7 @@ export default function StatsView() {
       )}
 
       {/* Streaks */}
-      {streak && <StreakCard streak={streak} />}
+      {/* {streak && <StreakCard streak={streak} />} */}
 
       {/* Two column layout for top venues and categories */}
       <div className="grid md:grid-cols-2 gap-4">
