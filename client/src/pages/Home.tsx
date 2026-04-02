@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile } from 'lucide-react';
-import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
+import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
+import { MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
@@ -97,6 +98,7 @@ function ExpandableFAB() {
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<TimelineItem[]>([]);
+  const [activityOptions, setActivityOptions] = useState<{ id: string; name: string; groupName: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -118,6 +120,23 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
+  // Load all mood activities for Activity filter dropdown
+  useEffect(() => {
+    moodActivities.groups().then((groups) => {
+      const options = (groups || []).flatMap((g: any) =>
+        (g.activities || []).map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          groupName: g.name,
+        }))
+      );
+      options.sort((a, b) => a.groupName.localeCompare(b.groupName) || a.name.localeCompare(b.name));
+      setActivityOptions(options);
+    }).catch(() => {
+      setActivityOptions([]);
+    });
+  }, []);
+
   // Read filters from URL params
   const searchQuery = searchParams.get('q') || '';
   const fromDate = searchParams.get('from') || '';
@@ -125,15 +144,17 @@ export default function Home() {
   const venueId = searchParams.get('venue_id') || '';
   const category = searchParams.get('category') || '';
   const country = searchParams.get('country') || '';
+  const mood = searchParams.get('mood') || '';
+  const activity = searchParams.get('activity') || '';
 
   const [showFilters, setShowFilters] = useState(false);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
-    if (fromDate || toDate || venueId || category || country) {
+    if (fromDate || toDate || venueId || category || country || mood || activity) {
       setShowFilters(true);
     }
-  }, []);
+  }, [fromDate, toDate, venueId, category, country, mood, activity]);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -172,6 +193,8 @@ export default function Home() {
         if (venueId) params.venue_id = venueId;
         if (category) params.category = category;
         if (country) params.country = country;
+  if (mood) params.mood = mood;
+  if (activity) params.activity = activity;
 
         const data = await timelineApi.list(params);
         if (append) {
@@ -188,7 +211,7 @@ export default function Home() {
         setLoadingMore(false);
       }
     },
-    [searchQuery, fromDate, toDate, venueId, category, country]
+    [searchQuery, fromDate, toDate, venueId, category, country, mood, activity]
   );
 
   // Initial load + reload on filter changes
@@ -288,7 +311,7 @@ export default function Home() {
     setShowFilters(false);
   };
 
-  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country;
+  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity;
   const rawGrouped = groupByDate(items);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
 
@@ -306,6 +329,11 @@ export default function Home() {
     if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
     if (toDate) filterPills.push({ label: `Until: ${toDate}`, key: 'to' });
   }
+  if (mood) {
+    const moodNum = parseInt(mood, 10);
+    filterPills.push({ label: `Mood: ${moodNum >= 1 && moodNum <= 5 ? MOOD_LABELS[moodNum] : mood}`, key: 'mood' });
+  }
+  if (activity) filterPills.push({ label: `Activity: ${activity}`, key: 'activity' });
 
   return (
     <div className="space-y-4">
@@ -431,6 +459,49 @@ export default function Home() {
                 placeholder="e.g. United States"
               />
             </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">Mood</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {([1, 2, 3, 4, 5] as const).map((m) => {
+                const isActive = mood === String(m);
+                return (
+                  <button
+                    key={m}
+                    onClick={() => setFilter('mood', isActive ? '' : String(m))}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
+                      isActive
+                        ? 'bg-indigo-500 text-white border-indigo-500'
+                        : 'bg-white/70 dark:bg-gray-800/70 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-indigo-300 dark:hover:border-indigo-600'
+                    }`}
+                  >
+                    <span className={isActive ? '' : MOOD_COLORS[m]}>{MOOD_LABELS[m]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">Activity</label>
+            <select
+              value={activity}
+              onChange={(e) => setFilter('activity', e.target.value)}
+              className="input"
+            >
+              <option value="">All activities</option>
+              {activity && !activityOptions.some((o) => o.name === activity) && (
+                <option value={activity}>{activity} (current)</option>
+              )}
+              {Array.from(new Set(activityOptions.map((o) => o.groupName))).map((groupName) => (
+                <optgroup key={groupName} label={groupName}>
+                  {activityOptions
+                    .filter((o) => o.groupName === groupName)
+                    .map((o) => (
+                      <option key={o.id} value={o.name}>{o.name}</option>
+                    ))}
+                </optgroup>
+              ))}
+            </select>
           </div>
         </div>
       )}

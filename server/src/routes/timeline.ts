@@ -20,6 +20,66 @@ router.get('/', async (req: Request, res: Response) => {
       limit = '50', offset = '0',
     } = req.query;
 
+    // Mood/activity filters always return only mood checkins — handle as early return
+    if (req.query.mood || req.query.activity) {
+      const mp: unknown[] = [];
+      const mc: string[] = [];
+      let mi = 1;
+
+      if (user_id) { mc.push(`mc.user_id = $${mi}`); mp.push(user_id); mi++; }
+      if (from)    { mc.push(`mc.checked_in_at >= $${mi}`); mp.push(from); mi++; }
+      if (to)      { mc.push(`mc.checked_in_at <= $${mi}`); mp.push(to); mi++; }
+
+      if (req.query.mood) {
+        const mv = parseInt(req.query.mood as string, 10);
+        if (mv >= 1 && mv <= 5) { mc.push(`mc.mood = $${mi}`); mp.push(mv); mi++; }
+      }
+
+      if (req.query.activity) {
+        mc.push(
+          `EXISTS (
+            SELECT 1 FROM mood_checkin_activities mca2
+            JOIN mood_activities ma2 ON mca2.activity_id = ma2.id
+            WHERE mca2.mood_checkin_id = mc.id
+              AND ma2.name ILIKE $${mi}
+          )`
+        );
+        mp.push(req.query.activity as string);
+        mi++;
+      }
+
+      mp.push(parseInt(limit as string, 10));
+      const lp = `$${mi}`; mi++;
+      mp.push(parseInt(offset as string, 10));
+      const op = `$${mi}`;
+
+      const wh = mc.length > 0 ? `WHERE ${mc.join(' AND ')}` : '';
+      const sql = `
+        SELECT 'mood' AS type, mc.id, mc.user_id, NULL AS venue_id, mc.note AS notes, NULL AS rating,
+               mc.checked_in_at, mc.created_at,
+               NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
+               NULL AS venue_category,
+               NULL AS parent_venue_id, NULL AS parent_venue_name,
+               mc.mood,
+               COALESCE(
+                 (SELECT json_agg(json_build_object(
+                   'id', ma.id, 'name', ma.name, 'group_name', mag.name, 'icon', ma.icon
+                 ) ORDER BY mag.display_order, ma.display_order)
+                 FROM mood_checkin_activities mca
+                 JOIN mood_activities ma ON mca.activity_id = ma.id
+                 JOIN mood_activity_groups mag ON ma.group_id = mag.id
+                 WHERE mca.mood_checkin_id = mc.id),
+                 '[]'::json
+               ) AS activities
+        FROM mood_checkins mc
+        ${wh}
+        ORDER BY mc.checked_in_at DESC
+        LIMIT ${lp} OFFSET ${op}
+      `;
+      const result = await query(sql, mp);
+      return res.json(result.rows.map(addTimezone));
+    }
+
     const params: unknown[] = [];
     const locationConditions: string[] = [];
     const moodConditions: string[] = [];
