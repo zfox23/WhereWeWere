@@ -529,8 +529,19 @@ function CountriesList({ data }: { data: CountryStats[] }) {
 }
 
 export default function Profile() {
+  type ProfileTab = 'places' | 'moods';
+
+  const isProfileTab = (value: string | null): value is ProfileTab => {
+    return value === 'places' || value === 'moods';
+  };
+
+  const getTabFromLocation = (): ProfileTab => {
+    const tabParam = new URLSearchParams(window.location.search).get('tab');
+    return isProfileTab(tabParam) ? tabParam : 'places';
+  };
+
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'places' | 'moods'>('places');
+  const [activeTab, setActiveTab] = useState<ProfileTab>(getTabFromLocation);
   const [summary, setSummary] = useState<StatsType | null>(null);
   // const [streak, setStreak] = useState<Streak | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
@@ -598,6 +609,28 @@ export default function Profile() {
   useEffect(() => {
     stats.heatmap(USER_ID, heatmapYear).then(setHeatmapDays).catch(console.error);
   }, [heatmapYear]);
+
+  useEffect(() => {
+    const syncTabFromLocation = () => {
+      setActiveTab(getTabFromLocation());
+    };
+
+    syncTabFromLocation();
+    window.addEventListener('popstate', syncTabFromLocation);
+    window.addEventListener('hashchange', syncTabFromLocation);
+
+    return () => {
+      window.removeEventListener('popstate', syncTabFromLocation);
+      window.removeEventListener('hashchange', syncTabFromLocation);
+    };
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('tab') === activeTab) return;
+    url.searchParams.set('tab', activeTab);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [activeTab]);
 
   if (loading) {
     return (

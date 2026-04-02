@@ -53,7 +53,7 @@ function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => voi
         Swarm Import
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400">
-        Import your check-in history from Swarm CSV export files. Upload all your CSV files at once for batch import.
+        Import your check-in history from Swarm CSV export files.
       </p>
 
       <div
@@ -64,9 +64,8 @@ function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => voi
         <p className="text-sm text-gray-600 dark:text-gray-400">
           {selectedFiles.length > 0
             ? `${selectedFiles.length} file${selectedFiles.length !== 1 ? 's' : ''} selected`
-            : 'Click to select CSV files'}
+            : 'Select .csv files'}
         </p>
-        <p className="text-xs text-gray-400 mt-1">Select your CSV files</p>
         <input
           ref={fileInputRef}
           type="file"
@@ -199,7 +198,7 @@ function DaylioImportSection() {
         Daylio Import
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400">
-        Import your mood history from a Daylio backup file. Export your Daylio data from the app and select the `.daylio` file.
+        Import your mood history from a Daylio backup file.
       </p>
 
       <div
@@ -208,9 +207,8 @@ function DaylioImportSection() {
       >
         <Upload size={24} className="mx-auto text-gray-400 mb-2" />
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          {selectedFile ? selectedFile.name : 'Click to select a Daylio backup file'}
+          {selectedFile ? selectedFile.name : 'Select a .daylio backup file'}
         </p>
-        <p className="text-xs text-gray-400 mt-1">Select your .daylio export file</p>
         <input
           ref={fileInputRef}
           type="file"
@@ -397,36 +395,39 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
         <Cog size={20} className="text-gray-600 dark:text-gray-400" />
         Jobs
       </h2>
-      <p className="text-sm text-gray-500 dark:text-gray-400">
-        Run background tasks to enrich venue data or sync with external services.
-      </p>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => startJob('backfill')}
-          disabled={starting || hasActiveJob}
-          className="btn-primary"
-        >
-          {starting ? (
-            <>
-              <Loader2 size={16} className="animate-spin mr-2" />
-              Starting...
-            </>
-          ) : (
-            <>
-              <Play size={16} className="mr-2" />
-              Backfill Venues
-            </>
-          )}
-        </button>
-        <button
-          onClick={() => startJob('dawarich-export')}
-          disabled={starting || hasActiveJob}
-          className="btn-secondary"
-        >
-          <Send size={16} className="mr-2" />
-          Export to Dawarich
-        </button>
+      <div className="flex flex-col items-start gap-4">
+        <div className='flex flex-col'>
+          <button
+            onClick={() => startJob('backfill')}
+            disabled={starting || hasActiveJob}
+            className="btn-primary"
+          >
+            {starting ? (
+              <>
+                <Loader2 size={16} className="animate-spin mr-2" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <Play size={16} className="mr-2" />
+                Backfill Venues
+              </>
+            )}
+          </button>
+          <p className="text-xs text-gray-400 mt-1">Reverse geocode and categorize venues</p>
+        </div>
+        <div className='flex flex-col'>
+          <button
+            onClick={() => startJob('dawarich-export')}
+            disabled={true || starting || hasActiveJob}
+            className="btn-secondary"
+          >
+            <Send size={16} className="mr-2" />
+            Export to Dawarich
+          </button>
+          <p className="text-xs text-gray-400 mt-1">Export Places to Dawarich (disabled; untested)</p>
+        </div>
       </div>
 
       {error && (
@@ -447,9 +448,9 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
                     <JobStatusIcon status={job.status} />
                     <span className="text-sm font-medium text-gray-900 dark:text-gray-100 capitalize">{job.type}</span>
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${job.status === 'completed' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                        job.status === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' :
-                          job.status === 'failed' ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                            'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                      job.status === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' :
+                        job.status === 'failed' ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                          'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                       }`}>
                       {job.status}
                     </span>
@@ -523,6 +524,7 @@ export default function Settings() {
   const [moodReminderTimes, setMoodReminderTimes] = useState<string[]>([]);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const notificationsLoadedRef = useRef(false);
 
   useEffect(() => {
     async function loadSettings() {
@@ -546,6 +548,12 @@ export default function Settings() {
     }
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      notificationsLoadedRef.current = true;
+    }
+  }, [loading]);
 
   useEffect(() => {
     async function loadActivityGroups() {
@@ -649,9 +657,8 @@ export default function Settings() {
     }
   };
 
-  const saveNotifications = async () => {
-    setNotifSaving(true);
-    setNotifMsg(null);
+  useEffect(() => {
+    if (!notificationsLoadedRef.current) return;
 
     const normalizedReminderTimes = Array.from(
       new Set(moodReminderTimes.map((t) => t.trim()).filter((t) => t.length > 0))
@@ -659,24 +666,34 @@ export default function Settings() {
 
     if (normalizedReminderTimes.some((t) => !TIME_24H_PATTERN.test(t))) {
       setNotifMsg({ type: 'error', text: 'Reminder times must use HH:MM format.' });
-      setNotifSaving(false);
       return;
     }
 
-    try {
-      await settings.update({
-        notifications_enabled: notificationsEnabled,
-        mood_reminder_times: normalizedReminderTimes,
-      });
+    const shouldNormalizeState = normalizedReminderTimes.join(',') !== moodReminderTimes.join(',');
+    if (shouldNormalizeState) {
       setMoodReminderTimes(normalizedReminderTimes);
-      setNotifMsg({ type: 'success', text: 'Notification preferences saved.' });
-      window.dispatchEvent(new Event('mood-reminders-updated'));
-    } catch (err) {
-      setNotifMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });
-    } finally {
-      setNotifSaving(false);
+      return;
     }
-  };
+
+    const timeout = setTimeout(async () => {
+      setNotifSaving(true);
+      setNotifMsg(null);
+      try {
+        await settings.update({
+          notifications_enabled: notificationsEnabled,
+          mood_reminder_times: normalizedReminderTimes,
+        });
+        setNotifMsg({ type: 'success', text: 'Notification preferences saved.' });
+        window.dispatchEvent(new Event('mood-reminders-updated'));
+      } catch (err) {
+        setNotifMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });
+      } finally {
+        setNotifSaving(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timeout);
+  }, [notificationsEnabled, moodReminderTimes]);
 
   const { theme: currentTheme, setTheme } = useTheme();
 
@@ -728,8 +745,8 @@ export default function Settings() {
                 setActiveTab(value);
               }}
               className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-medium transition-all ${activeTab === value
-                  ? 'bg-primary-50 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                  : 'bg-white/50 dark:bg-gray-800/50 border border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                ? 'bg-primary-50 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                : 'bg-white/50 dark:bg-gray-800/50 border border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                 }`}
             >
               <Icon size={16} />
@@ -797,8 +814,8 @@ export default function Settings() {
                   key={value}
                   onClick={() => setTheme(value)}
                   className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${currentTheme === value
-                      ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                      : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }`}
                 >
                   <Icon size={20} />
@@ -888,16 +905,15 @@ export default function Settings() {
               </div>
             </div>
 
+            {notifSaving && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">Saving changes...</p>
+            )}
             {notifMsg && (
               <div className={`flex items-center gap-2 text-sm ${notifMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
                 {notifMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
                 {notifMsg.text}
               </div>
             )}
-            <button onClick={saveNotifications} disabled={notifSaving} className="btn-primary">
-              {notifSaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
-              Save Notifications
-            </button>
           </div>
         </>
       )}
@@ -926,8 +942,8 @@ export default function Settings() {
                     setData(prev => prev ? { ...prev, mood_icon_pack: value } : prev);
                   }}
                   className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${data?.mood_icon_pack === value
-                      ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                      : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }`}
                 >
                   <MoodIconRow pack={value} size={20} />
@@ -1070,6 +1086,15 @@ export default function Settings() {
 
       {activeTab === 'data' && (
         <>
+          {/* Import Section */}
+          <SwarmImportSection onImportComplete={() => setJobRefreshKey((k) => k + 1)} />
+
+          {/* Daylio Import Section */}
+          <DaylioImportSection />
+
+          {/* Jobs Section */}
+          <JobsSection refreshKey={jobRefreshKey} />
+
           {/* Export Section */}
           <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -1088,15 +1113,6 @@ export default function Settings() {
               Export JSON
             </a>
           </div>
-
-          {/* Import Section */}
-          <SwarmImportSection onImportComplete={() => setJobRefreshKey((k) => k + 1)} />
-
-          {/* Daylio Import Section */}
-          <DaylioImportSection />
-
-          {/* Jobs Section */}
-          <JobsSection refreshKey={jobRefreshKey} />
         </>
       )}
     </div>

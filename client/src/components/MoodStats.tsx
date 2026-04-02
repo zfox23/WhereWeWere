@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp,
@@ -58,7 +58,7 @@ type MoodCount = { mood: number; count: number };
 
 // ─── SVG Line/Span Chart ──────────────────────────────────────────────────────
 
-const SW = 560, SH = 180, PL = 30, PR = 10, PT = 12, PB = 28;
+const SW = 760, SH = 280, PL = 42, PR = 16, PT = 14, PB = 34;
 const CW = SW - PL - PR;
 const CH = SH - PT - PB;
 
@@ -70,6 +70,18 @@ function toY(m: number): number {
 }
 
 function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'span' }) {
+  const navigate = useNavigate();
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+
+  useEffect(() => {
+    setActiveIndex(null);
+    setPinnedIndex(null);
+    setIsScrubbing(false);
+  }, [data, mode]);
+
   if (!data.length) {
     return (
       <div className="flex items-center justify-center h-36 text-sm text-gray-400">
@@ -118,89 +130,189 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
   const TC = 'rgba(128,128,128,0.8)';
   const AC = 'rgba(128,128,128,0.5)';
 
+  const getIndexFromClientX = (clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+
+    const svgPoint = pt.matrixTransform(ctm.inverse());
+    const clampedX = Math.max(PL, Math.min(SW - PR, svgPoint.x));
+    if (n <= 1) return 0;
+    const idx = Math.round(((clampedX - PL) / CW) * (n - 1));
+    return Math.max(0, Math.min(n - 1, idx));
+  };
+
+  const updateActiveFromPointer = (clientX: number, clientY: number) => {
+    const idx = getIndexFromClientX(clientX, clientY);
+    if (idx === null) return;
+    setActiveIndex(idx);
+  };
+
+  const displayIndex = activeIndex ?? pinnedIndex;
+  const selectedPoint = displayIndex !== null ? data[displayIndex] : null;
+  const selectedX = displayIndex !== null ? toX(displayIndex, n) : null;
+
   return (
-    <svg viewBox={`0 0 ${SW} ${SH}`} className="w-full" style={{ height: SH, display: 'block' }}>
-      {/* Y grid lines + labels */}
-      {[1, 2, 3, 4, 5].map((m) => (
-        <g key={m}>
-          <line x1={PL} y1={toY(m)} x2={SW - PR} y2={toY(m)} stroke={GC} strokeWidth={1} />
-          <text
-            x={PL - 4}
-            y={toY(m) + 4}
-            textAnchor="end"
-            fontSize={10}
-            fill={TC}
-            fontFamily="system-ui, sans-serif"
-          >
-            {m}
-          </text>
-        </g>
-      ))}
+    <div className="relative">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${SW} ${SH}`}
+        className="w-full"
+        style={{ height: SH, display: 'block', touchAction: 'none' }}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setIsScrubbing(true);
+          updateActiveFromPointer(e.clientX, e.clientY);
+        }}
+        onPointerMove={(e) => {
+          if (!isScrubbing) return;
+          updateActiveFromPointer(e.clientX, e.clientY);
+        }}
+        onPointerUp={(e) => {
+          if (!isScrubbing) return;
+          const idx = getIndexFromClientX(e.clientX, e.clientY);
+          setIsScrubbing(false);
+          setActiveIndex(null);
+          if (idx !== null) setPinnedIndex(idx);
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }}
+        onPointerCancel={() => {
+          setIsScrubbing(false);
+          setActiveIndex(null);
+        }}
+      >
+        {/* Y grid lines + labels */}
+        {[1, 2, 3, 4, 5].map((m) => (
+          <g key={m}>
+            <line x1={PL} y1={toY(m)} x2={SW - PR} y2={toY(m)} stroke={GC} strokeWidth={1} />
+            <text
+              x={PL - 4}
+              y={toY(m) + 4}
+              textAnchor="end"
+              fontSize={10}
+              fill={TC}
+              fontFamily="system-ui, sans-serif"
+            >
+              {m}
+            </text>
+          </g>
+        ))}
 
-      {/* X axis baseline */}
-      <line x1={PL} y1={PT + CH} x2={SW - PR} y2={PT + CH} stroke={AC} strokeWidth={1} />
+        {/* X axis baseline */}
+        <line x1={PL} y1={PT + CH} x2={SW - PR} y2={PT + CH} stroke={AC} strokeWidth={1} />
 
-      {/* X axis ticks + labels */}
-      {xticks.map((t) => (
-        <g key={t.label}>
-          <line x1={t.x} y1={PT + CH} x2={t.x} y2={PT + CH + 4} stroke={AC} strokeWidth={1} />
-          <text
-            x={t.x}
-            y={SH - 4}
-            textAnchor="middle"
-            fontSize={9}
-            fill={TC}
-            fontFamily="system-ui, sans-serif"
-          >
-            {t.label}
-          </text>
-        </g>
-      ))}
+        {/* X axis ticks + labels */}
+        {xticks.map((t) => (
+          <g key={t.label}>
+            <line x1={t.x} y1={PT + CH} x2={t.x} y2={PT + CH + 4} stroke={AC} strokeWidth={1} />
+            <text
+              x={t.x}
+              y={SH - 4}
+              textAnchor="middle"
+              fontSize={9}
+              fill={TC}
+              fontFamily="system-ui, sans-serif"
+            >
+              {t.label}
+            </text>
+          </g>
+        ))}
 
-      {mode === 'span' && (
-        <>
-          <path d={spanArea} fill="rgba(99,102,241,0.18)" />
-          <path d={maxPath} fill="none" stroke="rgba(99,102,241,0.45)" strokeWidth={1} strokeDasharray="3 2" />
-          <path d={minPath} fill="none" stroke="rgba(99,102,241,0.45)" strokeWidth={1} strokeDasharray="3 2" />
-          <path
-            d={avgPath}
-            fill="none"
-            stroke="#6366f1"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </>
+        {mode === 'span' && (
+          <>
+            <path d={spanArea} fill="rgba(99,102,241,0.18)" />
+            <path d={maxPath} fill="none" stroke="rgba(99,102,241,0.45)" strokeWidth={1} strokeDasharray="3 2" />
+            <path d={minPath} fill="none" stroke="rgba(99,102,241,0.45)" strokeWidth={1} strokeDasharray="3 2" />
+            <path
+              d={avgPath}
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        )}
+
+        {mode === 'line' && (
+          <>
+            <path
+              d={
+                avgPath +
+                ` L ${toX(n - 1, n).toFixed(1)} ${(PT + CH).toFixed(1)} L ${toX(0, n).toFixed(1)} ${(PT + CH).toFixed(1)} Z`
+              }
+              fill="rgba(99,102,241,0.08)"
+            />
+            <path
+              d={avgPath}
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {n <= 45 &&
+              data.map((d, i) => (
+                <circle key={d.date} cx={toX(i, n)} cy={toY(d.avg_mood)} r={2.5} fill="#6366f1">
+                  <title>
+                    {d.date}: avg {d.avg_mood.toFixed(1)} ({d.count} {d.count === 1 ? 'entry' : 'entries'})
+                  </title>
+                </circle>
+              ))}
+          </>
+        )}
+
+        {selectedPoint && selectedX !== null && (
+          <>
+            <line
+              x1={selectedX}
+              y1={PT}
+              x2={selectedX}
+              y2={PT + CH}
+              stroke="rgba(99,102,241,0.5)"
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+            />
+            <circle cx={selectedX} cy={toY(selectedPoint.avg_mood)} r={4} fill="#6366f1" />
+          </>
+        )}
+      </svg>
+
+      {selectedPoint && selectedX !== null && (
+        <div
+          className="absolute top-2 px-2.5 py-1 rounded-md bg-gray-900/90 text-white text-xs font-medium whitespace-nowrap pointer-events-none"
+          style={{
+            left: `${(selectedX / SW) * 100}%`,
+            transform: 'translateX(-50%)',
+          }}
+        >
+          {selectedPoint.date} • avg {selectedPoint.avg_mood.toFixed(1)}
+        </div>
       )}
 
-      {mode === 'line' && (
-        <>
-          <path
-            d={
-              avgPath +
-              ` L ${toX(n - 1, n).toFixed(1)} ${(PT + CH).toFixed(1)} L ${toX(0, n).toFixed(1)} ${(PT + CH).toFixed(1)} Z`
-            }
-            fill="rgba(99,102,241,0.08)"
-          />
-          <path
-            d={avgPath}
-            fill="none"
-            stroke="#6366f1"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          {n <= 45 &&
-            data.map((d, i) => (
-              <circle key={d.date} cx={toX(i, n)} cy={toY(d.avg_mood)} r={2.5} fill="#6366f1">
-                <title>
-                  {d.date}: avg {d.avg_mood.toFixed(1)} ({d.count} {d.count === 1 ? 'entry' : 'entries'})
-                </title>
-              </circle>
-            ))}
-        </>
+      {pinnedIndex !== null && !isScrubbing && (
+        <div className="mt-2 flex justify-center">
+          <button
+            type="button"
+            onClick={() => {
+              const day = data[pinnedIndex]?.date;
+              if (!day) return;
+              navigate(`/?from=${day}&to=${day}`);
+            }}
+            className="text-xs px-2.5 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/35"
+          >
+            Open {data[pinnedIndex]?.date} in Home
+          </button>
+        </div>
       )}
-    </svg>
+    </div>
   );
 }
 
@@ -239,13 +351,13 @@ function MoodPieChart({ slices }: { slices: MoodCount[] }) {
   const total = slices.reduce((s, d) => s + d.count, 0);
   if (!total) {
     return (
-      <div className="flex items-center justify-center w-[120px] h-[120px] text-xs text-gray-400">
+      <div className="flex items-center justify-center w-[168px] h-[168px] text-sm text-gray-400">
         No data
       </div>
     );
   }
 
-  const CX = 60, CY = 60, R = 56;
+  const CX = 84, CY = 84, R = 78;
   let angle = -Math.PI / 2;
   const paths = slices
     .filter((d) => d.count > 0)
@@ -268,7 +380,7 @@ function MoodPieChart({ slices }: { slices: MoodCount[] }) {
     });
 
   return (
-    <svg viewBox="0 0 120 120" width={120} height={120} className="shrink-0">
+    <svg viewBox="0 0 168 168" className="shrink-0 w-40 h-40 sm:w-44 sm:h-44">
       {paths.map((s) => (
         <path key={s.mood} d={s.path} fill={MOOD_HEX[s.mood]}>
           <title>
@@ -288,6 +400,8 @@ function MoodMonthlySection({
   moodCounts,
   chartMode,
   onChartModeChange,
+  periodMode,
+  onPeriodModeChange,
   monthLoading,
   year,
   onYearChange,
@@ -299,6 +413,8 @@ function MoodMonthlySection({
   moodCounts: MoodCount[];
   chartMode: 'line' | 'span';
   onChartModeChange: (mode: 'line' | 'span') => void;
+  periodMode: 'single' | 'triple';
+  onPeriodModeChange: (mode: 'single' | 'triple') => void;
   monthLoading: boolean;
   year: number;
   onYearChange: (y: number) => void;
@@ -317,12 +433,23 @@ function MoodMonthlySection({
   }, [monthlyData]);
 
   const pie = useMemo(
-    () =>
-      ([1, 2, 3, 4, 5] as const).map((m) => ({
+    () => {
+      const shiftMonth = (month: string, delta: number): string => {
+        const [y, mo] = month.split('-').map((v) => parseInt(v, 10));
+        const d = new Date(y, mo - 1 + delta, 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      };
+
+      const months = periodMode === 'triple'
+        ? [shiftMonth(selectedMonth, -2), shiftMonth(selectedMonth, -1), selectedMonth]
+        : [selectedMonth];
+
+      return ([1, 2, 3, 4, 5] as const).map((m) => ({
         mood: m,
-        count: monthMap.get(selectedMonth)?.get(m) || 0,
-      })) as MoodCount[],
-    [monthMap, selectedMonth]
+        count: months.reduce((sum, month) => sum + (monthMap.get(month)?.get(m) || 0), 0),
+      })) as MoodCount[];
+    },
+    [monthMap, selectedMonth, periodMode]
   );
 
   const allMonths = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
@@ -330,14 +457,25 @@ function MoodMonthlySection({
   const selLabel = selectedMonth
     ? new Date(selectedMonth + '-01T12:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : '';
+  const rangeLabel = useMemo(() => {
+    if (!selectedMonth) return '';
+    if (periodMode === 'single') return selLabel;
+
+    const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
+    const start = new Date(y, mo - 3, 1);
+    const end = new Date(y, mo - 1, 1);
+    const startLabel = start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const endLabel = end.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    return `${startLabel} - ${endLabel}`;
+  }, [selectedMonth, periodMode, selLabel]);
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-          <CalendarDays size={16} className="text-violet-500" />
-          Monthly Mood Breakdown
-        </h3>
+        <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+          <TrendingUp size={14} className="text-indigo-500" />
+          {rangeLabel || 'Selected Month'}
+        </h4>
         <div className="flex items-center gap-1">
           <button
             onClick={() => onYearChange(year - 1)}
@@ -360,22 +498,23 @@ function MoodMonthlySection({
       </div>
 
       {/* Pie + legend for selected month */}
-      <div className="flex items-start gap-4 mb-5">
-        <div>
-          <p className="text-xs text-gray-500 mb-1 text-center">{selLabel}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-[auto,1fr] gap-4 sm:gap-6 mb-6 items-center">
+        <div className="mx-auto sm:mx-0">
           <MoodPieChart slices={pie} />
         </div>
-        <div className="flex flex-col gap-1.5 pt-1">
+        <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-1 gap-2 pt-1">
           {([5, 4, 3, 2, 1] as const).map((m) => {
             const cnt = pie.find((d) => d.mood === m)?.count || 0;
             return (
-              <div key={m} className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: MOOD_HEX[m] }} />
-                <span className="text-xs text-gray-600 dark:text-gray-400 w-16">{MOOD_LABELS[m]}</span>
-                <span className="text-xs font-medium text-gray-800 dark:text-gray-200 w-6 text-right">
+              <div key={m} className="flex items-center gap-2 rounded-lg bg-gray-50/80 dark:bg-gray-800/60 px-2.5 py-1.5">
+                <div className="w-3.5 h-3.5 rounded-sm shrink-0" style={{ backgroundColor: MOOD_HEX[m] }} />
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 text-right min-w-[20px]">
                   {cnt}
                 </span>
-                <span className="text-[10px] text-gray-400">
+                <span className="text-xs text-gray-500">
+                  {MOOD_LABELS[m]}
+                </span>
+                <span className="text-xs text-gray-400 ml-auto">
                   ({pieTotal ? Math.round((cnt / pieTotal) * 100) : 0}%)
                 </span>
               </div>
@@ -384,8 +523,55 @@ function MoodMonthlySection({
         </div>
       </div>
 
+      {/* Selected month trend */}
+      <div className="mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
+              {(['1M', '3M'] as const).map((label, i) => {
+                const value: 'single' | 'triple' = i === 0 ? 'single' : 'triple';
+                return (
+                  <button
+                    key={label}
+                    onClick={() => onPeriodModeChange(value)}
+                    className={`px-2.5 py-1 font-medium transition-colors ${periodMode === value
+                      ? 'bg-violet-500 text-white'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
+              {(['line', 'span'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => onChartModeChange(m)}
+                className={`px-2.5 py-1 font-medium capitalize transition-colors ${chartMode === m
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
+              >
+                {m}
+              </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {monthLoading ? (
+          <div className="flex justify-center py-16">
+            <div className="animate-spin w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full" />
+          </div>
+        ) : (
+          <MoodLineSpanChart data={dailyData} mode={chartMode} />
+        )}
+      </div>
+
       {/* Month picker */}
-      <div className="flex flex-wrap gap-1 mb-4">
+      <div className="flex flex-wrap gap-1 mt-4">
         {allMonths.map((m, i) => {
           const hasData = monthMap.has(m);
           const isSel = m === selectedMonth;
@@ -393,109 +579,17 @@ function MoodMonthlySection({
             <button
               key={m}
               onClick={() => onSelectedMonthChange(m)}
-              className={`px-2 py-0.5 text-xs rounded-md transition-colors ${
-                isSel
-                  ? 'bg-violet-500 text-white font-semibold'
-                  : hasData
+              className={`px-2 py-0.5 text-xs rounded-md transition-colors ${isSel
+                ? 'bg-violet-500 text-white font-semibold'
+                : hasData
                   ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30'
                   : 'bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
-              }`}
+                }`}
             >
               {MONTH_NAMES[i]}
             </button>
           );
         })}
-      </div>
-
-      {/* Selected month trend */}
-      <div className="mb-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
-            <TrendingUp size={14} className="text-indigo-500" />
-            {selLabel || 'Selected Month'} Trend
-          </h4>
-          <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-            {(['line', 'span'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => onChartModeChange(m)}
-                className={`px-2.5 py-1 font-medium capitalize transition-colors ${
-                  chartMode === m
-                    ? 'bg-indigo-500 text-white'
-                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {monthLoading ? (
-          <div className="flex justify-center py-10">
-            <div className="animate-spin w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full" />
-          </div>
-        ) : (
-          <MoodLineSpanChart data={dailyData} mode={chartMode} />
-        )}
-        <MoodCountSummary data={moodCounts} />
-      </div>
-
-      {/* Monthly counts table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-gray-100 dark:border-gray-800">
-              <th className="text-left font-medium text-gray-500 py-1 pr-3">Month</th>
-              {([1, 2, 3, 4, 5] as const).map((m) => (
-                <th key={m} className="py-1 px-1">
-                  <div className="flex justify-center">
-                    <MoodIcon mood={m} size={12} />
-                  </div>
-                </th>
-              ))}
-              <th className="text-right font-medium text-gray-500 py-1 pl-3">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {allMonths.map((month, i) => {
-              const mmap = monthMap.get(month);
-              if (!mmap) return null;
-              const total = [...mmap.values()].reduce((s, v) => s + v, 0);
-              return (
-                <tr
-                  key={month}
-                  onClick={() => onSelectedMonthChange(month)}
-                  className={`cursor-pointer border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50/60 dark:hover:bg-gray-800/30 transition-colors ${
-                    month === selectedMonth ? 'bg-violet-50/50 dark:bg-violet-900/10' : ''
-                  }`}
-                >
-                  <td className="py-1 pr-3 font-medium text-gray-700 dark:text-gray-300">
-                    {MONTH_NAMES[i]}
-                  </td>
-                  {([1, 2, 3, 4, 5] as const).map((m) => {
-                    const cnt = mmap.get(m) || 0;
-                    return (
-                      <td key={m} className="text-center py-1 px-1">
-                        {cnt > 0 ? (
-                          <span className={`font-medium ${MOOD_TEXT[m]}`}>{cnt}</span>
-                        ) : (
-                          <span className="text-gray-300 dark:text-gray-600">—</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                  <td className="text-right py-1 pl-3 font-semibold text-gray-700 dark:text-gray-300">
-                    {total}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!monthlyData.length && (
-          <p className="text-sm text-gray-400 text-center py-3">No mood data for {year}</p>
-        )}
       </div>
     </div>
   );
@@ -735,6 +829,7 @@ function MoodYearInPixels({
 
 export function MoodsTab() {
   const [chartMode, setChartMode] = useState<'line' | 'span'>('line');
+  const [periodMode, setPeriodMode] = useState<'single' | 'triple'>('single');
   const [year, setYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState('');
 
@@ -783,15 +878,20 @@ export function MoodsTab() {
   // Selected-month data (line/span + count summary)
   useEffect(() => {
     if (!selectedMonth) return;
-    const monthStart = `${selectedMonth}-01`;
     const [y, m] = selectedMonth.split('-').map((v) => parseInt(v, 10));
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const monthEnd = `${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`;
+
+    const startDate = periodMode === 'triple'
+      ? new Date(y, m - 3, 1)
+      : new Date(y, m - 1, 1);
+    const endDate = new Date(y, m, 0);
+
+    const rangeStart = isoDate(startDate);
+    const rangeEnd = isoDate(endDate);
 
     setMonthLoading(true);
     Promise.all([
-      stats.moodDaily(USER_ID, monthStart, monthEnd),
-      stats.moodCountRange(USER_ID, monthStart, monthEnd),
+      stats.moodDaily(USER_ID, rangeStart, rangeEnd),
+      stats.moodCountRange(USER_ID, rangeStart, rangeEnd),
     ])
       .then(([daily, counts]) => {
         setDailyData(daily);
@@ -799,10 +899,13 @@ export function MoodsTab() {
       })
       .catch(console.error)
       .finally(() => setMonthLoading(false));
-  }, [selectedMonth]);
+  }, [selectedMonth, periodMode]);
 
   return (
     <div className="space-y-6">
+      {/* Year in pixels */}
+      <MoodYearInPixels data={heatData} year={year} onYearChange={setYear} />
+
       {/* Monthly breakdown with pie + line/span */}
       <MoodMonthlySection
         monthlyData={monthlyData}
@@ -810,6 +913,8 @@ export function MoodsTab() {
         moodCounts={moodCounts}
         chartMode={chartMode}
         onChartModeChange={setChartMode}
+        periodMode={periodMode}
+        onPeriodModeChange={setPeriodMode}
         monthLoading={monthLoading}
         year={year}
         onYearChange={setYear}
@@ -822,9 +927,6 @@ export function MoodsTab() {
 
       {/* Activity correlations */}
       <MoodActivityCorrelations data={corrData} />
-
-      {/* Year in pixels */}
-      <MoodYearInPixels data={heatData} year={year} onYearChange={setYear} />
     </div>
   );
 }

@@ -58,7 +58,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   WhereWeWere
                 </Link>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 max-w-xs">
-                  A self-hosted check-in tracker for the places that matter to you.
+                  Rediscover who you are.
                 </p>
               </div>
               <div className="flex gap-12">

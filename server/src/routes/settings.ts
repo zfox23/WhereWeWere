@@ -68,7 +68,7 @@ router.put('/', async (req: Request, res: Response) => {
     const result = await query(
       `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled,
       mood_reminder_times, mood_icon_pack)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
@@ -77,8 +77,8 @@ router.put('/', async (req: Request, res: Response) => {
          maloja_url = COALESCE($6, user_settings.maloja_url),
          theme = COALESCE($7, user_settings.theme),
          notifications_enabled = COALESCE($8, user_settings.notifications_enabled),
-         mood_reminder_times = COALESCE($12::text[], user_settings.mood_reminder_times),
-         mood_icon_pack = COALESCE($13, user_settings.mood_icon_pack),
+         mood_reminder_times = COALESCE($9::text[], user_settings.mood_reminder_times),
+         mood_icon_pack = COALESCE($10, user_settings.mood_icon_pack),
          updated_at = NOW()
        RETURNING *`,
       [
