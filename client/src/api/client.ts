@@ -85,6 +85,8 @@ export const stats = {
     request<any[]>(`/stats/mood-activity-correlations?user_id=${userId}`),
   moodHeatmap: (userId: string, year: number) =>
     request<any[]>(`/stats/mood-heatmap?user_id=${userId}&year=${year}`),
+  moodCountRange: (userId: string, from: string, to: string) =>
+    request<any[]>(`/stats/mood-count-range?user_id=${userId}&from=${from}&to=${to}`),
 };
 
 // Search

@@ -871,6 +871,33 @@ router.get('/mood-activity-correlations', async (req: Request, res: Response) =>
   }
 });
 
+// GET /mood-count-range?user_id=&from=&to= - count of each mood level in date range
+router.get('/mood-count-range', async (req: Request, res: Response) => {
+  try {
+    const { user_id, from, to } = req.query;
+    if (!user_id || !from || !to) return res.status(400).json({ error: 'user_id, from, and to are required' });
+
+    const result = await query(
+      `SELECT mood, COUNT(*)::int AS count
+       FROM mood_checkins
+       WHERE user_id = $1
+         AND checked_in_at >= $2::date
+         AND checked_in_at < ($3::date + INTERVAL '1 day')
+       GROUP BY mood
+       ORDER BY mood ASC`,
+      [user_id, from, to]
+    );
+
+    const countMap = new Map(result.rows.map((r: any) => [r.mood, r.count]));
+    const data = [1, 2, 3, 4, 5].map((mood) => ({ mood, count: countMap.get(mood) || 0 }));
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error getting mood-count-range:', err);
+    res.status(500).json({ error: 'Failed to get mood count range' });
+  }
+});
+
 // GET /mood-heatmap?user_id=&year= - avg mood per day for year-in-pixels
 router.get('/mood-heatmap', async (req: Request, res: Response) => {
   try {
