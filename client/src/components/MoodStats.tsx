@@ -35,12 +35,6 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${dd}`;
 }
 
-function addMonths(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setMonth(r.getMonth() + n);
-  return r;
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type DailyPt = {
@@ -290,15 +284,28 @@ function MoodPieChart({ slices }: { slices: MoodCount[] }) {
 
 function MoodMonthlySection({
   monthlyData,
+  dailyData,
+  moodCounts,
+  chartMode,
+  onChartModeChange,
+  monthLoading,
   year,
   onYearChange,
+  selectedMonth,
+  onSelectedMonthChange,
 }: {
   monthlyData: MonthlyPt[];
+  dailyData: DailyPt[];
+  moodCounts: MoodCount[];
+  chartMode: 'line' | 'span';
+  onChartModeChange: (mode: 'line' | 'span') => void;
+  monthLoading: boolean;
   year: number;
   onYearChange: (y: number) => void;
+  selectedMonth: string;
+  onSelectedMonthChange: (month: string) => void;
 }) {
   const currentYear = new Date().getFullYear();
-  const [selectedMonth, setSelectedMonth] = useState('');
 
   const monthMap = useMemo(() => {
     const m = new Map<string, Map<number, number>>();
@@ -308,13 +315,6 @@ function MoodMonthlySection({
     }
     return m;
   }, [monthlyData]);
-
-  useEffect(() => {
-    const months = [...monthMap.keys()].sort();
-    const cm = `${year}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    const target = months.includes(cm) ? cm : months.length ? months[months.length - 1] : cm;
-    setSelectedMonth(target);
-  }, [monthMap, year]);
 
   const pie = useMemo(
     () =>
@@ -392,20 +392,53 @@ function MoodMonthlySection({
           return (
             <button
               key={m}
-              onClick={() => setSelectedMonth(m)}
-              disabled={!hasData}
+              onClick={() => onSelectedMonthChange(m)}
               className={`px-2 py-0.5 text-xs rounded-md transition-colors ${
                 isSel
                   ? 'bg-violet-500 text-white font-semibold'
                   : hasData
                   ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30'
-                  : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  : 'bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
               }`}
             >
               {MONTH_NAMES[i]}
             </button>
           );
         })}
+      </div>
+
+      {/* Selected month trend */}
+      <div className="mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+            <TrendingUp size={14} className="text-indigo-500" />
+            {selLabel || 'Selected Month'} Trend
+          </h4>
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
+            {(['line', 'span'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => onChartModeChange(m)}
+                className={`px-2.5 py-1 font-medium capitalize transition-colors ${
+                  chartMode === m
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {monthLoading ? (
+          <div className="flex justify-center py-10">
+            <div className="animate-spin w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full" />
+          </div>
+        ) : (
+          <MoodLineSpanChart data={dailyData} mode={chartMode} />
+        )}
+        <MoodCountSummary data={moodCounts} />
       </div>
 
       {/* Monthly counts table */}
@@ -432,7 +465,7 @@ function MoodMonthlySection({
               return (
                 <tr
                   key={month}
-                  onClick={() => setSelectedMonth(month)}
+                  onClick={() => onSelectedMonthChange(month)}
                   className={`cursor-pointer border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50/60 dark:hover:bg-gray-800/30 transition-colors ${
                     month === selectedMonth ? 'bg-violet-50/50 dark:bg-violet-900/10' : ''
                   }`}
@@ -701,9 +734,9 @@ function MoodYearInPixels({
 // ─── Main Moods Tab ───────────────────────────────────────────────────────────
 
 export function MoodsTab() {
-  const [chartRange, setChartRange] = useState<1 | 3>(1);
   const [chartMode, setChartMode] = useState<'line' | 'span'>('line');
   const [year, setYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState('');
 
   const [dailyData, setDailyData] = useState<DailyPt[]>([]);
   const [moodCounts, setMoodCounts] = useState<MoodCount[]>([]);
@@ -711,7 +744,7 @@ export function MoodsTab() {
   const [dowData, setDowData] = useState<DowPt[]>([]);
   const [corrData, setCorrData] = useState<CorrPt[]>([]);
   const [heatData, setHeatData] = useState<HeatPt[]>([]);
-  const [rangeLoading, setRangeLoading] = useState(true);
+  const [monthLoading, setMonthLoading] = useState(true);
 
   // Static data — loaded once
   useEffect(() => {
@@ -739,81 +772,50 @@ export function MoodsTab() {
       .catch(console.error);
   }, [year]);
 
-  // Range-scoped data
+  // Default selected month for the chosen year
   useEffect(() => {
-    const to = new Date();
-    const from = addMonths(to, -chartRange);
-    setRangeLoading(true);
+    const months = [...new Set(monthlyData.map((m) => m.month))].sort();
+    const cm = `${year}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const target = months.includes(cm) ? cm : months.length ? months[months.length - 1] : `${year}-01`;
+    setSelectedMonth(target);
+  }, [monthlyData, year]);
+
+  // Selected-month data (line/span + count summary)
+  useEffect(() => {
+    if (!selectedMonth) return;
+    const monthStart = `${selectedMonth}-01`;
+    const [y, m] = selectedMonth.split('-').map((v) => parseInt(v, 10));
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const monthEnd = `${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`;
+
+    setMonthLoading(true);
     Promise.all([
-      stats.moodDaily(USER_ID, isoDate(from), isoDate(to)),
-      stats.moodCountRange(USER_ID, isoDate(from), isoDate(to)),
+      stats.moodDaily(USER_ID, monthStart, monthEnd),
+      stats.moodCountRange(USER_ID, monthStart, monthEnd),
     ])
       .then(([daily, counts]) => {
         setDailyData(daily);
         setMoodCounts(counts);
       })
       .catch(console.error)
-      .finally(() => setRangeLoading(false));
-  }, [chartRange]);
+      .finally(() => setMonthLoading(false));
+  }, [selectedMonth]);
 
   return (
     <div className="space-y-6">
-      {/* Mood Over Time */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-            <TrendingUp size={16} className="text-indigo-500" />
-            Mood Over Time
-          </h3>
-          <div className="flex items-center gap-2">
-            {/* Range picker */}
-            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-              {([1, 3] as const).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setChartRange(r)}
-                  className={`px-2.5 py-1 font-medium transition-colors ${
-                    chartRange === r
-                      ? 'bg-indigo-500 text-white'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  {r}mo
-                </button>
-              ))}
-            </div>
-            {/* Chart mode */}
-            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-              {(['line', 'span'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setChartMode(m)}
-                  className={`px-2.5 py-1 font-medium capitalize transition-colors ${
-                    chartMode === m
-                      ? 'bg-indigo-500 text-white'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {rangeLoading ? (
-          <div className="flex justify-center py-10">
-            <div className="animate-spin w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full" />
-          </div>
-        ) : (
-          <MoodLineSpanChart data={dailyData} mode={chartMode} />
-        )}
-
-        <MoodCountSummary data={moodCounts} />
-      </div>
-
-      {/* Monthly breakdown */}
-      <MoodMonthlySection monthlyData={monthlyData} year={year} onYearChange={setYear} />
+      {/* Monthly breakdown with pie + line/span */}
+      <MoodMonthlySection
+        monthlyData={monthlyData}
+        dailyData={dailyData}
+        moodCounts={moodCounts}
+        chartMode={chartMode}
+        onChartModeChange={setChartMode}
+        monthLoading={monthLoading}
+        year={year}
+        onYearChange={setYear}
+        selectedMonth={selectedMonth}
+        onSelectedMonthChange={setSelectedMonth}
+      />
 
       {/* Day of week */}
       <MoodDowChart data={dowData} />
