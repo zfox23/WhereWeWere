@@ -4,6 +4,22 @@ import { query } from '../db';
 const router = Router();
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
+const TIME_24H_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function normalizeReminderTimes(value: unknown): string[] | null {
+  if (typeof value === 'undefined') return null;
+  if (!Array.isArray(value)) return null;
+
+  const unique = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string' || !TIME_24H_PATTERN.test(item)) {
+      return null;
+    }
+    unique.add(item);
+  }
+
+  return Array.from(unique).sort();
+}
 
 // GET / - get user settings
 router.get('/', async (_req: Request, res: Response) => {
@@ -18,6 +34,7 @@ router.get('/', async (_req: Request, res: Response) => {
               COALESCE(us.notify_streak_reminder, true) AS notify_streak_reminder,
               COALESCE(us.notify_weekly_summary, true) AS notify_weekly_summary,
               COALESCE(us.notify_milestone, true) AS notify_milestone,
+              COALESCE(us.mood_reminder_times, ARRAY[]::text[]) AS mood_reminder_times,
               COALESCE(us.mood_icon_pack, 'emoji') AS mood_icon_pack
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
@@ -42,12 +59,18 @@ router.put('/', async (req: Request, res: Response) => {
     const {
       dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
       theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone,
+      mood_reminder_times,
       mood_icon_pack,
     } = req.body;
 
+    const normalizedReminderTimes = normalizeReminderTimes(mood_reminder_times);
+    if (typeof mood_reminder_times !== 'undefined' && normalizedReminderTimes === null) {
+      return res.status(400).json({ error: 'mood_reminder_times must be an array of HH:MM values' });
+    }
+
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone, mood_icon_pack)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled, notify_streak_reminder, notify_weekly_summary, notify_milestone, mood_reminder_times, mood_icon_pack)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
@@ -59,7 +82,8 @@ router.put('/', async (req: Request, res: Response) => {
          notify_streak_reminder = COALESCE($9, user_settings.notify_streak_reminder),
          notify_weekly_summary = COALESCE($10, user_settings.notify_weekly_summary),
          notify_milestone = COALESCE($11, user_settings.notify_milestone),
-         mood_icon_pack = COALESCE($12, user_settings.mood_icon_pack),
+         mood_reminder_times = COALESCE($12::text[], user_settings.mood_reminder_times),
+         mood_icon_pack = COALESCE($13, user_settings.mood_icon_pack),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -70,6 +94,7 @@ router.put('/', async (req: Request, res: Response) => {
         theme ?? null,
         notifications_enabled ?? null, notify_streak_reminder ?? null,
         notify_weekly_summary ?? null, notify_milestone ?? null,
+        normalizedReminderTimes,
         mood_icon_pack ?? null,
       ]
     );

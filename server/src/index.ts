@@ -17,6 +17,8 @@ import { moodCheckinsRouter } from './routes/mood-checkins';
 import { moodActivitiesRouter } from './routes/mood-activities';
 import { timelineRouter } from './routes/timeline';
 import { importDaylioRouter } from './routes/import-daylio';
+import { pushRouter } from './routes/push';
+import { sendMoodReminder } from './services/pushReminder';
 
 const app = express();
 
@@ -37,6 +39,7 @@ app.use('/api/v1/mood-checkins', moodCheckinsRouter);
 app.use('/api/v1/mood-activities', moodActivitiesRouter);
 app.use('/api/v1/timeline', timelineRouter);
 app.use('/api/v1/import/daylio', importDaylioRouter);
+app.use('/api/v1/push', pushRouter);
 
 // In production, serve client
 if (config.nodeEnv === 'production') {
@@ -89,6 +92,16 @@ async function runMigrations() {
 
 runMigrations()
   .then(() => {
+    // Start mood reminder push scheduler
+    const reminderIntervalMs = 60 * 1000; // Check every minute
+    setInterval(async () => {
+      try {
+        await sendMoodReminder();
+      } catch (err) {
+        console.error('Error in mood reminder scheduler:', err);
+      }
+    }, reminderIntervalMs);
+
     app.listen(config.port, () => {
       console.log(`WhereWeWere server listening on port ${config.port}`);
     });

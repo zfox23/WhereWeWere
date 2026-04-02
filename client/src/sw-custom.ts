@@ -55,3 +55,32 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
+
+// Handle push notifications from server
+self.addEventListener('push', (event) => {
+  let data: { title: string; body: string; icon?: string; tag?: string; data?: Record<string, unknown> } = {
+    title: 'WhereWeWere',
+    body: 'New notification',
+  };
+
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch {
+      data = {
+        title: 'WhereWeWere',
+        body: event.data.text(),
+      };
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon || '/icon-192.svg',
+      tag: data.tag || 'default',
+      data: data.data,
+      requireInteraction: false,
+    })
+  );
+});

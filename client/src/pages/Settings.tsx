@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2 } from 'lucide-react';
 import { settings, importApi, jobs, moodActivities } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
 import ActivityGroupManager from '../components/ActivityGroupManager';
+import { PushSettings } from '../components/PushSettings';
 import type { UserSettings, ImportResult, Job, MoodActivityGroup } from '../types';
 
 function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => void }) {
@@ -484,6 +485,7 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
 
 export default function Settings() {
   type SettingsTab = 'account' | 'mood' | 'integrations' | 'data';
+  const TIME_24H_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
   const isSettingsTab = (value: string | null): value is SettingsTab => {
     return value === 'account' || value === 'mood' || value === 'integrations' || value === 'data';
@@ -522,6 +524,7 @@ export default function Settings() {
   const [notifyStreak, setNotifyStreak] = useState(true);
   const [notifyWeekly, setNotifyWeekly] = useState(true);
   const [notifyMilestone, setNotifyMilestone] = useState(true);
+  const [moodReminderTimes, setMoodReminderTimes] = useState<string[]>([]);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -541,6 +544,7 @@ export default function Settings() {
         setNotifyStreak(s.notify_streak_reminder ?? true);
         setNotifyWeekly(s.notify_weekly_summary ?? true);
         setNotifyMilestone(s.notify_milestone ?? true);
+        setMoodReminderTimes(Array.isArray(s.mood_reminder_times) ? s.mood_reminder_times : []);
       } catch (err) {
         console.error('Failed to load settings:', err);
       } finally {
@@ -600,14 +604,28 @@ export default function Settings() {
   const saveNotifications = async () => {
     setNotifSaving(true);
     setNotifMsg(null);
+
+    const normalizedReminderTimes = Array.from(
+      new Set(moodReminderTimes.map((t) => t.trim()).filter((t) => t.length > 0))
+    ).sort();
+
+    if (normalizedReminderTimes.some((t) => !TIME_24H_PATTERN.test(t))) {
+      setNotifMsg({ type: 'error', text: 'Reminder times must use HH:MM format.' });
+      setNotifSaving(false);
+      return;
+    }
+
     try {
       await settings.update({
         notifications_enabled: notificationsEnabled,
         notify_streak_reminder: notifyStreak,
         notify_weekly_summary: notifyWeekly,
         notify_milestone: notifyMilestone,
+        mood_reminder_times: normalizedReminderTimes,
       });
+      setMoodReminderTimes(normalizedReminderTimes);
       setNotifMsg({ type: 'success', text: 'Notification preferences saved.' });
+      window.dispatchEvent(new Event('mood-reminders-updated'));
     } catch (err) {
       setNotifMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });
     } finally {
@@ -828,6 +846,58 @@ export default function Settings() {
                     }`} />
                   </button>
                 </label>
+
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Mood Check-in Schedule</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Set daily reminders like 09:00, 14:00, and 20:30.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMoodReminderTimes((prev) => [...prev, '09:00'])}
+                      className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <Plus size={12} />
+                      Add time
+                    </button>
+                  </div>
+
+                  {moodReminderTimes.length > 0 ? (
+                    <div className="space-y-2">
+                      {moodReminderTimes.map((time, index) => (
+                        <div key={`${time}-${index}`} className="flex items-center gap-2">
+                          <input
+                            type="time"
+                            value={time}
+                            onChange={(e) => {
+                              const next = [...moodReminderTimes];
+                              next[index] = e.target.value;
+                              setMoodReminderTimes(next);
+                            }}
+                            className="input max-w-[160px]"
+                            step={60}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMoodReminderTimes((prev) => prev.filter((_, i) => i !== index))}
+                            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-red-200 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-50/70 dark:hover:bg-red-900/20"
+                            aria-label="Remove reminder time"
+                          >
+                            <Trash2 size={12} />
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">No mood reminders scheduled yet.</p>
+                  )}
+                </div>
+
+                <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
+                  <PushSettings enabled={notificationsEnabled} />
+                </div>
               </div>
             </div>
 

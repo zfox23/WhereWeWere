@@ -10,7 +10,11 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw-custom.ts',
       strategies: 'injectManifest',
-      injectRegister: 'auto',
+      injectRegister: null,
+      devOptions: {
+        enabled: true,
+        type: 'module',
+      },
       includeAssets: ['icon-192.svg', 'icon-512.svg'],
       manifest: {
         name: 'WhereWeWere',

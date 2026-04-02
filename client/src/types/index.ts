@@ -183,6 +183,7 @@ export interface UserSettings {
   notify_streak_reminder: boolean;
   notify_weekly_summary: boolean;
   notify_milestone: boolean;
+  mood_reminder_times: string[];
   mood_icon_pack: 'emoji' | 'lucide' | 'nature';
 }
 
