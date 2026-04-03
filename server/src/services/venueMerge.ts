@@ -278,7 +278,7 @@ async function updateVenueMetadataFromCandidate(
          osm_id = COALESCE(osm_id, $8),
          swarm_venue_id = COALESCE(swarm_venue_id, $9),
          parent_venue_id = CASE
-           WHEN parent_venue_id IS NULL AND $10 IS NOT NULL AND $10 <> id THEN $10
+           WHEN parent_venue_id IS NULL AND $10::uuid IS NOT NULL AND $10::uuid <> id THEN $10::uuid
            ELSE parent_venue_id
          END,
          updated_at = NOW()
