@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   TrendingUp,
   CalendarDays,
@@ -35,6 +35,10 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${dd}`;
 }
 
+function openInNewTab(path: string): void {
+  window.open(path, '_blank', 'noopener,noreferrer');
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type DailyPt = {
@@ -55,6 +59,15 @@ type CorrPt = {
 };
 type HeatPt = { date: string; avg_mood: number };
 type MoodCount = { mood: number; count: number };
+type PeriodMode = 'single' | 'triple' | 'twelve';
+
+function isValidMonthParam(value: string | null): value is string {
+  return value !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+function parsePeriodParam(value: string | null): PeriodMode | null {
+  return value === 'single' || value === 'triple' || value === 'twelve' ? value : null;
+}
 
 // ─── SVG Line/Span Chart ──────────────────────────────────────────────────────
 
@@ -70,7 +83,6 @@ function toY(m: number): number {
 }
 
 function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'span' }) {
-  const navigate = useNavigate();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
@@ -192,7 +204,7 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
             const idx = getIndexFromClientX(e.clientX, e.clientY);
             if (idx !== null) {
               const day = data[idx]?.date;
-              if (day) navigate(`/?from=${day}&to=${day}`);
+              if (day) openInNewTab(`/?from=${day}&to=${day}`);
             }
             return;
           }
@@ -328,7 +340,7 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
             onClick={() => {
               const day = data[displayIndex]?.date;
               if (!day) return;
-              navigate(`/?from=${day}&to=${day}`);
+              openInNewTab(`/?from=${day}&to=${day}`);
             }}
             className="text-xs px-2.5 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/35"
           >
@@ -439,15 +451,14 @@ function MoodMonthlySection({
   dowData: DowPt[];
   chartMode: 'line' | 'span';
   onChartModeChange: (mode: 'line' | 'span') => void;
-  periodMode: 'single' | 'triple' | 'twelve';
-  onPeriodModeChange: (mode: 'single' | 'triple' | 'twelve') => void;
+  periodMode: PeriodMode;
+  onPeriodModeChange: (mode: PeriodMode) => void;
   monthLoading: boolean;
   year: number;
   onYearChange: (y: number) => void;
   selectedMonth: string;
   onSelectedMonthChange: (month: string) => void;
 }) {
-  const navigate = useNavigate();
   const currentYear = new Date().getFullYear();
   const currentMonthIso = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
 
@@ -461,6 +472,12 @@ function MoodMonthlySection({
     onSelectedMonthChange(month);
     const nextYear = parseInt(month.slice(0, 4), 10);
     if (nextYear !== year) onYearChange(nextYear);
+  };
+
+  const resetToDefaultView = () => {
+    onPeriodModeChange('triple');
+    onYearChange(currentYear);
+    onSelectedMonthChange(currentMonthIso);
   };
 
   const monthMap = useMemo(() => {
@@ -489,8 +506,8 @@ function MoodMonthlySection({
   );
 
   const allMonths = useMemo(() => {
-    if (!selectedMonth) return Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
-    return Array.from({ length: 12 }, (_, i) => shiftMonth(selectedMonth, -(11 - i)));
+    if (!selectedMonth) return Array.from({ length: 15 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+    return Array.from({ length: 15 }, (_, i) => shiftMonth(selectedMonth, -(11 - i)));
   }, [selectedMonth, year]);
   const pieTotal = pie.reduce((s, d) => s + d.count, 0);
   const selLabel = selectedMonth
@@ -539,7 +556,15 @@ function MoodMonthlySection({
 
       {/* Month picker */}
       <div className="flex items-center gap-2">
-        <TrendingUp size={14} className="shrink-0 text-indigo-500" />
+        <button
+          type="button"
+          onClick={resetToDefaultView}
+          className="shrink-0 rounded-md p-1 text-indigo-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-300"
+          title="Reset to current month and 3-month view"
+          aria-label="Reset to current month and 3-month view"
+        >
+          <TrendingUp size={14} />
+        </button>
         <div className="flex shrink-0 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
           {([
             { label: '1M', value: 'single' as const },
@@ -622,7 +647,7 @@ function MoodMonthlySection({
                 type="button"
                 onClick={() => {
                   if (!visibleRange.from || !visibleRange.to) return;
-                  navigate(`/?from=${visibleRange.from}&to=${visibleRange.to}&mood=${m}`);
+                  openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}&mood=${m}`);
                 }}
                 className="w-full flex items-center gap-2 rounded-lg bg-gray-50/80 dark:bg-gray-800/60 px-2.5 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/25 transition-colors"
                 title={`Open Home filtered to ${MOOD_LABELS[m]} mood for this visible period`}
@@ -677,6 +702,19 @@ function MoodMonthlySection({
       <div className="mt-4">
         <MoodDowChart data={dowData} />
       </div>
+
+      <div className="mt-4 flex justify-center">
+        <button
+          type="button"
+          onClick={() => {
+            if (!visibleRange.from || !visibleRange.to) return;
+            openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
+          }}
+          className="rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/60 dark:bg-indigo-900/20 dark:text-indigo-300 dark:hover:bg-indigo-900/35"
+        >
+          Open {rangeLabel || selLabel || 'This Period'} in Home
+        </button>
+      </div>
     </div>
   );
 }
@@ -718,7 +756,6 @@ function MoodDowChart({ data }: { data: DowPt[] }) {
 // ─── Activity–Mood Correlations ───────────────────────────────────────────────
 
 function MoodActivityCorrelations({ data }: { data: CorrPt[] }) {
-  const navigate = useNavigate();
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
@@ -746,7 +783,7 @@ function MoodActivityCorrelations({ data }: { data: CorrPt[] }) {
                 return (
                   <tr
                     key={d.activity_id}
-                    onClick={() => navigate(`/?activity=${encodeURIComponent(d.activity_name)}`)}
+                    onClick={() => openInNewTab(`/?activity=${encodeURIComponent(d.activity_name)}`)}
                     className="cursor-pointer border-b border-gray-50 dark:border-gray-800/50 hover:bg-indigo-50/60 dark:hover:bg-indigo-900/20 transition-colors"
                     title={`Filter Home by "${d.activity_name}"`}
                   >
@@ -784,7 +821,6 @@ function MoodYearInPixels({
   year: number;
   onYearChange: (y: number) => void;
 }) {
-  const navigate = useNavigate();
   const dayMap = new Map(data.map((d) => [d.date, d.avg_mood]));
   const startDate = new Date(year, 0, 1);
   const endDate = new Date(year, 11, 31);
@@ -879,7 +915,7 @@ function MoodYearInPixels({
                     className="w-[12px] h-[12px] rounded-sm cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 dark:hover:ring-gray-500"
                     style={{ backgroundColor: MOOD_HEX[r] }}
                     title={`${day.date}: avg ${day.mood.toFixed(1)} — click to view`}
-                    onClick={() => navigate(`/?from=${day.date}&to=${day.date}`)}
+                    onClick={() => openInNewTab(`/?from=${day.date}&to=${day.date}`)}
                   />
                 );
               })}
@@ -910,10 +946,15 @@ function MoodYearInPixels({
 // ─── Main Moods Tab ───────────────────────────────────────────────────────────
 
 export function MoodsTab() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialMonthParam = isValidMonthParam(searchParams.get('moodsMonth'))
+    ? searchParams.get('moodsMonth')
+    : null;
+  const initialPeriodParam = parsePeriodParam(searchParams.get('moodsPeriod'));
   const [chartMode, setChartMode] = useState<'line' | 'span'>('line');
-  const [periodMode, setPeriodMode] = useState<'single' | 'triple' | 'twelve'>('single');
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState('');
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPeriodParam ?? 'single');
+  const [year, setYear] = useState(initialMonthParam ? parseInt(initialMonthParam.slice(0, 4), 10) : new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(initialMonthParam ?? '');
 
   const [dailyData, setDailyData] = useState<DailyPt[]>([]);
   const [moodCounts, setMoodCounts] = useState<MoodCount[]>([]);
@@ -956,6 +997,47 @@ export function MoodsTab() {
     const target = months.includes(cm) ? cm : months.length ? months[months.length - 1] : `${year}-01`;
     setSelectedMonth(target);
   }, [monthlyData, year, selectedMonth]);
+
+  useEffect(() => {
+    const monthParam = isValidMonthParam(searchParams.get('moodsMonth')) ? searchParams.get('moodsMonth') : null;
+    const periodParam = parsePeriodParam(searchParams.get('moodsPeriod'));
+
+    if (periodParam && periodParam !== periodMode) {
+      setPeriodMode(periodParam);
+    }
+
+    if (monthParam && monthParam !== selectedMonth) {
+      setSelectedMonth(monthParam);
+      const monthYear = parseInt(monthParam.slice(0, 4), 10);
+      if (monthYear !== year) {
+        setYear(monthYear);
+      }
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!selectedMonth) return;
+
+    const next = new URLSearchParams(searchParams);
+    let changed = false;
+
+    if (next.get('tab') !== 'moods') {
+      next.set('tab', 'moods');
+      changed = true;
+    }
+    if (next.get('moodsMonth') !== selectedMonth) {
+      next.set('moodsMonth', selectedMonth);
+      changed = true;
+    }
+    if (next.get('moodsPeriod') !== periodMode) {
+      next.set('moodsPeriod', periodMode);
+      changed = true;
+    }
+
+    if (changed) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [periodMode, searchParams, selectedMonth, setSearchParams]);
 
   // Selected-month data (line/span + count summary)
   useEffect(() => {
