@@ -10,6 +10,17 @@ WhereWeWere integrates with:
 - Maloja, to show musical scrobbles relevant to a check-in's time.
 - Dawarich, to show specific location history data associated with a given day or time around a checkin.
 
+## Docker Deployment Notes
+
+When running with Docker Compose in production mode, the server requires push notification VAPID keys.
+
+Set these values in your `.env` file before running `docker compose up -d`:
+
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+
+If either key is missing, the server will fail fast on startup and the client may show a `502` while proxying `/api`.
+
 ## Motivation
 
 I've been using Foursquare Swarm, Last.fm, Google Location History, Google Photos, and other similar services since ~2010, and it's starting to scare me how much data third parties have on me. That fear remains even though I've allowed those parties to have that data.

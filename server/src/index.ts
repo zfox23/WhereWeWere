@@ -26,6 +26,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Container health endpoint for compose/orchestrators.
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 // API routes
 app.use('/api/v1/checkins', checkinsRouter);
 app.use('/api/v1/venues', venuesRouter);
