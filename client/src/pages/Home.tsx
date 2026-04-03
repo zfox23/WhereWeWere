@@ -170,6 +170,10 @@ export default function Home() {
   }, [countryInput, countryOptions]);
 
   const [showFilters, setShowFilters] = useState(false);
+  const hasMoodTypeFilter = Boolean(mood || activity);
+  const hasLocationTypeFilter = Boolean(venueId || category || country);
+  const moodFiltersDisabled = hasLocationTypeFilter;
+  const locationFiltersDisabled = hasMoodTypeFilter;
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
@@ -214,6 +218,35 @@ export default function Home() {
   const setFilter = useCallback((key: string, value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
+      if (value) {
+        next.set(key, value);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const setMoodTypeFilter = useCallback((key: 'mood' | 'activity', value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('venue_id');
+      next.delete('category');
+      next.delete('country');
+      if (value) {
+        next.set(key, value);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const setLocationTypeFilter = useCallback((key: 'venue_id' | 'category' | 'country', value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('mood');
+      next.delete('activity');
       if (value) {
         next.set(key, value);
       } else {
@@ -469,6 +502,9 @@ export default function Home() {
               </button>
             )}
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Mood filters and location filters are mutually exclusive. With no type-specific filters set, the timeline shows both card types.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">After</label>
@@ -489,116 +525,143 @@ export default function Home() {
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Category</label>
-              <input
-                type="text"
-                list="category-options"
-                value={categoryInput}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setCategoryInput(next);
-                  const match = findExactOption(next, categoryOptions);
-                  if (match && category !== match) setFilter('category', match);
-                  if (!match && category) setFilter('category', '');
-                }}
-                onBlur={() => {
-                  if (!categoryInput.trim()) return;
-                  const match = findExactOption(categoryInput, categoryOptions);
-                  if (match) {
-                    setCategoryInput(match);
-                    if (category !== match) setFilter('category', match);
-                  } else {
-                    setCategoryInput('');
-                    if (category) setFilter('category', '');
-                  }
-                }}
-                className="input"
-                placeholder="Restaurant"
-              />
-              <datalist id="category-options">
-                {filteredCategoryOptions.map((opt) => (
-                  <option key={opt} value={opt} />
-                ))}
-              </datalist>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Country</label>
-              <input
-                type="text"
-                list="country-options"
-                value={countryInput}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setCountryInput(next);
-                  const match = findExactOption(next, countryOptions);
-                  if (match && country !== match) setFilter('country', match);
-                  if (!match && country) setFilter('country', '');
-                }}
-                onBlur={() => {
-                  if (!countryInput.trim()) return;
-                  const match = findExactOption(countryInput, countryOptions);
-                  if (match) {
-                    setCountryInput(match);
-                    if (country !== match) setFilter('country', match);
-                  } else {
-                    setCountryInput('');
-                    if (country) setFilter('country', '');
-                  }
-                }}
-                className="input"
-                placeholder="United States"
-              />
-              <datalist id="country-options">
-                {filteredCountryOptions.map((opt) => (
-                  <option key={opt} value={opt} />
-                ))}
-              </datalist>
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">Mood</label>
-            <div className="flex gap-1.5 flex-wrap">
-              {([1, 2, 3, 4, 5] as const).map((m) => {
-                const isActive = mood === String(m);
-                return (
-                  <button
-                    key={m}
-                    onClick={() => setFilter('mood', isActive ? '' : String(m))}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
-                      isActive
-                        ? 'bg-indigo-500 text-white border-indigo-500'
-                        : 'bg-white/70 dark:bg-gray-800/70 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-indigo-300 dark:hover:border-indigo-600'
-                    }`}
-                  >
-                    <span className={isActive ? '' : MOOD_COLORS[m]}>{MOOD_LABELS[m]}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">Activity</label>
-            <select
-              value={activity}
-              onChange={(e) => setFilter('activity', e.target.value)}
-              className="input"
-            >
-              <option value="">All activities</option>
-              {activity && !activityOptions.some((o) => o.name === activity) && (
-                <option value={activity}>{activity} (current)</option>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className={`rounded-xl border p-3 space-y-3 ${locationFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-sky-200 dark:border-sky-800/60 bg-sky-50/50 dark:bg-sky-950/20'}`}>
+              <div>
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Location filters</div>
+              </div>
+              {locationFiltersDisabled && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Clear mood filters to enable location filtering.
+                </p>
               )}
-              {Array.from(new Set(activityOptions.map((o) => o.groupName))).map((groupName) => (
-                <optgroup key={groupName} label={groupName}>
-                  {activityOptions
-                    .filter((o) => o.groupName === groupName)
-                    .map((o) => (
-                      <option key={o.id} value={o.name}>{o.name}</option>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Category</label>
+                  <input
+                    type="text"
+                    list="category-options"
+                    value={categoryInput}
+                    disabled={locationFiltersDisabled}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setCategoryInput(next);
+                      const match = findExactOption(next, categoryOptions);
+                      if (match && category !== match) setLocationTypeFilter('category', match);
+                      if (!match && category) setLocationTypeFilter('category', '');
+                    }}
+                    onBlur={() => {
+                      if (!categoryInput.trim()) return;
+                      const match = findExactOption(categoryInput, categoryOptions);
+                      if (match) {
+                        setCategoryInput(match);
+                        if (category !== match) setLocationTypeFilter('category', match);
+                      } else {
+                        setCategoryInput('');
+                        if (category) setLocationTypeFilter('category', '');
+                      }
+                    }}
+                    className="input disabled:cursor-not-allowed disabled:opacity-60"
+                    placeholder="Restaurant, Home..."
+                  />
+                  <datalist id="category-options">
+                    {filteredCategoryOptions.map((opt) => (
+                      <option key={opt} value={opt} />
                     ))}
-                </optgroup>
-              ))}
-            </select>
+                  </datalist>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Country</label>
+                  <input
+                    type="text"
+                    list="country-options"
+                    value={countryInput}
+                    disabled={locationFiltersDisabled}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setCountryInput(next);
+                      const match = findExactOption(next, countryOptions);
+                      if (match && country !== match) setLocationTypeFilter('country', match);
+                      if (!match && country) setLocationTypeFilter('country', '');
+                    }}
+                    onBlur={() => {
+                      if (!countryInput.trim()) return;
+                      const match = findExactOption(countryInput, countryOptions);
+                      if (match) {
+                        setCountryInput(match);
+                        if (country !== match) setLocationTypeFilter('country', match);
+                      } else {
+                        setCountryInput('');
+                        if (country) setLocationTypeFilter('country', '');
+                      }
+                    }}
+                    className="input disabled:cursor-not-allowed disabled:opacity-60"
+                    placeholder="United States, Espana..."
+                  />
+                  <datalist id="country-options">
+                    {filteredCountryOptions.map((opt) => (
+                      <option key={opt} value={opt} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+            </div>
+
+            <div className={`rounded-xl border p-3 space-y-3 ${moodFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-950/20'}`}>
+              <div>
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Mood filters</div>
+              </div>
+              {moodFiltersDisabled && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Clear location filters to enable mood filtering.
+                </p>
+              )}
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Mood</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {([1, 2, 3, 4, 5] as const).map((m) => {
+                    const isActive = mood === String(m);
+                    return (
+                      <button
+                        key={m}
+                        disabled={moodFiltersDisabled}
+                        onClick={() => setMoodTypeFilter('mood', isActive ? '' : String(m))}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isActive
+                            ? 'bg-indigo-500 text-white border-indigo-500'
+                            : 'bg-white/70 dark:bg-gray-800/70 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-indigo-300 dark:hover:border-indigo-600'
+                        }`}
+                      >
+                        <span className={isActive ? '' : MOOD_COLORS[m]}>{MOOD_LABELS[m]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Activity</label>
+                <select
+                  value={activity}
+                  disabled={moodFiltersDisabled}
+                  onChange={(e) => setMoodTypeFilter('activity', e.target.value)}
+                  className="input disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="">All activities</option>
+                  {activity && !activityOptions.some((o) => o.name === activity) && (
+                    <option value={activity}>{activity} (current)</option>
+                  )}
+                  {Array.from(new Set(activityOptions.map((o) => o.groupName))).map((groupName) => (
+                    <optgroup key={groupName} label={groupName}>
+                      {activityOptions
+                        .filter((o) => o.groupName === groupName)
+                        .map((o) => (
+                          <option key={o.id} value={o.name}>{o.name}</option>
+                        ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       )}
