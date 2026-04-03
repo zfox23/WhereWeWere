@@ -23,9 +23,11 @@ router.get('/photos/:checkinId', async (req: Request, res: Response) => {
     const immich = await getImmichSettings();
     if (!immich) return res.json({ assets: [] });
 
-    // Get check-in timestamp
+    // Get check-in timestamp (location or mood)
     const checkinResult = await query(
-      'SELECT checked_in_at FROM checkins WHERE id = $1',
+      `SELECT checked_in_at FROM checkins WHERE id = $1
+       UNION ALL
+       SELECT checked_in_at FROM mood_checkins WHERE id = $1`,
       [checkinId]
     );
     if (checkinResult.rows.length === 0) {
@@ -94,9 +96,11 @@ router.get('/photos', async (req: Request, res: Response) => {
       return res.json(empty);
     }
 
-    // Fetch all check-in timestamps
+    // Fetch all check-in timestamps across location and mood check-ins
     const checkinsResult = await query(
-      'SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])',
+      `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
+       UNION ALL
+       SELECT id, checked_in_at FROM mood_checkins WHERE id = ANY($1::uuid[])`,
       [checkinIds]
     );
 

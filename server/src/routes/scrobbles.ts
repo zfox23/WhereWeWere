@@ -54,9 +54,11 @@ router.get('/', async (req: Request, res: Response) => {
     const uncachedIds = checkinIds.filter((id) => !cached.has(id));
 
     if (uncachedIds.length > 0) {
-      // Get check-in timestamps for uncached IDs
+      // Get check-in timestamps for uncached IDs across location and mood check-ins
       const checkinsResult = await query(
-        'SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])',
+        `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
+         UNION ALL
+         SELECT id, checked_in_at FROM mood_checkins WHERE id = ANY($1::uuid[])`,
         [uncachedIds]
       );
 

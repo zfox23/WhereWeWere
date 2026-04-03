@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
+import { Pencil, ChevronDown, ChevronUp } from 'lucide-react';
+import { immich as immichApi } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
-import type { TimelineItem } from '../types';
+import type { TimelineItem, ImmichAsset, Scrobble } from '../types';
+import { formatDate, buildImmichTimeUrl } from '../utils/checkin';
+import { PhotoStrip } from './PhotoStrip';
+import { ScrobbleList } from './ScrobbleList';
 
 interface MoodCheckInCardProps {
   item: TimelineItem;
   iconPack?: string;
+  immichUrl?: string | null;
+  photos?: ImmichAsset[] | null;
+  scrobbles?: Scrobble[];
+  malojaUrl?: string | null;
 }
 
 function renderIcon(iconName?: string): React.ReactNode {
@@ -17,25 +25,24 @@ function renderIcon(iconName?: string): React.ReactNode {
   return <IconComponent size={14} className="flex-shrink-0 text-current" />;
 }
 
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
-}
-
-export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckInCardProps) {
+export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl }: MoodCheckInCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [isLong, setIsLong] = useState(false);
+  const [selfFetchedAssets, setSelfFetchedAssets] = useState<ImmichAsset[] | null>(null);
   const noteRef = useRef<HTMLParagraphElement | null>(null);
   const mood = item.mood || 3;
   const activities = item.activities || [];
   const note = item.notes;
+
+  useEffect(() => {
+    if (photos !== undefined) return;
+    if (!immichUrl) return;
+    let cancelled = false;
+    immichApi.photos(item.id).then((data) => {
+      if (!cancelled) setSelfFetchedAssets(data.assets);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [item.id, immichUrl, photos]);
 
   useEffect(() => {
     if (!note || expanded || !noteRef.current) {
@@ -55,6 +62,11 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckI
 
     return () => observer.disconnect();
   }, [note, expanded]);
+
+  const resolvedAssets = photos !== undefined ? photos : selfFetchedAssets;
+  const hasPhotos = resolvedAssets && resolvedAssets.length > 0;
+  const showInTime = immichUrl && resolvedAssets === null;
+  const showImmichRow = hasPhotos || showInTime;
 
   return (
     <div className={`bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 hover:shadow-md transition-all`}>
@@ -109,6 +121,32 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckI
             </div>
           )}
 
+          {/* Immich photo thumbnails */}
+          {immichUrl && hasPhotos && (
+            <PhotoStrip
+              assets={resolvedAssets!}
+              moreUrl={buildImmichTimeUrl(immichUrl, item.checked_in_at)}
+              immichUrl={immichUrl}
+            />
+          )}
+
+          {/* Immich links */}
+          {showImmichRow && showInTime && (
+            <div className="flex items-center gap-2 mt-2 text-indigo-600 dark:text-indigo-300">
+                <a
+                  href={buildImmichTimeUrl(immichUrl!, item.checked_in_at)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs font-medium hover:text-indigo-800 dark:hover:text-indigo-500"
+                >
+                  in time
+                </a>
+            </div>
+          )}
+
+          {/* Scrobbles */}
+          {scrobbles && <ScrobbleList scrobbles={scrobbles} checkedInAt={item.checked_in_at} malojaUrl={malojaUrl} />}
+
           {/* Timestamp */}
           <div className="flex items-center gap-1.5 flex-wrap mt-2">
             <Link
@@ -117,7 +155,7 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckI
               title="View details"
             >
               <time dateTime={item.checked_in_at}>
-                {formatDate(item.checked_in_at)}
+                {formatDate(item.checked_in_at, item.mood_timezone)}
               </time>
             </Link>
           </div>

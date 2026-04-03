@@ -155,6 +155,7 @@ export interface MoodCheckIn {
   mood: number;
   note: string | null;
   activities: { id: string; name: string; group_name: string }[];
+  mood_timezone?: string | null;
   checked_in_at: string;
   created_at: string;
 }
@@ -178,6 +179,7 @@ export interface TimelineItem {
   rating?: number | null;
   // Mood fields
   mood?: number;
+  mood_timezone?: string | null;
   activities?: { id: string; name: string; group_name: string; icon?: string | null }[] | null;
 }
 

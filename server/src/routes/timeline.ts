@@ -122,7 +122,7 @@ router.get('/', async (req: Request, res: Response) => {
              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
              vc.name AS venue_category,
              pv.id AS parent_venue_id, pv.name AS parent_venue_name,
-             NULL::smallint AS mood, NULL::json AS activities
+            NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
@@ -137,6 +137,7 @@ router.get('/', async (req: Request, res: Response) => {
              NULL AS venue_category,
              NULL AS parent_venue_id, NULL AS parent_venue_name,
              mc.mood,
+             mc.mood_timezone,
              COALESCE(
                (SELECT json_agg(json_build_object(
                  'id', ma.id, 'name', ma.name, 'group_name', mag.name, 'icon', ma.icon

@@ -45,7 +45,7 @@ router.get('/', async (req: Request, res: Response) => {
     const offsetParam = `$${paramIndex}`;
 
     const sql = `
-      SELECT mc.id, mc.user_id, mc.mood, mc.note,
+      SELECT mc.id, mc.user_id, mc.mood, mc.note, mc.mood_timezone,
              mc.checked_in_at, mc.created_at, mc.updated_at,
              COALESCE(
                (SELECT json_agg(json_build_object(
@@ -77,7 +77,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const result = await query(
-      `SELECT mc.id, mc.user_id, mc.mood, mc.note,
+      `SELECT mc.id, mc.user_id, mc.mood, mc.note, mc.mood_timezone,
               mc.checked_in_at, mc.created_at, mc.updated_at,
               COALESCE(
                 (SELECT json_agg(json_build_object(
@@ -109,7 +109,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
-    const { mood, note, checked_in_at, activity_ids } = req.body;
+    const { mood, note, checked_in_at, mood_timezone, activity_ids } = req.body;
 
     if (!mood || mood < 1 || mood > 5) {
       return res.status(400).json({ error: 'mood must be between 1 and 5' });
@@ -118,10 +118,10 @@ router.post('/', async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     const result = await client.query(
-      `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
+      `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), NULLIF($5, ''))
        RETURNING *`,
-      [USER_ID, mood, note || null, checked_in_at || null]
+      [USER_ID, mood, note || null, checked_in_at || null, mood_timezone || null]
     );
 
     const moodCheckin = result.rows[0];
@@ -154,7 +154,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { mood, note, checked_in_at, activity_ids } = req.body;
+    const { mood, note, checked_in_at, mood_timezone, activity_ids } = req.body;
 
     if (mood !== undefined && (mood < 1 || mood > 5)) {
       return res.status(400).json({ error: 'mood must be between 1 and 5' });
@@ -166,10 +166,11 @@ router.put('/:id', async (req: Request, res: Response) => {
       `UPDATE mood_checkins
        SET mood = COALESCE($2, mood),
            note = COALESCE($3, note),
-           checked_in_at = COALESCE($4::timestamptz, checked_in_at)
+           checked_in_at = COALESCE($4::timestamptz, checked_in_at),
+           mood_timezone = COALESCE(NULLIF($5, ''), mood_timezone)
        WHERE id = $1
        RETURNING *`,
-      [id, mood ?? null, note, checked_in_at || null]
+      [id, mood ?? null, note, checked_in_at || null, mood_timezone || null]
     );
 
     if (result.rows.length === 0) {

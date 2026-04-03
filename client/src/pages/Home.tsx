@@ -312,27 +312,24 @@ export default function Home() {
     };
   }, [fetchTimeline]);
 
-  // Location items for scrobbles/photos
-  const locationItems = useMemo(
-    () => items.filter(i => i.type === 'location'),
-    [items]
-  );
+  // All visible timeline items for cross-type photo/scrobble deduplication
+  const timelineItems = useMemo(() => items, [items]);
 
-  // Fetch scrobbles for loaded location check-ins
+  // Fetch scrobbles for loaded timeline check-ins
   useEffect(() => {
-    if (!malojaUrl || locationItems.length === 0) return;
-    const newIds = locationItems.map((c) => c.id).filter((id) => !(id in scrobblesMap));
+    if (!malojaUrl || timelineItems.length === 0) return;
+    const newIds = timelineItems.map((c) => c.id).filter((id) => !(id in scrobblesMap));
     if (newIds.length === 0) return;
     scrobblesApi.forCheckins(newIds).then((data) => {
       setScrobblesMap((prev) => ({ ...prev, ...data }));
     }).catch(() => {});
-  }, [locationItems, malojaUrl]);
+  }, [timelineItems, malojaUrl, scrobblesMap]);
 
   // Deduplicate scrobbles across checkins: assign each scrobble to the closest checkin
   const dedupedScrobblesMap = useMemo(() => {
-    if (locationItems.length <= 1) return scrobblesMap;
+    if (timelineItems.length <= 1) return scrobblesMap;
     const assignments: Map<number, { checkinId: string; checkinTimeMs: number; scrobble: Scrobble }[]> = new Map();
-    for (const item of locationItems) {
+    for (const item of timelineItems) {
       const scrobbleList = scrobblesMap[item.id];
       if (!scrobbleList) continue;
       const checkinTimeMs = new Date(item.checked_in_at).getTime();
@@ -360,17 +357,17 @@ export default function Home() {
       result[id].sort((a, b) => a.time - b.time);
     }
     return result;
-  }, [scrobblesMap, locationItems]);
+  }, [scrobblesMap, timelineItems]);
 
-  // Fetch photos for loaded location check-ins (batch with deduplication)
+  // Fetch photos for loaded timeline check-ins (batch with deduplication)
   useEffect(() => {
-    if (!immichUrl || locationItems.length === 0) return;
-    const newIds = locationItems.map((c) => c.id).filter((id) => !(id in photosMap));
+    if (!immichUrl || timelineItems.length === 0) return;
+    const newIds = timelineItems.map((c) => c.id).filter((id) => !(id in photosMap));
     if (newIds.length === 0) return;
     immichApi.photosForCheckins(newIds).then((data) => {
       setPhotosMap((prev) => ({ ...prev, ...data }));
     }).catch(() => {});
-  }, [locationItems, immichUrl]);
+  }, [timelineItems, immichUrl, photosMap]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -725,6 +722,10 @@ export default function Home() {
                         key={item.id}
                         item={item}
                         iconPack={iconPack}
+                        immichUrl={immichUrl}
+                        photos={photosMap[item.id] ?? null}
+                        scrobbles={dedupedScrobblesMap[item.id]}
+                        malojaUrl={malojaUrl}
                       />
                     ) : (
                       <CheckInCard

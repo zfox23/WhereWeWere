@@ -19,6 +19,7 @@ export default function MoodCheckInPage() {
   const [mood, setMood] = useState<number>(0);
   const [note, setNote] = useState('');
   const [checkedInAt, setCheckedInAt] = useState(toLocalDatetimeString(new Date()));
+  const [moodTimezone, setMoodTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const [selectedActivities, setSelectedActivities] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<MoodActivityGroup[]>([]);
   const [iconPack, setIconPack] = useState('emoji');
@@ -40,6 +41,7 @@ export default function MoodCheckInPage() {
       setMood(mc.mood);
       setNote(mc.note || '');
       setCheckedInAt(toLocalDatetimeString(new Date(mc.checked_in_at)));
+      setMoodTimezone(mc.mood_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
       setSelectedActivities(new Set(mc.activities.map((a: any) => a.id)));
     }).catch(console.error).finally(() => setLoading(false));
   }, [editId]);
@@ -61,6 +63,7 @@ export default function MoodCheckInPage() {
         mood,
         note: note.trim() || null,
         checked_in_at: new Date(checkedInAt).toISOString(),
+        mood_timezone: moodTimezone,
         activity_ids: Array.from(selectedActivities),
       };
       if (editId) {
