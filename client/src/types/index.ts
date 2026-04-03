@@ -233,33 +233,3 @@ export interface Job {
   created_at: string;
 }
 
-export interface VenueMergeSuggestion {
-  id: string;
-  status: 'pending' | 'denied' | 'applied' | 'invalid';
-  similarity_score: number;
-  distance_meters: number;
-  reason: string;
-  created_at: string;
-  updated_at: string;
-  resolved_at: string | null;
-  canonical_venue: {
-    id: string | null;
-    name: string;
-    address: string | null;
-    city: string | null;
-    state: string | null;
-    latitude: number | null;
-    longitude: number | null;
-    checkin_count: number;
-  };
-  duplicate_venue: {
-    id: string | null;
-    name: string;
-    address: string | null;
-    city: string | null;
-    state: string | null;
-    latitude: number | null;
-    longitude: number | null;
-    checkin_count: number;
-  };
-}

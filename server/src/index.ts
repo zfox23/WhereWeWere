@@ -18,7 +18,6 @@ import { moodActivitiesRouter } from './routes/mood-activities';
 import { timelineRouter } from './routes/timeline';
 import { importDaylioRouter } from './routes/import-daylio';
 import { pushRouter } from './routes/push';
-import { venueMergesRouter } from './routes/venue-merges';
 import { backupRouter } from './routes/backup';
 import { sendMoodReminder } from './services/pushReminder';
 
@@ -40,7 +39,6 @@ app.use('/api/v1/search', searchRouter);
 app.use('/api/v1/settings', settingsRouter);
 app.use('/api/v1/import/swarm', importRouter);
 app.use('/api/v1/jobs', jobsRouter);
-app.use('/api/v1/venue-merges', venueMergesRouter);
 app.use('/api/v1/scrobbles', scrobblesRouter);
 app.use('/api/v1/immich', immichRouter);
 app.use('/api/v1/mood-checkins', moodCheckinsRouter);

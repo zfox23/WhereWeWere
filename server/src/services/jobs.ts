@@ -1,12 +1,6 @@
 import { query } from '../db';
 import { reverseGeocode } from './nominatim';
 import { searchNearbyVenues } from './overpass';
-import {
-  countPendingVenueMergeSuggestions,
-  findVenueMergeProposals,
-  invalidateStaleVenueMergeSuggestions,
-  storeVenueMergeProposal,
-} from './venueMerge';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -148,40 +142,6 @@ async function categorizeBatch(jobId: string): Promise<{ updated: number; remain
   return { updated, remaining: remaining.rows[0].count };
 }
 
-async function scanVenueMergeSuggestions(jobId: string): Promise<{
-  scanned: number;
-  proposalsFound: number;
-  pendingSuggestions: number;
-}> {
-  const { scanned, proposals } = await findVenueMergeProposals();
-
-  for (let index = 0; index < proposals.length; index += 1) {
-    if (isJobCancelled(jobId)) {
-      throw new Error('cancelled');
-    }
-
-    await storeVenueMergeProposal(jobId, proposals[index]);
-
-    if ((index + 1) % 25 === 0 || index === proposals.length - 1) {
-      await updateJobProgress(jobId, {
-        phase: 'scanning',
-        scanned,
-        proposals_found: index + 1,
-        remaining: Math.max(proposals.length - index - 1, 0),
-        message: `Scanned ${scanned} venues and recorded ${index + 1} merge proposals`,
-      });
-    }
-  }
-
-  await invalidateStaleVenueMergeSuggestions(jobId);
-
-  return {
-    scanned,
-    proposalsFound: proposals.length,
-    pendingSuggestions: await countPendingVenueMergeSuggestions(),
-  };
-}
-
 export async function runBackfillJob(jobId: string): Promise<void> {
   try {
     await query(
@@ -236,36 +196,6 @@ export async function runBackfillJob(jobId: string): Promise<void> {
     cleanupCancellation(jobId);
     const isCancelled = err.message === 'cancelled';
     console.error(`Job ${jobId} ${isCancelled ? 'cancelled' : 'failed'}:`, isCancelled ? '' : err);
-    await query(
-      `UPDATE jobs SET status = $1, completed_at = NOW(), error = $2 WHERE id = $3`,
-      [isCancelled ? 'cancelled' : 'failed', isCancelled ? 'Job was cancelled by user.' : (err.message || String(err)), jobId]
-    );
-  }
-}
-
-export async function runVenueMergeJob(jobId: string): Promise<void> {
-  try {
-    await query(
-      `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1`,
-      [jobId]
-    );
-
-    const result = await scanVenueMergeSuggestions(jobId);
-
-    await query(
-      `UPDATE jobs SET status = 'completed', completed_at = NOW(), progress = $1 WHERE id = $2`,
-      [JSON.stringify({
-        phase: 'done',
-        scanned: result.scanned,
-        proposals_found: result.proposalsFound,
-        pending_suggestions: result.pendingSuggestions,
-        message: `Complete. Found ${result.proposalsFound} merge proposals. ${result.pendingSuggestions} pending review.`,
-      }), jobId]
-    );
-  } catch (err: any) {
-    cleanupCancellation(jobId);
-    const isCancelled = err.message === 'cancelled';
-    console.error(`Venue merge job ${jobId} ${isCancelled ? 'cancelled' : 'failed'}:`, isCancelled ? '' : err);
     await query(
       `UPDATE jobs SET status = $1, completed_at = NOW(), error = $2 WHERE id = $3`,
       [isCancelled ? 'cancelled' : 'failed', isCancelled ? 'Job was cancelled by user.' : (err.message || String(err)), jobId]

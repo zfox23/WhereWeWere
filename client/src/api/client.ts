@@ -202,17 +202,6 @@ export const jobs = {
     request<any>(`/jobs/${id}/cancel`, { method: 'POST' }),
 };
 
-export const venueMerges = {
-  list: (status: 'pending' | 'denied' | 'applied' | 'invalid' | 'all' = 'pending') =>
-    request<any[]>(`/venue-merges?status=${status}`),
-  approve: (id: string) =>
-    request<any>(`/venue-merges/${id}/approve`, { method: 'POST' }),
-  deny: (id: string) =>
-    request<any>(`/venue-merges/${id}/deny`, { method: 'POST' }),
-  resolveBatch: (ids: string[], action: 'approve' | 'deny') =>
-    request<any>('/venue-merges/resolve', { method: 'POST', body: JSON.stringify({ ids, action }) }),
-};
-
 // Immich photos
 export const immich = {
   photos: (checkinId: string) =>
