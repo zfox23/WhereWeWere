@@ -6,6 +6,20 @@ import { findOrReuseVenue } from '../services/venueMerge';
 
 const router = Router();
 
+function toNumberOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function serializeVenue<T extends Record<string, unknown>>(venue: T): T {
+  return {
+    ...venue,
+    latitude: toNumberOrNull(venue.latitude),
+    longitude: toNumberOrNull(venue.longitude),
+  };
+}
+
 // GET / - list venues with optional search, category filter, pagination
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -53,7 +67,7 @@ router.get('/', async (req: Request, res: Response) => {
     `;
 
     const result = await query(sql, params);
-    res.json(result.rows);
+    res.json(result.rows.map((row) => serializeVenue(row)));
   } catch (err) {
     console.error('Error listing venues:', err);
     res.status(500).json({ error: 'Failed to list venues' });
@@ -108,7 +122,7 @@ router.get('/nearby', async (req: Request, res: Response) => {
     `;
 
     const dbResult = await query(dbSql, dbParams);
-    const localVenues = dbResult.rows;
+  const localVenues = dbResult.rows.map((row) => serializeVenue(row));
 
     // Also query Overpass API
     let osmVenues: Array<Record<string, unknown>> = [];
@@ -192,7 +206,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     );
     venue.child_venues = childrenResult.rows;
 
-    res.json(venue);
+    res.json(serializeVenue(venue));
   } catch (err) {
     console.error('Error getting venue:', err);
     res.status(500).json({ error: 'Failed to get venue' });
@@ -273,7 +287,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Venue not found' });
     }
 
-    res.json(result.rows[0]);
+    res.json(serializeVenue(result.rows[0]));
   } catch (err) {
     console.error('Error updating venue:', err);
     res.status(500).json({ error: 'Failed to update venue' });
@@ -322,7 +336,7 @@ router.post('/:id/merge-into', async (req: Request, res: Response) => {
       [target_id]
     );
 
-    res.json(result.rows[0]);
+    res.json(serializeVenue(result.rows[0]));
   } catch (err) {
     console.error('Error merging venue:', err);
     res.status(500).json({ error: 'Failed to merge venue' });

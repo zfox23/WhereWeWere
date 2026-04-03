@@ -12,6 +12,11 @@ import MapView from '../components/MapView';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
+function normalizeCoordinate(value: unknown, fallback = 0): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export default function VenueDetail() {
   const { id } = useParams<{ id: string }>();
   const [venue, setVenue] = useState<Venue | null>(null);
@@ -109,8 +114,8 @@ export default function VenueDetail() {
     setEditState(venue.state ?? '');
     setEditPostalCode(venue.postal_code ?? '');
     setEditCountry(venue.country ?? '');
-    setEditLat(venue.latitude);
-    setEditLng(venue.longitude);
+    setEditLat(normalizeCoordinate(venue.latitude));
+    setEditLng(normalizeCoordinate(venue.longitude));
     setEditError(null);
     setIsEditing(true);
   };
@@ -209,6 +214,10 @@ export default function VenueDetail() {
   const fullAddress = [venue.address, venue.city, venue.state, venue.postal_code, venue.country]
     .filter(Boolean)
     .join(', ');
+  const venueLat = normalizeCoordinate(venue.latitude);
+  const venueLng = normalizeCoordinate(venue.longitude);
+  const safeEditLat = normalizeCoordinate(editLat);
+  const safeEditLng = normalizeCoordinate(editLng);
 
   return (
     <div className="space-y-6">
@@ -313,10 +322,10 @@ export default function VenueDetail() {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Pin location</span>
-              <span className="font-mono text-xs text-gray-400">{editLat.toFixed(6)}, {editLng.toFixed(6)}</span>
+              <span className="font-mono text-xs text-gray-400">{safeEditLat.toFixed(6)}, {safeEditLng.toFixed(6)}</span>
             </div>
             <div className="h-56 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-              <VenueEditMap initialCenter={[editLat, editLng]} zoom={15}
+              <VenueEditMap initialCenter={[safeEditLat, safeEditLng]} zoom={15}
                 onChange={(lat, lng) => { setEditLat(lat); setEditLng(lng); }} className="h-56 w-full" />
             </div>
           </div>
@@ -342,14 +351,14 @@ export default function VenueDetail() {
       {/* ── Map (view mode) ─────────────────────────── */}
       {!isEditing && (
         <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 overflow-hidden">
-          <MapView center={[venue.latitude, venue.longitude]} zoom={15}
-            markers={[{ lat: venue.latitude, lng: venue.longitude, label: venue.name, id: venue.id }]}
+          <MapView center={[venueLat, venueLng]} zoom={15}
+            markers={[{ lat: venueLat, lng: venueLng, label: venue.name, id: venue.id }]}
             className="h-64 w-full" />
         </div>
       )}
 
       {/* ── Merge venue panel ───────────────────────── */}
-      {!isEditing && (
+      {isEditing && (
         <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40">
           <button onClick={toggleMergePanel}
             className="flex w-full items-center justify-between gap-2 rounded-xl px-5 py-3.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
