@@ -807,11 +807,15 @@ router.get('/mood-monthly', async (req: Request, res: Response) => {
   }
 });
 
-// GET /mood-by-day-of-week?user_id= - avg mood per day of week
+// GET /mood-by-day-of-week?user_id=&from=&to= - avg mood per day of week
 router.get('/mood-by-day-of-week', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE 'UTC')::date BETWEEN $2::date AND $3::date" : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
       `SELECT
@@ -820,9 +824,10 @@ router.get('/mood-by-day-of-week', async (req: Request, res: Response) => {
          COUNT(*)::int AS count
        FROM mood_checkins
        WHERE user_id = $1
+         ${whereRange}
        GROUP BY dow
        ORDER BY dow`,
-      [user_id]
+      params
     );
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

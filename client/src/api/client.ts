@@ -79,8 +79,14 @@ export const stats = {
     request<any[]>(`/stats/mood-daily?user_id=${userId}&from=${from}&to=${to}`),
   moodMonthly: (userId: string, year: number) =>
     request<any[]>(`/stats/mood-monthly?user_id=${userId}&year=${year}`),
-  moodByDayOfWeek: (userId: string) =>
-    request<any[]>(`/stats/mood-by-day-of-week?user_id=${userId}`),
+  moodByDayOfWeek: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/mood-by-day-of-week?${qp.toString()}`);
+  },
   moodActivityCorrelations: (userId: string) =>
     request<any[]>(`/stats/mood-activity-correlations?user_id=${userId}`),
   moodHeatmap: (userId: string, year: number) =>

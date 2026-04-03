@@ -322,7 +322,7 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
       )}
 
       {selectedPoint && displayIndex !== null && !isScrubbing && (
-        <div className="mt-2 flex justify-center">
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-2 z-10">
           <button
             type="button"
             onClick={() => {
@@ -422,6 +422,7 @@ function MoodMonthlySection({
   monthlyData,
   dailyData,
   moodCounts,
+  dowData,
   chartMode,
   onChartModeChange,
   periodMode,
@@ -435,10 +436,11 @@ function MoodMonthlySection({
   monthlyData: MonthlyPt[];
   dailyData: DailyPt[];
   moodCounts: MoodCount[];
+  dowData: DowPt[];
   chartMode: 'line' | 'span';
   onChartModeChange: (mode: 'line' | 'span') => void;
-  periodMode: 'single' | 'triple';
-  onPeriodModeChange: (mode: 'single' | 'triple') => void;
+  periodMode: 'single' | 'triple' | 'twelve';
+  onPeriodModeChange: (mode: 'single' | 'triple' | 'twelve') => void;
   monthLoading: boolean;
   year: number;
   onYearChange: (y: number) => void;
@@ -447,6 +449,19 @@ function MoodMonthlySection({
 }) {
   const navigate = useNavigate();
   const currentYear = new Date().getFullYear();
+  const currentMonthIso = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+
+  const shiftMonth = (month: string, delta: number): string => {
+    const [y, mo] = month.split('-').map((v) => parseInt(v, 10));
+    const d = new Date(y, mo - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const selectMonth = (month: string) => {
+    onSelectedMonthChange(month);
+    const nextYear = parseInt(month.slice(0, 4), 10);
+    if (nextYear !== year) onYearChange(nextYear);
+  };
 
   const monthMap = useMemo(() => {
     const m = new Map<string, Map<number, number>>();
@@ -459,15 +474,11 @@ function MoodMonthlySection({
 
   const pie = useMemo(
     () => {
-      const shiftMonth = (month: string, delta: number): string => {
-        const [y, mo] = month.split('-').map((v) => parseInt(v, 10));
-        const d = new Date(y, mo - 1 + delta, 1);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      };
-
-      const months = periodMode === 'triple'
-        ? [shiftMonth(selectedMonth, -2), shiftMonth(selectedMonth, -1), selectedMonth]
-        : [selectedMonth];
+      const months = periodMode === 'single'
+        ? [selectedMonth]
+        : periodMode === 'triple'
+          ? [shiftMonth(selectedMonth, -2), shiftMonth(selectedMonth, -1), selectedMonth]
+          : Array.from({ length: 12 }, (_, i) => shiftMonth(selectedMonth, -(11 - i)));
 
       return ([1, 2, 3, 4, 5] as const).map((m) => ({
         mood: m,
@@ -477,7 +488,10 @@ function MoodMonthlySection({
     [monthMap, selectedMonth, periodMode]
   );
 
-  const allMonths = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+  const allMonths = useMemo(() => {
+    if (!selectedMonth) return Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+    return Array.from({ length: 12 }, (_, i) => shiftMonth(selectedMonth, -(11 - i)));
+  }, [selectedMonth, year]);
   const pieTotal = pie.reduce((s, d) => s + d.count, 0);
   const selLabel = selectedMonth
     ? new Date(selectedMonth + '-01T12:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -487,7 +501,8 @@ function MoodMonthlySection({
     if (periodMode === 'single') return selLabel;
 
     const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
-    const start = new Date(y, mo - 3, 1);
+    const monthsBack = periodMode === 'triple' ? 3 : 12;
+    const start = new Date(y, mo - monthsBack, 1);
     const end = new Date(y, mo - 1, 1);
     const startLabel = start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
     const endLabel = end.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
@@ -497,39 +512,100 @@ function MoodMonthlySection({
   const visibleRange = useMemo(() => {
     if (!selectedMonth) return { from: '', to: '' };
     const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
-    const startDate = periodMode === 'triple'
-      ? new Date(y, mo - 3, 1)
-      : new Date(y, mo - 1, 1);
+    const startDate = periodMode === 'single'
+      ? new Date(y, mo - 1, 1)
+      : periodMode === 'triple'
+        ? new Date(y, mo - 3, 1)
+        : new Date(y, mo - 12, 1);
     const endDate = new Date(y, mo, 0);
     return { from: isoDate(startDate), to: isoDate(endDate) };
   }, [selectedMonth, periodMode]);
 
+  const additionalIncludedMonths = useMemo(() => {
+    if (!selectedMonth || periodMode === 'single') return new Set<string>();
+    const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
+    const monthsToInclude = periodMode === 'triple' ? 2 : 11;
+    const set = new Set<string>();
+    for (let i = 1; i <= monthsToInclude; i += 1) {
+      const d = new Date(y, mo - 1 - i, 1);
+      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    return set;
+  }, [selectedMonth, periodMode]);
+
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
-          <TrendingUp size={14} className="text-indigo-500" />
-          {rangeLabel || 'Selected Month'}
-        </h4>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => onYearChange(year - 1)}
-            className="p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <span className="text-sm font-medium text-gray-600 dark:text-gray-400 w-12 text-center">
-            {year}
-          </span>
-          {year < currentYear && (
-            <button
-              onClick={() => onYearChange(year + 1)}
-              className="p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-            >
-              <ChevronRight size={14} />
-            </button>
-          )}
+      
+
+      {/* Month picker */}
+      <div className="flex items-center gap-2">
+        <TrendingUp size={14} className="shrink-0 text-indigo-500" />
+        <div className="flex shrink-0 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
+          {([
+            { label: '1M', value: 'single' as const },
+            { label: '3M', value: 'triple' as const },
+            { label: '12M', value: 'twelve' as const },
+          ]).map(({ label, value }) => {
+            return (
+              <button
+                key={label}
+                onClick={() => onPeriodModeChange(value)}
+                className={`px-2.5 py-1 font-medium transition-colors ${periodMode === value
+                  ? 'bg-violet-500 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
+        <button
+          type="button"
+          onClick={() => selectedMonth && selectMonth(shiftMonth(selectedMonth, -1))}
+          className="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30"
+          title="Previous month"
+          aria-label="Previous month"
+        >
+          <ChevronLeft size={12} />
+        </button>
+        <div className="relative h-6 min-w-0 flex-1 overflow-hidden">
+          <div className="absolute right-0 top-0 flex w-max flex-nowrap gap-0.5">
+            {allMonths.map((m) => {
+              const isSel = m === selectedMonth;
+              const isIncludedPrev = additionalIncludedMonths.has(m);
+              const [yy, mm] = m.split('-').map((v) => parseInt(v, 10));
+              const monthLabel = MONTH_NAMES[mm - 1];
+              const yearLabel = String(yy).slice(2);
+              return (
+                <button
+                  key={m}
+                  onClick={() => selectMonth(m)}
+                  className={`shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] transition-colors ${isSel
+                    ? 'bg-violet-500 text-white font-semibold'
+                    : isIncludedPrev
+                      ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30'
+                    }`}
+                  title={`${monthLabel} ${yy}`}
+                >
+                  {monthLabel} '{yearLabel}
+                </button>
+              );
+            })}
+          </div>
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-white/95 via-white/70 to-transparent dark:from-gray-900/95 dark:via-gray-900/70 dark:to-transparent" />
+        </div>
+        <button
+          type="button"
+          onClick={() => selectedMonth && selectMonth(shiftMonth(selectedMonth, 1))}
+          disabled={!selectedMonth || selectedMonth >= currentMonthIso}
+          className="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30 disabled:opacity-40 disabled:hover:bg-gray-100 dark:disabled:hover:bg-gray-800"
+          title="Next month"
+          aria-label="Next month"
+        >
+          <ChevronRight size={12} />
+        </button>
       </div>
 
       {/* Pie + legend for selected month */}
@@ -569,71 +645,37 @@ function MoodMonthlySection({
 
       {/* Selected month trend */}
       <div className="mb-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-              {(['1M', '3M'] as const).map((label, i) => {
-                const value: 'single' | 'triple' = i === 0 ? 'single' : 'triple';
-                return (
-                  <button
-                    key={label}
-                    onClick={() => onPeriodModeChange(value)}
-                    className={`px-2.5 py-1 font-medium transition-colors ${periodMode === value
-                      ? 'bg-violet-500 text-white'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                      }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-              {(['line', 'span'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => onChartModeChange(m)}
-                className={`px-2.5 py-1 font-medium capitalize transition-colors ${chartMode === m
-                  ? 'bg-indigo-500 text-white'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-              >
-                {m}
-              </button>
-              ))}
-            </div>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
+            {(['line', 'span'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => onChartModeChange(m)}
+              className={`px-2.5 py-1 font-medium capitalize transition-colors ${chartMode === m
+                ? 'bg-indigo-500 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+            >
+              {m}
+            </button>
+            ))}
           </div>
         </div>
 
-        {monthLoading ? (
-          <div className="flex justify-center py-16">
-            <div className="animate-spin w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full" />
+        <div className="relative">
+          <div className={monthLoading ? 'opacity-65 transition-opacity' : 'opacity-100 transition-opacity'}>
+            <MoodLineSpanChart data={dailyData} mode={chartMode} />
           </div>
-        ) : (
-          <MoodLineSpanChart data={dailyData} mode={chartMode} />
-        )}
+          {monthLoading && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="h-8 w-8 rounded-full border-2 border-indigo-500/70 border-t-transparent animate-spin bg-white/40 dark:bg-gray-900/30 backdrop-blur-[1px]" />
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Month picker */}
-      <div className="flex flex-wrap gap-1 mt-4">
-        {allMonths.map((m, i) => {
-          const hasData = monthMap.has(m);
-          const isSel = m === selectedMonth;
-          return (
-            <button
-              key={m}
-              onClick={() => onSelectedMonthChange(m)}
-              className={`px-2 py-0.5 text-xs rounded-md transition-colors ${isSel
-                ? 'bg-violet-500 text-white font-semibold'
-                : hasData
-                  ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30'
-                  : 'bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
-                }`}
-            >
-              {MONTH_NAMES[i]}
-            </button>
-          );
-        })}
+      <div className="mt-4">
+        <MoodDowChart data={dowData} />
       </div>
     </div>
   );
@@ -643,11 +685,7 @@ function MoodMonthlySection({
 
 function MoodDowChart({ data }: { data: DowPt[] }) {
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
-        <BarChart3 size={16} className="text-sky-500" />
-        Mood by Day of Week
-      </h3>
+    <div className="">
       {data.every((d) => d.avg_mood === null) ? (
         <p className="text-sm text-gray-400">No mood data yet.</p>
       ) : (
@@ -873,7 +911,7 @@ function MoodYearInPixels({
 
 export function MoodsTab() {
   const [chartMode, setChartMode] = useState<'line' | 'span'>('line');
-  const [periodMode, setPeriodMode] = useState<'single' | 'triple'>('single');
+  const [periodMode, setPeriodMode] = useState<'single' | 'triple' | 'twelve'>('single');
   const [year, setYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState('');
 
@@ -887,12 +925,8 @@ export function MoodsTab() {
 
   // Static data — loaded once
   useEffect(() => {
-    Promise.all([
-      stats.moodByDayOfWeek(USER_ID),
-      stats.moodActivityCorrelations(USER_ID),
-    ])
-      .then(([dow, corr]) => {
-        setDowData(dow);
+    Promise.all([stats.moodActivityCorrelations(USER_ID)])
+      .then(([corr]) => {
         setCorrData(corr);
       })
       .catch(console.error);
@@ -913,20 +947,26 @@ export function MoodsTab() {
 
   // Default selected month for the chosen year
   useEffect(() => {
+    if (selectedMonth.startsWith(`${year}-`)) {
+      return;
+    }
+
     const months = [...new Set(monthlyData.map((m) => m.month))].sort();
     const cm = `${year}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
     const target = months.includes(cm) ? cm : months.length ? months[months.length - 1] : `${year}-01`;
     setSelectedMonth(target);
-  }, [monthlyData, year]);
+  }, [monthlyData, year, selectedMonth]);
 
   // Selected-month data (line/span + count summary)
   useEffect(() => {
     if (!selectedMonth) return;
     const [y, m] = selectedMonth.split('-').map((v) => parseInt(v, 10));
 
-    const startDate = periodMode === 'triple'
-      ? new Date(y, m - 3, 1)
-      : new Date(y, m - 1, 1);
+    const startDate = periodMode === 'single'
+      ? new Date(y, m - 1, 1)
+      : periodMode === 'triple'
+        ? new Date(y, m - 3, 1)
+        : new Date(y, m - 12, 1);
     const endDate = new Date(y, m, 0);
 
     const rangeStart = isoDate(startDate);
@@ -936,10 +976,12 @@ export function MoodsTab() {
     Promise.all([
       stats.moodDaily(USER_ID, rangeStart, rangeEnd),
       stats.moodCountRange(USER_ID, rangeStart, rangeEnd),
+      stats.moodByDayOfWeek(USER_ID, rangeStart, rangeEnd),
     ])
-      .then(([daily, counts]) => {
+      .then(([daily, counts, dow]) => {
         setDailyData(daily);
         setMoodCounts(counts);
+        setDowData(dow);
       })
       .catch(console.error)
       .finally(() => setMonthLoading(false));
@@ -955,6 +997,7 @@ export function MoodsTab() {
         monthlyData={monthlyData}
         dailyData={dailyData}
         moodCounts={moodCounts}
+        dowData={dowData}
         chartMode={chartMode}
         onChartModeChange={setChartMode}
         periodMode={periodMode}
@@ -965,9 +1008,6 @@ export function MoodsTab() {
         selectedMonth={selectedMonth}
         onSelectedMonthChange={setSelectedMonth}
       />
-
-      {/* Day of week */}
-      <MoodDowChart data={dowData} />
 
       {/* Activity correlations */}
       <MoodActivityCorrelations data={corrData} />
