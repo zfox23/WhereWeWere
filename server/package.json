@@ -11,6 +11,7 @@
   "dependencies": {
     "@types/web-push": "^3.6.4",
     "cors": "^2.8.5",
+    "csv-parse": "^6.2.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "geo-tz": "^8.1.6",
