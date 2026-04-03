@@ -104,33 +104,6 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /export - export all check-ins as JSON
-router.get('/export', async (_req: Request, res: Response) => {
-  try {
-    const result = await query(
-      `SELECT c.id, c.user_id, c.venue_id, c.notes, c.rating,
-              c.checked_in_at, c.created_at,
-              v.name AS venue_name, v.address AS venue_address,
-              v.city AS venue_city, v.state AS venue_state,
-              v.country AS venue_country, v.latitude AS venue_latitude,
-              v.longitude AS venue_longitude,
-              vc.name AS venue_category,
-              pv.id AS parent_venue_id, pv.name AS parent_venue_name
-       FROM checkins c
-       JOIN venues v ON c.venue_id = v.id
-       LEFT JOIN venue_categories vc ON v.category_id = vc.id
-       LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-       ORDER BY c.checked_in_at DESC`,
-      []
-    );
-    res.setHeader('Content-Disposition', 'attachment; filename="wherewewere-export.json"');
-    res.json(result.rows.map(addTimezone));
-  } catch (err) {
-    console.error('Error exporting check-ins:', err);
-    res.status(500).json({ error: 'Failed to export check-ins' });
-  }
-});
-
 // GET /:id - get single check-in with venue details
 router.get('/:id', async (req: Request, res: Response) => {
   try {

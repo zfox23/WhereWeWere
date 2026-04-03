@@ -19,6 +19,7 @@ import { timelineRouter } from './routes/timeline';
 import { importDaylioRouter } from './routes/import-daylio';
 import { pushRouter } from './routes/push';
 import { venueMergesRouter } from './routes/venue-merges';
+import { backupRouter } from './routes/backup';
 import { sendMoodReminder } from './services/pushReminder';
 
 const app = express();
@@ -47,6 +48,7 @@ app.use('/api/v1/mood-activities', moodActivitiesRouter);
 app.use('/api/v1/timeline', timelineRouter);
 app.use('/api/v1/import/daylio', importDaylioRouter);
 app.use('/api/v1/push', pushRouter);
+app.use('/api/v1/backup', backupRouter);
 
 // In production, serve client
 if (config.nodeEnv === 'production') {

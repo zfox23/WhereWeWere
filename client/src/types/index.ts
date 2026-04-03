@@ -122,6 +122,18 @@ export interface ImportResult {
   total_errors: number;
 }
 
+export interface BackupImportEntityCount {
+  inserted: number;
+  skipped: number;
+}
+
+export interface BackupImportResult {
+  message: string;
+  schemaVersion: number;
+  counts: Record<string, BackupImportEntityCount>;
+  errors: string[];
+}
+
 export interface MoodActivityGroup {
   id: string;
   name: string;

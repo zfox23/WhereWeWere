@@ -153,6 +153,45 @@ export const importApi = {
   },
 };
 
+// Backup / Restore
+export const backupApi = {
+  export: async () => {
+    const res = await fetch(`${API_BASE}/backup/export`);
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(error.message || `Backup export failed: ${res.status}`);
+    }
+
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || res.headers.get('content-disposition');
+    const fileNameMatch = disposition?.match(/filename="?([^\"]+)"?/i);
+    const fileName = fileNameMatch?.[1] || `wherewewere-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    return { blob, fileName };
+  },
+  import: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/backup/import`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(error.error || error.message || `Backup import failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  startOver: async (firstConfirmation: string, secondConfirmation: string) => {
+    return request<{ message: string; counts: Record<string, number> }>('/backup/start-over', {
+      method: 'POST',
+      body: JSON.stringify({
+        first_confirmation: firstConfirmation,
+        second_confirmation: secondConfirmation,
+      }),
+    });
+  },
+};
+
 // Jobs
 export const jobs = {
   list: () => request<any[]>('/jobs'),
