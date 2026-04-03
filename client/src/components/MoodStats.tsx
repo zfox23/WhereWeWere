@@ -165,17 +165,37 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
         viewBox={`0 0 ${SW} ${SH}`}
         className="w-full"
         style={{ height: SH, display: 'block', touchAction: 'none' }}
+        onPointerEnter={(e) => {
+          if (e.pointerType !== 'mouse') return;
+          updateActiveFromPointer(e.clientX, e.clientY);
+        }}
         onPointerDown={(e) => {
+          if (e.pointerType === 'mouse') {
+            updateActiveFromPointer(e.clientX, e.clientY);
+            return;
+          }
           e.preventDefault();
           e.currentTarget.setPointerCapture(e.pointerId);
           setIsScrubbing(true);
           updateActiveFromPointer(e.clientX, e.clientY);
         }}
         onPointerMove={(e) => {
+          if (e.pointerType === 'mouse' && !isScrubbing) {
+            updateActiveFromPointer(e.clientX, e.clientY);
+            return;
+          }
           if (!isScrubbing) return;
           updateActiveFromPointer(e.clientX, e.clientY);
         }}
         onPointerUp={(e) => {
+          if (e.pointerType === 'mouse') {
+            const idx = getIndexFromClientX(e.clientX, e.clientY);
+            if (idx !== null) {
+              const day = data[idx]?.date;
+              if (day) navigate(`/?from=${day}&to=${day}`);
+            }
+            return;
+          }
           if (!isScrubbing) return;
           const idx = getIndexFromClientX(e.clientX, e.clientY);
           setIsScrubbing(false);
@@ -185,6 +205,10 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
         }}
         onPointerCancel={() => {
           setIsScrubbing(false);
+          setActiveIndex(null);
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType !== 'mouse') return;
           setActiveIndex(null);
         }}
       >
@@ -297,18 +321,18 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
         </div>
       )}
 
-      {pinnedIndex !== null && !isScrubbing && (
+      {selectedPoint && displayIndex !== null && !isScrubbing && (
         <div className="mt-2 flex justify-center">
           <button
             type="button"
             onClick={() => {
-              const day = data[pinnedIndex]?.date;
+              const day = data[displayIndex]?.date;
               if (!day) return;
               navigate(`/?from=${day}&to=${day}`);
             }}
             className="text-xs px-2.5 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/35"
           >
-            Open {data[pinnedIndex]?.date} in Home
+            Open {data[displayIndex]?.date} in Home
           </button>
         </div>
       )}
@@ -421,6 +445,7 @@ function MoodMonthlySection({
   selectedMonth: string;
   onSelectedMonthChange: (month: string) => void;
 }) {
+  const navigate = useNavigate();
   const currentYear = new Date().getFullYear();
 
   const monthMap = useMemo(() => {
@@ -469,6 +494,16 @@ function MoodMonthlySection({
     return `${startLabel} - ${endLabel}`;
   }, [selectedMonth, periodMode, selLabel]);
 
+  const visibleRange = useMemo(() => {
+    if (!selectedMonth) return { from: '', to: '' };
+    const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
+    const startDate = periodMode === 'triple'
+      ? new Date(y, mo - 3, 1)
+      : new Date(y, mo - 1, 1);
+    const endDate = new Date(y, mo, 0);
+    return { from: isoDate(startDate), to: isoDate(endDate) };
+  }, [selectedMonth, periodMode]);
+
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
       <div className="flex items-center justify-between mb-4">
@@ -506,7 +541,16 @@ function MoodMonthlySection({
           {([5, 4, 3, 2, 1] as const).map((m) => {
             const cnt = pie.find((d) => d.mood === m)?.count || 0;
             return (
-              <div key={m} className="flex items-center gap-2 rounded-lg bg-gray-50/80 dark:bg-gray-800/60 px-2.5 py-1.5">
+              <button
+                key={m}
+                type="button"
+                onClick={() => {
+                  if (!visibleRange.from || !visibleRange.to) return;
+                  navigate(`/?from=${visibleRange.from}&to=${visibleRange.to}&mood=${m}`);
+                }}
+                className="w-full flex items-center gap-2 rounded-lg bg-gray-50/80 dark:bg-gray-800/60 px-2.5 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/25 transition-colors"
+                title={`Open Home filtered to ${MOOD_LABELS[m]} mood for this visible period`}
+              >
                 <div className="w-3.5 h-3.5 rounded-sm shrink-0" style={{ backgroundColor: MOOD_HEX[m] }} />
                 <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 text-right min-w-[20px]">
                   {cnt}
@@ -517,7 +561,7 @@ function MoodMonthlySection({
                 <span className="text-xs text-gray-400 ml-auto">
                   ({pieTotal ? Math.round((cnt / pieTotal) * 100) : 0}%)
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile } from 'lucide-react';
-import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities } from '../api/client';
+import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
@@ -98,6 +98,8 @@ function ExpandableFAB() {
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<TimelineItem[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+  const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [activityOptions, setActivityOptions] = useState<{ id: string; name: string; groupName: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -146,6 +148,26 @@ export default function Home() {
   const country = searchParams.get('country') || '';
   const mood = searchParams.get('mood') || '';
   const activity = searchParams.get('activity') || '';
+  const [categoryInput, setCategoryInput] = useState(category);
+  const [countryInput, setCountryInput] = useState(country);
+
+  const findExactOption = useCallback((value: string, options: string[]) => {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    return options.find((opt) => opt.toLowerCase() === normalized) || null;
+  }, []);
+
+  const filteredCategoryOptions = useMemo(() => {
+    const needle = categoryInput.trim().toLowerCase();
+    if (!needle) return categoryOptions.slice(0, 30);
+    return categoryOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
+  }, [categoryInput, categoryOptions]);
+
+  const filteredCountryOptions = useMemo(() => {
+    const needle = countryInput.trim().toLowerCase();
+    if (!needle) return countryOptions.slice(0, 30);
+    return countryOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
+  }, [countryInput, countryOptions]);
 
   const [showFilters, setShowFilters] = useState(false);
 
@@ -155,6 +177,35 @@ export default function Home() {
       setShowFilters(true);
     }
   }, [fromDate, toDate, venueId, category, country, mood, activity]);
+
+  useEffect(() => {
+    setCategoryInput(category);
+  }, [category]);
+
+  useEffect(() => {
+    setCountryInput(country);
+  }, [country]);
+
+  useEffect(() => {
+    Promise.all([
+      stats.categoryBreakdown(USER_ID),
+      stats.countries(USER_ID),
+    ]).then(([categories, countries]) => {
+      const uniqueCategories = Array.from(new Set((categories || [])
+        .map((c: any) => String(c.category_name || '').trim())
+        .filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b));
+      const uniqueCountries = Array.from(new Set((countries || [])
+        .map((c: any) => String(c.country || '').trim())
+        .filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b));
+      setCategoryOptions(uniqueCategories);
+      setCountryOptions(uniqueCountries);
+    }).catch(() => {
+      setCategoryOptions([]);
+      setCountryOptions([]);
+    });
+  }, []);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -191,10 +242,10 @@ export default function Home() {
         if (fromDate) params.from = fromDate;
         if (toDate) params.to = toDate + 'T23:59:59';
         if (venueId) params.venue_id = venueId;
-        if (category) params.category = category;
-        if (country) params.country = country;
-  if (mood) params.mood = mood;
-  if (activity) params.activity = activity;
+          if (category) params.category = category;
+          if (country) params.country = country;
+          if (mood) params.mood = mood;
+          if (activity) params.activity = activity;
 
         const data = await timelineApi.list(params);
         if (append) {
@@ -443,21 +494,67 @@ export default function Home() {
               <label className="text-xs text-gray-500 mb-1 block">Category</label>
               <input
                 type="text"
-                value={category}
-                onChange={(e) => setFilter('category', e.target.value)}
+                list="category-options"
+                value={categoryInput}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCategoryInput(next);
+                  const match = findExactOption(next, categoryOptions);
+                  if (match && category !== match) setFilter('category', match);
+                  if (!match && category) setFilter('category', '');
+                }}
+                onBlur={() => {
+                  if (!categoryInput.trim()) return;
+                  const match = findExactOption(categoryInput, categoryOptions);
+                  if (match) {
+                    setCategoryInput(match);
+                    if (category !== match) setFilter('category', match);
+                  } else {
+                    setCategoryInput('');
+                    if (category) setFilter('category', '');
+                  }
+                }}
                 className="input"
-                placeholder="e.g. Restaurant"
+                placeholder="Restaurant"
               />
+              <datalist id="category-options">
+                {filteredCategoryOptions.map((opt) => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
             </div>
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Country</label>
               <input
                 type="text"
-                value={country}
-                onChange={(e) => setFilter('country', e.target.value)}
+                list="country-options"
+                value={countryInput}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCountryInput(next);
+                  const match = findExactOption(next, countryOptions);
+                  if (match && country !== match) setFilter('country', match);
+                  if (!match && country) setFilter('country', '');
+                }}
+                onBlur={() => {
+                  if (!countryInput.trim()) return;
+                  const match = findExactOption(countryInput, countryOptions);
+                  if (match) {
+                    setCountryInput(match);
+                    if (country !== match) setFilter('country', match);
+                  } else {
+                    setCountryInput('');
+                    if (country) setFilter('country', '');
+                  }
+                }}
                 className="input"
-                placeholder="e.g. United States"
+                placeholder="United States"
               />
+              <datalist id="country-options">
+                {filteredCountryOptions.map((opt) => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
             </div>
           </div>
           <div>

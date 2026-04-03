@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Clock, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
@@ -31,10 +31,30 @@ function formatDate(dateStr: string): string {
 
 export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckInCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [isLong, setIsLong] = useState(false);
+  const noteRef = useRef<HTMLParagraphElement | null>(null);
   const mood = item.mood || 3;
   const activities = item.activities || [];
   const note = item.notes;
-  const isLong = note ? note.length > 200 : false;
+
+  useEffect(() => {
+    if (!note || expanded || !noteRef.current) {
+      if (!note) setIsLong(false);
+      return;
+    }
+
+    const el = noteRef.current;
+    const checkOverflow = () => {
+      setIsLong(el.scrollHeight > el.clientHeight + 1);
+    };
+
+    checkOverflow();
+
+    const observer = new ResizeObserver(checkOverflow);
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [note, expanded]);
 
   return (
     <div className={`bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 hover:shadow-md transition-all`}>
@@ -68,7 +88,10 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji' }: MoodCheckI
           {/* Note (truncated to 3 lines) */}
           {note && (
             <div className="mt-2">
-              <p className={`text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap ${!expanded && isLong ? 'line-clamp-3' : ''}`}>
+              <p
+                ref={noteRef}
+                className={`text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap ${!expanded ? 'line-clamp-3' : ''}`}
+              >
                 {note}
               </p>
               {isLong && (
