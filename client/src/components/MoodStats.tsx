@@ -55,18 +55,27 @@ type CorrPt = {
   activity_name: string;
   group_name: string;
   avg_mood: number;
+  mood_impact: number;
+  checkin_count: number;
+};
+type ComboPt = {
+  combination_key: string;
+  combination_name: string;
+  activity_count: number;
+  avg_mood: number;
+  mood_impact: number;
   checkin_count: number;
 };
 type HeatPt = { date: string; avg_mood: number };
 type MoodCount = { mood: number; count: number };
-type PeriodMode = 'single' | 'triple' | 'twelve';
+type PeriodMode = 'single' | 'triple' | 'twelve' | 'all';
 
 function isValidMonthParam(value: string | null): value is string {
   return value !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
 function parsePeriodParam(value: string | null): PeriodMode | null {
-  return value === 'single' || value === 'triple' || value === 'twelve' ? value : null;
+  return value === 'single' || value === 'triple' || value === 'twelve' || value === 'all' ? value : null;
 }
 
 // ─── SVG Line/Span Chart ──────────────────────────────────────────────────────
@@ -491,6 +500,7 @@ function MoodMonthlySection({
 
   const pie = useMemo(
     () => {
+      if (periodMode === 'all') return moodCounts;
       const months = periodMode === 'single'
         ? [selectedMonth]
         : periodMode === 'triple'
@@ -502,7 +512,7 @@ function MoodMonthlySection({
         count: months.reduce((sum, month) => sum + (monthMap.get(month)?.get(m) || 0), 0),
       })) as MoodCount[];
     },
-    [monthMap, selectedMonth, periodMode]
+    [monthMap, selectedMonth, periodMode, moodCounts]
   );
 
   const allMonths = useMemo(() => {
@@ -514,6 +524,7 @@ function MoodMonthlySection({
     ? new Date(selectedMonth + '-01T12:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : '';
   const rangeLabel = useMemo(() => {
+    if (periodMode === 'all') return 'All Time';
     if (!selectedMonth) return '';
     if (periodMode === 'single') return selLabel;
 
@@ -527,7 +538,7 @@ function MoodMonthlySection({
   }, [selectedMonth, periodMode, selLabel]);
 
   const visibleRange = useMemo(() => {
-    if (!selectedMonth) return { from: '', to: '' };
+    if (periodMode === 'all' || !selectedMonth) return { from: '', to: '' };
     const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
     const startDate = periodMode === 'single'
       ? new Date(y, mo - 1, 1)
@@ -539,7 +550,7 @@ function MoodMonthlySection({
   }, [selectedMonth, periodMode]);
 
   const additionalIncludedMonths = useMemo(() => {
-    if (!selectedMonth || periodMode === 'single') return new Set<string>();
+    if (!selectedMonth || periodMode === 'single' || periodMode === 'all') return new Set<string>();
     const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
     const monthsToInclude = periodMode === 'triple' ? 2 : 11;
     const set = new Set<string>();
@@ -570,6 +581,7 @@ function MoodMonthlySection({
             { label: '1M', value: 'single' as const },
             { label: '3M', value: 'triple' as const },
             { label: '12M', value: 'twelve' as const },
+            { label: 'All', value: 'all' as const },
           ]).map(({ label, value }) => {
             return (
               <button
@@ -585,6 +597,7 @@ function MoodMonthlySection({
             );
           })}
         </div>
+        {periodMode !== 'all' && (
         <button
           type="button"
           onClick={() => selectedMonth && selectMonth(shiftMonth(selectedMonth, -1))}
@@ -594,6 +607,12 @@ function MoodMonthlySection({
         >
           <ChevronLeft size={12} />
         </button>
+        )}
+        {periodMode === 'all' ? (
+          <div className="min-w-0 flex-1 flex items-center">
+            <span className="text-[11px] text-gray-400 italic">All available data</span>
+          </div>
+        ) : (
         <div className="relative h-6 min-w-0 flex-1 overflow-hidden">
           <div className="absolute right-0 top-0 flex w-max flex-nowrap gap-0.5">
             {allMonths.map((m) => {
@@ -621,6 +640,8 @@ function MoodMonthlySection({
           </div>
           <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-white/95 via-white/70 to-transparent dark:from-gray-900/95 dark:via-gray-900/70 dark:to-transparent" />
         </div>
+        )}
+        {periodMode !== 'all' && (
         <button
           type="button"
           onClick={() => selectedMonth && selectMonth(shiftMonth(selectedMonth, 1))}
@@ -631,6 +652,7 @@ function MoodMonthlySection({
         >
           <ChevronRight size={12} />
         </button>
+        )}
       </div>
 
       {/* Pie + legend for selected month */}
@@ -646,8 +668,13 @@ function MoodMonthlySection({
                 key={m}
                 type="button"
                 onClick={() => {
-                  if (!visibleRange.from || !visibleRange.to) return;
-                  openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}&mood=${m}`);
+                  const qp = new URLSearchParams();
+                  if (visibleRange.from && visibleRange.to) {
+                    qp.set('from', visibleRange.from);
+                    qp.set('to', visibleRange.to);
+                  }
+                  qp.set('mood', String(m));
+                  openInNewTab(`/?${qp.toString()}`);
                 }}
                 className="w-full flex items-center gap-2 rounded-lg bg-gray-50/80 dark:bg-gray-800/60 px-2.5 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/25 transition-colors"
                 title={`Open Home filtered to ${MOOD_LABELS[m]} mood for this visible period`}
@@ -707,8 +734,11 @@ function MoodMonthlySection({
         <button
           type="button"
           onClick={() => {
-            if (!visibleRange.from || !visibleRange.to) return;
-            openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
+            if (visibleRange.from && visibleRange.to) {
+              openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
+            } else {
+              openInNewTab('/');
+            }
           }}
           className="rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/60 dark:bg-indigo-900/20 dark:text-indigo-300 dark:hover:bg-indigo-900/35"
         >
@@ -756,30 +786,63 @@ function MoodDowChart({ data }: { data: DowPt[] }) {
 // ─── Activity–Mood Correlations ───────────────────────────────────────────────
 
 function MoodActivityCorrelations({ data }: { data: CorrPt[] }) {
+  type SortKey = keyof CorrPt;
+  const [sortKey, setSortKey] = useState<SortKey>('mood_impact');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const toggleSort = (col: SortKey) => {
+    if (sortKey === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(col); setSortDir('desc'); }
+  };
+
+  const sorted = useMemo(() => {
+    return [...data].sort((a, b) => {
+      const av = a[sortKey], bv = b[sortKey];
+      const cmp = typeof av === 'string' ? (av as string).localeCompare(bv as string) : (av as number) - (bv as number);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [data, sortKey, sortDir]);
+
+  const SortInd = ({ col }: { col: SortKey }) => (
+    <span className={`ml-0.5 text-[10px] ${sortKey === col ? 'text-indigo-500' : 'text-gray-300 dark:text-gray-600'}`}>
+      {sortKey === col ? (sortDir === 'asc' ? '↑' : '↓') : '⇅'}
+    </span>
+  );
+
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-1.5">
         <Activity size={16} className="text-rose-500" />
-        Activity–Mood Correlations
+        Activity Impact
       </h3>
+      <p className="text-xs text-gray-400 mb-3">
+        Average mood lift or drop when an activity appears in a mood check-in.
+      </p>
       {!data.length ? (
         <p className="text-sm text-gray-400">
-          No activity data yet (need ≥2 entries per activity).
+          No activity data yet for this period (need ≥2 entries per activity).
         </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-100 dark:border-gray-800">
-                <th className="text-left font-medium text-gray-500 py-1.5 pr-3">Activity</th>
-                <th className="text-left font-medium text-gray-500 py-1.5 pr-3">Group</th>
-                <th className="text-center font-medium text-gray-500 py-1.5 px-2">Avg Mood</th>
-                <th className="text-right font-medium text-gray-500 py-1.5 pl-2">Entries</th>
+                <th className="text-left font-medium text-gray-500 py-1.5 pr-3 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('activity_name')}>Activity <SortInd col="activity_name" /></th>
+                <th className="text-left font-medium text-gray-500 py-1.5 pr-3 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('group_name')}>Group <SortInd col="group_name" /></th>
+                <th className="text-center font-medium text-gray-500 py-1.5 px-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('avg_mood')}>Avg Mood <SortInd col="avg_mood" /></th>
+                <th className="text-center font-medium text-gray-500 py-1.5 px-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('mood_impact')}>Impact <SortInd col="mood_impact" /></th>
+                <th className="text-right font-medium text-gray-500 py-1.5 pl-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('checkin_count')}>Entries <SortInd col="checkin_count" /></th>
               </tr>
             </thead>
             <tbody>
-              {data.map((d) => {
+              {sorted.map((d) => {
                 const r = Math.max(1, Math.min(5, Math.round(d.avg_mood)));
+                const impactClass = d.mood_impact > 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : d.mood_impact < 0
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-gray-500 dark:text-gray-400';
+                const impactLabel = `${d.mood_impact > 0 ? '+' : ''}${d.mood_impact.toFixed(2)}`;
                 return (
                   <tr
                     key={d.activity_id}
@@ -794,6 +857,100 @@ function MoodActivityCorrelations({ data }: { data: CorrPt[] }) {
                     <td className="py-1.5 px-2 text-center">
                       <span className="font-semibold" style={{ color: MOOD_HEX[r] }}>
                         {d.avg_mood.toFixed(1)}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      <span className={`font-semibold ${impactClass}`}>
+                        {impactLabel}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pl-2 text-right text-gray-500">
+                      {d.checkin_count}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoodActivityCombinations({ data }: { data: ComboPt[] }) {
+  type SortKey = keyof ComboPt;
+  const [sortKey, setSortKey] = useState<SortKey>('mood_impact');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const toggleSort = (col: SortKey) => {
+    if (sortKey === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(col); setSortDir('desc'); }
+  };
+
+  const sorted = useMemo(() => {
+    return [...data].sort((a, b) => {
+      const av = a[sortKey], bv = b[sortKey];
+      const cmp = typeof av === 'string' ? (av as string).localeCompare(bv as string) : (av as number) - (bv as number);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [data, sortKey, sortDir]);
+
+  const SortInd = ({ col }: { col: SortKey }) => (
+    <span className={`ml-0.5 text-[10px] ${sortKey === col ? 'text-indigo-500' : 'text-gray-300 dark:text-gray-600'}`}>
+      {sortKey === col ? (sortDir === 'asc' ? '↑' : '↓') : '⇅'}
+    </span>
+  );
+
+  return (
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-1.5">
+        <BarChart3 size={16} className="text-fuchsia-500" />
+        Activity Combinations
+      </h3>
+      <p className="text-xs text-gray-400 mb-3">
+        Repeated sets of two or more activities and how they shift your mood.
+      </p>
+      {!data.length ? (
+        <p className="text-sm text-gray-400">
+          No repeated activity combinations yet for this period (need ≥2 matching check-ins).
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-100 dark:border-gray-800">
+                <th className="text-left font-medium text-gray-500 py-1.5 pr-3 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('combination_name')}>Combination <SortInd col="combination_name" /></th>
+                <th className="text-center font-medium text-gray-500 py-1.5 px-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('avg_mood')}>Avg Mood <SortInd col="avg_mood" /></th>
+                <th className="text-center font-medium text-gray-500 py-1.5 px-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('mood_impact')}>Impact <SortInd col="mood_impact" /></th>
+                <th className="text-right font-medium text-gray-500 py-1.5 pl-2 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleSort('checkin_count')}>Entries <SortInd col="checkin_count" /></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((d) => {
+                const r = Math.max(1, Math.min(5, Math.round(d.avg_mood)));
+                const impactClass = d.mood_impact > 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : d.mood_impact < 0
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-gray-500 dark:text-gray-400';
+                const impactLabel = `${d.mood_impact > 0 ? '+' : ''}${d.mood_impact.toFixed(2)}`;
+                return (
+                  <tr key={d.combination_key} className="border-b border-gray-50 dark:border-gray-800/50">
+                    <td className="py-1.5 pr-3 font-medium text-gray-800 dark:text-gray-200">
+                      {d.combination_name}
+                      <span className="ml-2 text-[11px] font-normal text-gray-400">
+                        ({d.activity_count} activities)
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      <span className="font-semibold" style={{ color: MOOD_HEX[r] }}>
+                        {d.avg_mood.toFixed(1)}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      <span className={`font-semibold ${impactClass}`}>
+                        {impactLabel}
                       </span>
                     </td>
                     <td className="py-1.5 pl-2 text-right text-gray-500">
@@ -961,17 +1118,9 @@ export function MoodsTab() {
   const [monthlyData, setMonthlyData] = useState<MonthlyPt[]>([]);
   const [dowData, setDowData] = useState<DowPt[]>([]);
   const [corrData, setCorrData] = useState<CorrPt[]>([]);
+  const [comboData, setComboData] = useState<ComboPt[]>([]);
   const [heatData, setHeatData] = useState<HeatPt[]>([]);
   const [monthLoading, setMonthLoading] = useState(true);
-
-  // Static data — loaded once
-  useEffect(() => {
-    Promise.all([stats.moodActivityCorrelations(USER_ID)])
-      .then(([corr]) => {
-        setCorrData(corr);
-      })
-      .catch(console.error);
-  }, []);
 
   // Year-scoped data
   useEffect(() => {
@@ -1041,29 +1190,38 @@ export function MoodsTab() {
 
   // Selected-month data (line/span + count summary)
   useEffect(() => {
-    if (!selectedMonth) return;
-    const [y, m] = selectedMonth.split('-').map((v) => parseInt(v, 10));
+    const isAll = periodMode === 'all';
+    if (!isAll && !selectedMonth) return;
 
-    const startDate = periodMode === 'single'
-      ? new Date(y, m - 1, 1)
-      : periodMode === 'triple'
-        ? new Date(y, m - 3, 1)
-        : new Date(y, m - 12, 1);
-    const endDate = new Date(y, m, 0);
+    let rangeStart: string | undefined;
+    let rangeEnd: string | undefined;
 
-    const rangeStart = isoDate(startDate);
-    const rangeEnd = isoDate(endDate);
+    if (!isAll && selectedMonth) {
+      const [y, m] = selectedMonth.split('-').map((v) => parseInt(v, 10));
+      const startDate = periodMode === 'single'
+        ? new Date(y, m - 1, 1)
+        : periodMode === 'triple'
+          ? new Date(y, m - 3, 1)
+          : new Date(y, m - 12, 1);
+      const endDate = new Date(y, m, 0);
+      rangeStart = isoDate(startDate);
+      rangeEnd = isoDate(endDate);
+    }
 
     setMonthLoading(true);
     Promise.all([
       stats.moodDaily(USER_ID, rangeStart, rangeEnd),
       stats.moodCountRange(USER_ID, rangeStart, rangeEnd),
       stats.moodByDayOfWeek(USER_ID, rangeStart, rangeEnd),
+      stats.moodActivityCorrelations(USER_ID, rangeStart, rangeEnd),
+      stats.moodActivityCombinations(USER_ID, rangeStart, rangeEnd),
     ])
-      .then(([daily, counts, dow]) => {
+      .then(([daily, counts, dow, corr, combos]) => {
         setDailyData(daily);
         setMoodCounts(counts);
         setDowData(dow);
+        setCorrData(corr);
+        setComboData(combos);
       })
       .catch(console.error)
       .finally(() => setMonthLoading(false));
@@ -1092,7 +1250,10 @@ export function MoodsTab() {
       />
 
       {/* Activity correlations */}
-      <MoodActivityCorrelations data={corrData} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <MoodActivityCorrelations data={corrData} />
+        <MoodActivityCombinations data={comboData} />
+      </div>
     </div>
   );
 }

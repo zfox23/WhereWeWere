@@ -75,8 +75,11 @@ export const stats = {
     request<any[]>(`/stats/reflections?user_id=${userId}`),
   additionalStats: (userId: string) =>
     request<any>(`/stats/additional-stats?user_id=${userId}`),
-  moodDaily: (userId: string, from: string, to: string) =>
-    request<any[]>(`/stats/mood-daily?user_id=${userId}&from=${from}&to=${to}`),
+  moodDaily: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) { qp.set('from', from); qp.set('to', to); }
+    return request<any[]>(`/stats/mood-daily?${qp.toString()}`);
+  },
   moodMonthly: (userId: string, year: number) =>
     request<any[]>(`/stats/mood-monthly?user_id=${userId}&year=${year}`),
   moodByDayOfWeek: (userId: string, from?: string, to?: string) => {
@@ -87,12 +90,29 @@ export const stats = {
     }
     return request<any[]>(`/stats/mood-by-day-of-week?${qp.toString()}`);
   },
-  moodActivityCorrelations: (userId: string) =>
-    request<any[]>(`/stats/mood-activity-correlations?user_id=${userId}`),
+  moodActivityCorrelations: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/mood-activity-correlations?${qp.toString()}`);
+  },
+  moodActivityCombinations: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/mood-activity-combinations?${qp.toString()}`);
+  },
   moodHeatmap: (userId: string, year: number) =>
     request<any[]>(`/stats/mood-heatmap?user_id=${userId}&year=${year}`),
-  moodCountRange: (userId: string, from: string, to: string) =>
-    request<any[]>(`/stats/mood-count-range?user_id=${userId}&from=${from}&to=${to}`),
+  moodCountRange: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) { qp.set('from', from); qp.set('to', to); }
+    return request<any[]>(`/stats/mood-count-range?${qp.toString()}`);
+  },
 };
 
 // Search

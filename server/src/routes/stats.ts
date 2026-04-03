@@ -754,7 +754,11 @@ router.get('/additional-stats', async (req: Request, res: Response) => {
 router.get('/mood-daily', async (req: Request, res: Response) => {
   try {
     const { user_id, from, to } = req.query;
-    if (!user_id || !from || !to) return res.status(400).json({ error: 'user_id, from, and to are required' });
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange ? "AND checked_in_at >= $2::date AND checked_in_at < ($3::date + INTERVAL '1 day')" : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
       `SELECT
@@ -765,11 +769,10 @@ router.get('/mood-daily', async (req: Request, res: Response) => {
          COUNT(*)::int AS count
        FROM mood_checkins
        WHERE user_id = $1
-         AND checked_in_at >= $2::date
-         AND checked_in_at < ($3::date + INTERVAL '1 day')
+         ${whereRange}
        GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
        ORDER BY date ASC`,
-      [user_id, from, to]
+      params
     );
 
     res.json(result.rows);
@@ -845,28 +848,42 @@ router.get('/mood-by-day-of-week', async (req: Request, res: Response) => {
   }
 });
 
-// GET /mood-activity-correlations?user_id= - avg mood per activity (min 2 checkins)
+// GET /mood-activity-correlations?user_id=&from=&to= - avg mood and impact per activity (min 2 checkins)
 router.get('/mood-activity-correlations', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE 'UTC')::date BETWEEN $2::date AND $3::date" : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
+
     const result = await query(
-      `SELECT
+      `WITH filtered_checkins AS (
+         SELECT id, mood
+         FROM mood_checkins
+         WHERE user_id = $1
+           ${whereRange}
+       ),
+       baseline AS (
+         SELECT AVG(mood)::numeric AS avg_mood
+         FROM filtered_checkins
+       )
+       SELECT
          ma.id AS activity_id,
          ma.name AS activity_name,
          mag.name AS group_name,
-         ROUND(AVG(mc.mood)::numeric, 2)::float AS avg_mood,
+         ROUND(AVG(fc.mood)::numeric, 2)::float AS avg_mood,
+         ROUND((AVG(fc.mood) - COALESCE((SELECT avg_mood FROM baseline), AVG(fc.mood)))::numeric, 2)::float AS mood_impact,
          COUNT(*)::int AS checkin_count
        FROM mood_checkin_activities mca
        JOIN mood_activities ma ON mca.activity_id = ma.id
        JOIN mood_activity_groups mag ON ma.group_id = mag.id
-       JOIN mood_checkins mc ON mca.mood_checkin_id = mc.id
-       WHERE mc.user_id = $1
+       JOIN filtered_checkins fc ON mca.mood_checkin_id = fc.id
        GROUP BY ma.id, ma.name, mag.name
        HAVING COUNT(*) >= 2
-       ORDER BY avg_mood DESC`,
-      [user_id]
+       ORDER BY mood_impact DESC, avg_mood DESC, checkin_count DESC`,
+      params
     );
 
     res.json(result.rows);
@@ -876,21 +893,79 @@ router.get('/mood-activity-correlations', async (req: Request, res: Response) =>
   }
 });
 
+// GET /mood-activity-combinations?user_id=&from=&to= - repeated multi-activity combinations (min 2 checkins)
+router.get('/mood-activity-combinations', async (req: Request, res: Response) => {
+  try {
+    const { user_id, from, to } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE 'UTC')::date BETWEEN $2::date AND $3::date" : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
+
+    const result = await query(
+      `WITH filtered_checkins AS (
+         SELECT id, mood
+         FROM mood_checkins
+         WHERE user_id = $1
+           ${whereRange}
+       ),
+       baseline AS (
+         SELECT AVG(mood)::numeric AS avg_mood
+         FROM filtered_checkins
+       ),
+       exact_combinations AS (
+         SELECT
+           fc.id AS mood_checkin_id,
+           fc.mood,
+           STRING_AGG(ma.id::text, ',' ORDER BY ma.name, ma.id::text) AS combination_key,
+           STRING_AGG(ma.name, ' + ' ORDER BY ma.name, ma.id::text) AS combination_name,
+           COUNT(*)::int AS activity_count
+         FROM filtered_checkins fc
+         JOIN mood_checkin_activities mca ON mca.mood_checkin_id = fc.id
+         JOIN mood_activities ma ON ma.id = mca.activity_id
+         GROUP BY fc.id, fc.mood
+         HAVING COUNT(*) >= 2
+       )
+       SELECT
+         combination_key,
+         combination_name,
+         activity_count,
+         ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
+         ROUND((AVG(mood) - COALESCE((SELECT avg_mood FROM baseline), AVG(mood)))::numeric, 2)::float AS mood_impact,
+         COUNT(*)::int AS checkin_count
+       FROM exact_combinations
+       GROUP BY combination_key, combination_name, activity_count
+       HAVING COUNT(*) >= 2
+       ORDER BY mood_impact DESC, avg_mood DESC, checkin_count DESC, combination_name ASC`,
+      params
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting mood-activity-combinations:', err);
+    res.status(500).json({ error: 'Failed to get mood activity combinations' });
+  }
+});
+
 // GET /mood-count-range?user_id=&from=&to= - count of each mood level in date range
 router.get('/mood-count-range', async (req: Request, res: Response) => {
   try {
     const { user_id, from, to } = req.query;
-    if (!user_id || !from || !to) return res.status(400).json({ error: 'user_id, from, and to are required' });
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange ? "AND checked_in_at >= $2::date AND checked_in_at < ($3::date + INTERVAL '1 day')" : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
       `SELECT mood, COUNT(*)::int AS count
        FROM mood_checkins
        WHERE user_id = $1
-         AND checked_in_at >= $2::date
-         AND checked_in_at < ($3::date + INTERVAL '1 day')
+         ${whereRange}
        GROUP BY mood
        ORDER BY mood ASC`,
-      [user_id, from, to]
+      params
     );
 
     const countMap = new Map(result.rows.map((r: any) => [r.mood, r.count]));

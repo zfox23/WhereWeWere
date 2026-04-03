@@ -29,7 +29,10 @@ I've begun a technological exodus, leaving third-party applications behind in ex
 
 On March 27, 2026, I purchased one month of Claude Code Pro in an attempt to vibe code a Swarm replacement. I also want to integrate data from other systems I've used for the past several years. This repository is the result of that experiment.
 
-## TODO as of 2026-04-01
+## TODO as of 2026-04-02
+### 1
+I need to be able to edit Venue metadata, such as the latitude and longitude (i.e. pin location) of the venue, the address of the venue, and the category of the venue. When in this new "edit venue" mode, let me drag the map around to adjust the latitude/longitude of the location. Also, let me merge the venue I'm viewing with another venue in the previously-checked-in database. In other words, I'd like to be able to say "This venue, named 'Harris Teeter Bad', is actually the same as this other venue, named 'Harris Teeter'". Create a merge UI where I can search the database for other venues by name.
+
 ### Third Task
 When navigating from the home page to a different page (like a checkin detail page or the Profile page) and then back to the home page, my vertical scroll position is reset. Please add a feature to preserve my vertical scroll location when navigating between those pages.
 
