@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MapPin, Tag, Navigation, Loader2, AlertCircle } from 'lucide-react';
+import {
+  MapPin, Tag, Navigation, Loader2, AlertCircle,
+  Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp,
+} from 'lucide-react';
 import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
-import { Venue, CheckIn, Scrobble, ImmichAsset } from '../types';
+import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../types';
+import VenueEditMap from '../components/VenueEditMap';
 import CheckInCard from '../components/CheckInCard';
 import MapView from '../components/MapView';
 
@@ -19,11 +23,40 @@ export default function VenueDetail() {
   const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
 
+  // ── Edit mode ─────────────────────────────────────────────────────────────
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editCategoryId, setEditCategoryId] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editState, setEditState] = useState('');
+  const [editPostalCode, setEditPostalCode] = useState('');
+  const [editCountry, setEditCountry] = useState('');
+  const [editLat, setEditLat] = useState(0);
+  const [editLng, setEditLng] = useState(0);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<VenueCategory[]>([]);
+
+  // ── Merge mode ────────────────────────────────────────────────────────────
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeQuery, setMergeQuery] = useState('');
+  const [mergeResults, setMergeResults] = useState<Venue[]>([]);
+  const [mergeSearching, setMergeSearching] = useState(false);
+  const [mergeTarget, setMergeTarget] = useState<Venue | null>(null);
+  const [mergeConfirming, setMergeConfirming] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const mergeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
       if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    venues.categories().then(setCategories).catch(() => {});
   }, []);
 
   const fetchData = async () => {
@@ -66,6 +99,90 @@ export default function VenueDetail() {
     }).catch(() => {});
   }, [venueCheckins, immichUrl]);
 
+  // ── Edit helpers ──────────────────────────────────────────────────────────
+  const startEditing = () => {
+    if (!venue) return;
+    setEditName(venue.name);
+    setEditCategoryId(venue.category_id ?? '');
+    setEditAddress(venue.address ?? '');
+    setEditCity(venue.city ?? '');
+    setEditState(venue.state ?? '');
+    setEditPostalCode(venue.postal_code ?? '');
+    setEditCountry(venue.country ?? '');
+    setEditLat(venue.latitude);
+    setEditLng(venue.longitude);
+    setEditError(null);
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => { setIsEditing(false); setEditError(null); };
+
+  const saveEdit = async () => {
+    if (!venue || !id) return;
+    if (!editName.trim()) { setEditError('Name is required.'); return; }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const updated = await venues.update(id, {
+        name: editName.trim(),
+        category_id: editCategoryId || null,
+        address: editAddress.trim() || null,
+        city: editCity.trim() || null,
+        state: editState.trim() || null,
+        postal_code: editPostalCode.trim() || null,
+        country: editCountry.trim() || null,
+        latitude: editLat,
+        longitude: editLng,
+      });
+      setVenue({ ...venue, ...updated });
+      setIsEditing(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Save failed.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // ── Merge helpers ─────────────────────────────────────────────────────────
+  const handleMergeSearch = (q: string) => {
+    setMergeQuery(q);
+    setMergeTarget(null);
+    if (mergeDebounce.current) clearTimeout(mergeDebounce.current);
+    if (!q.trim()) { setMergeResults([]); return; }
+    mergeDebounce.current = setTimeout(async () => {
+      setMergeSearching(true);
+      try {
+        const results = await venues.list({ search: q, limit: '10' });
+        setMergeResults(results.filter((v: Venue) => v.id !== id));
+      } catch {
+        setMergeResults([]);
+      } finally {
+        setMergeSearching(false);
+      }
+    }, 300);
+  };
+
+  const doMerge = async () => {
+    if (!mergeTarget || !id) return;
+    setMergeConfirming(true);
+    setMergeError(null);
+    try {
+      await venues.mergeInto(id, mergeTarget.id);
+      window.location.href = `/venues/${mergeTarget.id}`;
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : 'Merge failed.');
+      setMergeConfirming(false);
+    }
+  };
+
+  const toggleMergePanel = () => {
+    setMergeOpen((o) => !o);
+    setMergeQuery('');
+    setMergeResults([]);
+    setMergeTarget(null);
+    setMergeError(null);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -93,21 +210,12 @@ export default function VenueDetail() {
     .filter(Boolean)
     .join(', ');
 
-  const markers = [
-    {
-      lat: venue.latitude,
-      lng: venue.longitude,
-      label: venue.name,
-      id: venue.id,
-    },
-  ];
-
   return (
     <div className="space-y-6">
-      {/* Venue Header */}
+      {/* ── Venue header ───────────────────────────── */}
       <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 p-6">
-        <div className="flex items-start justify-between">
-          <div className="space-y-2">
+        <div className="flex items-start gap-4">
+          <div className="min-w-0 flex-1 space-y-2">
             {venue.parent_venue_name && (
               <Link
                 to={`/venues/${venue.parent_venue_id}`}
@@ -135,25 +243,179 @@ export default function VenueDetail() {
               </p>
             )}
           </div>
-          <Link
-            to={`/check-in?venueId=${encodeURIComponent(venue.id)}&venueName=${encodeURIComponent(venue.name)}`}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium shrink-0"
-          >
-            <MapPin size={18} />
-            Check in here
-          </Link>
+          <div className="shrink-0 flex flex-col sm:flex-row gap-2 items-end sm:items-start">
+            <button onClick={startEditing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <Edit2 size={14} />Edit
+            </button>
+            <Link to={`/check-in?venueId=${encodeURIComponent(venue.id)}&venueName=${encodeURIComponent(venue.name)}`}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium">
+              <MapPin size={18} />Check in here
+            </Link>
+          </div>
         </div>
       </div>
 
-      {/* Map */}
-      <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 overflow-hidden">
-        <MapView
-          center={[venue.latitude, venue.longitude]}
-          zoom={15}
-          markers={markers}
-          className="h-64 w-full"
-        />
-      </div>
+      {/* ── Edit venue panel ────────────────────────── */}
+      {isEditing && (
+        <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-indigo-200 dark:border-indigo-700/50 p-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-gray-100">
+              <Edit2 size={16} className="text-indigo-500" />Edit venue
+            </h2>
+            <button onClick={cancelEditing} aria-label="Cancel editing"
+              className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+          <label className="block">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Name</span>
+            <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Category</span>
+            <select value={editCategoryId} onChange={(e) => setEditCategoryId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="">— No category —</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ''}{c.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Street address</span>
+              <input type="text" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} placeholder="123 Main St"
+                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">City</span>
+              <input type="text" value={editCity} onChange={(e) => setEditCity(e.target.value)} placeholder="Charlotte"
+                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">State / Province</span>
+              <input type="text" value={editState} onChange={(e) => setEditState(e.target.value)} placeholder="NC"
+                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Postal code</span>
+              <input type="text" value={editPostalCode} onChange={(e) => setEditPostalCode(e.target.value)} placeholder="28202"
+                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Country</span>
+              <input type="text" value={editCountry} onChange={(e) => setEditCountry(e.target.value)} placeholder="United States"
+                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </label>
+          </div>
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Pin location</span>
+              <span className="font-mono text-xs text-gray-400">{editLat.toFixed(6)}, {editLng.toFixed(6)}</span>
+            </div>
+            <div className="h-56 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+              <VenueEditMap initialCenter={[editLat, editLng]} zoom={15}
+                onChange={(lat, lng) => { setEditLat(lat); setEditLng(lng); }} className="h-56 w-full" />
+            </div>
+          </div>
+          {editError && (
+            <p className="flex items-center gap-1.5 text-sm text-red-500">
+              <AlertTriangle size={14} className="shrink-0" /> {editError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={cancelEditing} disabled={editSaving}
+              className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={saveEdit} disabled={editSaving}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-60">
+              {editSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {editSaving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Map (view mode) ─────────────────────────── */}
+      {!isEditing && (
+        <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 overflow-hidden">
+          <MapView center={[venue.latitude, venue.longitude]} zoom={15}
+            markers={[{ lat: venue.latitude, lng: venue.longitude, label: venue.name, id: venue.id }]}
+            className="h-64 w-full" />
+        </div>
+      )}
+
+      {/* ── Merge venue panel ───────────────────────── */}
+      {!isEditing && (
+        <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40">
+          <button onClick={toggleMergePanel}
+            className="flex w-full items-center justify-between gap-2 rounded-xl px-5 py-3.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+            <span className="flex items-center gap-2">
+              <GitMerge size={15} className="text-violet-500" />
+              Merge into another venue
+            </span>
+            {mergeOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+          </button>
+          {mergeOpen && (
+            <div className="border-t border-gray-100 dark:border-gray-800 px-5 pb-5 pt-4 space-y-4">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Search for the venue to keep. All check-ins from{' '}
+                <strong className="text-gray-700 dark:text-gray-300">{venue.name}</strong> will be
+                moved there, and this venue will be permanently deleted.
+              </p>
+              <div className="relative">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="text" value={mergeQuery} onChange={(e) => handleMergeSearch(e.target.value)}
+                  placeholder="Search venue by name…"
+                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 pl-8 pr-9 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500" />
+                {mergeSearching && <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />}
+              </div>
+              {!mergeTarget && mergeResults.length > 0 && (
+                <ul className="max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  {mergeResults.map((v) => (
+                    <li key={v.id}>
+                      <button onClick={() => setMergeTarget(v)}
+                        className="w-full px-3 py-2.5 text-left hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
+                        <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">{v.name}</span>
+                        {(v.address || v.city) && <span className="text-xs text-gray-400">{[v.address, v.city].filter(Boolean).join(', ')}</span>}
+                        {v.category_name && <span className="ml-2 text-xs text-gray-400">{v.category_name}</span>}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {mergeTarget && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="rounded bg-gray-100 dark:bg-gray-800 px-2 py-0.5 font-semibold text-gray-800 dark:text-gray-200">{venue.name}</span>
+                    <ArrowRight size={14} className="shrink-0 text-gray-400" />
+                    <span className="rounded bg-violet-100 dark:bg-violet-900/40 px-2 py-0.5 font-semibold text-gray-800 dark:text-gray-200">{mergeTarget.name}</span>
+                  </div>
+                  <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    All check-ins will be moved and <strong>{venue.name}</strong> will be deleted. This cannot be undone.
+                  </p>
+                  {mergeError && <p className="text-xs text-red-500">{mergeError}</p>}
+                  <div className="flex gap-2">
+                    <button onClick={() => { setMergeTarget(null); setMergeError(null); }} disabled={mergeConfirming}
+                      className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50">
+                      Back
+                    </button>
+                    <button onClick={doMerge} disabled={mergeConfirming}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 transition-colors disabled:opacity-60">
+                      {mergeConfirming ? <Loader2 size={12} className="animate-spin" /> : <GitMerge size={12} />}
+                      {mergeConfirming ? 'Merging…' : 'Confirm merge'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Child venues (e.g. terminals inside an airport) */}
       {venue.child_venues && venue.child_venues.length > 0 && (

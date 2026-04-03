@@ -34,6 +34,8 @@ export const venues = {
     request<any>('/venues', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) =>
     request<any>(`/venues/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  mergeInto: (sourceId: string, targetId: string) =>
+    request<any>(`/venues/${sourceId}/merge-into`, { method: 'POST', body: JSON.stringify({ target_id: targetId }) }),
   nearby: (params: Record<string, string>) =>
     request<any[]>(`/venues/nearby?${new URLSearchParams(params)}`),
   categories: () => request<any[]>('/venues/categories'),

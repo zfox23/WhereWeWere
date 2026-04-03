@@ -235,7 +235,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /:id - update venue
+// PUT /:id - update venue metadata
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -244,23 +244,29 @@ router.put('/:id', async (req: Request, res: Response) => {
       postal_code, latitude, longitude, osm_id,
     } = req.body;
 
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    if (latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ error: 'latitude and longitude are required' });
+    }
+
     const result = await query(
       `UPDATE venues
-       SET name = COALESCE($2, name),
-           category_id = COALESCE($3, category_id),
-           address = COALESCE($4, address),
-           city = COALESCE($5, city),
-           state = COALESCE($6, state),
-           country = COALESCE($7, country),
-           postal_code = COALESCE($8, postal_code),
-           latitude = COALESCE($9, latitude),
-           longitude = COALESCE($10, longitude),
-           osm_id = COALESCE($11, osm_id),
-           updated_at = NOW()
+       SET name         = $2,
+           category_id  = $3,
+           address      = $4,
+           city         = $5,
+           state        = $6,
+           country      = $7,
+           postal_code  = $8,
+           latitude     = $9,
+           longitude    = $10,
+           osm_id       = COALESCE($11, osm_id),
+           updated_at   = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id, name, category_id, address, city, state, country,
-       postal_code, latitude, longitude, osm_id]
+      [id, name, category_id || null, address || null, city || null, state || null,
+       country || null, postal_code || null,
+       parseFloat(String(latitude)), parseFloat(String(longitude)), osm_id || null]
     );
 
     if (result.rows.length === 0) {
@@ -271,6 +277,55 @@ router.put('/:id', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error updating venue:', err);
     res.status(500).json({ error: 'Failed to update venue' });
+  }
+});
+
+// POST /:id/merge-into - merge this venue into another, moving all check-ins to the target
+router.post('/:id/merge-into', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { target_id } = req.body as { target_id?: string };
+
+    if (!target_id) return res.status(400).json({ error: 'target_id is required' });
+    if (id === target_id) return res.status(400).json({ error: 'Cannot merge a venue into itself' });
+
+    const [srcCheck, tgtCheck] = await Promise.all([
+      query('SELECT id, name FROM venues WHERE id = $1', [id]),
+      query('SELECT id, name FROM venues WHERE id = $1', [target_id]),
+    ]);
+    if (!srcCheck.rows.length) return res.status(404).json({ error: 'Source venue not found' });
+    if (!tgtCheck.rows.length) return res.status(404).json({ error: 'Target venue not found' });
+
+    // Move all check-ins from the source venue to the target
+    await query('UPDATE checkins SET venue_id = $1 WHERE venue_id = $2', [target_id, id]);
+
+    // Re-parent any child venues that pointed to the source
+    await query('UPDATE venues SET parent_venue_id = $1 WHERE parent_venue_id = $2', [target_id, id]);
+
+    // Delete the source venue
+    await query('DELETE FROM venues WHERE id = $1', [id]);
+
+    // Return the updated target venue
+    const result = await query(
+      `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
+              v.latitude, v.longitude, v.osm_id, v.parent_venue_id,
+              v.created_at, v.updated_at,
+              vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
+              pv.name AS parent_venue_name,
+              COUNT(c.id)::int AS checkin_count
+       FROM venues v
+       LEFT JOIN venue_categories vc ON v.category_id = vc.id
+       LEFT JOIN venues pv ON v.parent_venue_id = pv.id
+       LEFT JOIN checkins c ON c.venue_id = v.id
+       WHERE v.id = $1
+       GROUP BY v.id, vc.id, pv.name`,
+      [target_id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error merging venue:', err);
+    res.status(500).json({ error: 'Failed to merge venue' });
   }
 });
 

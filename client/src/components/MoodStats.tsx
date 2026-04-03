@@ -655,6 +655,22 @@ function MoodMonthlySection({
         )}
       </div>
 
+      <div className="my-2 flex justify-center">
+        <button
+          type="button"
+          onClick={() => {
+            if (visibleRange.from && visibleRange.to) {
+              openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
+            } else {
+              openInNewTab('/');
+            }
+          }}
+          className="rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/60 dark:bg-indigo-900/20 dark:text-indigo-300 dark:hover:bg-indigo-900/35"
+        >
+          Open {rangeLabel || selLabel || 'This Period'} in Home
+        </button>
+      </div>
+
       {/* Pie + legend for selected month */}
       <div className="grid grid-cols-1 sm:grid-cols-[auto,1fr] gap-4 sm:gap-6 mb-6 items-center">
         <div className="mx-auto sm:mx-0">
@@ -728,22 +744,6 @@ function MoodMonthlySection({
 
       <div className="mt-4">
         <MoodDowChart data={dowData} />
-      </div>
-
-      <div className="mt-4 flex justify-center">
-        <button
-          type="button"
-          onClick={() => {
-            if (visibleRange.from && visibleRange.to) {
-              openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
-            } else {
-              openInNewTab('/');
-            }
-          }}
-          className="rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/60 dark:bg-indigo-900/20 dark:text-indigo-300 dark:hover:bg-indigo-900/35"
-        >
-          Open {rangeLabel || selLabel || 'This Period'} in Home
-        </button>
       </div>
     </div>
   );
