@@ -141,6 +141,7 @@ export const importApi = {
   daylio: async (file: File) => {
     const form = new FormData();
     form.append('file', file);
+    form.append('source_timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
     const res = await fetch(`${API_BASE}/import/daylio`, {
       method: 'POST',
       body: form,
@@ -181,12 +182,24 @@ export const backupApi = {
     }
     return res.json();
   },
-  startOver: async (firstConfirmation: string, secondConfirmation: string) => {
+  startOver: async (
+    firstConfirmation: string,
+    secondConfirmation: string,
+    options: {
+      delete_all_checkins: boolean;
+      delete_venue_checkins: boolean;
+      delete_mood_checkins: boolean;
+      reset_account_settings: boolean;
+      reset_mood_settings: boolean;
+      reset_integrations_settings: boolean;
+    }
+  ) => {
     return request<{ message: string; counts: Record<string, number> }>('/backup/start-over', {
       method: 'POST',
       body: JSON.stringify({
         first_confirmation: firstConfirmation,
         second_confirmation: secondConfirmation,
+        options,
       }),
     });
   },

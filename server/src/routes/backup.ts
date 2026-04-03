@@ -738,47 +738,104 @@ router.post('/start-over', async (req: Request, res: Response) => {
       });
     }
 
+    const rawOptions = req.body?.options ?? {};
+    const deleteAllCheckins = Boolean(rawOptions.delete_all_checkins);
+    const deleteVenueCheckins = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
+    const deleteMoodCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
+    const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
+    const resetMoodSettings = Boolean(rawOptions.reset_mood_settings);
+    const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
+
+    if (!deleteVenueCheckins && !deleteMoodCheckins && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
+      return res.status(400).json({
+        error: 'No start-over actions selected',
+      });
+    }
+
     await client.query('BEGIN');
 
     const counts: Record<string, number> = {};
 
-    const mergeResult = await client.query('DELETE FROM venue_merge_suggestions');
-    counts.venue_merge_suggestions = mergeResult.rowCount ?? 0;
+    if (deleteVenueCheckins) {
+      const scrobbleResult = await client.query(
+        `DELETE FROM checkin_scrobbles
+         WHERE checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
+        [USER_ID]
+      );
+      counts.checkin_scrobbles = scrobbleResult.rowCount ?? 0;
 
-    const jobsResult = await client.query('DELETE FROM jobs');
-    counts.jobs = jobsResult.rowCount ?? 0;
+      const checkinResult = await client.query('DELETE FROM checkins WHERE user_id = $1', [USER_ID]);
+      counts.checkins = checkinResult.rowCount ?? 0;
+    }
 
-    const pushLogResult = await client.query('DELETE FROM push_delivery_logs WHERE user_id = $1', [USER_ID]);
-    counts.push_delivery_logs = pushLogResult.rowCount ?? 0;
+    if (deleteMoodCheckins) {
+      const moodCheckinResult = await client.query('DELETE FROM mood_checkins WHERE user_id = $1', [USER_ID]);
+      counts.mood_checkins = moodCheckinResult.rowCount ?? 0;
+    }
 
-    const pushResult = await client.query('DELETE FROM push_subscriptions WHERE user_id = $1', [USER_ID]);
-    counts.push_subscriptions = pushResult.rowCount ?? 0;
+    if (resetMoodSettings) {
+      const groupResult = await client.query('DELETE FROM mood_activity_groups WHERE user_id = $1', [USER_ID]);
+      counts.mood_activity_groups = groupResult.rowCount ?? 0;
 
-    const scrobbleResult = await client.query(
-      `DELETE FROM checkin_scrobbles
-       WHERE checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
-      [USER_ID]
-    );
-    counts.checkin_scrobbles = scrobbleResult.rowCount ?? 0;
+      const moodSettingsResult = await client.query(
+        `INSERT INTO user_settings (user_id, mood_reminder_times, mood_icon_pack)
+         VALUES ($1, ARRAY[]::text[], 'emoji')
+         ON CONFLICT (user_id) DO UPDATE SET
+           mood_reminder_times = EXCLUDED.mood_reminder_times,
+           mood_icon_pack = EXCLUDED.mood_icon_pack,
+           updated_at = NOW()`,
+        [USER_ID]
+      );
+      counts.user_settings_mood_reset = moodSettingsResult.rowCount ?? 0;
+    }
 
-    const checkinResult = await client.query('DELETE FROM checkins WHERE user_id = $1', [USER_ID]);
-    counts.checkins = checkinResult.rowCount ?? 0;
+    if (resetIntegrationsSettings) {
+      const pushLogResult = await client.query('DELETE FROM push_delivery_logs WHERE user_id = $1', [USER_ID]);
+      counts.push_delivery_logs = pushLogResult.rowCount ?? 0;
 
-    const moodCheckinResult = await client.query('DELETE FROM mood_checkins WHERE user_id = $1', [USER_ID]);
-    counts.mood_checkins = moodCheckinResult.rowCount ?? 0;
+      const pushResult = await client.query('DELETE FROM push_subscriptions WHERE user_id = $1', [USER_ID]);
+      counts.push_subscriptions = pushResult.rowCount ?? 0;
 
-    const groupResult = await client.query('DELETE FROM mood_activity_groups WHERE user_id = $1', [USER_ID]);
-    counts.mood_activity_groups = groupResult.rowCount ?? 0;
+      const integrationSettingsResult = await client.query(
+        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url)
+         VALUES ($1, NULL, NULL, NULL, NULL, NULL)
+         ON CONFLICT (user_id) DO UPDATE SET
+           dawarich_url = NULL,
+           dawarich_api_key = NULL,
+           immich_url = NULL,
+           immich_api_key = NULL,
+           maloja_url = NULL,
+           updated_at = NOW()`,
+        [USER_ID]
+      );
+      counts.user_settings_integrations_reset = integrationSettingsResult.rowCount ?? 0;
+    }
 
-    const settingsResult = await client.query('DELETE FROM user_settings WHERE user_id = $1', [USER_ID]);
-    counts.user_settings = settingsResult.rowCount ?? 0;
+    if (resetAccountSettings) {
+      const profileResult = await client.query(
+        `UPDATE users
+         SET display_name = NULL,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [USER_ID]
+      );
+      counts.user_profile_reset = profileResult.rowCount ?? 0;
 
-    const venuesResult = await client.query('DELETE FROM venues');
-    counts.venues = venuesResult.rowCount ?? 0;
+      const accountSettingsResult = await client.query(
+        `INSERT INTO user_settings (user_id, theme, notifications_enabled)
+         VALUES ($1, 'system', true)
+         ON CONFLICT (user_id) DO UPDATE SET
+           theme = 'system',
+           notifications_enabled = true,
+           updated_at = NOW()`,
+        [USER_ID]
+      );
+      counts.user_settings_account_reset = accountSettingsResult.rowCount ?? 0;
+    }
 
     await client.query('COMMIT');
 
-    res.json({ message: 'All user data deleted. Fresh start complete.', counts });
+    res.json({ message: 'Selected data has been reset.', counts });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error running start-over:', err);
