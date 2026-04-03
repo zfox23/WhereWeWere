@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
 
 const router = Router();
@@ -638,6 +639,7 @@ router.get('/reflections', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT c.id, c.notes, c.rating, c.checked_in_at,
               v.id AS venue_id, v.name AS venue_name, v.city, v.country,
+              v.latitude, v.longitude,
               vc.name AS venue_category
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id
@@ -652,9 +654,25 @@ router.get('/reflections', async (req: Request, res: Response) => {
     // Group by year
     const byYear: Record<number, any[]> = {};
     for (const row of result.rows) {
-      const year = new Date(row.checked_in_at).getFullYear();
+      const tzResults = row.latitude != null && row.longitude != null
+        ? findTimezone(Number(row.latitude), Number(row.longitude))
+        : [];
+      const venueTimezone = tzResults[0] || null;
+
+      const year = new Date(row.checked_in_at).getUTCFullYear();
       if (!byYear[year]) byYear[year] = [];
-      byYear[year].push(row);
+      byYear[year].push({
+        id: row.id,
+        notes: row.notes,
+        rating: row.rating,
+        checked_in_at: row.checked_in_at,
+        venue_id: row.venue_id,
+        venue_name: row.venue_name,
+        city: row.city,
+        country: row.country,
+        venue_category: row.venue_category,
+        venue_timezone: venueTimezone,
+      });
     }
 
     const reflections = Object.entries(byYear)
