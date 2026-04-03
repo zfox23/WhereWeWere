@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { searchNearbyVenues, findEnclosingVenue } from '../services/overpass';
 import { reverseGeocode } from '../services/nominatim';
+import { findOrReuseVenue } from '../services/venueMerge';
 
 const router = Router();
 
@@ -214,16 +215,20 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'latitude and longitude are required' });
     }
 
-    const result = await query(
-      `INSERT INTO venues (name, category_id, address, city, state, country,
-                           postal_code, latitude, longitude, osm_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [name, category_id || null, address || null, city || null, state || null,
-       country || null, postal_code || null, latitude, longitude, osm_id || null]
-    );
+    const venue = await findOrReuseVenue({
+      name,
+      category_id: category_id || null,
+      address: address || null,
+      city: city || null,
+      state: state || null,
+      country: country || null,
+      postal_code: postal_code || null,
+      latitude: parseFloat(String(latitude)),
+      longitude: parseFloat(String(longitude)),
+      osm_id: osm_id || null,
+    });
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(venue);
   } catch (err) {
     console.error('Error creating venue:', err);
     res.status(500).json({ error: 'Failed to create venue' });
@@ -278,16 +283,6 @@ router.post('/import-osm', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'name and osm_id are required' });
     }
 
-    // Check if a venue with this osm_id already exists
-    const existing = await query(
-      'SELECT * FROM venues WHERE osm_id = $1',
-      [osm_id]
-    );
-
-    if (existing.rows.length > 0) {
-      return res.json(existing.rows[0]);
-    }
-
     // Try to find a matching category
     let categoryId: string | null = null;
     if (category) {
@@ -317,20 +312,24 @@ router.post('/import-osm', async (req: Request, res: Response) => {
       }
     }
 
-    const insertResult = await query(
-      `INSERT INTO venues (name, category_id, address, city, state, latitude, longitude, osm_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [name, categoryId, addressLine, city, state, latitude, longitude, osm_id]
-    );
-
-    const childVenue = insertResult.rows[0];
+    const childVenue = await findOrReuseVenue({
+      name,
+      category_id: categoryId,
+      address: addressLine,
+      city,
+      state,
+      latitude: parseFloat(String(latitude)),
+      longitude: parseFloat(String(longitude)),
+      osm_id,
+    }) as any;
 
     // Try to find an enclosing parent venue (e.g. the airport containing a terminal)
     if (latitude && longitude) {
       try {
+        const latNum = parseFloat(String(latitude));
+        const lngNum = parseFloat(String(longitude));
         const enclosing = await findEnclosingVenue(
-          parseFloat(latitude), parseFloat(longitude), osm_id
+          latNum, lngNum, osm_id
         );
         if (enclosing) {
           // Upsert the parent venue
@@ -362,7 +361,7 @@ router.post('/import-osm', async (req: Request, res: Response) => {
 
           // Link child to parent
           await query(
-            'UPDATE venues SET parent_venue_id = $1 WHERE id = $2',
+            'UPDATE venues SET parent_venue_id = $1 WHERE id = $2 AND parent_venue_id IS NULL',
             [parentVenue.id, childVenue.id]
           );
           childVenue.parent_venue_id = parentVenue.id;

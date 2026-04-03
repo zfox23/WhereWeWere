@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
+import { findOrReuseVenue } from '../services/venueMerge';
 
 const router = Router();
 
@@ -41,52 +42,14 @@ async function findOrCreateVenue(
   lng: number,
   swarmVenueId: string | null
 ): Promise<string> {
-  // Try matching by swarm_venue_id first
-  if (swarmVenueId) {
-    const existing = await query(
-      'SELECT id FROM venues WHERE swarm_venue_id = $1',
-      [swarmVenueId]
-    );
-    if (existing.rows.length > 0) {
-      return existing.rows[0].id;
-    }
-  }
+  const venue = await findOrReuseVenue({
+    name: venueName,
+    latitude: lat,
+    longitude: lng,
+    swarm_venue_id: swarmVenueId,
+  });
 
-  // Try matching by name + proximity (within ~100m)
-  const nearby = await query(
-    `SELECT id FROM venues
-     WHERE name = $1
-       AND (6371000 * acos(
-         LEAST(1.0, GREATEST(-1.0,
-           cos(radians($2)) * cos(radians(latitude)) *
-           cos(radians(longitude) - radians($3)) +
-           sin(radians($2)) * sin(radians(latitude))
-         ))
-       )) < 100
-     LIMIT 1`,
-    [venueName, lat, lng]
-  );
-
-  if (nearby.rows.length > 0) {
-    const venueId = nearby.rows[0].id;
-    // Update with swarm_venue_id for future matching
-    if (swarmVenueId) {
-      await query(
-        'UPDATE venues SET swarm_venue_id = $1 WHERE id = $2 AND swarm_venue_id IS NULL',
-        [swarmVenueId, venueId]
-      );
-    }
-    return venueId;
-  }
-
-  // Create new venue
-  const newVenue = await query(
-    `INSERT INTO venues (name, latitude, longitude, swarm_venue_id)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id`,
-    [venueName, lat, lng, swarmVenueId]
-  );
-  return newVenue.rows[0].id;
+  return venue.id;
 }
 
 // POST / - import Swarm CSV files

@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2 } from 'lucide-react';
-import { settings, importApi, jobs, moodActivities } from '../api/client';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2, RefreshCw, MapPin } from 'lucide-react';
+import { settings, importApi, jobs, moodActivities, venueMerges } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
 import ActivityGroupManager from '../components/ActivityGroupManager';
 import { PushSettings } from '../components/PushSettings';
-import type { UserSettings, ImportResult, Job, MoodActivityGroup, MoodActivity } from '../types';
+import type { UserSettings, ImportResult, Job, MoodActivityGroup, MoodActivity, VenueMergeSuggestion } from '../types';
 
 function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -309,6 +309,12 @@ function formatRelativeTime(dateStr: string): string {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
 }
 
+function formatDistanceMeters(distanceMeters: number): string {
+  return distanceMeters >= 1000
+    ? `${(distanceMeters / 1000).toFixed(1)} km`
+    : `${distanceMeters} m`;
+}
+
 function JobStatusIcon({ status }: { status: Job['status'] }) {
   switch (status) {
     case 'pending':
@@ -419,6 +425,26 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
         </div>
         <div className='flex flex-col'>
           <button
+            onClick={() => startJob('venue-merge')}
+            disabled={starting || hasActiveJob}
+            className="btn-secondary"
+          >
+            {starting ? (
+              <>
+                <Loader2 size={16} className="animate-spin mr-2" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <Play size={16} className="mr-2" />
+                Scan Similar Venues
+              </>
+            )}
+          </button>
+          <p className="text-xs text-gray-400 mt-1">Find likely duplicate venues and queue them for manual review</p>
+        </div>
+        <div className='flex flex-col'>
+          <button
             onClick={() => startJob('dawarich-export')}
             disabled={true || starting || hasActiveJob}
             className="btn-secondary"
@@ -476,6 +502,233 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResolveMergesSection() {
+  const [suggestions, setSuggestions] = useState<VenueMergeSuggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [processingIds, setProcessingIds] = useState<string[]>([]);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const loadSuggestions = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
+    try {
+      const data = await venueMerges.list('pending');
+      setSuggestions(data);
+      setSelectedIds((prev) => prev.filter((id) => data.some((item) => item.id === id)));
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to load merge suggestions.' });
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSuggestions();
+    const interval = setInterval(() => {
+      loadSuggestions(true).catch(() => undefined);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => prev.length === suggestions.length ? [] : suggestions.map((item) => item.id));
+  };
+
+  const resolveSingle = async (id: string, action: 'approve' | 'deny') => {
+    setProcessingIds((prev) => [...prev, id]);
+    setMessage(null);
+    try {
+      if (action === 'approve') {
+        await venueMerges.approve(id);
+      } else {
+        await venueMerges.deny(id);
+      }
+      setMessage({ type: 'success', text: action === 'approve' ? 'Merge approved.' : 'Merge denied.' });
+      await loadSuggestions(true);
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to resolve merge.' });
+    } finally {
+      setProcessingIds((prev) => prev.filter((item) => item !== id));
+    }
+  };
+
+  const resolveBatch = async (action: 'approve' | 'deny') => {
+    if (selectedIds.length === 0) {
+      return;
+    }
+    setProcessingIds(selectedIds);
+    setMessage(null);
+    try {
+      const result = await venueMerges.resolveBatch(selectedIds, action);
+      const failures = result.results.filter((item: { status: string }) => item.status === 'error').length;
+      setMessage({
+        type: failures > 0 ? 'error' : 'success',
+        text: failures > 0
+          ? `${result.resolved} of ${result.total} suggestions were resolved.`
+          : `${action === 'approve' ? 'Approved' : 'Denied'} ${result.resolved} suggestions.`,
+      });
+      setSelectedIds([]);
+      await loadSuggestions(true);
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to resolve selected merges.' });
+    } finally {
+      setProcessingIds([]);
+    }
+  };
+
+  const allSelected = suggestions.length > 0 && selectedIds.length === suggestions.length;
+
+  return (
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <MapPin size={20} className="text-gray-600 dark:text-gray-400" />
+            Resolve Merges
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Review nearby venues that look similar before any merge is applied.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setRefreshing(true);
+            loadSuggestions(true).catch(() => undefined);
+          }}
+          disabled={refreshing}
+          className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </div>
+
+      {message && (
+        <div className={`flex items-center gap-2 text-sm ${message.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+          {message.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+          {message.text}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="animate-spin text-primary-600" size={24} />
+        </div>
+      ) : suggestions.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 p-6 text-sm text-gray-500 dark:text-gray-400">
+          No pending merge suggestions. Run “Scan Similar Venues” to generate new proposals.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200/70 dark:border-gray-700/70 bg-white/60 dark:bg-gray-800/40 p-3">
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+                className="rounded border-gray-300 dark:border-gray-600"
+              />
+              Select all
+            </label>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{selectedIds.length} selected</span>
+            <button
+              onClick={() => resolveBatch('approve')}
+              disabled={selectedIds.length === 0 || processingIds.length > 0}
+              className="btn-primary disabled:opacity-50"
+            >
+              Approve Selected
+            </button>
+            <button
+              onClick={() => resolveBatch('deny')}
+              disabled={selectedIds.length === 0 || processingIds.length > 0}
+              className="btn-secondary disabled:opacity-50"
+            >
+              Deny Selected
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {suggestions.map((suggestion) => {
+              const isProcessing = processingIds.includes(suggestion.id);
+              const canonicalMeta = [suggestion.canonical_venue.city, suggestion.canonical_venue.state].filter(Boolean).join(', ');
+              const duplicateMeta = [suggestion.duplicate_venue.city, suggestion.duplicate_venue.state].filter(Boolean).join(', ');
+
+              return (
+                <div key={suggestion.id} className="rounded-2xl border border-gray-200/70 dark:border-gray-700/70 bg-white/70 dark:bg-gray-800/50 p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(suggestion.id)}
+                      onChange={() => toggleSelection(suggestion.id)}
+                      className="mt-1 rounded border-gray-300 dark:border-gray-600"
+                    />
+                    <div className="flex-1 min-w-0 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                        <span className="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700/70 text-gray-700 dark:text-gray-300">
+                          {Math.round(suggestion.similarity_score * 100)}% similar
+                        </span>
+                        <span>{formatDistanceMeters(suggestion.distance_meters)} apart</span>
+                        <span>{formatRelativeTime(suggestion.created_at)}</span>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-green-200/70 dark:border-green-900/60 bg-green-50/50 dark:bg-green-900/10 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-green-700 dark:text-green-400">Keep</p>
+                          <p className="mt-1 font-semibold text-gray-900 dark:text-gray-100">{suggestion.canonical_venue.name}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{canonicalMeta || suggestion.canonical_venue.address || 'No location details'}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{suggestion.canonical_venue.checkin_count} check-ins</p>
+                        </div>
+
+                        <div className="rounded-xl border border-amber-200/70 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-900/10 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">Merge Into Keep</p>
+                          <p className="mt-1 font-semibold text-gray-900 dark:text-gray-100">{suggestion.duplicate_venue.name}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{duplicateMeta || suggestion.duplicate_venue.address || 'No location details'}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{suggestion.duplicate_venue.checkin_count} check-ins</p>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Match reason: {suggestion.reason.replace(/-/g, ' ')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    <button
+                      onClick={() => resolveSingle(suggestion.id, 'deny')}
+                      disabled={isProcessing || processingIds.length > 0}
+                      className="btn-secondary disabled:opacity-50"
+                    >
+                      {isProcessing ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+                      Deny
+                    </button>
+                    <button
+                      onClick={() => resolveSingle(suggestion.id, 'approve')}
+                      disabled={isProcessing || processingIds.length > 0}
+                      className="btn-primary disabled:opacity-50"
+                    >
+                      {isProcessing ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+                      Approve Merge
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1094,6 +1347,9 @@ export default function Settings() {
 
           {/* Jobs Section */}
           <JobsSection refreshKey={jobRefreshKey} />
+
+          {/* Resolve Merges Section */}
+          <ResolveMergesSection />
 
           {/* Export Section */}
           <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">

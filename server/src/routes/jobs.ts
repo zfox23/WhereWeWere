@@ -1,6 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { runBackfillJob, runDawarichExportJob, requestJobCancellation } from '../services/jobs';
+import {
+  runBackfillJob,
+  runDawarichExportJob,
+  runVenueMergeJob,
+  requestJobCancellation,
+} from '../services/jobs';
 
 const router = Router();
 
@@ -43,7 +48,7 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { type } = req.body;
 
-    const supportedTypes = ['backfill', 'dawarich-export'];
+    const supportedTypes = ['backfill', 'dawarich-export', 'venue-merge'];
     if (!supportedTypes.includes(type)) {
       return res.status(400).json({ error: `Unknown job type. Supported: ${supportedTypes.join(', ')}` });
     }
@@ -67,7 +72,11 @@ router.post('/', async (req: Request, res: Response) => {
     const job = result.rows[0];
 
     // Fire and forget — run in the background
-    const runner = type === 'dawarich-export' ? runDawarichExportJob : runBackfillJob;
+    const runner = type === 'dawarich-export'
+      ? runDawarichExportJob
+      : type === 'venue-merge'
+        ? runVenueMergeJob
+        : runBackfillJob;
     runner(job.id).catch((err) => {
       console.error(`Background job ${job.id} threw:`, err);
     });

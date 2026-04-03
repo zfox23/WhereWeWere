@@ -207,9 +207,45 @@ export interface Job {
     message?: string;
     geocoded?: number;
     categorized?: number;
+    scanned?: number;
+    merged_venues?: number;
+    moved_checkins?: number;
+    proposals_found?: number;
+    pending_suggestions?: number;
   };
   error: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+}
+
+export interface VenueMergeSuggestion {
+  id: string;
+  status: 'pending' | 'denied' | 'applied' | 'invalid';
+  similarity_score: number;
+  distance_meters: number;
+  reason: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  canonical_venue: {
+    id: string | null;
+    name: string;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    checkin_count: number;
+  };
+  duplicate_venue: {
+    id: string | null;
+    name: string;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    checkin_count: number;
+  };
 }
