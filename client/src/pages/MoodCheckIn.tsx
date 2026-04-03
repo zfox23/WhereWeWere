@@ -11,6 +11,21 @@ function toLocalDatetimeString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function toOffsetDateTime(localDateTime: string): string {
+  const date = new Date(localDateTime);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+
+  const pad = (n: number) => String(Math.trunc(Math.abs(n))).padStart(2, '0');
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const offsetHours = pad(offsetMinutes / 60);
+  const offsetMins = pad(offsetMinutes % 60);
+
+  return `${toLocalDatetimeString(date)}:00${sign}${offsetHours}:${offsetMins}`;
+}
+
 export default function MoodCheckInPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -19,7 +34,6 @@ export default function MoodCheckInPage() {
   const [mood, setMood] = useState<number>(0);
   const [note, setNote] = useState('');
   const [checkedInAt, setCheckedInAt] = useState(toLocalDatetimeString(new Date()));
-  const [moodTimezone, setMoodTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const [selectedActivities, setSelectedActivities] = useState<Set<string>>(new Set());
   const [groups, setGroups] = useState<MoodActivityGroup[]>([]);
   const [iconPack, setIconPack] = useState('emoji');
@@ -41,7 +55,6 @@ export default function MoodCheckInPage() {
       setMood(mc.mood);
       setNote(mc.note || '');
       setCheckedInAt(toLocalDatetimeString(new Date(mc.checked_in_at)));
-      setMoodTimezone(mc.mood_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
       setSelectedActivities(new Set(mc.activities.map((a: any) => a.id)));
     }).catch(console.error).finally(() => setLoading(false));
   }, [editId]);
@@ -62,8 +75,8 @@ export default function MoodCheckInPage() {
       const data = {
         mood,
         note: note.trim() || null,
-        checked_in_at: new Date(checkedInAt).toISOString(),
-        mood_timezone: moodTimezone,
+        checked_in_at: toOffsetDateTime(checkedInAt),
+        mood_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
         activity_ids: Array.from(selectedActivities),
       };
       if (editId) {

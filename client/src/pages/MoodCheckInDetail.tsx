@@ -4,8 +4,11 @@ import { Clock, Pencil, Trash2, Loader2, AlertCircle, ArrowLeft } from 'lucide-r
 import { moodCheckins, settings as settingsApi } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from '../components/MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
+import { normalizeTimezoneForDisplay } from '../utils/checkin';
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, timeZone?: string | null): string {
+  const date = new Date(dateStr);
+  const displayTimeZone = normalizeTimezoneForDisplay(timeZone);
   return new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     year: 'numeric',
@@ -13,7 +16,9 @@ function formatDate(dateStr: string): string {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(new Date(dateStr));
+    timeZoneName: 'short',
+    ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
+  }).format(date);
 }
 
 export default function MoodCheckInDetail() {
@@ -119,7 +124,7 @@ export default function MoodCheckInDetail() {
         <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <Clock size={14} />
           <time dateTime={checkin.checked_in_at}>
-            {formatDate(checkin.checked_in_at)}
+            {formatDate(checkin.checked_in_at, checkin.mood_timezone)}
           </time>
         </div>
 

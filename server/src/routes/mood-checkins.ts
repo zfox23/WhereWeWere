@@ -45,8 +45,8 @@ router.get('/', async (req: Request, res: Response) => {
     const offsetParam = `$${paramIndex}`;
 
     const sql = `
-      SELECT mc.id, mc.user_id, mc.mood, mc.note, mc.mood_timezone,
-             mc.checked_in_at, mc.created_at, mc.updated_at,
+      SELECT mc.id, mc.user_id, mc.mood, mc.note,
+             mc.checked_in_at, mc.created_at, mc.updated_at, mc.mood_timezone,
              COALESCE(
                (SELECT json_agg(json_build_object(
                  'id', ma.id, 'name', ma.name, 'group_name', mag.name, 'icon', ma.icon
@@ -77,8 +77,8 @@ router.get('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const result = await query(
-      `SELECT mc.id, mc.user_id, mc.mood, mc.note, mc.mood_timezone,
-              mc.checked_in_at, mc.created_at, mc.updated_at,
+      `SELECT mc.id, mc.user_id, mc.mood, mc.note,
+              mc.checked_in_at, mc.created_at, mc.updated_at, mc.mood_timezone,
               COALESCE(
                 (SELECT json_agg(json_build_object(
                   'id', ma.id, 'name', ma.name, 'group_name', mag.name, 'icon', ma.icon
@@ -119,7 +119,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const result = await client.query(
       `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), NULLIF($5, ''))
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
        RETURNING *`,
       [USER_ID, mood, note || null, checked_in_at || null, mood_timezone || null]
     );
@@ -167,7 +167,7 @@ router.put('/:id', async (req: Request, res: Response) => {
        SET mood = COALESCE($2, mood),
            note = COALESCE($3, note),
            checked_in_at = COALESCE($4::timestamptz, checked_in_at),
-           mood_timezone = COALESCE(NULLIF($5, ''), mood_timezone)
+           mood_timezone = COALESCE($5, mood_timezone)
        WHERE id = $1
        RETURNING *`,
       [id, mood ?? null, note, checked_in_at || null, mood_timezone || null]

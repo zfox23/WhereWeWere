@@ -154,8 +154,8 @@ export interface MoodCheckIn {
   user_id: string;
   mood: number;
   note: string | null;
-  activities: { id: string; name: string; group_name: string }[];
   mood_timezone?: string | null;
+  activities: { id: string; name: string; group_name: string }[];
   checked_in_at: string;
   created_at: string;
 }

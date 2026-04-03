@@ -26,6 +26,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.heat';
 import { stats } from '../api/client';
+import { normalizeTimezoneForDisplay } from '../utils/checkin';
 import {
   StatCard,
   StreakCard,
@@ -181,7 +182,7 @@ interface TimeOfDayData { period: string; count: number }
 interface BusiestDayData { date: string; count: number }
 interface CityData { city: string; country: string; checkin_count: number; unique_venues: number }
 interface InsightData { title: string; description: string; icon: string }
-interface ReflectionYear { year: number; years_ago: number; checkins: { id: string; venue_id: string; venue_name: string; venue_category?: string; city?: string; country?: string; notes?: string; rating?: number; checked_in_at: string }[] }
+interface ReflectionYear { year: number; years_ago: number; checkins: { id: string; venue_id: string; venue_name: string; venue_category?: string; city?: string; country?: string; notes?: string; rating?: number; checked_in_at: string; venue_timezone?: string | null }[] }
 interface AdditionalStatsData {
   avg_rating: number | null;
   rated_count: number;
@@ -370,8 +371,14 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
   const navigate = useNavigate();
   if (data.length === 0) return null;
 
-  function formatTime(dateStr: string) {
-    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(dateStr));
+  function formatTime(dateStr: string, timeZone?: string | null) {
+    const displayTimeZone = normalizeTimezoneForDisplay(timeZone);
+    return new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+      ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
+    }).format(new Date(dateStr));
   }
 
   function handleYearClick(checkins: ReflectionYear['checkins']) {
@@ -405,7 +412,7 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     {c.venue_category && <span className="text-purple-600 dark:text-purple-400">{c.venue_category}</span>}
                     {c.city && <span>{c.city}{c.country ? `, ${c.country}` : ''}</span>}
-                    <span>{formatTime(c.checked_in_at)}</span>
+                    <span>{formatTime(c.checked_in_at, c.venue_timezone)}</span>
                   </div>
                   {c.notes && <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 italic">"{c.notes}"</p>}
                   {c.rating && (

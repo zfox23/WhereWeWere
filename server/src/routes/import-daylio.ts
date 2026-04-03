@@ -38,6 +38,7 @@ const daylioUpload = multer({
 interface DaylioEntry {
   id: number;
   datetime: number;
+  timeZoneOffset?: number;
   mood: number;
   tags?: number[];
   note?: string;
@@ -58,6 +59,91 @@ interface DaylioBackup {
   dayEntries: DaylioEntry[];
   tags: DaylioTag[];
   tag_groups: DaylioTagGroup[];
+  metadata?: {
+    timezone?: string;
+    timeZone?: string;
+  };
+}
+
+function normalizeEpochMillis(value: number): number {
+  // Daylio exports can use milliseconds, but some exports may provide seconds.
+  return value < 1e12 ? value * 1000 : value;
+}
+
+function isValidTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Custom mapping for known-broken Daylio timeZoneOffset values.
+ * Used when Daylio records invalid offset values.
+ */
+const DAYLIO_OFFSET_FIXES: Record<number, string> = {
+  57600000: 'America/Los_Angeles',  // Should be PDT (UTC-7)
+  54000000: 'America/New_York',     // Should be EST (UTC-5)
+};
+
+/**
+ * Convert a Daylio timeZoneOffset (ms, Android UTC offset convention) to an IANA
+ * timezone name suitable for Intl.DateTimeFormat. Returns null for non-whole-hour
+ * offsets (rare; caller should fall back to a named timezone).
+ * Note: POSIX/IANA Etc/GMT sign is inverted relative to UTC offset:
+ *   UTC-4 (offsetMs = -14400000) → Etc/GMT+4
+ *   UTC+1 (offsetMs = +3600000)  → Etc/GMT-1
+ */
+function offsetMsToIanaTz(offsetMs: number): string | null {
+  // Check custom fixes first
+  if (offsetMs in DAYLIO_OFFSET_FIXES) {
+    return DAYLIO_OFFSET_FIXES[offsetMs];
+  }
+  
+  const totalMinutes = Math.round(offsetMs / 60000);
+  if (totalMinutes % 60 !== 0) return null;
+  const hours = totalMinutes / 60;
+  if (hours === 0) return 'UTC';
+  return `Etc/GMT${hours > 0 ? '-' : '+'}${Math.abs(hours)}`;
+}
+
+function formatOffset(raw: string): string {
+  if (raw === 'GMT' || raw === 'UTC') return '+00:00';
+  const cleaned = raw.replace(/^(GMT|UTC)/, '');
+  const match = cleaned.match(/^([+-])(\d{1,2})(?::?(\d{2}))?$/);
+  if (!match) return '+00:00';
+  const [, sign, hour, minute] = match;
+  return `${sign}${hour.padStart(2, '0')}:${(minute || '00').padStart(2, '0')}`;
+}
+
+function toTimezoneAwareIso(epochMillis: number, timeZone: string): string {
+  const date = new Date(epochMillis);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZoneName: 'shortOffset',
+  });
+
+  const parts = formatter.formatToParts(date);
+  const getPart = (type: string) => parts.find((part) => part.type === type)?.value || '00';
+  const year = getPart('year');
+  const month = getPart('month');
+  const day = getPart('day');
+  const hour = getPart('hour');
+  const minute = getPart('minute');
+  const second = getPart('second');
+  const tzName = getPart('timeZoneName');
+  const offset = formatOffset(tzName);
+
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`;
 }
 
 // Icon mapping for common activities
@@ -268,6 +354,9 @@ router.post('/', daylioUpload.single('file'), async (req: Request, res: Response
 
   try {
     const backup = await extractBackupFromZip(file.path);
+    const importTimezoneRaw = (req.body?.source_timezone || req.body?.time_zone || '').toString().trim();
+    const backupTimezoneRaw = backup.metadata?.timezone || backup.metadata?.timeZone || '';
+    const selectedTimezone = [importTimezoneRaw, backupTimezoneRaw, 'UTC'].find((tz) => isValidTimeZone(tz)) || 'UTC';
 
     // Build tag ID -> tag name mapping
     const tagMap = new Map<number, string>();
@@ -293,7 +382,7 @@ router.post('/', daylioUpload.single('file'), async (req: Request, res: Response
 
     for (const entry of backup.dayEntries) {
       try {
-        const { datetime, mood, tags: tagIds = [], note = null } = entry;
+        const { datetime, timeZoneOffset, mood, tags: tagIds = [], note = null } = entry;
 
         if (!datetime || !mood || mood < 1 || mood > 5) {
           skipped++;
@@ -320,15 +409,40 @@ router.post('/', daylioUpload.single('file'), async (req: Request, res: Response
           continue;
         }
 
-        // Convert unix timestamp to date
-        const checkedInAt = new Date(datetime);
+        // Determine the timezone for this entry:
+        // Prefer the per-entry timeZoneOffset (converted to IANA name via fix map or Etc/GMT±N),
+        // fall back to the global selectedTimezone from the import form / backup metadata.
+        let entryIanaTz: string = selectedTimezone;
+        if (timeZoneOffset !== undefined && timeZoneOffset !== null) {
+          const convertedTz = offsetMsToIanaTz(timeZoneOffset);
+          // If conversion failed (returns null), log and use selectedTimezone
+          if (convertedTz === null && !isValidTimeZone(selectedTimezone)) {
+            // Both offset conversion and selectedTimezone failed
+            errors.push(
+              `Entry ${entry.id} (${new Date(normalizeEpochMillis(datetime)).toISOString()}): ` +
+              `timeZoneOffset ${timeZoneOffset} is invalid (not in fix map or convertible), ` +
+              `and fallback timezone "${selectedTimezone}" is also invalid. Using UTC.`
+            );
+            entryIanaTz = 'UTC';
+          } else if (convertedTz !== null) {
+            // Conversion succeeded
+            entryIanaTz = convertedTz;
+          } else {
+            // Offset conversion failed, but selectedTimezone is valid
+            errors.push(
+              `Entry ${entry.id}: timeZoneOffset ${timeZoneOffset} is not a whole hour. Using fallback: ${selectedTimezone}`
+            );
+          }
+        }
 
-        // Insert mood checkin
+        const checkedInAt = toTimezoneAwareIso(normalizeEpochMillis(datetime), entryIanaTz);
+
+        // Insert mood checkin (with mood_timezone for correct display)
         const insertResult = await query(
-          `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, daylio_hash)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, daylio_hash, mood_timezone)
+           VALUES ($1, $2, $3, $4::timestamptz, $5, $6)
            RETURNING id`,
-          [USER_ID, invertedMood, note, checkedInAt, daylioHash]
+          [USER_ID, invertedMood, note, checkedInAt, daylioHash, entryIanaTz]
         );
 
         const moodCheckinId = insertResult.rows[0].id;

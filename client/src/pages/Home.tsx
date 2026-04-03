@@ -19,10 +19,22 @@ function formatDateHeader(dateStr: string) {
   }).format(new Date(dateStr + 'T12:00:00'));
 }
 
+/**
+ * Get the local calendar date of a checkin in its timezone (YYYY-MM-DD).
+ * Uses venue_timezone for location checkins and mood_timezone for mood checkins.
+ * Falls back to browser local time if no timezone is stored.
+ */
+function getLocalDateKey(item: TimelineItem): string {
+  const tz = item.type === 'location' ? item.venue_timezone : item.mood_timezone;
+  return new Date(item.checked_in_at).toLocaleDateString('en-CA', {
+    ...(tz ? { timeZone: tz } : {}),
+  });
+}
+
 function groupByDate(items: TimelineItem[]): Map<string, TimelineItem[]> {
   const groups = new Map<string, TimelineItem[]>();
   for (const item of items) {
-    const date = item.checked_in_at.slice(0, 10);
+    const date = getLocalDateKey(item);
     if (!groups.has(date)) groups.set(date, []);
     groups.get(date)!.push(item);
   }
