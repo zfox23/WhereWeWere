@@ -9,6 +9,7 @@ import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../types';
 import VenueEditMap from '../components/VenueEditMap';
 import CheckInCard from '../components/CheckInCard';
 import MapView from '../components/MapView';
+import { buildImmichMapUrl } from '../utils/checkin';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -57,11 +58,11 @@ export default function VenueDetail() {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
       if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   useEffect(() => {
-    venues.categories().then(setCategories).catch(() => {});
+    venues.categories().then(setCategories).catch(() => { });
   }, []);
 
   const fetchData = async () => {
@@ -92,7 +93,7 @@ export default function VenueDetail() {
     const ids = venueCheckins.map((c) => c.id);
     scrobblesApi.forCheckins(ids).then((data) => {
       setScrobblesMap(data);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [venueCheckins, malojaUrl]);
 
   // Fetch photos for loaded check-ins (batch with deduplication)
@@ -101,7 +102,7 @@ export default function VenueDetail() {
     const ids = venueCheckins.map((c) => c.id);
     immichApi.photosForCheckins(ids).then((data) => {
       setPhotosMap(data);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [venueCheckins, immichUrl]);
 
   // ── Edit helpers ──────────────────────────────────────────────────────────
@@ -218,6 +219,7 @@ export default function VenueDetail() {
   const venueLng = normalizeCoordinate(venue.longitude);
   const safeEditLat = normalizeCoordinate(editLat);
   const safeEditLng = normalizeCoordinate(editLng);
+  const hasVenueCoords = venue.latitude != null && venue.longitude != null;
 
   return (
     <div className="space-y-6">
@@ -250,6 +252,17 @@ export default function VenueDetail() {
               <p className="text-sm text-gray-500">
                 {venue.checkin_count} check-in{venue.checkin_count !== 1 ? 's' : ''} here
               </p>
+            )}
+            {immichUrl && hasVenueCoords && (
+              <a
+                href={buildImmichMapUrl(immichUrl, venueLat, venueLng)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-500"
+              >
+                <Navigation size={14} />
+                <span>View in space</span>
+              </a>
             )}
           </div>
           <div className="shrink-0 flex flex-col sm:flex-row gap-2 items-end sm:items-start">

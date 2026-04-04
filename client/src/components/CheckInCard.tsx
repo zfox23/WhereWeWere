@@ -34,10 +34,6 @@ function StarRating({ rating }: { rating: number }) {
   );
 }
 
-function buildImmichMapUrl(immichUrl: string, lat: number, lng: number): string {
-  return `${immichUrl}/map#15/${lat}/${lng}`;
-}
-
 function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): string {
   const t = new Date(checkedInAt);
   const startTime = new Date(t.getTime() - 2 * 60 * 60 * 1000);
@@ -67,11 +63,10 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
 
   const resolvedAssets = photos !== undefined ? photos : selfFetchedAssets;
 
-  const hasInSpace = immichUrl && checkin.venue_latitude != null && checkin.venue_longitude != null;
   const hasPhotos = resolvedAssets && resolvedAssets.length > 0;
   // Show "in time" only while still loading (null) as a fallback link
   const showInTime = immichUrl && resolvedAssets === null;
-  const showImmichRow = hasPhotos || showInTime || hasInSpace;
+  const showImmichRow = showInTime;
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 hover:shadow-md transition-all">
@@ -141,16 +136,6 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
                   className="flex items-center gap-1 text-xs font-medium hover:text-indigo-800 dark:hover:text-indigo-500"
                 >
                   in time
-                </a>
-              )}
-              {hasInSpace && (
-                <a
-                  href={buildImmichMapUrl(immichUrl!, Number(checkin.venue_latitude), Number(checkin.venue_longitude))}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs font-medium hover:text-indigo-800 dark:hover:text-indigo-500"
-                >
-                  in space
                 </a>
               )}
             </div>

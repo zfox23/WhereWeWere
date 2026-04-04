@@ -40,10 +40,6 @@ function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {
   return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
 }
 
-function buildImmichMapUrl(immichUrl: string, lat: number, lng: number): string {
-  return `${immichUrl}/map#15/${lat}/${lng}`;
-}
-
 const THUMB_SIZE = 80;
 
 export default function CheckInDetail() {
@@ -233,16 +229,6 @@ export default function CheckInDetail() {
               >
                 View in time
               </a>
-              {hasCoords && (
-                <a
-                  href={buildImmichMapUrl(immichUrl, Number(checkin.venue_latitude), Number(checkin.venue_longitude))}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-medium hover:text-indigo-800 dark:hover:text-indigo-500"
-                >
-                  View in space
-                </a>
-              )}
             </div>
           </div>
         )}

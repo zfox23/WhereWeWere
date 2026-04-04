@@ -67,6 +67,10 @@ export function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): stri
   return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
 }
 
+export function buildImmichMapUrl(immichUrl: string, lat: number, lng: number): string {
+  return `${immichUrl}/map#15/${lat}/${lng}`;
+}
+
 export function buildMalojaTrackUrl(malojaUrl: string, artists: string[], title?: string): string {
   const params = new URLSearchParams();
   for (const artist of artists) {
