@@ -9,6 +9,7 @@ import { MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
+const COMPLETE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function formatDateHeader(dateStr: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -160,6 +161,8 @@ export default function Home() {
   const country = searchParams.get('country') || '';
   const mood = searchParams.get('mood') || '';
   const activity = searchParams.get('activity') || '';
+  const [fromDateInput, setFromDateInput] = useState(fromDate);
+  const [toDateInput, setToDateInput] = useState(toDate);
   const [categoryInput, setCategoryInput] = useState(category);
   const [countryInput, setCountryInput] = useState(country);
 
@@ -193,6 +196,14 @@ export default function Home() {
       setShowFilters(true);
     }
   }, [fromDate, toDate, venueId, category, country, mood, activity]);
+
+  useEffect(() => {
+    setFromDateInput(fromDate);
+  }, [fromDate]);
+
+  useEffect(() => {
+    setToDateInput(toDate);
+  }, [toDate]);
 
   useEffect(() => {
     setCategoryInput(category);
@@ -267,6 +278,37 @@ export default function Home() {
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  const handleDateInputChange = useCallback((key: 'from' | 'to', value: string) => {
+    if (key === 'from') {
+      setFromDateInput(value);
+    } else {
+      setToDateInput(value);
+    }
+
+    if (!value) {
+      setFilter(key, '');
+    }
+  }, [setFilter]);
+
+  const commitDateInput = useCallback((key: 'from' | 'to') => {
+    const value = key === 'from' ? fromDateInput : toDateInput;
+    if (!value) {
+      setFilter(key, '');
+      return;
+    }
+
+    if (COMPLETE_DATE_PATTERN.test(value)) {
+      setFilter(key, value);
+      return;
+    }
+
+    if (key === 'from') {
+      setFromDateInput(fromDate);
+    } else {
+      setToDateInput(toDate);
+    }
+  }, [fromDate, fromDateInput, setFilter, toDate, toDateInput]);
 
   const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
@@ -519,8 +561,14 @@ export default function Home() {
               <label className="text-xs text-gray-500 mb-1 block">After</label>
               <input
                 type="date"
-                value={fromDate}
-                onChange={(e) => setFilter('from', e.target.value)}
+                value={fromDateInput}
+                onChange={(e) => handleDateInputChange('from', e.target.value)}
+                onBlur={() => commitDateInput('from')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitDateInput('from');
+                  }
+                }}
                 className="input"
               />
             </div>
@@ -528,8 +576,14 @@ export default function Home() {
               <label className="text-xs text-gray-500 mb-1 block">Before</label>
               <input
                 type="date"
-                value={toDate}
-                onChange={(e) => setFilter('to', e.target.value)}
+                value={toDateInput}
+                onChange={(e) => handleDateInputChange('to', e.target.value)}
+                onBlur={() => commitDateInput('to')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitDateInput('to');
+                  }
+                }}
                 className="input"
               />
             </div>
