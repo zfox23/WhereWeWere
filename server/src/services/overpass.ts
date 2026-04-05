@@ -16,135 +16,41 @@ export interface OSMVenueResult {
   osm_id: string;
 }
 
-// OSM tag keys we query and their value-to-category mappings
-const OSM_TAG_CATEGORY_MAP: Record<string, Record<string, string>> = {
-  amenity: {
-    restaurant: 'Food',
-    fast_food: 'Fast Food',
-    cafe: 'Coffee Shop',
-    bar: 'Bar',
-    pub: 'Bar',
-    nightclub: 'Nightclub',
-    pharmacy: 'Pharmacy',
-    hospital: 'Hospital',
-    clinic: 'Health',
-    dentist: 'Health',
-    doctors: 'Health',
-    school: 'School',
-    university: 'University',
-    library: 'Library',
-    cinema: 'Cinema',
-    theatre: 'Theater',
-    place_of_worship: 'Place of Worship',
-    bank: 'Bank',
-    atm: 'ATM',
-    fuel: 'Gas Station',
-    parking: 'Parking',
-    post_office: 'Post Office',
-    police: 'Police Station',
-    fire_station: 'Fire Station',
-    community_centre: 'Community Center',
-    marketplace: 'Market',
-    ice_cream: 'Ice Cream',
-    food_court: 'Food Court',
-    biergarten: 'Beer Garden',
-  },
-  shop: {
-    supermarket: 'Grocery Store',
-    convenience: 'Convenience Store',
-    bakery: 'Bakery',
-    butcher: 'Butcher',
-    clothes: 'Clothing Store',
-    electronics: 'Electronics Store',
-    hardware: 'Hardware Store',
-    bookshop: 'Bookstore',
-    mall: 'Shopping Mall',
-    department_store: 'Department Store',
-    hairdresser: 'Salon',
-    beauty: 'Salon',
-    florist: 'Florist',
-    gift: 'Gift Shop',
-    jewelry: 'Jewelry Store',
-    optician: 'Optician',
-    shoes: 'Shoe Store',
-    sports: 'Sporting Goods',
-    toys: 'Toy Store',
-  },
-  tourism: {
-    hotel: 'Hotel',
-    motel: 'Motel',
-    hostel: 'Hostel',
-    museum: 'Museum',
-    gallery: 'Art Gallery',
-    zoo: 'Zoo',
-    aquarium: 'Aquarium',
-    theme_park: 'Theme Park',
-    viewpoint: 'Viewpoint',
-    attraction: 'Attraction',
-    information: 'Tourist Info',
-    camp_site: 'Campground',
-  },
-  leisure: {
-    park: 'Park',
-    playground: 'Playground',
-    garden: 'Garden',
-    sports_centre: 'Gym',
-    fitness_centre: 'Gym',
-    swimming_pool: 'Pool',
-    stadium: 'Stadium',
-    pitch: 'Sports Field',
-    golf_course: 'Golf Course',
-    dog_park: 'Dog Park',
-    beach_resort: 'Beach',
-    marina: 'Marina',
-  },
-  aeroway: {
-    aerodrome: 'Airport',
-    terminal: 'Airport',
-    helipad: 'Airport',
-  },
-  railway: {
-    station: 'Train Station',
-    halt: 'Train Station',
-    tram_stop: 'Train Station',
-    subway_entrance: 'Train Station',
-  },
-  building: {
-    train_station: 'Train Station',
-    transportation: 'Transit',
-    hospital: 'Hospital',
-    university: 'University',
-    school: 'School',
-    church: 'Place of Worship',
-    mosque: 'Place of Worship',
-    synagogue: 'Place of Worship',
-    stadium: 'Stadium',
-  },
-  office: {
-    government: 'Government',
-    company: 'Office',
-    coworking: 'Office',
-  },
-};
+const PLACE_TAG_KEYS = [
+  'amenity',
+  'shop',
+  'tourism',
+  'leisure',
+  'aeroway',
+  'railway',
+  'building',
+  'office',
+  'public_transport',
+] as const;
+const PLACE_TAG_KEY_PATTERN = `^(${PLACE_TAG_KEYS.join('|')})$`;
+const GENERIC_CATEGORY_VALUES = new Set(['yes']);
+const QUERY_SEARCH_RADIUS_METERS = 5000;
+const SEARCHABLE_NAME_KEY_PATTERN = '^(name|official_name|brand|short_name|alt_name|operator)$';
 
-// The tag keys we include in the Overpass query
-const QUERIED_OSM_TAGS = Object.keys(OSM_TAG_CATEGORY_MAP);
+function formatOsmTagValue(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
 
-function mapOSMCategory(tags: Record<string, string>): string {
-  for (const [tagKey, mappings] of Object.entries(OSM_TAG_CATEGORY_MAP)) {
-    const tagValue = tags[tagKey];
-    if (tagValue && mappings[tagValue]) {
-      return mappings[tagValue];
-    }
+function getPrimaryCategoryValue(tags: Record<string, string>): string | null {
+  for (const tagKey of PLACE_TAG_KEYS) {
+    const tagValue = tags[tagKey]?.trim();
+    if (!tagValue || GENERIC_CATEGORY_VALUES.has(tagValue)) continue;
+    return tagValue;
   }
-  // Fallback: return the first recognized tag value or 'Other'
-  for (const tagKey of QUERIED_OSM_TAGS) {
-    if (tags[tagKey]) {
-      // Capitalize the tag value as a fallback category name
-      return tags[tagKey].replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    }
-  }
-  return 'Other';
+
+  return null;
+}
+
+function getVenueCategory(tags: Record<string, string>): string {
+  const categoryValue = getPrimaryCategoryValue(tags);
+  return categoryValue ? formatOsmTagValue(categoryValue) : 'Place';
 }
 
 function buildAddress(tags: Record<string, string>): string | null {
@@ -164,6 +70,110 @@ function buildAddress(tags: Record<string, string>): string | null {
     parts.push(tags['addr:postcode']);
   }
   return parts.length > 0 ? parts.join(', ') : null;
+}
+
+function escapeOverpassRegex(value: string): string {
+  return value
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/"/g, '\\"');
+}
+
+function getVenueDisplayName(tags: Record<string, string>): string | null {
+  const candidates = [
+    tags.name,
+    tags.official_name,
+    tags.brand,
+    tags.short_name,
+    tags.alt_name,
+    tags.operator,
+  ];
+
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed) return trimmed;
+  }
+
+  return null;
+}
+
+function buildNameFilter(query?: string): string {
+  if (!query) return '[name]';
+  return `[~"${SEARCHABLE_NAME_KEY_PATTERN}"~"${escapeOverpassRegex(query)}",i]`;
+}
+
+function getSearchRadius(radius: number, query?: string): number {
+  return query ? Math.max(radius, QUERY_SEARCH_RADIUS_METERS) : radius;
+}
+
+function buildPlaceFilter(): string {
+  return `[~"${PLACE_TAG_KEY_PATTERN}"~"."]`;
+}
+
+function getParentPriority(tags: Record<string, string>): number {
+  if (tags.aeroway && ['aerodrome', 'terminal', 'helipad'].includes(tags.aeroway)) return 10;
+  if (tags.railway && ['station', 'halt', 'tram_stop', 'subway_entrance'].includes(tags.railway)) return 10;
+  if (tags.shop === 'mall') return 9;
+  if (tags.leisure === 'stadium' || tags.tourism === 'theme_park') return 9;
+  if (tags.tourism === 'museum' || tags.amenity === 'university' || tags.building === 'university') return 8;
+  if (tags.amenity === 'hospital' || tags.building === 'hospital') return 8;
+  if (tags.leisure === 'park' || tags.tourism === 'zoo') return 7;
+  return 1;
+}
+
+async function fetchNearbyOverpassVenues(
+  lat: number,
+  lon: number,
+  radius: number,
+  query?: string,
+): Promise<OSMVenueResult[]> {
+  const placeFilter = buildPlaceFilter();
+  const nameFilter = buildNameFilter(query);
+  const searchRadius = getSearchRadius(radius, query);
+
+  const overpassQuery = `
+    [out:json][timeout:15];
+    nwr${placeFilter}${nameFilter}(around:${searchRadius},${lat},${lon});
+    out center;
+  `;
+
+  const url = 'https://overpass-api.de/api/interpreter';
+  const requestBody = `data=${encodeURIComponent(overpassQuery)}`;
+
+  const response = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: requestBody,
+  });
+
+  const data = (await response.json()) as { elements: OverpassElement[] };
+  const deduped = new Map<string, OSMVenueResult>();
+
+  for (const element of data.elements) {
+    const tags = element.tags || {};
+    const name = getVenueDisplayName(tags);
+    if (!name) continue;
+
+    const latitude = element.lat ?? element.center?.lat;
+    const longitude = element.lon ?? element.center?.lon;
+
+    if (latitude === undefined || longitude === undefined) continue;
+
+    const osmId = `${element.type}/${element.id}`;
+    if (deduped.has(osmId)) continue;
+
+    deduped.set(osmId, {
+      name,
+      category: getVenueCategory(tags),
+      latitude,
+      longitude,
+      address: buildAddress(tags),
+      osm_id: osmId,
+    });
+  }
+
+  return Array.from(deduped.values());
 }
 
 export interface EnclosingVenueResult {
@@ -215,7 +225,7 @@ export async function searchNearbyVenues(
   lat: number,
   lon: number,
   query?: string,
-  radius: number = 500
+  radius: number = 500,
 ): Promise<OSMVenueResult[]> {
   // Check cache first
   const key = cacheKey(lat, lon, query, radius);
@@ -224,61 +234,7 @@ export async function searchNearbyVenues(
     return cached.data as OSMVenueResult[];
   }
 
-  // When the user is searching by name, widen the radius so large features
-  // (airports, parks, stadiums) whose centroid may be far from the user's
-  // GPS position are still found.
-  const searchRadius = query ? Math.max(radius, 3000) : radius;
-
-  const nameFilter = query
-    ? `[name~"${query}",i]`
-    : '[name]';
-
-  // Build union of node/way/relation for every tag key we track
-  const stanzas = QUERIED_OSM_TAGS.flatMap((tag) => [
-    `node["${tag}"]${nameFilter}(around:${searchRadius},${lat},${lon});`,
-    `way["${tag}"]${nameFilter}(around:${searchRadius},${lat},${lon});`,
-    `relation["${tag}"]${nameFilter}(around:${searchRadius},${lat},${lon});`,
-  ]);
-
-  const overpassQuery = `
-    [out:json][timeout:15];
-    (
-      ${stanzas.join('\n      ')}
-    );
-    out center;
-  `;
-
-  const response = await fetchWithRetry('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: `data=${encodeURIComponent(overpassQuery)}`,
-  });
-
-  const data = (await response.json()) as { elements: OverpassElement[] };
-
-  const results: OSMVenueResult[] = [];
-
-  for (const element of data.elements) {
-    const tags = element.tags || {};
-    if (!tags.name) continue;
-
-    // For nodes, lat/lon is direct. For ways, use center.
-    const latitude = element.lat ?? element.center?.lat;
-    const longitude = element.lon ?? element.center?.lon;
-
-    if (latitude === undefined || longitude === undefined) continue;
-
-    results.push({
-      name: tags.name,
-      category: mapOSMCategory(tags),
-      latitude,
-      longitude,
-      address: buildAddress(tags),
-      osm_id: `${element.type}/${element.id}`,
-    });
-  }
+  const results = await fetchNearbyOverpassVenues(lat, lon, radius, query);
 
   // Store in cache
   cache.set(key, { data: results, expires: Date.now() + CACHE_TTL_MS });
@@ -312,17 +268,14 @@ export async function findEnclosingVenue(
     return pickBestEnclosing(results, excludeOsmId);
   }
 
-  // Build stanzas filtering the is_in results to named features we care about
-  const stanzas = QUERIED_OSM_TAGS.flatMap((tag) => [
-    `way.enclosing["name"]["${tag}"];`,
-    `relation.enclosing["name"]["${tag}"];`,
-  ]);
+  const placeFilter = buildPlaceFilter();
 
   const overpassQuery = `
     [out:json][timeout:15];
     is_in(${lat},${lon})->.enclosing;
     (
-      ${stanzas.join('\n      ')}
+      way.enclosing${placeFilter}["name"];
+      relation.enclosing${placeFilter}["name"];
     );
     out center;
   `;
@@ -347,20 +300,6 @@ export async function findEnclosingVenue(
   }
 }
 
-// Priority order: prefer specific "place" categories over generic ones
-const PARENT_CATEGORY_PRIORITY: Record<string, number> = {
-  Airport: 10,
-  'Train Station': 10,
-  'Shopping Mall': 9,
-  Stadium: 9,
-  'Theme Park': 9,
-  Museum: 8,
-  University: 8,
-  Hospital: 8,
-  Park: 7,
-  Zoo: 7,
-};
-
 function pickBestEnclosing(
   elements: OverpassElement[],
   excludeOsmId: string,
@@ -374,11 +313,11 @@ function pickBestEnclosing(
     const osmId = `${el.type}/${el.id}`;
     if (osmId === excludeOsmId) continue;
 
-    const category = mapOSMCategory(tags);
-    const priority = PARENT_CATEGORY_PRIORITY[category] ?? 1;
+    const categoryValue = getPrimaryCategoryValue(tags);
+    if (!categoryValue) continue;
 
-    // Skip very generic results (landuse, boundaries, etc. that slip through)
-    if (category === 'Other') continue;
+    const category = formatOsmTagValue(categoryValue);
+    const priority = getParentPriority(tags);
 
     const latitude = el.lat ?? el.center?.lat;
     const longitude = el.lon ?? el.center?.lon;

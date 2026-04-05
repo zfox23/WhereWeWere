@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, MapPin, Plus, Loader2 } from 'lucide-react';
+import { Search, MapPin, Plus, Loader2, Navigation } from 'lucide-react';
 import { venues } from '../api/client';
 import { useLocation } from '../contexts/LocationContext';
+import { haversineDistance } from '../utils/geo';
 import type { NearbyVenue, VenueCategory } from '../types';
 
 export interface SelectedVenue {
@@ -15,6 +16,31 @@ interface VenueSearchProps {
   onSelect: (venue: SelectedVenue) => void;
   initialLat?: number;
   initialLon?: number;
+}
+
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+function getBearingDegrees(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
+  const phi1 = toRadians(fromLat);
+  const phi2 = toRadians(toLat);
+  const lambdaDelta = toRadians(toLon - fromLon);
+
+  const y = Math.sin(lambdaDelta) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambdaDelta);
+
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return (bearing + 360) % 360;
+}
+
+function formatDistance(distanceMeters: number): string {
+  if (distanceMeters < 1000) {
+    return `${Math.round(distanceMeters)}m`;
+  }
+  return `${(distanceMeters / 1000).toFixed(1)}km`;
 }
 
 export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueSearchProps) {
@@ -83,7 +109,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           lon: coords.lon.toString(),
         };
         if (searchQuery.trim()) {
-          params.q = searchQuery.trim();
+          params.search = searchQuery.trim();
         }
         const data = await venues.nearby(params);
         setResults(data);
@@ -199,6 +225,15 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       {!loading && results.length > 0 && (
         <ul className="divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden max-h-72 overflow-y-auto">
           {results.map((venue, i) => (
+            (() => {
+              const distanceMeters = coords
+                ? haversineDistance(coords.lat, coords.lon, venue.latitude, venue.longitude)
+                : null;
+              const bearing = coords
+                ? getBearingDegrees(coords.lat, coords.lon, venue.latitude, venue.longitude)
+                : null;
+
+              return (
             <li key={`${venue.osm_id}-${i}`}>
               <button
                 type="button"
@@ -227,6 +262,16 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                     >
                       {venue.source === 'local' ? 'Local' : 'OSM'}
                     </span>
+                    {distanceMeters != null && bearing != null && (
+                      <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                        <Navigation
+                          size={10}
+                          className="text-gray-500 dark:text-gray-400"
+                          style={{ transform: `rotate(${bearing}deg)` }}
+                        />
+                        <span>{formatDistance(distanceMeters)}</span>
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                     {[venue.category, venue.address]
@@ -242,6 +287,8 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                 )}
               </button>
             </li>
+              );
+            })()
           ))}
         </ul>
       )}

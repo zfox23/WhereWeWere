@@ -10,13 +10,6 @@ import CheckInDetail from './pages/CheckInDetail';
 import Settings from './pages/Settings';
 import MoodCheckIn from './pages/MoodCheckIn';
 import MoodCheckInDetail from './pages/MoodCheckInDetail';
-import DocsLayout from './pages/docs/DocsLayout';
-import Overview from './pages/docs/Overview';
-import GettingStarted from './pages/docs/GettingStarted';
-import ApiCheckins from './pages/docs/ApiCheckins';
-import ApiVenues from './pages/docs/ApiVenues';
-import ApiStats from './pages/docs/ApiStats';
-import ApiSearch from './pages/docs/ApiSearch';
 
 export default function App() {
   return (
@@ -32,12 +25,6 @@ export default function App() {
         <Route path="/venues/:id" element={<VenueDetail />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/docs" element={<DocsLayout><Overview /></DocsLayout>} />
-        <Route path="/docs/getting-started" element={<DocsLayout><GettingStarted /></DocsLayout>} />
-        <Route path="/docs/api/checkins" element={<DocsLayout><ApiCheckins /></DocsLayout>} />
-        <Route path="/docs/api/venues" element={<DocsLayout><ApiVenues /></DocsLayout>} />
-        <Route path="/docs/api/stats" element={<DocsLayout><ApiStats /></DocsLayout>} />
-        <Route path="/docs/api/search" element={<DocsLayout><ApiSearch /></DocsLayout>} />
       </Routes>
     </Layout>
     </LocationProvider>

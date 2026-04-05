@@ -77,7 +77,13 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /nearby - search nearby venues from DB and optionally OSM
 router.get('/nearby', async (req: Request, res: Response) => {
   try {
-    const { lat, lon, radius = '500', search } = req.query;
+    const { lat, lon, radius = '500' } = req.query;
+    const rawSearch = typeof req.query.search === 'string'
+      ? req.query.search
+      : typeof req.query.q === 'string'
+        ? req.query.q
+        : undefined;
+    const search = rawSearch?.trim() || undefined;
 
     if (!lat || !lon) {
       return res.status(400).json({ error: 'lat and lon are required' });
@@ -122,7 +128,7 @@ router.get('/nearby', async (req: Request, res: Response) => {
     `;
 
     const dbResult = await query(dbSql, dbParams);
-  const localVenues = dbResult.rows.map((row) => serializeVenue(row));
+    const localVenues = dbResult.rows.map((row) => serializeVenue(row));
 
     // Also query Overpass API
     let osmVenues: Array<Record<string, unknown>> = [];

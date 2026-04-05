@@ -85,27 +85,6 @@ export default function Layout({ children }: { children: ReactNode }) {
                     </li>
                   </ul>
                 </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Resources</h4>
-                  <ul className="space-y-2">
-                    <li>
-                      <Link to="/docs" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
-                        <BookOpen size={14} />
-                        Documentation
-                      </Link>
-                    </li>
-                    <li>
-                      <Link to="/docs/getting-started" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors">
-                        Getting Started
-                      </Link>
-                    </li>
-                    <li>
-                      <Link to="/docs/api/checkins" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors">
-                        API Reference
-                      </Link>
-                    </li>
-                  </ul>
-                </div>
               </div>
             </div>
           </div>
