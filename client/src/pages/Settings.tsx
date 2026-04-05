@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2, RotateCcw, ShieldAlert } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2, RotateCcw, ShieldAlert, Palette } from 'lucide-react';
 import { settings, importApi, jobs, moodActivities, backupApi } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
@@ -1290,8 +1290,8 @@ export default function Settings() {
           <div id="mood-activities" className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                <Cog size={20} className="text-gray-600 dark:text-gray-400" />
-                Mood Activities
+                <Palette size={20} className="text-gray-600 dark:text-gray-400" />
+                Activities
               </h2>
               <button
                 type="button"
@@ -1302,9 +1302,6 @@ export default function Settings() {
                 Sort A&gt;Z
               </button>
             </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Manage and reorder your mood activity groups and activities. Click the palette icon to change an activity's icon.
-            </p>
             {activityGroupsLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="animate-spin text-primary-600" size={24} />

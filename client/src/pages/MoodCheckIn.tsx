@@ -35,6 +35,7 @@ export default function MoodCheckInPage() {
   const [note, setNote] = useState('');
   const [checkedInAt, setCheckedInAt] = useState(toLocalDatetimeString(new Date()));
   const [selectedActivities, setSelectedActivities] = useState<Set<string>>(new Set());
+  const [activityFilter, setActivityFilter] = useState('');
   const [groups, setGroups] = useState<MoodActivityGroup[]>([]);
   const [iconPack, setIconPack] = useState('emoji');
   const [saving, setSaving] = useState(false);
@@ -64,6 +65,65 @@ export default function MoodCheckInPage() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  };
+
+  const normalizedFilter = activityFilter.trim().toLowerCase();
+  const filteredGroups = normalizedFilter
+    ? (() => {
+        const getRank = (activityName: string, groupName: string) => {
+          const activity = activityName.toLowerCase();
+          const group = groupName.toLowerCase();
+
+          if (activity === normalizedFilter || group === normalizedFilter) return 0;
+          if (activity.startsWith(normalizedFilter) || group.startsWith(normalizedFilter)) return 1;
+          if (activity.includes(normalizedFilter) || group.includes(normalizedFilter)) return 2;
+          return Number.POSITIVE_INFINITY;
+        };
+
+        const ranked = groups
+          .flatMap((group, groupIndex) =>
+            group.activities.map((activity, activityIndex) => ({
+              group,
+              activity,
+              rank: getRank(activity.name, group.name),
+              groupIndex,
+              activityIndex,
+            }))
+          )
+          .filter((entry) => Number.isFinite(entry.rank))
+          .sort((a, b) => (
+            a.rank - b.rank
+            || a.groupIndex - b.groupIndex
+            || a.activityIndex - b.activityIndex
+          ));
+
+        const grouped = new Map<string, MoodActivityGroup>();
+        for (const entry of ranked) {
+          const existing = grouped.get(entry.group.id);
+          if (existing) {
+            existing.activities.push(entry.activity);
+          } else {
+            grouped.set(entry.group.id, { ...entry.group, activities: [entry.activity] });
+          }
+        }
+
+        return Array.from(grouped.values());
+      })()
+    : groups;
+
+  const topFilteredActivity = filteredGroups[0]?.activities[0] ?? null;
+
+  const toggleTopFilteredActivity = () => {
+    if (!topFilteredActivity) return;
+    setSelectedActivities((prev) => {
+      const next = new Set(prev);
+      if (next.has(topFilteredActivity.id)) {
+        next.delete(topFilteredActivity.id);
+      } else {
+        next.add(topFilteredActivity.id);
+      }
       return next;
     });
   };
@@ -114,7 +174,7 @@ export default function MoodCheckInPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-lg mx-auto px-4 py-6 space-y-3">
       {/* Header */}
       <div className="flex items-center gap-3 text-gray-900 dark:text-gray-100">
         <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
@@ -124,7 +184,7 @@ export default function MoodCheckInPage() {
       </div>
 
       {/* Mood selector */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 flex flex-col gap-3">
         <div className="flex items-center justify-around">
           {[5, 4, 3, 2, 1].map((m) => (
             <button
@@ -143,6 +203,26 @@ export default function MoodCheckInPage() {
             </button>
           ))}
         </div>
+
+        {/* Time */}
+        <input
+          type="datetime-local"
+          value={checkedInAt}
+          onChange={(e) => setCheckedInAt(e.target.value)}
+          className="input w-full text-gray-900 dark:text-gray-100"
+        />
+      </div>
+
+      {/* Note */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
+        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Note</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="What's on your mind?"
+          rows={4}
+          className="input w-full resize-none"
+        />
       </div>
 
       {/* Activities */}
@@ -157,12 +237,26 @@ export default function MoodCheckInPage() {
           </Link>
         </div>
 
-        {groups.map((group) => (
+        <input
+          type="text"
+          value={activityFilter}
+          onChange={(e) => setActivityFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              toggleTopFilteredActivity();
+            }
+          }}
+          placeholder="Filter by activity or group"
+          className="input w-full"
+        />
+
+        {filteredGroups.map((group) => (
           <div key={group.id}>
-            <p className="text-base font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
               {group.name}
             </p>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col gap-0.5">
               {group.activities.map((act) => (
                 <button
                   key={act.id}
@@ -173,10 +267,10 @@ export default function MoodCheckInPage() {
                       : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-500'
                   }`}
                 >
-                  <span className="flex flex-col items-center justify-center gap-1">
+                  <span className="flex flex-row items-center justify-start gap-1">
                     {act.icon ? (() => {
                       const IconComponent = resolveActivityIcon(act.icon);
-                      return IconComponent ? <IconComponent size={32} className="shrink-0 text-current" /> : null;
+                      return IconComponent ? <IconComponent size={18} className="shrink-0 text-current" /> : null;
                     })() : null}
                     {act.name}
                   </span>
@@ -185,29 +279,10 @@ export default function MoodCheckInPage() {
             </div>
           </div>
         ))}
-      </div>
 
-      {/* Note */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
-        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Note</label>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="What's on your mind? (Markdown supported)"
-          rows={4}
-          className="input w-full resize-none"
-        />
-      </div>
-
-      {/* Time */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
-        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Time</label>
-        <input
-          type="datetime-local"
-          value={checkedInAt}
-          onChange={(e) => setCheckedInAt(e.target.value)}
-          className="input w-full text-gray-900 dark:text-gray-100"
-        />
+        {normalizedFilter && filteredGroups.length === 0 && (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No matching activities.</p>
+        )}
       </div>
 
       {/* Submit */}
