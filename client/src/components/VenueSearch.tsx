@@ -78,9 +78,13 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [customLat, setCustomLat] = useState<number | null>(null);
   const [customLng, setCustomLng] = useState<number | null>(null);
   const [creatingCustom, setCreatingCustom] = useState(false);
+  const [customAddressGeocoding, setCustomAddressGeocoding] = useState(false);
+  const [customAddressError, setCustomAddressError] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestIdRef = useRef(0);
+  const customAddressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const customAddressRequestIdRef = useRef(0);
   const effectiveCoords = searchMode === 'remote' ? remoteCoords : coords;
   const remoteMapCenter = useMemo<[number, number] | null>(() => {
     if (searchMode !== 'remote' || !effectiveCoords) return null;
@@ -134,6 +138,64 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     setCustomLat((prev) => prev ?? effectiveCoords.lat);
     setCustomLng((prev) => prev ?? effectiveCoords.lon);
   }, [effectiveCoords]);
+
+  useEffect(() => {
+    if (!showCreateForm) {
+      if (customAddressDebounceRef.current) {
+        clearTimeout(customAddressDebounceRef.current);
+      }
+      setCustomAddressGeocoding(false);
+      setCustomAddressError(null);
+      return;
+    }
+
+    const q = customAddress.trim();
+    if (!q || q.length < 4) {
+      if (customAddressDebounceRef.current) {
+        clearTimeout(customAddressDebounceRef.current);
+      }
+      setCustomAddressGeocoding(false);
+      setCustomAddressError(null);
+      return;
+    }
+
+    if (customAddressDebounceRef.current) {
+      clearTimeout(customAddressDebounceRef.current);
+    }
+
+    customAddressDebounceRef.current = setTimeout(() => {
+      const requestId = ++customAddressRequestIdRef.current;
+      setCustomAddressGeocoding(true);
+      setCustomAddressError(null);
+
+      void venues
+        .placeSearch({ q, limit: '1' })
+        .then((places) => {
+          if (requestId !== customAddressRequestIdRef.current) return;
+          const topMatch = (places as PlaceSearchResult[])[0];
+          if (!topMatch) {
+            setCustomAddressError('Could not find that address. Try adding city or state.');
+            return;
+          }
+          setCustomLat(topMatch.latitude);
+          setCustomLng(topMatch.longitude);
+        })
+        .catch(() => {
+          if (requestId !== customAddressRequestIdRef.current) return;
+          setCustomAddressError('Failed to look up address. Please try again.');
+        })
+        .finally(() => {
+          if (requestId !== customAddressRequestIdRef.current) return;
+          setCustomAddressGeocoding(false);
+        });
+    }, 450);
+
+    return () => {
+      if (customAddressDebounceRef.current) {
+        clearTimeout(customAddressDebounceRef.current);
+      }
+    };
+  }, [customAddress, showCreateForm]);
 
   const searchNearby = useCallback(
     async (searchQuery: string, offset = 0, append = false) => {
@@ -574,6 +636,15 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
             placeholder="Address (optional)"
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 dark:text-gray-100 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
+          {customAddressGeocoding && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" />
+              Locating address on map...
+            </p>
+          )}
+          {!customAddressGeocoding && customAddressError && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{customAddressError}</p>
+          )}
           {categories.length > 0 && (
             <select
               value={customCategoryId}
