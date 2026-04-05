@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   MapPin, Tag, Navigation, Loader2, AlertCircle,
-  Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp,
+  Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera
 } from 'lucide-react';
 import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../types';
@@ -258,10 +258,11 @@ export default function VenueDetail() {
                 href={buildImmichMapUrl(immichUrl, venueLat, venueLng)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-500"
+                aria-label="Open nearby photos"
+                title="Open nearby photos"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm transition-all hover:bg-indigo-100 hover:text-indigo-800 hover:shadow dark:border-indigo-700/60 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50 dark:hover:text-indigo-200"
               >
-                <Navigation size={14} />
-                <span>View in space</span>
+                <Camera size={16} />
               </a>
             )}
           </div>
@@ -371,7 +372,7 @@ export default function VenueDetail() {
       )}
 
       {/* ── Merge venue panel ───────────────────────── */}
-      {isEditing && (
+      {!isEditing && (
         <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40">
           <button onClick={toggleMergePanel}
             className="flex w-full items-center justify-between gap-2 rounded-xl px-5 py-3.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
