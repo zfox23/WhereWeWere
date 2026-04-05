@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   MapPin, Tag, Navigation, Loader2, AlertCircle,
-  Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera
+  Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink
 } from 'lucide-react';
 import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../types';
@@ -16,6 +16,33 @@ const USER_ID = '00000000-0000-0000-0000-000000000001';
 function normalizeCoordinate(value: unknown, fallback = 0): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildOpenStreetMapUrl(
+  osmId: string | null | undefined,
+  latitude: number | null,
+  longitude: number | null,
+  venueName: string,
+): string | null {
+  const trimmed = osmId?.trim() || '';
+  if (!trimmed) {
+    if (latitude == null || longitude == null) return null;
+    const query = encodeURIComponent(`${venueName} ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+    return `https://www.openstreetmap.org/search?query=${query}`;
+  }
+
+  if (trimmed.startsWith('node/') || trimmed.startsWith('way/') || trimmed.startsWith('relation/')) {
+    return `https://www.openstreetmap.org/${trimmed}`;
+  }
+
+  // Fallback for legacy numeric ids where object type was not stored.
+  if (/^\d+$/.test(trimmed)) {
+    return `https://www.openstreetmap.org/node/${trimmed}`;
+  }
+
+  if (latitude == null || longitude == null) return null;
+  const query = encodeURIComponent(`${venueName} ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+  return `https://www.openstreetmap.org/search?query=${query}`;
 }
 
 export default function VenueDetail() {
@@ -220,6 +247,12 @@ export default function VenueDetail() {
   const safeEditLat = normalizeCoordinate(editLat);
   const safeEditLng = normalizeCoordinate(editLng);
   const hasVenueCoords = venue.latitude != null && venue.longitude != null;
+  const openStreetMapUrl = buildOpenStreetMapUrl(
+    venue.osm_id,
+    hasVenueCoords ? venueLat : null,
+    hasVenueCoords ? venueLng : null,
+    venue.name
+  );
 
   return (
     <div className="space-y-6">
@@ -253,17 +286,33 @@ export default function VenueDetail() {
                 {venue.checkin_count} check-in{venue.checkin_count !== 1 ? 's' : ''} here
               </p>
             )}
-            {immichUrl && hasVenueCoords && (
-              <a
-                href={buildImmichMapUrl(immichUrl, venueLat, venueLng)}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open nearby photos"
-                title="Open nearby photos"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm transition-all hover:bg-indigo-100 hover:text-indigo-800 hover:shadow dark:border-indigo-700/60 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50 dark:hover:text-indigo-200"
-              >
-                <Camera size={16} />
-              </a>
+            {(openStreetMapUrl || (immichUrl && hasVenueCoords)) && (
+              <div className="inline-flex items-center gap-2">
+                {immichUrl && hasVenueCoords && (
+                  <a
+                    href={buildImmichMapUrl(immichUrl, venueLat, venueLng)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Open nearby photos"
+                    title="Open nearby photos"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm transition-all hover:bg-indigo-100 hover:text-indigo-800 hover:shadow dark:border-indigo-700/60 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50 dark:hover:text-indigo-200"
+                  >
+                    <Camera size={16} />
+                  </a>
+                )}
+                {openStreetMapUrl && (
+                  <a
+                    href={openStreetMapUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="View on OpenStreetMap"
+                    title="View on OpenStreetMap"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm transition-all hover:bg-emerald-100 hover:text-emerald-800 hover:shadow dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50 dark:hover:text-emerald-200"
+                  >
+                    <ExternalLink size={16} />
+                  </a>
+                )}
+              </div>
             )}
           </div>
           <div className="shrink-0 flex flex-col sm:flex-row gap-2 items-end sm:items-start">
@@ -291,6 +340,73 @@ export default function VenueDetail() {
               <X size={16} />
             </button>
           </div>
+
+      {/* ── Merge venue panel ───────────────────────── */}
+        <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40">
+          <button onClick={toggleMergePanel}
+            className="flex w-full items-center justify-between gap-2 rounded-xl px-5 py-3.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+            <span className="flex items-center gap-2">
+              <GitMerge size={15} className="text-violet-500" />
+              Merge into another venue
+            </span>
+            {mergeOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+          </button>
+          {mergeOpen && (
+            <div className="border-t border-gray-100 dark:border-gray-800 px-5 pb-5 pt-4 space-y-4">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Search for the venue to keep. All check-ins from{' '}
+                <strong className="text-gray-700 dark:text-gray-300">{venue.name}</strong> will be
+                moved there, and this venue will be permanently deleted.
+              </p>
+              <div className="relative">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="text" value={mergeQuery} onChange={(e) => handleMergeSearch(e.target.value)}
+                  placeholder="Search venue by name…"
+                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 pl-8 pr-9 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500" />
+                {mergeSearching && <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />}
+              </div>
+              {!mergeTarget && mergeResults.length > 0 && (
+                <ul className="max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  {mergeResults.map((v) => (
+                    <li key={v.id}>
+                      <button onClick={() => setMergeTarget(v)}
+                        className="w-full px-3 py-2.5 text-left hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
+                        <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">{v.name}</span>
+                        {(v.address || v.city) && <span className="text-xs text-gray-400">{[v.address, v.city].filter(Boolean).join(', ')}</span>}
+                        {v.category_name && <span className="ml-2 text-xs text-gray-400">{v.category_name}</span>}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {mergeTarget && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="rounded bg-gray-100 dark:bg-gray-800 px-2 py-0.5 font-semibold text-gray-800 dark:text-gray-200">{venue.name}</span>
+                    <ArrowRight size={14} className="shrink-0 text-gray-400" />
+                    <span className="rounded bg-violet-100 dark:bg-violet-900/40 px-2 py-0.5 font-semibold text-gray-800 dark:text-gray-200">{mergeTarget.name}</span>
+                  </div>
+                  <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    All check-ins will be moved and <strong>{venue.name}</strong> will be deleted. This cannot be undone.
+                  </p>
+                  {mergeError && <p className="text-xs text-red-500">{mergeError}</p>}
+                  <div className="flex gap-2">
+                    <button onClick={() => { setMergeTarget(null); setMergeError(null); }} disabled={mergeConfirming}
+                      className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50">
+                      Back
+                    </button>
+                    <button onClick={doMerge} disabled={mergeConfirming}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 transition-colors disabled:opacity-60">
+                      {mergeConfirming ? <Loader2 size={12} className="animate-spin" /> : <GitMerge size={12} />}
+                      {mergeConfirming ? 'Merging…' : 'Confirm merge'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
           <label className="block">
             <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Name</span>
             <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
@@ -368,75 +484,6 @@ export default function VenueDetail() {
           <MapView center={[venueLat, venueLng]} zoom={15}
             markers={[{ lat: venueLat, lng: venueLng, label: venue.name, id: venue.id }]}
             className="h-64 w-full" />
-        </div>
-      )}
-
-      {/* ── Merge venue panel ───────────────────────── */}
-      {!isEditing && (
-        <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40">
-          <button onClick={toggleMergePanel}
-            className="flex w-full items-center justify-between gap-2 rounded-xl px-5 py-3.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
-            <span className="flex items-center gap-2">
-              <GitMerge size={15} className="text-violet-500" />
-              Merge into another venue
-            </span>
-            {mergeOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
-          </button>
-          {mergeOpen && (
-            <div className="border-t border-gray-100 dark:border-gray-800 px-5 pb-5 pt-4 space-y-4">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Search for the venue to keep. All check-ins from{' '}
-                <strong className="text-gray-700 dark:text-gray-300">{venue.name}</strong> will be
-                moved there, and this venue will be permanently deleted.
-              </p>
-              <div className="relative">
-                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="text" value={mergeQuery} onChange={(e) => handleMergeSearch(e.target.value)}
-                  placeholder="Search venue by name…"
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2 pl-8 pr-9 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500" />
-                {mergeSearching && <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />}
-              </div>
-              {!mergeTarget && mergeResults.length > 0 && (
-                <ul className="max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                  {mergeResults.map((v) => (
-                    <li key={v.id}>
-                      <button onClick={() => setMergeTarget(v)}
-                        className="w-full px-3 py-2.5 text-left hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
-                        <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">{v.name}</span>
-                        {(v.address || v.city) && <span className="text-xs text-gray-400">{[v.address, v.city].filter(Boolean).join(', ')}</span>}
-                        {v.category_name && <span className="ml-2 text-xs text-gray-400">{v.category_name}</span>}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {mergeTarget && (
-                <div className="rounded-lg border border-amber-200 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="rounded bg-gray-100 dark:bg-gray-800 px-2 py-0.5 font-semibold text-gray-800 dark:text-gray-200">{venue.name}</span>
-                    <ArrowRight size={14} className="shrink-0 text-gray-400" />
-                    <span className="rounded bg-violet-100 dark:bg-violet-900/40 px-2 py-0.5 font-semibold text-gray-800 dark:text-gray-200">{mergeTarget.name}</span>
-                  </div>
-                  <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                    All check-ins will be moved and <strong>{venue.name}</strong> will be deleted. This cannot be undone.
-                  </p>
-                  {mergeError && <p className="text-xs text-red-500">{mergeError}</p>}
-                  <div className="flex gap-2">
-                    <button onClick={() => { setMergeTarget(null); setMergeError(null); }} disabled={mergeConfirming}
-                      className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50">
-                      Back
-                    </button>
-                    <button onClick={doMerge} disabled={mergeConfirming}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 transition-colors disabled:opacity-60">
-                      {mergeConfirming ? <Loader2 size={12} className="animate-spin" /> : <GitMerge size={12} />}
-                      {mergeConfirming ? 'Merging…' : 'Confirm merge'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
