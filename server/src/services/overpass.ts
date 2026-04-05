@@ -22,15 +22,20 @@ const PLACE_TAG_KEYS = [
   'tourism',
   'leisure',
   'aeroway',
+  'highway=rest_area',
+  'highway=services',
   'railway',
   'building',
   'office',
   'public_transport',
+  'historic',
+  'natural',
+  'man_made',
 ] as const;
 const PLACE_TAG_KEY_PATTERN = `^(${PLACE_TAG_KEYS.join('|')})$`;
 const GENERIC_CATEGORY_VALUES = new Set(['yes']);
-const MIN_NEARBY_SEARCH_RADIUS_METERS = 2000;
-const QUERY_SEARCH_RADIUS_METERS = 5000;
+const MIN_NEARBY_SEARCH_RADIUS_METERS = 5000;
+const QUERY_SEARCH_RADIUS_METERS = 10000;
 const SEARCHABLE_NAME_KEY_PATTERN = '^(name|official_name|brand|short_name|alt_name|operator)$';
 
 function formatOsmTagValue(value: string): string {

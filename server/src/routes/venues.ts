@@ -90,7 +90,7 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /nearby - search nearby venues from DB and optionally OSM
 router.get('/nearby', async (req: Request, res: Response) => {
   try {
-    const { lat, lon, radius = '2000', limit = '20', offset = '0' } = req.query;
+    const { lat, lon, radius = '5000', limit = '20', offset = '0' } = req.query;
     const rawSearch = typeof req.query.search === 'string'
       ? req.query.search
       : typeof req.query.q === 'string'
