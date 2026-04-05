@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { searchNearbyVenues, findEnclosingVenue } from '../services/overpass';
-import { reverseGeocode } from '../services/nominatim';
+import { reverseGeocode, searchPlacesByName } from '../services/nominatim';
 import { findOrReuseVenue } from '../services/venueMerge';
 
 const router = Router();
@@ -230,6 +230,24 @@ router.get('/categories', async (_req: Request, res: Response) => {
   } catch (err) {
     console.error('Error listing categories:', err);
     res.status(500).json({ error: 'Failed to list categories' });
+  }
+});
+
+// GET /place-search?q= - geocode a city or named place to map coordinates
+router.get('/place-search', async (req: Request, res: Response) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const limitNum = Math.min(Math.max(parseInt(String(req.query.limit || '5'), 10) || 5, 1), 10);
+
+    if (!q) {
+      return res.status(400).json({ error: 'q is required' });
+    }
+
+    const places = await searchPlacesByName(q, limitNum);
+    return res.json(places);
+  } catch (err) {
+    console.error('Error searching places:', err);
+    return res.status(500).json({ error: 'Failed to search places' });
   }
 });
 

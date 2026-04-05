@@ -14,6 +14,8 @@ L.Icon.Default.mergeOptions({
 interface Props {
   /** Initial center — only used on first mount */
   initialCenter: [number, number];
+  /** Optional controlled recenter target for programmatic map moves */
+  viewCenter?: [number, number] | null;
   zoom?: number;
   /** Called whenever the user stops dragging the map */
   onChange: (lat: number, lng: number) => void;
@@ -43,8 +45,18 @@ function InitialView({ center, zoom }: { center: [number, number]; zoom: number 
   return null;
 }
 
+function SyncedView({ center }: { center: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!center) return;
+    map.setView(center);
+  }, [map, center]);
+  return null;
+}
+
 export default function VenueEditMap({
   initialCenter,
+  viewCenter = null,
   zoom = 15,
   onChange,
   className = '',
@@ -64,6 +76,7 @@ export default function VenueEditMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <InitialView center={initialCenter} zoom={zoom} />
+        <SyncedView center={viewCenter} />
         <CenterTracker onChange={onChange} />
       </MapContainer>
 

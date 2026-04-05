@@ -38,6 +38,8 @@ export const venues = {
     request<any>(`/venues/${sourceId}/merge-into`, { method: 'POST', body: JSON.stringify({ target_id: targetId }) }),
   nearby: (params: Record<string, string>) =>
     request<any[]>(`/venues/nearby?${new URLSearchParams(params)}`),
+  placeSearch: (params: Record<string, string>) =>
+    request<any[]>(`/venues/place-search?${new URLSearchParams(params)}`),
   categories: () => request<any[]>('/venues/categories'),
   importOsm: (data: any) =>
     request<any>('/venues/import-osm', { method: 'POST', body: JSON.stringify(data) }),

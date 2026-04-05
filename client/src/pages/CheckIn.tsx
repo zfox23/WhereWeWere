@@ -117,7 +117,6 @@ export default function CheckIn() {
 
       {!selectedVenue && !editId ? (
         <div className="space-y-4">
-          <p className="text-gray-600 dark:text-gray-400">Where are you?</p>
           <VenueSearch
             onSelect={handleVenueSelect}
             initialLat={searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : undefined}
