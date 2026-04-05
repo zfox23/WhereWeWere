@@ -553,9 +553,6 @@ export default function Home() {
               </button>
             )}
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Mood filters and location filters are mutually exclusive. With no type-specific filters set, the timeline shows both card types.
-          </p>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">After</label>
@@ -591,14 +588,14 @@ export default function Home() {
           <div className="grid gap-3 lg:grid-cols-2">
             <div className={`rounded-xl border p-3 space-y-3 ${locationFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-sky-200 dark:border-sky-800/60 bg-sky-50/50 dark:bg-sky-950/20'}`}>
               <div>
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Location filters</div>
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Location</div>
               </div>
               {locationFiltersDisabled && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Clear mood filters to enable location filtering.
                 </p>
               )}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Category</label>
                   <input
@@ -670,9 +667,9 @@ export default function Home() {
               </div>
             </div>
 
-            <div className={`rounded-xl border p-3 space-y-3 ${moodFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-950/20'}`}>
+            <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${moodFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-950/20'}`}>
               <div>
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Mood filters</div>
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Mood</div>
               </div>
               {moodFiltersDisabled && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -689,7 +686,7 @@ export default function Home() {
                         key={m}
                         disabled={moodFiltersDisabled}
                         onClick={() => setMoodTypeFilter('mood', isActive ? '' : String(m))}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
                           isActive
                             ? 'bg-indigo-500 text-white border-indigo-500'
                             : 'bg-white/70 dark:bg-gray-800/70 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-indigo-300 dark:hover:border-indigo-600'
