@@ -42,7 +42,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (searchType === 'checkins' || searchType === 'all') {
       const checkinsResult = await query(
-        `SELECT c.id, c.user_id, c.notes, c.rating, c.checked_in_at, c.created_at,
+        `SELECT c.id, c.user_id, c.notes, c.checked_in_at, c.created_at,
                 v.id AS venue_id, v.name AS venue_name,
                 vc.name AS venue_category,
                 pv.id AS parent_venue_id, pv.name AS parent_venue_name,

@@ -637,7 +637,7 @@ router.get('/reflections', async (req: Request, res: Response) => {
 
     // Find check-ins on this month/day in all prior years
     const result = await query(
-      `SELECT c.id, c.notes, c.rating, c.checked_in_at,
+      `SELECT c.id, c.notes, c.checked_in_at,
               v.id AS venue_id, v.name AS venue_name, v.city, v.country,
               v.latitude, v.longitude,
               vc.name AS venue_category
@@ -664,7 +664,6 @@ router.get('/reflections', async (req: Request, res: Response) => {
       byYear[year].push({
         id: row.id,
         notes: row.notes,
-        rating: row.rating,
         checked_in_at: row.checked_in_at,
         venue_id: row.venue_id,
         venue_name: row.venue_name,
@@ -695,14 +694,6 @@ router.get('/additional-stats', async (req: Request, res: Response) => {
   try {
     const { user_id } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
-    // Average rating
-    const avgRating = await query(
-      `SELECT ROUND(AVG(rating)::numeric, 1)::float AS avg_rating,
-              COUNT(rating)::int AS rated_count
-       FROM checkins WHERE user_id = $1 AND rating IS NOT NULL`,
-      [user_id]
-    );
 
     // Most common category
     const topCategory = await query(
@@ -755,8 +746,6 @@ router.get('/additional-stats', async (req: Request, res: Response) => {
     );
 
     res.json({
-      avg_rating: avgRating.rows[0]?.avg_rating || null,
-      rated_count: avgRating.rows[0]?.rated_count || 0,
       top_category: topCategory.rows[0] || null,
       longest_gap: { days: longestGap, start: gapStart, end: gapEnd },
       one_time_venues: oneTimers.rows[0]?.count || 0,

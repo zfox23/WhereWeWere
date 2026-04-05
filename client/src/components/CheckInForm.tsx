@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Star, Loader2, MapPin, Trash2 } from 'lucide-react';
+import { Loader2, MapPin, Trash2 } from 'lucide-react';
 import { checkins, venues } from '../api/client';
 import VenueSearch from './VenueSearch';
 
@@ -19,7 +19,6 @@ interface CheckInFormProps {
   onSuccess?: () => void;
   editCheckinId?: string;
   initialNotes?: string;
-  initialRating?: number;
   initialCheckedInAt?: string;
 }
 
@@ -31,15 +30,12 @@ export default function CheckInForm({
   onSuccess,
   editCheckinId,
   initialNotes,
-  initialRating,
   initialCheckedInAt,
 }: CheckInFormProps) {
   const navigate = useNavigate();
   const [venueId, setVenueId] = useState(initialVenueId || '');
   const [venueName, setVenueName] = useState(initialVenueName || '');
   const [notes, setNotes] = useState(initialNotes || '');
-  const [rating, setRating] = useState(initialRating || 0);
-  const [hoverRating, setHoverRating] = useState(0);
   const [checkedInAt, setCheckedInAt] = useState(() => {
     if (initialCheckedInAt) return toLocalDatetimeString(new Date(initialCheckedInAt));
     return toLocalDatetimeString(new Date());
@@ -129,7 +125,6 @@ export default function CheckInForm({
       if (isEditMode) {
         await checkins.update(editCheckinId!, {
           notes: notes.trim() || null,
-          rating: rating > 0 ? rating : null,
           checked_in_at: new Date(checkedInAt).toISOString(),
         });
       } else {
@@ -137,7 +132,6 @@ export default function CheckInForm({
           user_id: HARDCODED_USER_ID,
           venue_id: venueId,
           notes: notes.trim() || null,
-          rating: rating > 0 ? rating : null,
           checked_in_at: new Date(checkedInAt).toISOString(),
           also_checkin_parent: alsoCheckinParent && !!parentVenueId,
         });
@@ -148,7 +142,6 @@ export default function CheckInForm({
           setVenueName('');
         }
         setNotes('');
-        setRating(0);
         setCheckedInAt(toLocalDatetimeString(new Date()));
       }
 
@@ -256,40 +249,6 @@ export default function CheckInForm({
           rows={3}
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
         />
-      </div>
-
-      {/* Star rating */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-          Rating
-        </label>
-        <div className="flex items-center gap-1">
-          {[1, 2, 3, 4, 5].map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setRating(value === rating ? 0 : value)}
-              onMouseEnter={() => setHoverRating(value)}
-              onMouseLeave={() => setHoverRating(0)}
-              className="p-0.5 transition-transform hover:scale-110"
-              aria-label={`Rate ${value} star${value !== 1 ? 's' : ''}`}
-            >
-              <Star
-                size={24}
-                className={
-                  value <= (hoverRating || rating)
-                    ? 'fill-yellow-400 text-yellow-400'
-                    : 'text-gray-300'
-                }
-              />
-            </button>
-          ))}
-          {rating > 0 && (
-            <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
-              {rating}/5
-            </span>
-          )}
-        </div>
       </div>
 
       {/* Error */}

@@ -44,7 +44,6 @@ export interface CheckIn {
   parent_venue_id?: string;
   parent_venue_name?: string;
   notes: string | null;
-  rating: number | null;
   venue_timezone?: string | null;
   checked_in_at: string;
   created_at: string;
@@ -176,7 +175,6 @@ export interface TimelineItem {
   venue_timezone?: string | null;
   parent_venue_id?: string;
   parent_venue_name?: string;
-  rating?: number | null;
   // Mood fields
   mood?: number;
   mood_timezone?: string | null;

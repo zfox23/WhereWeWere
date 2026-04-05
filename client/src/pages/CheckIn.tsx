@@ -190,7 +190,6 @@ export default function CheckIn() {
             onSuccess={handleSuccess}
             editCheckinId={editId || undefined}
             initialNotes={editCheckin?.notes || ''}
-            initialRating={editCheckin?.rating || 0}
             initialCheckedInAt={editCheckin?.checked_in_at}
           />
         </div>

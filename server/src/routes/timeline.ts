@@ -117,7 +117,7 @@ router.get('/', async (req: Request, res: Response) => {
     const offsetParam = `$${paramIndex}`;
 
     const locationSelect = `
-      SELECT 'location' AS type, c.id, c.user_id, c.venue_id, c.notes, c.rating,
+      SELECT 'location' AS type, c.id, c.user_id, c.venue_id, c.notes,
              c.checked_in_at, c.created_at,
              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
              vc.name AS venue_category,
@@ -131,7 +131,7 @@ router.get('/', async (req: Request, res: Response) => {
     `;
 
     const moodSelect = `
-      SELECT 'mood' AS type, mc.id, mc.user_id, NULL AS venue_id, mc.note AS notes, NULL AS rating,
+      SELECT 'mood' AS type, mc.id, mc.user_id, NULL AS venue_id, mc.note AS notes,
              mc.checked_in_at, mc.created_at,
              NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
              NULL AS venue_category,

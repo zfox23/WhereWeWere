@@ -808,7 +808,6 @@ export default function Home() {
                           parent_venue_id: item.parent_venue_id,
                           parent_venue_name: item.parent_venue_name,
                           notes: item.notes,
-                          rating: item.rating ?? null,
                           checked_in_at: item.checked_in_at,
                           created_at: item.created_at,
                         }}

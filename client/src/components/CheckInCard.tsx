@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Star, MapPin, Clock, Pencil, Camera, Link2, Map, Calendar } from 'lucide-react';
+import { MapPin, Clock, Pencil, Camera, Link2, Map, Calendar } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
 import type { CheckIn, Scrobble, ImmichAsset } from '../types';
 import { formatDate, buildImmichTimeUrl } from '../utils/checkin';
@@ -14,24 +14,6 @@ interface CheckInCardProps {
   scrobbles?: Scrobble[];
   malojaUrl?: string | null;
   dawarichUrl?: string | null;
-}
-
-function StarRating({ rating }: { rating: number }) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <Star
-          key={i}
-          size={14}
-          className={
-            i <= rating
-              ? 'fill-yellow-400 text-yellow-400'
-              : 'text-gray-300'
-          }
-        />
-      ))}
-    </div>
-  );
 }
 
 function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): string {
@@ -106,13 +88,6 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
             <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
               {checkin.notes}
             </p>
-          )}
-
-          {/* Rating */}
-          {checkin.rating != null && checkin.rating > 0 && (
-            <div className="mt-2">
-              <StarRating rating={checkin.rating} />
-            </div>
           )}
 
           {/* Immich photo thumbnails */}

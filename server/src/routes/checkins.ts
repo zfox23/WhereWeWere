@@ -82,7 +82,7 @@ router.get('/', async (req: Request, res: Response) => {
     const offsetParam = `$${paramIndex}`;
 
     const sql = `
-      SELECT c.id, c.user_id, c.venue_id, c.notes, c.rating,
+      SELECT c.id, c.user_id, c.venue_id, c.notes,
              c.checked_in_at, c.created_at, c.updated_at,
              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
              vc.name AS venue_category,
@@ -110,7 +110,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const checkinResult = await query(
-      `SELECT c.id, c.user_id, c.venue_id, c.notes, c.rating,
+      `SELECT c.id, c.user_id, c.venue_id, c.notes,
               c.checked_in_at, c.created_at, c.updated_at,
               v.name AS venue_name, v.address AS venue_address,
               v.city AS venue_city, v.state AS venue_state,
@@ -140,24 +140,17 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST / - create check-in
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { user_id, venue_id, notes, rating, checked_in_at, also_checkin_parent } = req.body;
+    const { user_id, venue_id, notes, checked_in_at, also_checkin_parent } = req.body;
 
     if (!user_id || !venue_id) {
       return res.status(400).json({ error: 'user_id and venue_id are required' });
     }
 
-    if (rating !== undefined && rating !== null) {
-      const ratingNum = parseInt(rating, 10);
-      if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-        return res.status(400).json({ error: 'rating must be between 1 and 5' });
-      }
-    }
-
     const result = await query(
-      `INSERT INTO checkins (user_id, venue_id, notes, rating, checked_in_at)
-       VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()))
+      `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
        RETURNING *`,
-      [user_id, venue_id, notes || null, rating || null, checked_in_at || null]
+      [user_id, venue_id, notes || null, checked_in_at || null]
     );
 
     const checkin = result.rows[0];
@@ -192,24 +185,16 @@ router.post('/', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { notes, rating, checked_in_at } = req.body;
-
-    if (rating !== undefined && rating !== null) {
-      const ratingNum = parseInt(rating, 10);
-      if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-        return res.status(400).json({ error: 'rating must be between 1 and 5' });
-      }
-    }
+    const { notes, checked_in_at } = req.body;
 
     const result = await query(
       `UPDATE checkins
        SET notes = COALESCE($2, notes),
-           rating = COALESCE($3, rating),
-           checked_in_at = COALESCE($4::timestamptz, checked_in_at),
+           checked_in_at = COALESCE($3::timestamptz, checked_in_at),
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id, notes, rating, checked_in_at || null]
+      [id, notes, checked_in_at || null]
     );
 
     if (result.rows.length === 0) {

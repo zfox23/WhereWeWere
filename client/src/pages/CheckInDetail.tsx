@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, Star, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft } from 'lucide-react';
+import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft } from 'lucide-react';
 import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import type { Scrobble, ImmichAsset } from '../types';
 import MapView from '../components/MapView';
@@ -177,19 +177,6 @@ export default function CheckInDetail() {
         {/* Notes */}
         {checkin.notes && (
           <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{checkin.notes}</p>
-        )}
-
-        {/* Rating */}
-        {checkin.rating != null && checkin.rating > 0 && (
-          <div className="flex items-center gap-0.5">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <Star
-                key={i}
-                size={18}
-                className={i <= checkin.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}
-              />
-            ))}
-          </div>
         )}
 
         {/* Photos */}

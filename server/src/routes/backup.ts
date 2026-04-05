@@ -76,7 +76,6 @@ interface BackupCheckin {
   id: string;
   venue_id: string;
   notes: string | null;
-  rating: number | null;
   checked_in_at: string;
   created_at: string;
   updated_at: string;
@@ -272,7 +271,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         []
       ),
       query(
-        `SELECT id, venue_id, notes, rating,
+        `SELECT id, venue_id, notes,
                 checked_in_at, created_at, updated_at, swarm_id
          FROM checkins
          WHERE user_id = $1
@@ -520,17 +519,17 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       const result = await client.query(
         `INSERT INTO checkins (
            id, user_id, venue_id,
-           notes, rating,
+           notes,
            checked_in_at, created_at, updated_at,
            swarm_id
          )
          VALUES (
            $1, $2, $3,
-           $4, $5,
+           $4,
+           COALESCE($5::timestamptz, NOW()),
            COALESCE($6::timestamptz, NOW()),
            COALESCE($7::timestamptz, NOW()),
-           COALESCE($8::timestamptz, NOW()),
-           $9
+           $8
          )
          ON CONFLICT (id) DO NOTHING`,
         [
@@ -538,7 +537,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           USER_ID,
           checkin.venue_id,
           checkin.notes || null,
-          checkin.rating ?? null,
           checkin.checked_in_at || null,
           checkin.created_at || null,
           checkin.updated_at || null,

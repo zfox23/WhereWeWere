@@ -11,7 +11,6 @@ import {
   Sun,
   Lightbulb,
   History,
-  Star,
   Compass,
   Heart,
   Home as HomeIcon,
@@ -182,10 +181,8 @@ interface TimeOfDayData { period: string; count: number }
 interface BusiestDayData { date: string; count: number }
 interface CityData { city: string; country: string; checkin_count: number; unique_venues: number }
 interface InsightData { title: string; description: string; icon: string }
-interface ReflectionYear { year: number; years_ago: number; checkins: { id: string; venue_id: string; venue_name: string; venue_category?: string; city?: string; country?: string; notes?: string; rating?: number; checked_in_at: string; venue_timezone?: string | null }[] }
+interface ReflectionYear { year: number; years_ago: number; checkins: { id: string; venue_id: string; venue_name: string; venue_category?: string; city?: string; country?: string; notes?: string; checked_in_at: string; venue_timezone?: string | null }[] }
 interface AdditionalStatsData {
-  avg_rating: number | null;
-  rated_count: number;
   top_category: { name: string; count: number } | null;
   longest_gap: { days: number; start: string; end: string };
   one_time_venues: number;
@@ -415,13 +412,6 @@ function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
                     <span>{formatTime(c.checked_in_at, c.venue_timezone)}</span>
                   </div>
                   {c.notes && <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 italic">"{c.notes}"</p>}
-                  {c.rating && (
-                    <div className="flex items-center gap-0.5 mt-0.5">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star key={s} size={10} className={s <= c.rating! ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'} />
-                      ))}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -447,16 +437,6 @@ function AdditionalStats({ data }: { data: AdditionalStatsData | null }) {
         More Stats
       </h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        {data.avg_rating != null && (
-          <div>
-            <div className="flex items-center gap-1 text-gray-500 mb-0.5">
-              <Star size={12} />
-              <span className="text-xs font-medium uppercase tracking-wide">Avg Rating</span>
-            </div>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{data.avg_rating}</p>
-            <p className="text-[10px] text-gray-400">{data.rated_count} rated check-ins</p>
-          </div>
-        )}
         {data.top_category && (
           <div>
             <div className="flex items-center gap-1 text-gray-500 mb-0.5">

@@ -47,7 +47,6 @@ CREATE TABLE checkins (
     user_id UUID NOT NULL REFERENCES users(id),
     venue_id UUID NOT NULL REFERENCES venues(id),
     notes TEXT,
-    rating SMALLINT CHECK (rating >= 1 AND rating <= 5),
     checked_in_at TIMESTAMPTZ DEFAULT NOW(),
     search_vector TSVECTOR,
     created_at TIMESTAMPTZ DEFAULT NOW(),
