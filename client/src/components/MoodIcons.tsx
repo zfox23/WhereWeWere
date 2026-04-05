@@ -41,7 +41,7 @@ export function MoodIcon({ mood, pack = 'emoji', size = 24 }: { mood: number; pa
 
 export function MoodIconRow({ pack = 'emoji', size = 24 }: { pack?: string; size?: number }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap justify-center items-center gap-2">
       {[1, 2, 3, 4, 5].map((m) => (
         <MoodIcon key={m} mood={m} pack={pack} size={size} />
       ))}

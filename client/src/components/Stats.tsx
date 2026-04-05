@@ -142,10 +142,10 @@ export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
               <span className="text-sm font-bold text-gray-400 w-5 text-right">
                 {i + 1}
               </span>
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 truncate">
                 <button
                   onClick={() => navigate(`/?venue_id=${venue.venue_id}`)}
-                  className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate hover:text-primary-600 hover:underline text-left"
+                  className="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 hover:underline text-left"
                 >
                   {venue.venue_name}
                 </button>

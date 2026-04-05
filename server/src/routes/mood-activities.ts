@@ -12,7 +12,17 @@ router.get('/groups', async (_req: Request, res: Response) => {
       `SELECT g.id, g.name, g.display_order,
               COALESCE(
                 (SELECT json_agg(json_build_object(
-                  'id', a.id, 'name', a.name, 'group_id', a.group_id, 'display_order', a.display_order, 'icon', a.icon
+                  'id', a.id,
+                  'name', a.name,
+                  'group_id', a.group_id,
+                  'display_order', a.display_order,
+                  'icon', a.icon,
+                  'mood_checkin_count', (
+                    SELECT COUNT(*)::int
+                    FROM mood_checkin_activities mca
+                    JOIN mood_checkins mc ON mc.id = mca.mood_checkin_id
+                    WHERE mca.activity_id = a.id AND mc.user_id = $1
+                  )
                 ) ORDER BY a.display_order)
                 FROM mood_activities a WHERE a.group_id = g.id),
                 '[]'::json
@@ -128,6 +138,65 @@ router.post('/activities', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error creating activity:', err);
     res.status(500).json({ error: 'Failed to create activity' });
+  }
+});
+
+// PUT /activities/reorder - reorder activities in a group with one request
+router.put('/activities/reorder', async (req: Request, res: Response) => {
+  try {
+    const { group_id, activity_ids } = req.body as {
+      group_id?: string;
+      activity_ids?: string[];
+    };
+
+    if (!group_id || !Array.isArray(activity_ids) || activity_ids.length === 0) {
+      return res.status(400).json({ error: 'group_id and non-empty activity_ids are required' });
+    }
+
+    const existingActivities = await query(
+      `SELECT id
+       FROM mood_activities
+       WHERE group_id = $1`,
+      [group_id]
+    );
+
+    const existingIds = existingActivities.rows.map((row) => String(row.id));
+    if (existingIds.length !== activity_ids.length) {
+      return res.status(400).json({ error: 'activity_ids must include all activities in the group exactly once' });
+    }
+
+    const uniqueIncomingIds = new Set(activity_ids);
+    if (uniqueIncomingIds.size !== activity_ids.length) {
+      return res.status(400).json({ error: 'activity_ids contains duplicates' });
+    }
+
+    const existingIdSet = new Set(existingIds);
+    const hasUnknownIds = activity_ids.some((id) => !existingIdSet.has(id));
+    if (hasUnknownIds) {
+      return res.status(400).json({ error: 'activity_ids contains IDs not in this group' });
+    }
+
+    const result = await query(
+      `UPDATE mood_activities AS a
+       SET display_order = ordered.display_order
+       FROM (
+         SELECT id, (ordinality - 1)::int AS display_order
+         FROM unnest($1::uuid[]) WITH ORDINALITY AS t(id, ordinality)
+       ) AS ordered
+       WHERE a.id = ordered.id
+         AND a.group_id = $2
+       RETURNING a.*`,
+      [activity_ids, group_id]
+    );
+
+    if (result.rows.length !== activity_ids.length) {
+      return res.status(400).json({ error: 'Failed to reorder all activities in group' });
+    }
+
+    res.json({ message: 'Activities reordered', count: result.rows.length });
+  } catch (err) {
+    console.error('Error reordering activities:', err);
+    res.status(500).json({ error: 'Failed to reorder activities' });
   }
 });
 

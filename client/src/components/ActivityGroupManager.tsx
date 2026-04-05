@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Plus, Trash2, Palette } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react';
 import { moodActivities } from '../api/client';
 import IconPicker from './IconPicker';
 import { resolveActivityIcon } from '../utils/icons';
-import type { MoodActivityGroup, MoodActivity } from '../types';
+import type { MoodActivityGroup } from '../types';
 
 interface ActivityGroupManagerProps {
   groups: MoodActivityGroup[];
@@ -23,6 +23,14 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
   const [addingActivityGroupId, setAddingActivityGroupId] = useState<string | null>(null);
   const [newActivityName, setNewActivityName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [confirmingDeleteActivityId, setConfirmingDeleteActivityId] = useState<string | null>(null);
+  const [draggingActivity, setDraggingActivity] = useState<{
+    groupId: string;
+    activityId: string;
+    fromIndex: number;
+    overIndex: number;
+    pointerId: number;
+  } | null>(null);
 
   const toggleGroup = (id: string) => {
     const newExpanded = new Set(expandedGroups);
@@ -73,19 +81,27 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
     }
   };
 
-  const moveActivityUp = async (groupIndex: number, activityIndex: number) => {
-    if (activityIndex === 0) return;
+  const reorderActivities = async (groupId: string, fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+
+    const groupIndex = groups.findIndex((group) => group.id === groupId);
+    if (groupIndex < 0) return;
+
     const newGroups = [...groups];
     const activities = [...newGroups[groupIndex].activities];
-    [activities[activityIndex], activities[activityIndex - 1]] = [activities[activityIndex - 1], activities[activityIndex]];
-    newGroups[groupIndex].activities = activities;
+    const [movedActivity] = activities.splice(fromIndex, 1);
+    if (!movedActivity) return;
+
+    const boundedToIndex = Math.max(0, Math.min(toIndex, activities.length));
+    activities.splice(boundedToIndex, 0, movedActivity);
+    newGroups[groupIndex] = { ...newGroups[groupIndex], activities };
 
     setLoading(true);
     try {
-      await Promise.all([
-        moodActivities.updateActivity(activities[activityIndex].id, { display_order: activityIndex }),
-        moodActivities.updateActivity(activities[activityIndex - 1].id, { display_order: activityIndex - 1 }),
-      ]);
+      await moodActivities.reorderActivities(
+        groupId,
+        activities.map((activity) => activity.id)
+      );
       onUpdate(newGroups);
     } catch (err) {
       console.error('Failed to reorder activities:', err);
@@ -94,25 +110,73 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
     }
   };
 
-  const moveActivityDown = async (groupIndex: number, activityIndex: number) => {
-    const activities = groups[groupIndex].activities;
-    if (activityIndex === activities.length - 1) return;
-    const newGroups = [...groups];
-    const actArray = [...newGroups[groupIndex].activities];
-    [actArray[activityIndex], actArray[activityIndex + 1]] = [actArray[activityIndex + 1], actArray[activityIndex]];
-    newGroups[groupIndex].activities = actArray;
+  const handleActivityPointerDown = (
+    groupId: string,
+    activityId: string,
+    activityIndex: number,
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    if (loading) {
+      return;
+    }
 
-    setLoading(true);
-    try {
-      await Promise.all([
-        moodActivities.updateActivity(actArray[activityIndex].id, { display_order: activityIndex }),
-        moodActivities.updateActivity(actArray[activityIndex + 1].id, { display_order: activityIndex + 1 }),
-      ]);
-      onUpdate(newGroups);
-    } catch (err) {
-      console.error('Failed to reorder activities:', err);
-    } finally {
-      setLoading(false);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingActivity({
+      groupId,
+      activityId,
+      fromIndex: activityIndex,
+      overIndex: activityIndex,
+      pointerId: event.pointerId,
+    });
+  };
+
+  const handleActivityPointerMove = (
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    if (!draggingActivity || draggingActivity.pointerId !== event.pointerId) return;
+    event.preventDefault();
+
+    const elementAtPointer = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+    const targetRow = elementAtPointer?.closest('[data-activity-drop-target="true"]') as HTMLElement | null;
+    if (!targetRow || targetRow.dataset.groupId !== draggingActivity.groupId) return;
+
+    const overIndex = Number(targetRow.dataset.activityIndex);
+    if (Number.isNaN(overIndex) || overIndex === draggingActivity.overIndex) return;
+
+    setDraggingActivity({ ...draggingActivity, overIndex });
+  };
+
+  const handleActivityPointerUp = async (
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    if (!draggingActivity || draggingActivity.pointerId !== event.pointerId || loading) {
+      setDraggingActivity(null);
+      return;
+    }
+
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    await reorderActivities(
+      draggingActivity.groupId,
+      draggingActivity.fromIndex,
+      draggingActivity.overIndex
+    );
+    setDraggingActivity(null);
+  };
+
+  const handleActivityPointerCancel = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (
+      draggingActivity &&
+      draggingActivity.pointerId === event.pointerId &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDraggingActivity(null);
+  };
+
+  const handleActivityPointerLostCapture = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (draggingActivity && draggingActivity.pointerId === event.pointerId) {
+      setDraggingActivity(null);
     }
   };
 
@@ -144,6 +208,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
       const createdActivity = await moodActivities.createActivity({
         group_id: groupId,
         name: trimmedName,
+        icon: 'dash',
       });
       const newGroups = groups.map((group) => (
         group.id === groupId
@@ -162,10 +227,6 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
   };
 
   const removeActivity = async (groupId: string, activityId: string) => {
-    if (!window.confirm('Remove this activity from the group?')) {
-      return;
-    }
-
     setLoading(true);
     try {
       await moodActivities.deleteActivity(activityId);
@@ -175,6 +236,9 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
           : group
       ));
       onUpdate(newGroups);
+      if (confirmingDeleteActivityId === activityId) {
+        setConfirmingDeleteActivityId(null);
+      }
     } catch (err) {
       console.error('Failed to delete activity:', err);
     } finally {
@@ -190,12 +254,31 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
           className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
         >
           {/* Group header */}
-          <button
+          <div
             onClick={() => toggleGroup(group.id)}
-            disabled={loading}
-            className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition disabled:opacity-50"
+            aria-disabled={loading}
+            className="w-full px-2 py-3 flex items-center justify-between bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition disabled:opacity-50"
           >
-            <span className="font-medium text-gray-900 dark:text-white">{group.name}</span>
+            {/* Group reorder buttons */}
+            <div className="flex gap-1 text-gray-600 dark:text-gray-200" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => moveGroupUp(groupIndex)}
+                disabled={loading || groupIndex === 0}
+                title="Move up"
+                className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronUp size={16} />
+              </button>
+              <button
+                onClick={() => moveGroupDown(groupIndex)}
+                disabled={loading || groupIndex === groups.length - 1}
+                title="Move down"
+                className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronDown size={16} />
+              </button>
+              <span className="font-medium text-gray-900 dark:text-white">{group.name}</span>
+            </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 {group.activities.length} activities
@@ -206,26 +289,6 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
                 <ChevronDown size={18} />
               )}
             </div>
-          </button>
-
-          {/* Group reorder buttons */}
-          <div className="px-4 py-2 flex gap-1 border-t border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/60 text-gray-600 dark:text-gray-200">
-            <button
-              onClick={() => moveGroupUp(groupIndex)}
-              disabled={loading || groupIndex === 0}
-              title="Move up"
-              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ChevronUp size={16} />
-            </button>
-            <button
-              onClick={() => moveGroupDown(groupIndex)}
-              disabled={loading || groupIndex === groups.length - 1}
-              title="Move down"
-              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ChevronDown size={16} />
-            </button>
           </div>
 
           {/* Activities */}
@@ -234,50 +297,82 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
               {group.activities.map((activity, actIndex) => (
                 <div
                   key={activity.id}
-                  className="px-2 py-3 flex items-center justify-between bg-white dark:bg-gray-900/50 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  data-activity-drop-target="true"
+                  data-group-id={group.id}
+                  data-activity-index={actIndex}
+                  className={`px-2 py-3 flex items-center justify-between bg-white dark:bg-gray-900/50 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 ${draggingActivity?.activityId === activity.id ? 'opacity-60' : ''} ${draggingActivity?.groupId === group.id && draggingActivity?.overIndex === actIndex && draggingActivity?.activityId !== activity.id ? 'ring-2 ring-primary-400 dark:ring-primary-500' : ''}`}
                 >
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {activity.icon && (
-                      <button
-                        onClick={() => setSelectedIconActivity(activity.id)}
-                        disabled={loading}
-                        title="Change icon"
-                        className="flex-shrink-0 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50"
-                      >
-                        {renderIcon(activity.icon)}
-                      </button>
-                    )}
-                    <span className="text-sm text-gray-700 dark:text-gray-200 truncate">
-                      {activity.name}
-                    </span>
-                  </div>
+                  {confirmingDeleteActivityId === activity.id ? (
+                    <div className="w-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-gray-700 dark:text-gray-200">
+                        <span className="font-medium">{activity.name}</span>{' '}
+                        is present in{' '}
+                        <span className="font-medium">{activity.mood_checkin_count ?? 0}</span>{' '}
+                        Mood Check-ins.
+                      </p>
+                      <div className="flex items-center gap-2 sm:ml-3">
+                        <button
+                          onClick={() => {
+                            void removeActivity(group.id, activity.id);
+                          }}
+                          disabled={loading}
+                          className="px-3 py-1.5 flex items-center gap-1 text-sm rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          
+                          <Trash2 size={16} /> <span>Delete</span>
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDeleteActivityId(null)}
+                          disabled={loading}
+                          className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <button
+                            onClick={() => setSelectedIconActivity(activity.id)}
+                            disabled={loading}
+                            title="Change icon"
+                            className="flex-shrink-0 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+                          >
+                            {renderIcon(activity.icon || 'dash')}
+                          </button>
+                        <span className="text-sm text-gray-700 dark:text-gray-200 truncate">
+                          {activity.name}
+                        </span>
+                      </div>
 
-                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                    <button
-                      onClick={() => removeActivity(group.id, activity.id)}
-                      disabled={loading}
-                      title="Remove activity"
-                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded disabled:opacity-50"
-                    >
-                      <Trash2 size={16} className="text-gray-500 dark:text-gray-200 hover:text-red-600 dark:hover:text-red-300" />
-                    </button>
-                    <button
-                      onClick={() => moveActivityUp(groupIndex, actIndex)}
-                      disabled={loading || actIndex === 0}
-                      title="Move up"
-                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <ChevronUp size={16} />
-                    </button>
-                    <button
-                      onClick={() => moveActivityDown(groupIndex, actIndex)}
-                      disabled={loading || actIndex === group.activities.length - 1}
-                      title="Move down"
-                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <ChevronDown size={16} />
-                    </button>
-                  </div>
+                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                        <button
+                          onClick={() => setConfirmingDeleteActivityId(activity.id)}
+                          disabled={loading}
+                          title="Remove activity"
+                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded disabled:opacity-50"
+                        >
+                          <Trash2 size={16} className="text-gray-500 dark:text-gray-200 hover:text-red-600 dark:hover:text-red-300" />
+                        </button>
+                        <button
+                          onPointerDown={(event) => handleActivityPointerDown(group.id, activity.id, actIndex, event)}
+                          onPointerMove={handleActivityPointerMove}
+                          onPointerUp={(event) => {
+                            void handleActivityPointerUp(event);
+                          }}
+                          onPointerCancel={handleActivityPointerCancel}
+                          onLostPointerCapture={handleActivityPointerLostCapture}
+                          disabled={loading}
+                          title="Drag to reorder"
+                          aria-label={`Drag ${activity.name} to reorder`}
+                          className={`p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed touch-none ${draggingActivity?.activityId === activity.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+                        >
+                          <GripVertical size={16} className="text-gray-500 dark:text-gray-300" />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
 

@@ -146,6 +146,7 @@ export interface MoodActivity {
   name: string;
   display_order: number;
   icon?: string | null;
+  mood_checkin_count?: number;
 }
 
 export interface MoodCheckIn {

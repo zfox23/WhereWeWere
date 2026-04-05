@@ -261,6 +261,11 @@ export const moodActivities = {
     request<void>(`/mood-activities/groups/${id}`, { method: 'DELETE' }),
   createActivity: (data: any) =>
     request<any>('/mood-activities/activities', { method: 'POST', body: JSON.stringify(data) }),
+  reorderActivities: (groupId: string, activityIds: string[]) =>
+    request<{ message: string; count: number }>('/mood-activities/activities/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ group_id: groupId, activity_ids: activityIds }),
+    }),
   updateActivity: (id: string, data: any) =>
     request<any>(`/mood-activities/activities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteActivity: (id: string) =>

@@ -152,7 +152,7 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, p
             <Link
               to={`/mood-checkins/${item.id}`}
               className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-              title="View details"
+              title={item.checked_in_at}
             >
               <time dateTime={item.checked_in_at}>
                 {formatDate(item.checked_in_at, item.mood_timezone)}

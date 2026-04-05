@@ -124,7 +124,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
             <Link
               to={`/checkins/${checkin.id}`}
               className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-              title="View details"
+              title={checkin.checked_in_at}
             >
               <time dateTime={checkin.checked_in_at}>
                 {formatDate(checkin.checked_in_at, checkin.venue_timezone)}

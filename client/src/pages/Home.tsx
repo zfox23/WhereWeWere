@@ -111,6 +111,8 @@ function ExpandableFAB() {
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<TimelineItem[]>([]);
+  const [includeLocation, setIncludeLocation] = useState(true);
+  const [includeMood, setIncludeMood] = useState(true);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [activityOptions, setActivityOptions] = useState<{ id: string; name: string; groupName: string }[]>([]);
@@ -189,6 +191,24 @@ export default function Home() {
   const hasLocationTypeFilter = Boolean(venueId || category || country);
   const moodFiltersDisabled = hasLocationTypeFilter;
   const locationFiltersDisabled = hasMoodTypeFilter;
+  const moodTypeToggleDisabled = hasLocationTypeFilter;
+  const locationTypeToggleDisabled = hasMoodTypeFilter;
+  const moodSectionDisabled = moodFiltersDisabled || !includeMood;
+  const locationSectionDisabled = locationFiltersDisabled || !includeLocation;
+
+  useEffect(() => {
+    if (hasMoodTypeFilter) {
+      setIncludeLocation(false);
+      setIncludeMood(true);
+    }
+  }, [hasMoodTypeFilter]);
+
+  useEffect(() => {
+    if (hasLocationTypeFilter) {
+      setIncludeMood(false);
+      setIncludeLocation(true);
+    }
+  }, [hasLocationTypeFilter]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
@@ -263,6 +283,11 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
+
+    if (value) {
+      setIncludeMood(true);
+      setIncludeLocation(false);
+    }
   }, [setSearchParams]);
 
   const setLocationTypeFilter = useCallback((key: 'venue_id' | 'category' | 'country', value: string) => {
@@ -277,7 +302,28 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
+
+    if (value) {
+      setIncludeLocation(true);
+      setIncludeMood(false);
+    }
   }, [setSearchParams]);
+
+  const toggleLocationType = useCallback(() => {
+    if (locationTypeToggleDisabled) return;
+    setIncludeLocation((prev) => {
+      if (prev && !includeMood) return prev;
+      return !prev;
+    });
+  }, [includeMood, locationTypeToggleDisabled]);
+
+  const toggleMoodType = useCallback(() => {
+    if (moodTypeToggleDisabled) return;
+    setIncludeMood((prev) => {
+      if (prev && !includeLocation) return prev;
+      return !prev;
+    });
+  }, [includeLocation, moodTypeToggleDisabled]);
 
   const handleDateInputChange = useCallback((key: 'from' | 'to', value: string) => {
     if (key === 'from') {
@@ -443,11 +489,18 @@ export default function Home() {
 
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
+    setIncludeLocation(true);
+    setIncludeMood(true);
     setShowFilters(false);
   };
 
-  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity;
-  const rawGrouped = groupByDate(items);
+  const hasTypeSelectionFilter = !includeLocation || !includeMood;
+  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || hasTypeSelectionFilter;
+  const visibleItems = useMemo(
+    () => items.filter((item) => (item.type === 'location' ? includeLocation : includeMood)),
+    [items, includeLocation, includeMood]
+  );
+  const rawGrouped = groupByDate(visibleItems);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
 
   // Build active filter pills for display
@@ -469,6 +522,8 @@ export default function Home() {
     filterPills.push({ label: `Mood: ${moodNum >= 1 && moodNum <= 5 ? MOOD_LABELS[moodNum] : mood}`, key: 'mood' });
   }
   if (activity) filterPills.push({ label: `Activity: ${activity}`, key: 'activity' });
+  if (includeLocation && !includeMood) filterPills.push({ label: 'Type: Location only', key: 'type_mood' });
+  if (!includeLocation && includeMood) filterPills.push({ label: 'Type: Mood only', key: 'type_location' });
 
   return (
     <div className="space-y-4">
@@ -483,7 +538,7 @@ export default function Home() {
             type="text"
             value={searchQuery}
             onChange={(e) => setFilter('q', e.target.value)}
-            placeholder="Search venues and notes..."
+            placeholder="Search check-ins..."
             className="w-full pl-10 pr-4 py-3 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/40 dark:border-gray-700/40 rounded-2xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none shadow-sm shadow-black/[0.03] dark:text-gray-100"
           />
         </div>
@@ -517,6 +572,10 @@ export default function Home() {
                       next.delete('to');
                       return next;
                     }, { replace: true });
+                  } else if (pill.key === 'type_mood') {
+                    setIncludeMood(true);
+                  } else if (pill.key === 'type_location') {
+                    setIncludeLocation(true);
                   } else {
                     setFilter(pill.key, '');
                   }
@@ -588,7 +647,16 @@ export default function Home() {
           <div className="grid gap-3 lg:grid-cols-2">
             <div className={`rounded-xl border p-3 space-y-3 ${locationFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-sky-200 dark:border-sky-800/60 bg-sky-50/50 dark:bg-sky-950/20'}`}>
               <div>
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Location</div>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={includeLocation}
+                    disabled={locationTypeToggleDisabled}
+                    onChange={toggleLocationType}
+                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
+                  />
+                  <span>Location</span>
+                </label>
               </div>
               {locationFiltersDisabled && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -602,7 +670,7 @@ export default function Home() {
                     type="text"
                     list="category-options"
                     value={categoryInput}
-                    disabled={locationFiltersDisabled}
+                    disabled={locationSectionDisabled}
                     onChange={(e) => {
                       const next = e.target.value;
                       setCategoryInput(next);
@@ -636,7 +704,7 @@ export default function Home() {
                     type="text"
                     list="country-options"
                     value={countryInput}
-                    disabled={locationFiltersDisabled}
+                    disabled={locationSectionDisabled}
                     onChange={(e) => {
                       const next = e.target.value;
                       setCountryInput(next);
@@ -669,7 +737,16 @@ export default function Home() {
 
             <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${moodFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-950/20'}`}>
               <div>
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Mood</div>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={includeMood}
+                    disabled={moodTypeToggleDisabled}
+                    onChange={toggleMoodType}
+                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
+                  />
+                  <span>Mood</span>
+                </label>
               </div>
               {moodFiltersDisabled && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -684,7 +761,7 @@ export default function Home() {
                     return (
                       <button
                         key={m}
-                        disabled={moodFiltersDisabled}
+                        disabled={moodSectionDisabled}
                         onClick={() => setMoodTypeFilter('mood', isActive ? '' : String(m))}
                         className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
                           isActive
@@ -702,7 +779,7 @@ export default function Home() {
                 <label className="text-xs text-gray-500 mb-1 block">Activity</label>
                 <select
                   value={activity}
-                  disabled={moodFiltersDisabled}
+                  disabled={moodSectionDisabled}
                   onChange={(e) => setMoodTypeFilter('activity', e.target.value)}
                   className="input disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -741,7 +818,7 @@ export default function Home() {
             Retry
           </button>
         </div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-8 text-center">
           <MapPin size={40} className="mx-auto text-gray-300 mb-3" />
           <p className="text-gray-500 mb-4">
