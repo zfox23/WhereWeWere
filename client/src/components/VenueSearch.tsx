@@ -12,6 +12,8 @@ interface PlaceSearchResult {
   name: string;
   latitude: number;
   longitude: number;
+  lat?: string | number;
+  lon?: string | number;
 }
 
 export interface SelectedVenue {
@@ -90,6 +92,10 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     if (searchMode !== 'remote' || !effectiveCoords) return null;
     return [effectiveCoords.lat, effectiveCoords.lon];
   }, [searchMode, effectiveCoords?.lat, effectiveCoords?.lon]);
+  const customMapCenter = useMemo<[number, number] | null>(() => {
+    if (customLat == null || customLng == null) return null;
+    return [customLat, customLng];
+  }, [customLat, customLng]);
 
   const getVenueKey = useCallback((venue: NearbyVenue) => {
     if (venue.source === 'local' && venue.id) return `local:${venue.id}`;
@@ -177,8 +183,23 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
             setCustomAddressError('Could not find that address. Try adding city or state.');
             return;
           }
-          setCustomLat(topMatch.latitude);
-          setCustomLng(topMatch.longitude);
+
+          const resolvedLat =
+            typeof topMatch.latitude === 'number'
+              ? topMatch.latitude
+              : Number(topMatch.lat);
+          const resolvedLng =
+            typeof topMatch.longitude === 'number'
+              ? topMatch.longitude
+              : Number(topMatch.lon);
+
+          if (!Number.isFinite(resolvedLat) || !Number.isFinite(resolvedLng)) {
+            setCustomAddressError('Address lookup returned invalid coordinates.');
+            return;
+          }
+
+          setCustomLat(resolvedLat);
+          setCustomLng(resolvedLng);
         })
         .catch(() => {
           if (requestId !== customAddressRequestIdRef.current) return;
@@ -670,6 +691,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               <div className="h-56 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
                 <VenueEditMap
                   initialCenter={[customLat, customLng]}
+                  viewCenter={customMapCenter}
                   zoom={15}
                   onChange={(lat, lng) => {
                     setCustomLat(lat);
