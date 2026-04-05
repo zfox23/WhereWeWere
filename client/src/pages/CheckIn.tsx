@@ -4,6 +4,7 @@ import { ArrowLeft, MapPin, Loader2 } from 'lucide-react';
 import VenueSearch from '../components/VenueSearch';
 import type { SelectedVenue } from '../components/VenueSearch';
 import CheckInForm from '../components/CheckInForm';
+import MapView from '../components/MapView';
 import { venues, checkins } from '../api/client';
 import type { CheckIn as CheckInType } from '../types';
 
@@ -13,6 +14,8 @@ export default function CheckIn() {
 
   const editId = searchParams.get('edit');
   const [selectedVenue, setSelectedVenue] = useState<SelectedVenue | null>(null);
+  const [selectedVenueCoords, setSelectedVenueCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [selectedVenueCoordsLoading, setSelectedVenueCoordsLoading] = useState(false);
   const [editCheckin, setEditCheckin] = useState<CheckInType | null>(null);
   const [editLoading, setEditLoading] = useState(false);
 
@@ -62,7 +65,41 @@ export default function CheckIn() {
 
   const handleChangeVenue = () => {
     setSelectedVenue(null);
+    setSelectedVenueCoords(null);
   };
+
+  useEffect(() => {
+    if (!selectedVenue?.id) {
+      setSelectedVenueCoords(null);
+      return;
+    }
+
+    let active = true;
+    setSelectedVenueCoordsLoading(true);
+    venues.get(selectedVenue.id)
+      .then((venue) => {
+        if (!active) return;
+        const lat = Number(venue.latitude);
+        const lng = Number(venue.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          setSelectedVenueCoords({ lat, lng });
+        } else {
+          setSelectedVenueCoords(null);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setSelectedVenueCoords(null);
+      })
+      .finally(() => {
+        if (!active) return;
+        setSelectedVenueCoordsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedVenue?.id]);
 
   if (editLoading) {
     return (
@@ -119,6 +156,31 @@ export default function CheckIn() {
               </button>
             )}
           </div>
+
+          {(selectedVenueCoordsLoading || selectedVenueCoords) && (
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 overflow-hidden">
+              {selectedVenueCoordsLoading && !selectedVenueCoords ? (
+                <div className="flex items-center justify-center h-48 text-sm text-gray-500 dark:text-gray-400">
+                  <Loader2 className="animate-spin text-primary-600" size={18} />
+                  <span className="ml-2">Loading map...</span>
+                </div>
+              ) : selectedVenueCoords ? (
+                <MapView
+                  center={[selectedVenueCoords.lat, selectedVenueCoords.lng]}
+                  zoom={15}
+                  markers={[
+                    {
+                      lat: selectedVenueCoords.lat,
+                      lng: selectedVenueCoords.lng,
+                      label: selectedVenue.name,
+                      id: selectedVenue.id,
+                    },
+                  ]}
+                  className="h-56 w-full"
+                />
+              ) : null}
+            </div>
+          )}
 
           {/* Check-in form */}
           <CheckInForm

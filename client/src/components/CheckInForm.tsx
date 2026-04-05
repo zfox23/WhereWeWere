@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Star, Loader2, MapPin, Trash2 } from 'lucide-react';
-import { checkins } from '../api/client';
+import { checkins, venues } from '../api/client';
 import VenueSearch from './VenueSearch';
 
 const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -48,6 +48,9 @@ export default function CheckInForm({
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [venueCheckinCount, setVenueCheckinCount] = useState<number | null>(null);
+  const [venueCategoryName, setVenueCategoryName] = useState<string | null>(null);
+  const [venueAddress, setVenueAddress] = useState<string | null>(null);
 
   const isEditMode = !!editCheckinId;
 
@@ -56,10 +59,47 @@ export default function CheckInForm({
     setVenueName(venue.name);
   };
 
-  const handleClearVenue = () => {
-    setVenueId('');
-    setVenueName('');
-  };
+  useEffect(() => {
+    if (!venueId || isEditMode) {
+      setVenueCheckinCount(null);
+      setVenueCategoryName(null);
+      setVenueAddress(null);
+      return;
+    }
+
+    let active = true;
+    setVenueCheckinCount(null);
+
+    venues.get(venueId)
+      .then((venue) => {
+        if (!active) return;
+        const parsed = typeof venue.checkin_count === 'number'
+          ? venue.checkin_count
+          : Number(venue.checkin_count);
+        setVenueCheckinCount(Number.isFinite(parsed) ? parsed : 0);
+        setVenueCategoryName(venue.category_name || null);
+        const fullAddress = [
+          venue.address,
+          venue.city,
+          venue.state,
+          venue.postal_code,
+          venue.country,
+        ]
+          .filter(Boolean)
+          .join(', ');
+        setVenueAddress(fullAddress || null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setVenueCheckinCount(null);
+        setVenueCategoryName(null);
+        setVenueAddress(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [venueId, isEditMode]);
 
   const handleDelete = async () => {
     if (!editCheckinId) return;
@@ -132,15 +172,31 @@ export default function CheckInForm({
             <div className="flex items-center gap-2 px-3 py-2.5 bg-primary-50 dark:bg-primary-900/30 border border-primary-200 dark:border-primary-700 rounded-lg">
               <MapPin size={16} className="text-primary-600 shrink-0" />
               <span className="text-sm font-medium text-primary-800 dark:text-primary-300 flex-1">
-                {venueName}
+                <span className="block">{venueName}</span>
+                {(venueCategoryName || venueAddress) && (
+                  <span className="block mt-0.5 text-xs font-normal text-primary-700/90 dark:text-primary-300/80">
+                    {[venueCategoryName, venueAddress].filter(Boolean).join(' • ')}
+                  </span>
+                )}
               </span>
-              <button
-                type="button"
-                onClick={handleClearVenue}
-                className="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium"
-              >
-                Change
-              </button>
+              {venueCheckinCount === null ? (
+                <span className="text-xs text-primary-600/70 dark:text-primary-400/80 font-medium">
+                  Loading...
+                </span>
+              ) : venueCheckinCount > 0 ? (
+                <Link
+                  to={`/venues/${encodeURIComponent(venueId)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium"
+                >
+                  {venueCheckinCount} check-in{venueCheckinCount === 1 ? '' : 's'}
+                </Link>
+              ) : (
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                  New venue
+                </span>
+              )}
             </div>
           ) : (
             <VenueSearch onSelect={handleVenueSelect} />
