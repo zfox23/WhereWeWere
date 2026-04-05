@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { Link, useLocation } from 'react-router-dom';
 import { MapPin, Clock, Pencil, Camera, Link2, Map, Calendar } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
@@ -85,9 +86,9 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
 
           {/* Notes */}
           {checkin.notes && (
-            <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-              {checkin.notes}
-            </p>
+            <div className="mt-2 prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-p:leading-relaxed prose-headings:my-1 prose-ul:my-0.5 prose-ol:my-0.5 text-gray-700 dark:text-gray-300">
+              <ReactMarkdown components={{ a: ({ ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>{checkin.notes}</ReactMarkdown>
+            </div>
           )}
 
           {/* Immich photo thumbnails */}

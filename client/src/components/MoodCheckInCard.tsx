@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { Link } from 'react-router-dom';
 import { Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
@@ -29,7 +30,7 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, p
   const [expanded, setExpanded] = useState(false);
   const [isLong, setIsLong] = useState(false);
   const [selfFetchedAssets, setSelfFetchedAssets] = useState<ImmichAsset[] | null>(null);
-  const noteRef = useRef<HTMLParagraphElement | null>(null);
+  const noteRef = useRef<HTMLDivElement | null>(null);
   const mood = item.mood || 3;
   const activities = item.activities || [];
   const note = item.notes;
@@ -100,12 +101,12 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, p
           {/* Note (truncated to 3 lines) */}
           {note && (
             <div className="mt-2">
-              <p
+              <div
                 ref={noteRef}
-                className={`text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap ${!expanded ? 'line-clamp-3' : ''}`}
+                className={`prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-p:leading-relaxed prose-headings:my-1 prose-ul:my-0.5 prose-ol:my-0.5 text-gray-700 dark:text-gray-300 ${!expanded ? 'line-clamp-3' : ''}`}
               >
-                {note}
-              </p>
+                <ReactMarkdown components={{ a: ({ ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>{note}</ReactMarkdown>
+              </div>
               {isLong && (
                 <button
                   onClick={() => setExpanded(!expanded)}
