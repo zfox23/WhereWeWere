@@ -29,6 +29,7 @@ const PLACE_TAG_KEYS = [
 ] as const;
 const PLACE_TAG_KEY_PATTERN = `^(${PLACE_TAG_KEYS.join('|')})$`;
 const GENERIC_CATEGORY_VALUES = new Set(['yes']);
+const MIN_NEARBY_SEARCH_RADIUS_METERS = 2000;
 const QUERY_SEARCH_RADIUS_METERS = 5000;
 const SEARCHABLE_NAME_KEY_PATTERN = '^(name|official_name|brand|short_name|alt_name|operator)$';
 
@@ -102,7 +103,10 @@ function buildNameFilter(query?: string): string {
 }
 
 function getSearchRadius(radius: number, query?: string): number {
-  return query ? Math.max(radius, QUERY_SEARCH_RADIUS_METERS) : radius;
+  if (query) {
+    return Math.max(radius, QUERY_SEARCH_RADIUS_METERS);
+  }
+  return Math.max(radius, MIN_NEARBY_SEARCH_RADIUS_METERS);
 }
 
 function buildPlaceFilter(): string {

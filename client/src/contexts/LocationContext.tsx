@@ -4,6 +4,45 @@ import { haversineDistance } from '../utils/geo';
 import type { NearbyVenue } from '../types';
 
 const STALE_DISTANCE_M = 200;
+const PREFETCH_LIMIT = '20';
+const PREFETCH_OFFSET = '0';
+const PREFETCH_CACHE_TTL_MS = 30 * 1000;
+
+const nearbyPrefetchInflight = new Map<string, Promise<NearbyVenue[]>>();
+const nearbyPrefetchCache = new Map<string, { data: NearbyVenue[]; expiresAt: number }>();
+
+function buildNearbyPrefetchKey(lat: number, lon: number): string {
+  return `${lat.toFixed(5)},${lon.toFixed(5)}|${PREFETCH_LIMIT}|${PREFETCH_OFFSET}`;
+}
+
+function fetchNearbyPrefetch(lat: number, lon: number): Promise<NearbyVenue[]> {
+  const key = buildNearbyPrefetchKey(lat, lon);
+  const cached = nearbyPrefetchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.data);
+  }
+
+  const existing = nearbyPrefetchInflight.get(key);
+  if (existing) return existing;
+
+  const request = venues.nearby({
+    lat: lat.toString(),
+    lon: lon.toString(),
+    limit: PREFETCH_LIMIT,
+    offset: PREFETCH_OFFSET,
+  }).then((data) => {
+    nearbyPrefetchCache.set(key, {
+      data,
+      expiresAt: Date.now() + PREFETCH_CACHE_TTL_MS,
+    });
+    return data;
+  }).finally(() => {
+    nearbyPrefetchInflight.delete(key);
+  });
+
+  nearbyPrefetchInflight.set(key, request);
+  return request;
+}
 
 interface LocationState {
   coords: { lat: number; lon: number } | null;
@@ -53,7 +92,7 @@ export function LocationProvider({ children }: { children: ReactNode }) {
       if (dist < STALE_DISTANCE_M) return;
     }
     setLoading(true);
-    venues.nearby({ lat: coords.lat.toString(), lon: coords.lon.toString() })
+    fetchNearbyPrefetch(coords.lat, coords.lon)
       .then((data) => {
         setNearbyVenues(data);
         fetchedCoordsRef.current = coords;

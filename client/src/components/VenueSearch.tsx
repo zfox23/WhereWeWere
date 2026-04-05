@@ -3,7 +3,10 @@ import { Search, MapPin, Plus, Loader2, Navigation } from 'lucide-react';
 import { venues } from '../api/client';
 import { useLocation } from '../contexts/LocationContext';
 import { haversineDistance } from '../utils/geo';
+import VenueEditMap from './VenueEditMap';
 import type { NearbyVenue, VenueCategory } from '../types';
+
+const NEARBY_PAGE_SIZE = 20;
 
 export interface SelectedVenue {
   id: string;
@@ -48,6 +51,8 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<NearbyVenue[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreResults, setHasMoreResults] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -59,11 +64,21 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [customName, setCustomName] = useState('');
   const [customAddress, setCustomAddress] = useState('');
   const [customCategoryId, setCustomCategoryId] = useState('');
+  const [customLat, setCustomLat] = useState<number | null>(null);
+  const [customLng, setCustomLng] = useState<number | null>(null);
   const [creatingCustom, setCreatingCustom] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef = useRef(0);
 
-  // Get user geolocation on mount (or use provided initial coords or prefetched coords)
+  const getVenueKey = useCallback((venue: NearbyVenue) => {
+    if (venue.source === 'local' && venue.id) return `local:${venue.id}`;
+    if (venue.osm_id) return `osm:${venue.osm_id}`;
+    return `${venue.name}:${venue.latitude}:${venue.longitude}`;
+  }, []);
+
+  // Determine coordinates from explicit params or LocationContext prefetch.
+  // Avoid a second geolocation flow here, which can duplicate nearby requests.
   useEffect(() => {
     if (initialLat !== undefined && initialLon !== undefined) {
       setCoords({ lat: initialLat, lon: initialLon });
@@ -76,22 +91,12 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       if (prefetched.nearbyVenues && !usedPrefetchRef.current) {
         usedPrefetchRef.current = true;
         setResults(prefetched.nearbyVenues);
+        setHasMoreResults(prefetched.nearbyVenues.length === NEARBY_PAGE_SIZE);
       }
       return;
     }
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by your browser.');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-      },
-      (err) => {
-        setLocationError(`Location access denied: ${err.message}`);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    // Wait for LocationContext to resolve coordinates.
+    setCoords(null);
   }, [initialLat, initialLon, prefetched.coords, prefetched.nearbyVenues]);
 
   // Load categories for custom venue form
@@ -99,47 +104,90 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     venues.categories().then(setCategories).catch(() => { });
   }, []);
 
+  // Keep default custom venue coordinates in sync with detected/prefetched coords.
+  useEffect(() => {
+    if (!coords) return;
+    setCustomLat((prev) => prev ?? coords.lat);
+    setCustomLng((prev) => prev ?? coords.lon);
+  }, [coords]);
+
   const searchNearby = useCallback(
-    async (searchQuery: string) => {
+    async (searchQuery: string, offset = 0, append = false) => {
       if (!coords) return;
-      setLoading(true);
+      const requestId = ++requestIdRef.current;
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
       try {
         const params: Record<string, string> = {
           lat: coords.lat.toString(),
           lon: coords.lon.toString(),
+          limit: NEARBY_PAGE_SIZE.toString(),
+          offset: offset.toString(),
         };
         if (searchQuery.trim()) {
           params.search = searchQuery.trim();
         }
         const data = await venues.nearby(params);
-        setResults(data);
+        if (requestId !== requestIdRef.current) return;
+        if (append) {
+          setResults((prev) => {
+            const merged = [...prev, ...data];
+            const deduped = new Map<string, NearbyVenue>();
+            merged.forEach((venue) => deduped.set(getVenueKey(venue), venue));
+            return Array.from(deduped.values());
+          });
+        } else {
+          setResults(data);
+        }
+        setHasMoreResults(data.length === NEARBY_PAGE_SIZE);
       } catch {
-        setResults([]);
+        if (requestId !== requestIdRef.current) return;
+        if (!append) {
+          setResults([]);
+        }
+        setHasMoreResults(false);
       } finally {
-        setLoading(false);
+        if (requestId !== requestIdRef.current) return;
+        if (append) {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
       }
     },
-    [coords]
+    [coords, getVenueKey]
   );
-
-  // Fetch nearby venues when coords are available
-  useEffect(() => {
-    if (coords) {
-      searchNearby('');
-    }
-  }, [coords, searchNearby]);
 
   // Debounced search
   useEffect(() => {
     if (!coords) return;
+    const isEmptyQuery = !query.trim();
+    const hasInitialCoords = initialLat !== undefined && initialLon !== undefined;
+
+    // For the default check-in flow, initial nearby data comes from LocationContext prefetch.
+    // Skip firing a duplicate empty-query fetch from this component.
+    if (isEmptyQuery && !hasInitialCoords) {
+      if (prefetched.loading || prefetched.nearbyVenues) {
+        return;
+      }
+    }
+
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      searchNearby(query);
-    }, 300);
+      searchNearby(query, 0, false);
+    }, isEmptyQuery ? 0 : 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, coords, searchNearby]);
+  }, [query, coords, searchNearby, initialLat, initialLon, prefetched.loading, prefetched.nearbyVenues]);
+
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || !hasMoreResults) return;
+    searchNearby(query, results.length, true);
+  }, [loading, loadingMore, hasMoreResults, searchNearby, query, results.length]);
 
   const handleSelectLocal = (venue: NearbyVenue) => {
     if (venue.id) {
@@ -173,15 +221,15 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
   const handleCreateCustom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customName.trim() || !coords) return;
+    if (!customName.trim() || customLat == null || customLng == null) return;
     setCreatingCustom(true);
     try {
       const created = await venues.create({
         name: customName.trim(),
         address: customAddress.trim() || null,
         category_id: customCategoryId || null,
-        latitude: coords.lat,
-        longitude: coords.lon,
+        latitude: customLat,
+        longitude: customLng,
       });
       onSelect({ id: created.id, name: created.name });
     } catch (err) {
@@ -224,7 +272,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
       {!loading && results.length > 0 && (
         <ul className="divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden max-h-72 overflow-y-auto">
-          {results.map((venue, i) => (
+          {results.map((venue) => (
             (() => {
               const distanceMeters = coords
                 ? haversineDistance(coords.lat, coords.lon, venue.latitude, venue.longitude)
@@ -234,7 +282,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                 : null;
 
               return (
-            <li key={`${venue.osm_id}-${i}`}>
+            <li key={getVenueKey(venue)}>
               <button
                 type="button"
                 onClick={() =>
@@ -290,6 +338,25 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               );
             })()
           ))}
+          {loadingMore && (
+            <li className="py-2.5 text-center text-xs text-gray-500 dark:text-gray-400">
+              <span className="inline-flex items-center gap-1.5">
+                <Loader2 size={12} className="animate-spin" />
+                Loading more venues...
+              </span>
+            </li>
+          )}
+          {hasMoreResults && !loadingMore && (
+            <li className="py-2.5 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
+              >
+                Load more venues...
+              </button>
+            </li>
+          )}
         </ul>
       )}
 
@@ -303,7 +370,13 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       {!showCreateForm ? (
         <button
           type="button"
-          onClick={() => setShowCreateForm(true)}
+          onClick={() => {
+            setShowCreateForm(true);
+            if (coords) {
+              setCustomLat(coords.lat);
+              setCustomLng(coords.lon);
+            }
+          }}
           className="flex items-center gap-1.5 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
         >
           <Plus size={14} />
@@ -346,10 +419,31 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               ))}
             </select>
           )}
+          {customLat != null && customLng != null && (
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Pin location</span>
+                <span className="font-mono text-xs text-gray-400">
+                  {customLat.toFixed(6)}, {customLng.toFixed(6)}
+                </span>
+              </div>
+              <div className="h-56 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                <VenueEditMap
+                  initialCenter={[customLat, customLng]}
+                  zoom={15}
+                  onChange={(lat, lng) => {
+                    setCustomLat(lat);
+                    setCustomLng(lng);
+                  }}
+                  className="h-56 w-full"
+                />
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <button
               type="submit"
-              disabled={!customName.trim() || creatingCustom}
+              disabled={!customName.trim() || customLat == null || customLng == null || creatingCustom}
               className="px-3 py-1.5 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50 transition-colors"
             >
               {creatingCustom ? 'Creating...' : 'Create Venue'}

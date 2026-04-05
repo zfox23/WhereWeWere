@@ -20,6 +20,19 @@ function serializeVenue<T extends Record<string, unknown>>(venue: T): T {
   };
 }
 
+function haversineMeters(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
+  const toRad = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadiusMeters = 6371000;
+  const dLat = toRad(toLat - fromLat);
+  const dLon = toRad(toLon - fromLon);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(fromLat)) * Math.cos(toRad(toLat)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusMeters * c;
+}
+
 // GET / - list venues with optional search, category filter, pagination
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -77,7 +90,7 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /nearby - search nearby venues from DB and optionally OSM
 router.get('/nearby', async (req: Request, res: Response) => {
   try {
-    const { lat, lon, radius = '500' } = req.query;
+    const { lat, lon, radius = '2000', limit = '20', offset = '0' } = req.query;
     const rawSearch = typeof req.query.search === 'string'
       ? req.query.search
       : typeof req.query.q === 'string'
@@ -92,6 +105,8 @@ router.get('/nearby', async (req: Request, res: Response) => {
     const latNum = parseFloat(lat as string);
     const lonNum = parseFloat(lon as string);
     const radiusMeters = parseInt(radius as string, 10);
+    const limitNum = Math.min(Math.max(parseInt(limit as string, 10) || 20, 1), 100);
+    const offsetNum = Math.max(parseInt(offset as string, 10) || 0, 0);
 
     if (isNaN(latNum) || isNaN(lonNum)) {
       return res.status(400).json({ error: 'lat and lon must be valid numbers' });
@@ -124,7 +139,6 @@ router.get('/nearby', async (req: Request, res: Response) => {
              )) <= $3
       ${searchCondition}
       ORDER BY distance ASC
-      LIMIT 50
     `;
 
     const dbResult = await query(dbSql, dbParams);
@@ -156,7 +170,48 @@ router.get('/nearby', async (req: Request, res: Response) => {
       console.error('Overpass API error (non-fatal):', osmErr);
     }
 
-    res.json([...localVenues, ...osmVenues]);
+    const localWithDistance = localVenues
+      .map((venue: Record<string, unknown>) => ({
+        ...venue,
+        distance: typeof venue.distance === 'number' ? venue.distance : Number(venue.distance),
+      }))
+      .filter((venue) => Number.isFinite(venue.distance))
+      .sort((a, b) => a.distance - b.distance);
+
+    const osmWithDistance = osmVenues
+      .map((venue) => ({
+        ...venue,
+        distance: haversineMeters(
+          latNum,
+          lonNum,
+          Number(venue.latitude),
+          Number(venue.longitude)
+        ),
+      }))
+      .filter((venue) => Number.isFinite(venue.distance))
+      .sort((a, b) => a.distance - b.distance);
+
+    // Keep the first page source-diverse so check-in search doesn't appear "local only"
+    // in dense areas where local venues can dominate the nearest-distance ranking.
+    let paged: Array<Record<string, unknown>>;
+    if (offsetNum === 0 && limitNum > 1 && osmWithDistance.length > 0) {
+      const osmQuota = Math.min(Math.floor(limitNum / 2), osmWithDistance.length);
+      const localQuota = limitNum - osmQuota;
+      paged = [
+        ...localWithDistance.slice(0, localQuota),
+        ...osmWithDistance.slice(0, osmQuota),
+      ]
+        .sort((a, b) => Number(a.distance) - Number(b.distance))
+        .map(({ distance, ...venue }) => venue);
+    } else {
+      const combined = [...localWithDistance, ...osmWithDistance]
+        .sort((a, b) => a.distance - b.distance);
+      paged = combined
+        .slice(offsetNum, offsetNum + limitNum)
+        .map(({ distance, ...venue }) => venue);
+    }
+
+    res.json(paged);
   } catch (err) {
     console.error('Error searching nearby venues:', err);
     res.status(500).json({ error: 'Failed to search nearby venues' });
