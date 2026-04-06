@@ -3,8 +3,8 @@ import { ChevronRight } from 'lucide-react';
 import { immich as immichApi } from '../api/client';
 import type { ImmichAsset } from '../types';
 
-const THUMB_SIZE = 64;
-const THUMB_GAP = 4;
+const THUMB_SIZE = 92;
+const THUMB_GAP = 2;
 
 interface PhotoStripProps {
   assets: ImmichAsset[];

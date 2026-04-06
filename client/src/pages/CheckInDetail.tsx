@@ -40,7 +40,7 @@ function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {
   return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
 }
 
-const THUMB_SIZE = 80;
+const THUMB_SIZE = 92;
 
 export default function CheckInDetail() {
   const { id } = useParams<{ id: string }>();

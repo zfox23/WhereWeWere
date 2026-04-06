@@ -73,7 +73,7 @@ function OnThisDaySection({
           <History size={16} className="text-purple-500" />
           On This Day
         </h3>
-        <p className="text-sm text-gray-400">Nothing from prior years for today yet.</p>
+        <p className="text-sm text-gray-400">Nothing...</p>
       </div>
     );
   }
@@ -115,7 +115,7 @@ function OnThisDaySection({
                 const timeZone = item.type === 'location' ? item.venue_timezone : item.mood_timezone;
 
                 return (
-                  <div key={`${item.type}-${item.id}`} className="text-sm space-y-0">
+                  <div key={`${item.type}-${item.id}`} className="text-xs space-y-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
                       <Link to={detailHref} className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                         {formatReflectionTime(item.checked_in_at, timeZone)}
@@ -123,24 +123,22 @@ function OnThisDaySection({
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {item.type === 'mood' && item.mood ? (
-                        <span className="inline-flex items-center gap-1.5 py-1">
-                          <span className={`text-xs font-semibold ${MOOD_COLORS[item.mood] || 'text-gray-700 dark:text-gray-300'}`}>
-                            {title}
-                          </span>
+                        <span className={`font-semibold ${MOOD_COLORS[item.mood] || 'text-gray-700 dark:text-gray-300'}`}>
+                          {title}
                         </span>
                       ) : null}
                       <Link to={detailHref} className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                         {item.type === 'location' ? title : ''}
                       </Link>
                       {item.type === 'location' && (item.venue_category || item.city) ? (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <span className="text-gray-500 dark:text-gray-400">
                           {item.venue_category}
                           {item.city ? ` · ${item.city}${item.country ? `, ${item.country}` : ''}` : ''}
                         </span>
                       ) : null}
                     </div>
                     {item.note ? (
-                      <p className="text-xs text-gray-600 dark:text-gray-400 italic leading-relaxed">
+                      <p className="text-gray-600 dark:text-gray-400 italic leading-relaxed">
                         {`"${item.note}"`}
                       </p>
                     ) : null}
