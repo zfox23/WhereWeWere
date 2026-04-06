@@ -215,7 +215,7 @@ export default function MoodCheckInPage() {
 
       {/* Note */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
-        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Note</label>
+        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Note.md</label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
