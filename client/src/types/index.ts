@@ -160,6 +160,28 @@ export interface MoodCheckIn {
   created_at: string;
 }
 
+export interface ReflectionItem {
+  type: 'location' | 'mood';
+  id: string;
+  checked_in_at: string;
+  note: string | null;
+  venue_id?: string | null;
+  venue_name?: string | null;
+  venue_category?: string | null;
+  city?: string | null;
+  country?: string | null;
+  venue_timezone?: string | null;
+  mood?: number | null;
+  mood_timezone?: string | null;
+  activities?: { id: string; name: string; group_name: string; icon?: string | null }[];
+}
+
+export interface ReflectionYear {
+  year: number;
+  years_ago: number;
+  items: ReflectionItem[];
+}
+
 export interface TimelineItem {
   type: 'location' | 'mood';
   id: string;

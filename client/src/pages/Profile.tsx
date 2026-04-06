@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { MapPin, SmilePlus } from 'lucide-react';
+import { CalendarDays, MapPin, SmilePlus } from 'lucide-react';
 import { MoodsTab } from '../components/MoodStats';
 import { PlacesTab } from '../components/PlacesTab';
+import { ReflectTab } from '../components/ReflectTab';
 
 export default function Profile() {
-  type ProfileTab = 'places' | 'moods';
+  type ProfileTab = 'places' | 'reflect' | 'moods';
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
-    return value === 'places' || value === 'moods';
+    return value === 'places' || value === 'reflect' || value === 'moods';
   };
 
   const getTabFromLocation = (): ProfileTab => {
@@ -58,6 +59,16 @@ export default function Profile() {
           Places
         </button>
         <button
+          onClick={() => setActiveTab('reflect')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'reflect'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+        >
+          <CalendarDays size={14} />
+          Reflect
+        </button>
+        <button
           onClick={() => setActiveTab('moods')}
           className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'moods'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
@@ -69,7 +80,7 @@ export default function Profile() {
         </button>
       </div>
 
-      {activeTab === 'moods' ? <MoodsTab /> : <PlacesTab />}
+      {activeTab === 'places' ? <PlacesTab /> : activeTab === 'reflect' ? <ReflectTab /> : <MoodsTab />}
     </div>
   );
 }

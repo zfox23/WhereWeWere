@@ -678,19 +678,70 @@ router.get('/reflections', async (req: Request, res: Response) => {
     const day = String(now.getDate()).padStart(2, '0');
     const currentYear = now.getFullYear();
 
-    // Find check-ins on this month/day in all prior years
+    // Find location and mood check-ins that happened on this month/day in prior years.
     const result = await query(
-      `SELECT c.id, c.notes, c.checked_in_at,
-              v.id AS venue_id, v.name AS venue_name, v.city, v.country,
-              v.latitude, v.longitude,
-              vc.name AS venue_category
-       FROM checkins c
-       JOIN venues v ON c.venue_id = v.id
-       LEFT JOIN venue_categories vc ON v.category_id = vc.id
-       WHERE c.user_id = $1
-         AND TO_CHAR(c.checked_in_at AT TIME ZONE 'UTC', 'MM-DD') = $2
-         AND EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE 'UTC') < $3
-       ORDER BY c.checked_in_at DESC`,
+      `(
+         SELECT
+           'location' AS type,
+           c.id,
+           c.checked_in_at,
+           c.notes AS note,
+           v.id AS venue_id,
+           v.name AS venue_name,
+           v.city,
+           v.country,
+           v.latitude,
+           v.longitude,
+           vc.name AS venue_category,
+           c.checkin_timezone AS venue_timezone,
+           NULL::smallint AS mood,
+           NULL::text AS mood_timezone,
+           '[]'::json AS activities
+         FROM checkins c
+         JOIN venues v ON c.venue_id = v.id
+         LEFT JOIN venue_categories vc ON v.category_id = vc.id
+         WHERE c.user_id = $1
+           AND TO_CHAR(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'), 'MM-DD') = $2
+           AND EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')) < $3
+       )
+       UNION ALL
+       (
+         SELECT
+           'mood' AS type,
+           mc.id,
+           mc.checked_in_at,
+           mc.note,
+           NULL::uuid AS venue_id,
+           NULL::text AS venue_name,
+           NULL::text AS city,
+           NULL::text AS country,
+           NULL::double precision AS latitude,
+           NULL::double precision AS longitude,
+           NULL::text AS venue_category,
+           NULL::text AS venue_timezone,
+           mc.mood,
+           mc.mood_timezone,
+           COALESCE(
+             (
+               SELECT json_agg(json_build_object(
+                 'id', ma.id,
+                 'name', ma.name,
+                 'group_name', mag.name,
+                 'icon', ma.icon
+               ) ORDER BY mag.display_order, ma.display_order)
+               FROM mood_checkin_activities mca
+               JOIN mood_activities ma ON mca.activity_id = ma.id
+               JOIN mood_activity_groups mag ON ma.group_id = mag.id
+               WHERE mca.mood_checkin_id = mc.id
+             ),
+             '[]'::json
+           ) AS activities
+         FROM mood_checkins mc
+         WHERE mc.user_id = $1
+           AND TO_CHAR(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'), 'MM-DD') = $2
+           AND EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC')) < $3
+       )
+       ORDER BY checked_in_at DESC`,
       [user_id, `${month}-${day}`, currentYear]
     );
 
@@ -700,13 +751,14 @@ router.get('/reflections', async (req: Request, res: Response) => {
       const tzResults = row.latitude != null && row.longitude != null
         ? findTimezone(Number(row.latitude), Number(row.longitude))
         : [];
-      const venueTimezone = tzResults[0] || null;
+      const venueTimezone = row.venue_timezone || tzResults[0] || null;
 
       const year = new Date(row.checked_in_at).getUTCFullYear();
       if (!byYear[year]) byYear[year] = [];
       byYear[year].push({
+        type: row.type,
         id: row.id,
-        notes: row.notes,
+        note: row.note,
         checked_in_at: row.checked_in_at,
         venue_id: row.venue_id,
         venue_name: row.venue_name,
@@ -714,14 +766,17 @@ router.get('/reflections', async (req: Request, res: Response) => {
         country: row.country,
         venue_category: row.venue_category,
         venue_timezone: venueTimezone,
+        mood: row.mood,
+        mood_timezone: row.mood_timezone,
+        activities: row.activities || [],
       });
     }
 
     const reflections = Object.entries(byYear)
-      .map(([year, checkins]) => ({
+      .map(([year, items]) => ({
         year: parseInt(year),
         years_ago: currentYear - parseInt(year),
-        checkins,
+        items,
       }))
       .sort((a, b) => b.year - a.year);
 

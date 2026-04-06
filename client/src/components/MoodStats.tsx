@@ -829,7 +829,7 @@ function MoodActivityCombinations({ data }: { data: ComboPt[] }) {
 
 // ─── Year in Pixels ───────────────────────────────────────────────────────────
 
-function MoodYearInPixels({
+export function MoodYearInPixels({
   data,
   year,
   onYearChange,
@@ -979,18 +979,13 @@ export function MoodsTab() {
   const [dowData, setDowData] = useState<DowPt[]>([]);
   const [corrData, setCorrData] = useState<CorrPt[]>([]);
   const [comboData, setComboData] = useState<ComboPt[]>([]);
-  const [heatData, setHeatData] = useState<HeatPt[]>([]);
   const [monthLoading, setMonthLoading] = useState(true);
 
   // Year-scoped data
   useEffect(() => {
-    Promise.all([
-      stats.moodMonthly(USER_ID, year),
-      stats.moodHeatmap(USER_ID, year),
-    ])
-      .then(([monthly, heat]) => {
+    stats.moodMonthly(USER_ID, year)
+      .then((monthly) => {
         setMonthlyData(monthly);
-        setHeatData(heat);
       })
       .catch(console.error);
   }, [year]);
@@ -1086,9 +1081,6 @@ export function MoodsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Year in pixels */}
-      <MoodYearInPixels data={heatData} year={year} onYearChange={setYear} />
-
       {/* Monthly breakdown with pie + line/span */}
       <MoodMonthlySection
         monthlyData={monthlyData}

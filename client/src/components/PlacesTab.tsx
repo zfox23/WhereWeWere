@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Building2,
   Calendar,
   CalendarDays,
   Clock,
   Globe,
-  History,
   Loader2,
   MapPin,
   Sun,
@@ -15,11 +14,9 @@ import { CircleMarker, MapContainer, Marker, Popup as LeafletPopup, TileLayer, T
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { stats } from '../api/client';
-import { normalizeTimezoneForDisplay } from '../utils/checkin';
 import { PeriodRangeSelector } from './PeriodRangeSelector';
 import {
   CategoryChart,
-  Heatmap,
   StatCard,
   TopVenuesList,
 } from './Stats';
@@ -60,22 +57,6 @@ interface DayOfWeekData { day: string; count: number }
 interface TimeOfDayData { period: string; count: number }
 interface BusiestDayData { date: string; count: number }
 interface CityData { city: string; country: string; checkin_count: number; unique_venues: number }
-interface ReflectionYear {
-  year: number;
-  years_ago: number;
-  checkins: {
-    id: string;
-    venue_id: string;
-    venue_name: string;
-    venue_category?: string;
-    city?: string;
-    country?: string;
-    notes?: string;
-    checked_in_at: string;
-    venue_timezone?: string | null;
-  }[];
-}
-
 const TIME_ICONS: Record<string, React.ElementType> = {
   Morning: Sun,
   Afternoon: Sun,
@@ -496,64 +477,6 @@ function TopCities({ data }: { data: CityData[] }) {
   );
 }
 
-function ReflectionsSection({ data }: { data: ReflectionYear[] }) {
-  const navigate = useNavigate();
-  if (data.length === 0) return null;
-
-  function formatTime(dateStr: string, timeZone?: string | null) {
-    const displayTimeZone = normalizeTimezoneForDisplay(timeZone);
-    return new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-      ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
-    }).format(new Date(dateStr));
-  }
-
-  function handleYearClick(checkins: ReflectionYear['checkins']) {
-    if (checkins.length === 0) return;
-    const date = checkins[0].checked_in_at.slice(0, 10);
-    navigate(`/?from=${date}&to=${date}`);
-  }
-
-  return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
-        <History size={16} className="text-purple-500" />
-        On This Day
-      </h3>
-      <div className="space-y-4">
-        {data.map((year) => (
-          <div key={year.year}>
-            <div className="flex items-center gap-2 mb-2">
-              <button
-                onClick={() => handleYearClick(year.checkins)}
-                className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
-              >
-                {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago
-              </button>
-              <span className="text-xs text-gray-400">{year.year}</span>
-            </div>
-            <div className="space-y-2 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
-              {year.checkins.map((c) => (
-                <div key={c.id} className="text-sm">
-                  <Link to={`/venues/${c.venue_id}`} className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">{c.venue_name}</Link>
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    {c.venue_category && <span className="text-purple-600 dark:text-purple-400">{c.venue_category}</span>}
-                    {c.city && <span>{c.city}{c.country ? `, ${c.country}` : ''}</span>}
-                    <span>{formatTime(c.checked_in_at, c.venue_timezone)}</span>
-                  </div>
-                  {c.notes && <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 italic">"{c.notes}"</p>}
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function CountriesList({ data }: { data: CountryStats[] }) {
   const navigate = useNavigate();
 
@@ -588,7 +511,6 @@ function CountriesList({ data }: { data: CountryStats[] }) {
 }
 
 export function PlacesTab() {
-  const navigate = useNavigate();
   const getPlacesMonthFromLocation = (): string => {
     const monthParam = new URLSearchParams(window.location.search).get('placesMonth');
     return isValidMonthParam(monthParam) ? monthParam : getCurrentMonthIso();
@@ -604,16 +526,12 @@ export function PlacesTab() {
   const [summary, setSummary] = useState<StatsType | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
   const [categories, setCategories] = useState<CategoryBreakdown[]>([]);
-  const [heatmapDays, setHeatmapDays] = useState<HeatmapDay[]>([]);
-  const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
   const [countries, setCountries] = useState<CountryStats[]>([]);
   const [mapData, setMapData] = useState<MapDataPoint[]>([]);
   const [dayOfWeek, setDayOfWeek] = useState<DayOfWeekData[]>([]);
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDayData[]>([]);
   const [busiestDays, setBusiestDays] = useState<BusiestDayData[]>([]);
   const [topCities, setTopCities] = useState<CityData[]>([]);
-  const [reflections, setReflections] = useState<ReflectionYear[]>([]);
-  const [loading, setLoading] = useState(true);
   const [placesLoading, setPlacesLoading] = useState(true);
   const [initialPlacesLoaded, setInitialPlacesLoaded] = useState(false);
 
@@ -625,25 +543,6 @@ export function PlacesTab() {
     () => getPeriodRangeLabel(placesSelectedMonth, placesPeriodMode),
     [placesSelectedMonth, placesPeriodMode]
   );
-
-  useEffect(() => {
-    async function loadStaticData() {
-      setLoading(true);
-      try {
-        const ref = await stats.reflections(USER_ID);
-        setReflections(ref);
-      } catch (err) {
-        console.error('Failed to load static profile data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadStaticData();
-  }, []);
-
-  useEffect(() => {
-    stats.heatmap(USER_ID, heatmapYear).then(setHeatmapDays).catch(console.error);
-  }, [heatmapYear]);
 
   useEffect(() => {
     let cancelled = false;
@@ -782,7 +681,7 @@ export function PlacesTab() {
     }
   }, [placesPeriodMode, placesSelectedMonth]);
 
-  if (loading || !initialPlacesLoaded) {
+  if (!initialPlacesLoaded) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="animate-spin text-primary-600" size={32} />
@@ -835,15 +734,6 @@ export function PlacesTab() {
       </div>
 
       <CountriesList data={countries} />
-
-      <ReflectionsSection data={reflections} />
-
-      <Heatmap
-        days={heatmapDays}
-        year={heatmapYear}
-        onYearChange={setHeatmapYear}
-        onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
-      />
     </div>
   );
 }
