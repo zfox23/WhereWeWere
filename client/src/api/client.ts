@@ -63,8 +63,14 @@ export const stats = {
     request<any[]>(`/stats/heatmap?user_id=${userId}&year=${year}`),
   countries: (userId: string) =>
     request<any[]>(`/stats/countries?user_id=${userId}`),
-  mapData: (userId: string) =>
-    request<any[]>(`/stats/map-data?user_id=${userId}`),
+  mapData: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/map-data?${qp.toString()}`);
+  },
   dayOfWeek: (userId: string) =>
     request<any[]>(`/stats/day-of-week?user_id=${userId}`),
   timeOfDay: (userId: string) =>

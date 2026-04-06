@@ -323,14 +323,20 @@ router.get('/countries', async (req: Request, res: Response) => {
   }
 });
 
-// GET /map-data?user_id= - all venue locations with checkin counts for heatmap map
+// GET /map-data?user_id=&from=&to= - venue locations with check-in counts for a date range
 router.get('/map-data', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
 
     if (!user_id) {
       return res.status(400).json({ error: 'user_id is required' });
     }
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange
+      ? "AND c.checked_in_at >= $2::date AND c.checked_in_at < ($3::date + INTERVAL '1 day')"
+      : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
       `SELECT v.id AS venue_id, v.name AS venue_name,
@@ -340,9 +346,10 @@ router.get('/map-data', async (req: Request, res: Response) => {
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id
        WHERE c.user_id = $1
+         ${whereRange}
        GROUP BY v.id
        ORDER BY checkin_count DESC`,
-      [user_id]
+      params
     );
 
     res.json(result.rows);

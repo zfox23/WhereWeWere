@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  TrendingUp,
   CalendarDays,
   BarChart3,
   Activity,
@@ -10,6 +9,17 @@ import {
 } from 'lucide-react';
 import { stats } from '../api/client';
 import { MoodIcon } from './MoodIcons';
+import { PeriodRangeSelector } from './PeriodRangeSelector';
+import {
+  PeriodMode,
+  getPeriodDateRange,
+  getPeriodRangeLabel,
+  isoDate,
+  isValidMonthParam,
+  parsePeriodParam,
+  resolveMonthForYear,
+  shiftMonth,
+} from '../utils/periodRange';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -23,18 +33,6 @@ const MOOD_TEXT = [
   'text-lime-500',
   'text-green-500',
 ] as const;
-const MONTH_NAMES = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-] as const;
-
-function isoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
 function openInNewTab(path: string): void {
   window.open(path, '_blank', 'noopener,noreferrer');
 }
@@ -68,16 +66,6 @@ type ComboPt = {
 };
 type HeatPt = { date: string; avg_mood: number };
 type MoodCount = { mood: number; count: number };
-type PeriodMode = 'single' | 'triple' | 'twelve' | 'all';
-
-function isValidMonthParam(value: string | null): value is string {
-  return value !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
-}
-
-function parsePeriodParam(value: string | null): PeriodMode | null {
-  return value === 'single' || value === 'triple' || value === 'twelve' || value === 'all' ? value : null;
-}
-
 // ─── SVG Line/Span Chart ──────────────────────────────────────────────────────
 
 const SW = 760, SH = 280, PL = 42, PR = 16, PT = 14, PB = 34;
@@ -471,12 +459,6 @@ function MoodMonthlySection({
   const currentYear = new Date().getFullYear();
   const currentMonthIso = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
 
-  const shiftMonth = (month: string, delta: number): string => {
-    const [y, mo] = month.split('-').map((v) => parseInt(v, 10));
-    const d = new Date(y, mo - 1 + delta, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
-
   const selectMonth = (month: string) => {
     onSelectedMonthChange(month);
     const nextYear = parseInt(month.slice(0, 4), 10);
@@ -515,145 +497,23 @@ function MoodMonthlySection({
     [monthMap, selectedMonth, periodMode, moodCounts]
   );
 
-  const allMonths = useMemo(() => {
-    if (!selectedMonth) return Array.from({ length: 15 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
-    return Array.from({ length: 15 }, (_, i) => shiftMonth(selectedMonth, -(11 - i)));
-  }, [selectedMonth, year]);
   const pieTotal = pie.reduce((s, d) => s + d.count, 0);
   const selLabel = selectedMonth
     ? new Date(selectedMonth + '-01T12:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : '';
-  const rangeLabel = useMemo(() => {
-    if (periodMode === 'all') return 'All Time';
-    if (!selectedMonth) return '';
-    if (periodMode === 'single') return selLabel;
-
-    const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
-    const monthsBack = periodMode === 'triple' ? 3 : 12;
-    const start = new Date(y, mo - monthsBack, 1);
-    const end = new Date(y, mo - 1, 1);
-    const startLabel = start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-    const endLabel = end.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-    return `${startLabel} - ${endLabel}`;
-  }, [selectedMonth, periodMode, selLabel]);
-
-  const visibleRange = useMemo(() => {
-    if (periodMode === 'all' || !selectedMonth) return { from: '', to: '' };
-    const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
-    const startDate = periodMode === 'single'
-      ? new Date(y, mo - 1, 1)
-      : periodMode === 'triple'
-        ? new Date(y, mo - 3, 1)
-        : new Date(y, mo - 12, 1);
-    const endDate = new Date(y, mo, 0);
-    return { from: isoDate(startDate), to: isoDate(endDate) };
-  }, [selectedMonth, periodMode]);
-
-  const additionalIncludedMonths = useMemo(() => {
-    if (!selectedMonth || periodMode === 'single' || periodMode === 'all') return new Set<string>();
-    const [y, mo] = selectedMonth.split('-').map((v) => parseInt(v, 10));
-    const monthsToInclude = periodMode === 'triple' ? 2 : 11;
-    const set = new Set<string>();
-    for (let i = 1; i <= monthsToInclude; i += 1) {
-      const d = new Date(y, mo - 1 - i, 1);
-      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-    return set;
-  }, [selectedMonth, periodMode]);
+  const rangeLabel = useMemo(() => getPeriodRangeLabel(selectedMonth, periodMode), [selectedMonth, periodMode]);
+  const visibleRange = useMemo(() => getPeriodDateRange(selectedMonth, periodMode), [selectedMonth, periodMode]);
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      
-
-      {/* Month picker */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={resetToDefaultView}
-          className="shrink-0 rounded-md p-1 text-indigo-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-300"
-          title="Reset to current month and 3-month view"
-          aria-label="Reset to current month and 3-month view"
-        >
-          <TrendingUp size={14} />
-        </button>
-        <div className="flex shrink-0 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-          {([
-            { label: '1M', value: 'single' as const },
-            { label: '3M', value: 'triple' as const },
-            { label: '12M', value: 'twelve' as const },
-            { label: 'All', value: 'all' as const },
-          ]).map(({ label, value }) => {
-            return (
-              <button
-                key={label}
-                onClick={() => onPeriodModeChange(value)}
-                className={`px-2.5 py-1 font-medium transition-colors ${periodMode === value
-                  ? 'bg-violet-500 text-white'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-        {periodMode !== 'all' && (
-        <button
-          type="button"
-          onClick={() => selectedMonth && selectMonth(shiftMonth(selectedMonth, -1))}
-          className="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30"
-          title="Previous month"
-          aria-label="Previous month"
-        >
-          <ChevronLeft size={12} />
-        </button>
-        )}
-        {periodMode === 'all' ? (
-          <div className="min-w-0 flex-1 flex items-center">
-            <span className="text-[11px] text-gray-400 italic">All available data</span>
-          </div>
-        ) : (
-        <div className="relative h-6 min-w-0 flex-1 overflow-hidden">
-          <div className="absolute right-0 top-0 flex w-max flex-nowrap gap-0.5">
-            {allMonths.map((m) => {
-              const isSel = m === selectedMonth;
-              const isIncludedPrev = additionalIncludedMonths.has(m);
-              const [yy, mm] = m.split('-').map((v) => parseInt(v, 10));
-              const monthLabel = MONTH_NAMES[mm - 1];
-              const yearLabel = String(yy).slice(2);
-              return (
-                <button
-                  key={m}
-                  onClick={() => selectMonth(m)}
-                  className={`shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] transition-colors ${isSel
-                    ? 'bg-violet-500 text-white font-semibold'
-                    : isIncludedPrev
-                      ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30'
-                    }`}
-                  title={`${monthLabel} ${yy}`}
-                >
-                  {monthLabel} '{yearLabel}
-                </button>
-              );
-            })}
-          </div>
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-white/95 via-white/70 to-transparent dark:from-gray-900/95 dark:via-gray-900/70 dark:to-transparent" />
-        </div>
-        )}
-        {periodMode !== 'all' && (
-        <button
-          type="button"
-          onClick={() => selectedMonth && selectMonth(shiftMonth(selectedMonth, 1))}
-          disabled={!selectedMonth || selectedMonth >= currentMonthIso}
-          className="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-violet-100 dark:hover:bg-violet-900/30 disabled:opacity-40 disabled:hover:bg-gray-100 dark:disabled:hover:bg-gray-800"
-          title="Next month"
-          aria-label="Next month"
-        >
-          <ChevronRight size={12} />
-        </button>
-        )}
-      </div>
+      <PeriodRangeSelector
+        periodMode={periodMode}
+        onPeriodModeChange={onPeriodModeChange}
+        year={year}
+        onYearChange={onYearChange}
+        selectedMonth={selectedMonth}
+        onSelectedMonthChange={selectMonth}
+      />
 
       <div className="my-2 flex justify-center">
         <button
@@ -1141,10 +1001,7 @@ export function MoodsTab() {
       return;
     }
 
-    const months = [...new Set(monthlyData.map((m) => m.month))].sort();
-    const cm = `${year}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    const target = months.includes(cm) ? cm : months.length ? months[months.length - 1] : `${year}-01`;
-    setSelectedMonth(target);
+    setSelectedMonth(resolveMonthForYear(year, monthlyData.map((month) => month.month)));
   }, [monthlyData, year, selectedMonth]);
 
   useEffect(() => {
