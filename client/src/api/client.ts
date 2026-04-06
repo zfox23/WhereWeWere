@@ -51,18 +51,42 @@ export const venues = {
 
 // Stats
 export const stats = {
-  summary: (userId: string) =>
-    request<any>(`/stats/summary?user_id=${userId}`),
+  summary: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any>(`/stats/summary?${qp.toString()}`);
+  },
   streaks: (userId: string) =>
     request<any>(`/stats/streaks?user_id=${userId}`),
-  topVenues: (userId: string, limit = 10) =>
-    request<any[]>(`/stats/top-venues?user_id=${userId}&limit=${limit}`),
-  categoryBreakdown: (userId: string) =>
-    request<any[]>(`/stats/category-breakdown?user_id=${userId}`),
+  topVenues: (userId: string, limit = 10, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId, limit: String(limit) });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/top-venues?${qp.toString()}`);
+  },
+  categoryBreakdown: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/category-breakdown?${qp.toString()}`);
+  },
   heatmap: (userId: string, year: number) =>
     request<any[]>(`/stats/heatmap?user_id=${userId}&year=${year}`),
-  countries: (userId: string) =>
-    request<any[]>(`/stats/countries?user_id=${userId}`),
+  countries: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/countries?${qp.toString()}`);
+  },
   mapData: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
     if (from && to) {
@@ -71,14 +95,38 @@ export const stats = {
     }
     return request<any[]>(`/stats/map-data?${qp.toString()}`);
   },
-  dayOfWeek: (userId: string) =>
-    request<any[]>(`/stats/day-of-week?user_id=${userId}`),
-  timeOfDay: (userId: string) =>
-    request<any[]>(`/stats/time-of-day?user_id=${userId}`),
-  busiestDays: (userId: string) =>
-    request<any[]>(`/stats/busiest-days?user_id=${userId}`),
-  topCities: (userId: string) =>
-    request<any[]>(`/stats/top-cities?user_id=${userId}`),
+  dayOfWeek: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/day-of-week?${qp.toString()}`);
+  },
+  timeOfDay: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/time-of-day?${qp.toString()}`);
+  },
+  busiestDays: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/busiest-days?${qp.toString()}`);
+  },
+  topCities: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/top-cities?${qp.toString()}`);
+  },
   insights: (userId: string) =>
     request<any[]>(`/stats/insights?user_id=${userId}`),
   reflections: (userId: string) =>

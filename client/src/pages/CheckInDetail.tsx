@@ -290,7 +290,7 @@ export default function CheckInDetail() {
 
       {/* Map */}
       {hasCoords && (
-        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] overflow-hidden">
+        <div className="page-map-breakout bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] overflow-hidden">
           <MapView
             center={[Number(checkin.venue_latitude), Number(checkin.venue_longitude)]}
             zoom={15}
@@ -300,7 +300,7 @@ export default function CheckInDetail() {
               label: checkin.venue_name || 'Venue',
               id: checkin.venue_id,
             }]}
-            className="h-64 w-full"
+            className="h-[22rem] md:h-[30rem] w-full"
           />
         </div>
       )}

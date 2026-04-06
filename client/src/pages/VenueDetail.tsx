@@ -480,10 +480,10 @@ export default function VenueDetail() {
 
       {/* ── Map (view mode) ─────────────────────────── */}
       {!isEditing && (
-        <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 overflow-hidden">
+        <div className="page-map-breakout bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40 overflow-hidden">
           <MapView center={[venueLat, venueLng]} zoom={15}
             markers={[{ lat: venueLat, lng: venueLng, label: venue.name, id: venue.id }]}
-            className="h-64 w-full" />
+            className="h-[22rem] md:h-[30rem] w-full" />
         </div>
       )}
 

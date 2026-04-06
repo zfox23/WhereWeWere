@@ -4,14 +4,27 @@ import { query } from '../db';
 
 const router = Router();
 
+function buildDateRangeClause(from: unknown, to: unknown, column: string) {
+  const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+  return {
+    hasRange,
+    whereClause: hasRange
+      ? ` AND ${column} >= $2::date AND ${column} < ($3::date + INTERVAL '1 day')`
+      : '',
+    params: hasRange ? [from, to] : [],
+  };
+}
+
 // GET /summary?user_id= - overall stats summary
 router.get('/summary', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
 
     if (!user_id) {
       return res.status(400).json({ error: 'user_id is required' });
     }
+
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
 
     const result = await query(
       `SELECT
@@ -22,8 +35,9 @@ router.get('/summary', async (req: Request, res: Response) => {
        FROM checkins c
        JOIN users u ON u.id = $1
        WHERE c.user_id = $1
+         ${whereClause}
        GROUP BY u.created_at`,
-      [user_id]
+      [user_id, ...rangeParams]
     );
 
     if (result.rows.length === 0) {
@@ -171,11 +185,14 @@ router.get('/streaks', async (req: Request, res: Response) => {
 // GET /top-venues?user_id=&limit=10 - most visited venues
 router.get('/top-venues', async (req: Request, res: Response) => {
   try {
-    const { user_id, limit = '10' } = req.query;
+    const { user_id, limit = '10', from, to } = req.query;
 
     if (!user_id) {
       return res.status(400).json({ error: 'user_id is required' });
     }
+
+    const { hasRange, whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
+    const limitParamIndex = hasRange ? 4 : 2;
 
     const result = await query(
       `SELECT v.id AS venue_id, v.name AS venue_name, v.address, v.city, v.state,
@@ -186,10 +203,11 @@ router.get('/top-venues', async (req: Request, res: Response) => {
        JOIN venues v ON c.venue_id = v.id
        LEFT JOIN venue_categories vc ON v.category_id = vc.id
        WHERE c.user_id = $1
+         ${whereClause}
        GROUP BY v.id, vc.name, vc.icon
        ORDER BY checkin_count DESC
-       LIMIT $2`,
-      [user_id, parseInt(limit as string, 10)]
+       LIMIT $${limitParamIndex}`,
+      [user_id, ...rangeParams, parseInt(limit as string, 10)]
     );
 
     res.json(result.rows);
@@ -202,11 +220,13 @@ router.get('/top-venues', async (req: Request, res: Response) => {
 // GET /category-breakdown?user_id= - check-ins by category
 router.get('/category-breakdown', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
 
     if (!user_id) {
       return res.status(400).json({ error: 'user_id is required' });
     }
+
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
 
     const result = await query(
       `SELECT COALESCE(vc.name, 'Uncategorized') AS category_name,
@@ -216,9 +236,10 @@ router.get('/category-breakdown', async (req: Request, res: Response) => {
        JOIN venues v ON c.venue_id = v.id
        LEFT JOIN venue_categories vc ON v.category_id = vc.id
        WHERE c.user_id = $1
+         ${whereClause}
        GROUP BY vc.name, vc.icon
        ORDER BY checkin_count DESC`,
-      [user_id]
+      [user_id, ...rangeParams]
     );
 
     res.json(result.rows);
@@ -298,11 +319,13 @@ router.get('/monthly', async (req: Request, res: Response) => {
 // GET /countries?user_id= - check-ins grouped by country
 router.get('/countries', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
 
     if (!user_id) {
       return res.status(400).json({ error: 'user_id is required' });
     }
+
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
 
     const result = await query(
       `SELECT COALESCE(v.country, 'Unknown') AS country,
@@ -311,9 +334,10 @@ router.get('/countries', async (req: Request, res: Response) => {
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id
        WHERE c.user_id = $1
+         ${whereClause}
        GROUP BY v.country
        ORDER BY checkin_count DESC`,
-      [user_id]
+      [user_id, ...rangeParams]
     );
 
     res.json(result.rows);
@@ -362,17 +386,20 @@ router.get('/map-data', async (req: Request, res: Response) => {
 // GET /day-of-week?user_id= - check-ins by day of week
 router.get('/day-of-week', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at');
 
     const result = await query(
       `SELECT EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC')::int AS dow,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
+         ${whereClause}
        GROUP BY dow
        ORDER BY dow`,
-      [user_id]
+      [user_id, ...rangeParams]
     );
 
     // Fill in missing days with 0
@@ -390,8 +417,10 @@ router.get('/day-of-week', async (req: Request, res: Response) => {
 // GET /time-of-day?user_id= - check-ins by time bucket
 router.get('/time-of-day', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at');
 
     const result = await query(
       `SELECT
@@ -404,8 +433,9 @@ router.get('/time-of-day', async (req: Request, res: Response) => {
          COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
+         ${whereClause}
        GROUP BY period`,
-      [user_id]
+      [user_id, ...rangeParams]
     );
 
     const order = ['Morning', 'Afternoon', 'Evening', 'Night'];
@@ -422,18 +452,21 @@ router.get('/time-of-day', async (req: Request, res: Response) => {
 // GET /busiest-days?user_id= - top 10 calendar days by check-in count
 router.get('/busiest-days', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at');
 
     const result = await query(
       `SELECT TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
+         ${whereClause}
        GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
        ORDER BY count DESC, date DESC
        LIMIT 10`,
-      [user_id]
+      [user_id, ...rangeParams]
     );
 
     res.json(result.rows);
@@ -446,8 +479,10 @@ router.get('/busiest-days', async (req: Request, res: Response) => {
 // GET /top-cities?user_id= - cities ranked by check-in count
 router.get('/top-cities', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
 
     const result = await query(
       `SELECT COALESCE(v.city, 'Unknown') AS city,
@@ -457,10 +492,11 @@ router.get('/top-cities', async (req: Request, res: Response) => {
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id
        WHERE c.user_id = $1
+         ${whereClause}
        GROUP BY v.city, v.country
        ORDER BY checkin_count DESC
        LIMIT 10`,
-      [user_id]
+      [user_id, ...rangeParams]
     );
 
     res.json(result.rows);

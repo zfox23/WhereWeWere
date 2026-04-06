@@ -46,6 +46,20 @@
     @apply bg-white/40 backdrop-blur-md border border-white/30;
   }
 
+  .page-map-breakout {
+    width: calc(100vw - 2rem);
+    margin-left: calc(50% - 50vw + 1rem);
+    margin-right: calc(50% - 50vw + 1rem);
+  }
+
+  @media (min-width: 1024px) {
+    .page-map-breakout {
+      width: calc(100vw - 3rem);
+      margin-left: calc(50% - 50vw + 1.5rem);
+      margin-right: calc(50% - 50vw + 1.5rem);
+    }
+  }
+
   /* Dark mode overrides */
   .dark body {
     @apply bg-gray-950;
