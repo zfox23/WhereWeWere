@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "migrate": "tsx src/db/migrate.ts"
+    "migrate": "tsx src/db/migrate.ts",
+    "backfill:checkin-timezone": "tsx src/db/backfill-checkin-timezone.ts"
   },
   "dependencies": {
     "@types/web-push": "^3.6.4",

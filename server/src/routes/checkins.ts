@@ -5,13 +5,28 @@ import { query } from '../db';
 const router = Router();
 
 function addTimezone(row: any): any {
-  if (row.venue_latitude != null && row.venue_longitude != null) {
+  if (!row.venue_timezone && row.venue_latitude != null && row.venue_longitude != null) {
     const tzResults = findTimezone(Number(row.venue_latitude), Number(row.venue_longitude));
     row.venue_timezone = tzResults[0] || null;
   } else {
-    row.venue_timezone = null;
+    row.venue_timezone = row.venue_timezone || null;
   }
   return row;
+}
+
+async function inferVenueTimezone(venueId: string): Promise<string | null> {
+  const venueResult = await query(
+    'SELECT latitude, longitude FROM venues WHERE id = $1',
+    [venueId]
+  );
+
+  if (venueResult.rows.length === 0) return null;
+
+  const venue = venueResult.rows[0];
+  if (venue.latitude == null || venue.longitude == null) return null;
+
+  const tzResults = findTimezone(Number(venue.latitude), Number(venue.longitude));
+  return tzResults[0] || null;
 }
 
 // GET / - list check-ins with venue info
@@ -83,7 +98,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const sql = `
       SELECT c.id, c.user_id, c.venue_id, c.notes,
-             c.checked_in_at, c.created_at, c.updated_at,
+              c.checked_in_at, c.checkin_timezone AS venue_timezone, c.created_at, c.updated_at,
              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
              vc.name AS venue_category,
              pv.id AS parent_venue_id, pv.name AS parent_venue_name
@@ -111,7 +126,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     const checkinResult = await query(
       `SELECT c.id, c.user_id, c.venue_id, c.notes,
-              c.checked_in_at, c.created_at, c.updated_at,
+              c.checked_in_at, c.checkin_timezone AS venue_timezone, c.created_at, c.updated_at,
               v.name AS venue_name, v.address AS venue_address,
               v.city AS venue_city, v.state AS venue_state,
               v.country AS venue_country, v.latitude AS venue_latitude,
@@ -146,11 +161,13 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id and venue_id are required' });
     }
 
+    const checkinTimezone = await inferVenueTimezone(venue_id);
+
     const result = await query(
-      `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
+      `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
        RETURNING *`,
-      [user_id, venue_id, notes || null, checked_in_at || null]
+      [user_id, venue_id, notes || null, checked_in_at || null, checkinTimezone]
     );
 
     const checkin = result.rows[0];
@@ -165,10 +182,10 @@ router.post('/', async (req: Request, res: Response) => {
       const parentVenueId = venueResult.rows[0]?.parent_venue_id;
       if (parentVenueId) {
         const parentResult = await query(
-          `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at)
-           VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
+          `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone)
+           VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
            RETURNING *`,
-          [user_id, parentVenueId, notes || null, checked_in_at || null]
+          [user_id, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId)]
         );
         parent_checkin = parentResult.rows[0];
       }

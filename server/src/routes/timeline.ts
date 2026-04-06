@@ -5,11 +5,18 @@ import { query } from '../db';
 const router = Router();
 
 function addTimezone(row: any): any {
-  if (row.type === 'location' && row.venue_latitude != null && row.venue_longitude != null) {
+  if (row.type === 'location' && !row.venue_timezone && row.venue_latitude != null && row.venue_longitude != null) {
     const tzResults = findTimezone(Number(row.venue_latitude), Number(row.venue_longitude));
     row.venue_timezone = tzResults[0] || null;
   }
   return row;
+}
+
+function extractDateString(value: unknown): string | null {
+  if (!value) return null;
+  const raw = String(value);
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
 }
 
 // GET / - unified timeline of location + mood checkins
@@ -26,6 +33,8 @@ router.get('/', async (req: Request, res: Response) => {
     let paramIndex = 1;
     const hasMoodTypeFilter = Boolean(req.query.mood || req.query.activity);
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
+    const fromDate = extractDateString(from);
+    const toDate = extractDateString(to);
 
     if (user_id) {
       locationConditions.push(`c.user_id = $${paramIndex}`);
@@ -34,17 +43,17 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    if (from) {
-      locationConditions.push(`c.checked_in_at >= $${paramIndex}`);
-      moodConditions.push(`mc.checked_in_at >= $${paramIndex}`);
-      params.push(from);
+    if (fromDate) {
+      locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${paramIndex}::date`);
+      moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date >= $${paramIndex}::date`);
+      params.push(fromDate);
       paramIndex++;
     }
 
-    if (to) {
-      locationConditions.push(`c.checked_in_at <= $${paramIndex}`);
-      moodConditions.push(`mc.checked_in_at <= $${paramIndex}`);
-      params.push(to);
+    if (toDate) {
+      locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $${paramIndex}::date`);
+      moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date <= $${paramIndex}::date`);
+      params.push(toDate);
       paramIndex++;
     }
 
@@ -120,6 +129,7 @@ router.get('/', async (req: Request, res: Response) => {
       SELECT 'location' AS type, c.id, c.user_id, c.venue_id, c.notes,
              c.checked_in_at, c.created_at,
              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
+              c.checkin_timezone AS venue_timezone,
              vc.name AS venue_category,
              pv.id AS parent_venue_id, pv.name AS parent_venue_name,
         NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities
@@ -134,6 +144,7 @@ router.get('/', async (req: Request, res: Response) => {
       SELECT 'mood' AS type, mc.id, mc.user_id, NULL AS venue_id, mc.note AS notes,
              mc.checked_in_at, mc.created_at,
              NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
+             NULL::text AS venue_timezone,
              NULL AS venue_category,
              NULL AS parent_venue_id, NULL AS parent_venue_name,
              mc.mood, mc.mood_timezone,

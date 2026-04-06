@@ -373,7 +373,7 @@ export default function Home() {
         };
         if (searchQuery.trim()) params.q = searchQuery.trim();
         if (fromDate) params.from = fromDate;
-        if (toDate) params.to = toDate + 'T23:59:59';
+        if (toDate) params.to = toDate;
         if (venueId) params.venue_id = venueId;
           if (category) params.category = category;
           if (country) params.country = country;
