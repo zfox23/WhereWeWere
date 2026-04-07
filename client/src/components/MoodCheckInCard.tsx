@@ -29,8 +29,8 @@ function renderIcon(iconName?: string): React.ReactNode {
 
 export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl }: MoodCheckInCardProps) {
   const { pathname } = useLocation();
-  const mood = item.mood || 3;
-  const activities = item.activities || [];
+  const mood = typeof item.mood === 'number' && item.mood >= 1 && item.mood <= 5 ? item.mood : 3;
+  const activities = Array.isArray(item.activities) ? item.activities : [];
   const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos);
 
   return (

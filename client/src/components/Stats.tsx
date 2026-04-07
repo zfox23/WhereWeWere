@@ -12,7 +12,6 @@ import {
 import { stats } from '../api/client';
 import type {
   Stats as StatsType,
-  Streak,
   TopVenue,
   CategoryBreakdown,
   HeatmapDay,
@@ -48,81 +47,6 @@ function formatDateShort(dateStr: string) {
     day: 'numeric',
     year: 'numeric',
   }).format(new Date(dateStr + 'T12:00:00'));
-}
-
-export function StreakCard({ streak }: { streak: Streak }) {
-  const navigate = useNavigate();
-
-  const handleCurrentClick = () => {
-    if (streak.current_streak > 0 && streak.current_streak_start && streak.current_streak_end) {
-      navigate(`/?from=${streak.current_streak_start}&to=${streak.current_streak_end}`);
-    }
-  };
-
-  const handleLongestClick = () => {
-    if (streak.longest_streak > 0 && streak.longest_streak_start && streak.longest_streak_end) {
-      navigate(`/?from=${streak.longest_streak_start}&to=${streak.longest_streak_end}`);
-    }
-  };
-
-  return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
-        <Flame size={16} className="text-orange-500" />
-        Streaks
-      </h3>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wide">
-            Current
-          </p>
-          {streak.current_streak > 0 ? (
-            <button onClick={handleCurrentClick} className="text-left group">
-              <p className="text-xl font-bold text-orange-600 group-hover:underline">
-                {streak.current_streak} day{streak.current_streak !== 1 ? 's' : ''}
-              </p>
-              {streak.current_streak_start && streak.current_streak_end && (
-                <p className="text-[10px] text-gray-400 mt-0.5">
-                  {formatDateShort(streak.current_streak_start)} — {formatDateShort(streak.current_streak_end)}
-                </p>
-              )}
-            </button>
-          ) : (
-            <p className="text-xl font-bold text-orange-600">0 days</p>
-          )}
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wide">
-            Longest
-          </p>
-          {streak.longest_streak > 0 ? (
-            <button onClick={handleLongestClick} className="text-left group">
-              <p className="text-xl font-bold text-gray-900 group-hover:underline">
-                {streak.longest_streak} day{streak.longest_streak !== 1 ? 's' : ''}
-              </p>
-              {streak.longest_streak_start && streak.longest_streak_end && (
-                <p className="text-[10px] text-gray-400 mt-0.5">
-                  {formatDateShort(streak.longest_streak_start)} — {formatDateShort(streak.longest_streak_end)}
-                </p>
-              )}
-            </button>
-          ) : (
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">0 days</p>
-          )}
-        </div>
-      </div>
-      {streak.last_checkin && (
-        <p className="text-xs text-gray-400 mt-3">
-          Last check-in:{' '}
-          {new Intl.DateTimeFormat('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          }).format(new Date(streak.last_checkin))}
-        </p>
-      )}
-    </div>
-  );
 }
 
 export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
@@ -360,7 +284,6 @@ export function Heatmap({
 export default function StatsView() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<StatsType | null>(null);
-  // const [streak, setStreak] = useState<Streak | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
   const [categories, setCategories] = useState<CategoryBreakdown[]>([]);
   const [heatmapDays, setHeatmapDays] = useState<HeatmapDay[]>([]);
@@ -373,13 +296,11 @@ export default function StatsView() {
       try {
         const [s, tv, cb, hm] = await Promise.all([
           stats.summary(USER_ID),
-          // stats.streaks(USER_ID),
           stats.topVenues(USER_ID, 10),
           stats.categoryBreakdown(USER_ID),
           stats.heatmap(USER_ID, heatmapYear),
         ]);
         setSummary(s);
-        // setStreak(st);
         setTopVenues(tv);
         setCategories(cb);
         setHeatmapDays(hm);
@@ -426,9 +347,6 @@ export default function StatsView() {
           />
         </div>
       )}
-
-      {/* Streaks */}
-      {/* {streak && <StreakCard streak={streak} />} */}
 
       {/* Two column layout for top venues and categories */}
       <div className="grid md:grid-cols-2 gap-4">

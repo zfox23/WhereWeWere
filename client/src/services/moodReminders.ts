@@ -53,7 +53,8 @@ function formatTimeLabel(time: string): string {
 
 function markAndCheckAlreadyFired(time: string): boolean {
   const key = `www:mood-reminder:${time}`;
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const last = window.localStorage.getItem(key);
   if (last === today) return true;
 

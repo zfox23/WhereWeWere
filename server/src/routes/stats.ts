@@ -4,12 +4,15 @@ import { query } from '../db';
 
 const router = Router();
 
-function buildDateRangeClause(from: unknown, to: unknown, column: string) {
+function buildDateRangeClause(from: unknown, to: unknown, column: string, timezoneColumn?: string) {
   const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+  const localDateExpr = timezoneColumn
+    ? `(${column} AT TIME ZONE COALESCE(${timezoneColumn}, 'UTC'))::date`
+    : `(${column})::date`;
   return {
     hasRange,
     whereClause: hasRange
-      ? ` AND ${column} >= $2::date AND ${column} < ($3::date + INTERVAL '1 day')`
+      ? ` AND ${localDateExpr} >= $2::date AND ${localDateExpr} <= $3::date`
       : '',
     params: hasRange ? [from, to] : [],
   };
@@ -24,13 +27,13 @@ router.get('/summary', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
-    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
     const result = await query(
       `SELECT
          COUNT(c.id)::int AS total_checkins,
          COUNT(DISTINCT c.venue_id)::int AS unique_venues,
-         COUNT(DISTINCT DATE(c.checked_in_at AT TIME ZONE 'UTC'))::int AS days_with_checkins,
+         COUNT(DISTINCT DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')))::int AS days_with_checkins,
          u.created_at AS member_since
        FROM checkins c
        JOIN users u ON u.id = $1
@@ -64,124 +67,6 @@ router.get('/summary', async (req: Request, res: Response) => {
   }
 });
 
-// GET /streaks?user_id= - check-in streaks
-router.get('/streaks', async (req: Request, res: Response) => {
-  try {
-    const { user_id } = req.query;
-
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
-
-    // Get distinct check-in dates ordered
-    const datesResult = await query(
-      `SELECT DISTINCT DATE(checked_in_at AT TIME ZONE 'UTC') AS checkin_date
-       FROM checkins
-       WHERE user_id = $1
-       ORDER BY checkin_date DESC`,
-      [user_id]
-    );
-
-    if (datesResult.rows.length === 0) {
-      return res.json({
-        current_streak: 0,
-        longest_streak: 0,
-        last_checkin_date: null,
-      });
-    }
-
-    const dates = datesResult.rows.map(
-      (r: { checkin_date: string }) => new Date(r.checkin_date)
-    );
-    const lastCheckinDate = dates[0];
-
-    // Calculate current streak (from today or last check-in date backwards)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    let currentStreak = 0;
-    const firstDate = new Date(dates[0]);
-    firstDate.setHours(0, 0, 0, 0);
-
-    // Current streak only counts if last check-in was today or yesterday
-    const diffFromToday = Math.floor(
-      (today.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    if (diffFromToday <= 1) {
-      currentStreak = 1;
-      for (let i = 1; i < dates.length; i++) {
-        const prevDate = new Date(dates[i - 1]);
-        const currDate = new Date(dates[i]);
-        prevDate.setHours(0, 0, 0, 0);
-        currDate.setHours(0, 0, 0, 0);
-        const diff = Math.floor(
-          (prevDate.getTime() - currDate.getTime()) / (1000 * 60 * 60 * 24)
-        );
-        if (diff === 1) {
-          currentStreak++;
-        } else {
-          break;
-        }
-      }
-    }
-
-    // Calculate current streak date range
-    let currentStreakStart: Date | null = null;
-    let currentStreakEnd: Date | null = null;
-    if (currentStreak > 0) {
-      currentStreakEnd = new Date(dates[0]);
-      currentStreakEnd.setHours(0, 0, 0, 0);
-      currentStreakStart = new Date(dates[currentStreak - 1]);
-      currentStreakStart.setHours(0, 0, 0, 0);
-    }
-
-    // Calculate longest streak
-    let longestStreak = 1;
-    let tempStreak = 1;
-    let longestEnd = 0; // index of the start (most recent date) of longest streak
-    for (let i = 1; i < dates.length; i++) {
-      const prevDate = new Date(dates[i - 1]);
-      const currDate = new Date(dates[i]);
-      prevDate.setHours(0, 0, 0, 0);
-      currDate.setHours(0, 0, 0, 0);
-      const diff = Math.floor(
-        (prevDate.getTime() - currDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      if (diff === 1) {
-        tempStreak++;
-        if (tempStreak > longestStreak) {
-          longestStreak = tempStreak;
-          longestEnd = i - tempStreak + 1; // dates are descending, so "end" is the more recent
-        }
-      } else {
-        tempStreak = 1;
-      }
-    }
-
-    // Longest streak date range (dates are descending)
-    const longestStreakEnd = new Date(dates[longestEnd]);
-    longestStreakEnd.setHours(0, 0, 0, 0);
-    const longestStreakStart = new Date(dates[longestEnd + longestStreak - 1]);
-    longestStreakStart.setHours(0, 0, 0, 0);
-
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-
-    res.json({
-      current_streak: currentStreak,
-      longest_streak: longestStreak,
-      last_checkin_date: lastCheckinDate,
-      current_streak_start: currentStreakStart ? fmt(currentStreakStart) : null,
-      current_streak_end: currentStreakEnd ? fmt(currentStreakEnd) : null,
-      longest_streak_start: fmt(longestStreakStart),
-      longest_streak_end: fmt(longestStreakEnd),
-    });
-  } catch (err) {
-    console.error('Error getting streaks:', err);
-    res.status(500).json({ error: 'Failed to get streaks' });
-  }
-});
-
 // GET /top-venues?user_id=&limit=10 - most visited venues
 router.get('/top-venues', async (req: Request, res: Response) => {
   try {
@@ -191,7 +76,7 @@ router.get('/top-venues', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
-    const { hasRange, whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
+    const { hasRange, whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
     const limitParamIndex = hasRange ? 4 : 2;
 
     const result = await query(
@@ -226,7 +111,7 @@ router.get('/category-breakdown', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
-    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
     const result = await query(
       `SELECT COALESCE(vc.name, 'Uncategorized') AS category_name,
@@ -261,13 +146,13 @@ router.get('/heatmap', async (req: Request, res: Response) => {
     const yearNum = parseInt(year as string, 10);
 
     const result = await query(
-      `SELECT TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
+      `SELECT TO_CHAR(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')), 'YYYY-MM-DD') AS date,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
-         AND checked_in_at >= $2::date
-         AND checked_in_at < ($2::date + INTERVAL '1 year')
-       GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
+         AND (checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::date >= $2::date
+         AND (checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::date < ($2::date + INTERVAL '1 year')
+       GROUP BY DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))
        ORDER BY date ASC`,
       [user_id, `${yearNum}-01-01`]
     );
@@ -298,13 +183,13 @@ router.get('/monthly', async (req: Request, res: Response) => {
     const startDate = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
 
     const result = await query(
-      `SELECT DATE(checked_in_at AT TIME ZONE 'UTC') AS date,
+      `SELECT DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) AS date,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
-         AND checked_in_at >= $2::date
-         AND checked_in_at < ($2::date + INTERVAL '1 month')
-       GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
+         AND (checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::date >= $2::date
+         AND (checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::date < ($2::date + INTERVAL '1 month')
+       GROUP BY DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))
        ORDER BY date ASC`,
       [user_id, startDate]
     );
@@ -325,7 +210,7 @@ router.get('/countries', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
-    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
     const result = await query(
       `SELECT COALESCE(v.country, 'Unknown') AS country,
@@ -358,7 +243,7 @@ router.get('/map-data', async (req: Request, res: Response) => {
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
     const whereRange = hasRange
-      ? "AND c.checked_in_at >= $2::date AND c.checked_in_at < ($3::date + INTERVAL '1 day')"
+      ? "AND (c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
       : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
@@ -366,7 +251,7 @@ router.get('/map-data', async (req: Request, res: Response) => {
       `SELECT v.id AS venue_id, v.name AS venue_name,
               v.latitude, v.longitude,
               COUNT(c.id)::int AS checkin_count,
-              ARRAY_AGG(DISTINCT DATE(c.checked_in_at AT TIME ZONE 'UTC') ORDER BY DATE(c.checked_in_at AT TIME ZONE 'UTC') DESC) AS dates
+              ARRAY_AGG(DISTINCT DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')) ORDER BY DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')) DESC) AS dates
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id
        WHERE c.user_id = $1
@@ -389,10 +274,10 @@ router.get('/day-of-week', async (req: Request, res: Response) => {
     const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
-    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at');
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at', 'checkin_timezone');
 
     const result = await query(
-      `SELECT EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC')::int AS dow,
+      `SELECT EXTRACT(DOW FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::int AS dow,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
@@ -420,14 +305,14 @@ router.get('/time-of-day', async (req: Request, res: Response) => {
     const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
-    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at');
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at', 'checkin_timezone');
 
     const result = await query(
       `SELECT
          CASE
-           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 5 AND 11 THEN 'Morning'
-           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 12 AND 16 THEN 'Afternoon'
-           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 17 AND 20 THEN 'Evening'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) BETWEEN 5 AND 11 THEN 'Morning'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) BETWEEN 12 AND 16 THEN 'Afternoon'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) BETWEEN 17 AND 20 THEN 'Evening'
            ELSE 'Night'
          END AS period,
          COUNT(*)::int AS count
@@ -455,15 +340,15 @@ router.get('/busiest-days', async (req: Request, res: Response) => {
     const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
-    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at');
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at', 'checkin_timezone');
 
     const result = await query(
-      `SELECT TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
+      `SELECT TO_CHAR(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')), 'YYYY-MM-DD') AS date,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
          ${whereClause}
-       GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
+       GROUP BY DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))
        ORDER BY count DESC, date DESC
        LIMIT 10`,
       [user_id, ...rangeParams]
@@ -482,7 +367,7 @@ router.get('/top-cities', async (req: Request, res: Response) => {
     const { user_id, from, to } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
-    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at');
+    const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
     const result = await query(
       `SELECT COALESCE(v.city, 'Unknown') AS city,
@@ -516,7 +401,7 @@ router.get('/insights', async (req: Request, res: Response) => {
 
     // Favorite day of week
     const dowResult = await query(
-      `SELECT EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC')::int AS dow,
+      `SELECT EXTRACT(DOW FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::int AS dow,
               COUNT(*)::int AS count
        FROM checkins WHERE user_id = $1
        GROUP BY dow ORDER BY count DESC LIMIT 1`,
@@ -536,9 +421,9 @@ router.get('/insights', async (req: Request, res: Response) => {
     const todResult = await query(
       `SELECT
          CASE
-           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 5 AND 11 THEN 'Morning'
-           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 12 AND 16 THEN 'Afternoon'
-           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE 'UTC') BETWEEN 17 AND 20 THEN 'Evening'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) BETWEEN 5 AND 11 THEN 'Morning'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) BETWEEN 12 AND 16 THEN 'Afternoon'
+           WHEN EXTRACT(HOUR FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) BETWEEN 17 AND 20 THEN 'Evening'
            ELSE 'Night'
          END AS period,
          COUNT(*)::int AS count
@@ -605,8 +490,8 @@ router.get('/insights', async (req: Request, res: Response) => {
     // Weekend vs weekday
     const weekendResult = await query(
       `SELECT
-         COUNT(*) FILTER (WHERE EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC') IN (0, 6))::int AS weekend,
-         COUNT(*) FILTER (WHERE EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC') NOT IN (0, 6))::int AS weekday
+         COUNT(*) FILTER (WHERE EXTRACT(DOW FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) IN (0, 6))::int AS weekend,
+         COUNT(*) FILTER (WHERE EXTRACT(DOW FROM checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) NOT IN (0, 6))::int AS weekday
        FROM checkins WHERE user_id = $1`,
       [user_id]
     );
@@ -629,7 +514,7 @@ router.get('/insights', async (req: Request, res: Response) => {
 
     // Average check-ins per active day
     const avgResult = await query(
-      `SELECT COUNT(*)::float / GREATEST(COUNT(DISTINCT DATE(checked_in_at AT TIME ZONE 'UTC')), 1) AS avg_per_day
+      `SELECT COUNT(*)::float / GREATEST(COUNT(DISTINCT DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))), 1) AS avg_per_day
        FROM checkins WHERE user_id = $1`,
       [user_id]
     );
@@ -817,7 +702,7 @@ router.get('/additional-stats', async (req: Request, res: Response) => {
 
     // Longest gap between check-ins
     const gapResult = await query(
-      `SELECT DATE(checked_in_at AT TIME ZONE 'UTC') AS d
+      `SELECT DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) AS d
        FROM checkins WHERE user_id = $1
        ORDER BY checked_in_at`,
       [user_id]
@@ -825,15 +710,15 @@ router.get('/additional-stats', async (req: Request, res: Response) => {
     let longestGap = 0;
     let gapStart = '';
     let gapEnd = '';
-    const dates = gapResult.rows.map((r: any) => r.d);
+    const dates = gapResult.rows.map((r: any) => String(r.d).slice(0, 10));
     for (let i = 1; i < dates.length; i++) {
       const diff = Math.floor(
         (new Date(dates[i]).getTime() - new Date(dates[i - 1]).getTime()) / (1000 * 60 * 60 * 24)
       );
       if (diff > longestGap) {
         longestGap = diff;
-        gapStart = new Date(dates[i - 1]).toISOString().slice(0, 10);
-        gapEnd = new Date(dates[i]).toISOString().slice(0, 10);
+        gapStart = dates[i - 1];
+        gapEnd = dates[i];
       }
     }
 
@@ -874,12 +759,12 @@ router.get('/mood-daily', async (req: Request, res: Response) => {
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND checked_in_at >= $2::date AND checked_in_at < ($3::date + INTERVAL '1 day')" : '';
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
       `SELECT
-         TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
+         TO_CHAR(DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')), 'YYYY-MM-DD') AS date,
          ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
          MIN(mood)::int AS min_mood,
          MAX(mood)::int AS max_mood,
@@ -887,7 +772,7 @@ router.get('/mood-daily', async (req: Request, res: Response) => {
        FROM mood_checkins
        WHERE user_id = $1
          ${whereRange}
-       GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
+       GROUP BY DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))
        ORDER BY date ASC`,
       params
     );
@@ -909,12 +794,12 @@ router.get('/mood-monthly', async (req: Request, res: Response) => {
 
     const result = await query(
       `SELECT
-         TO_CHAR(DATE_TRUNC('month', checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
+         TO_CHAR(DATE_TRUNC('month', checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')), 'YYYY-MM') AS month,
          mood,
          COUNT(*)::int AS count
        FROM mood_checkins
        WHERE user_id = $1
-         AND EXTRACT(YEAR FROM checked_in_at AT TIME ZONE 'UTC') = $2
+         AND EXTRACT(YEAR FROM checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')) = $2
        GROUP BY month, mood
        ORDER BY month ASC, mood ASC`,
       [user_id, yearNum]
@@ -934,12 +819,12 @@ router.get('/mood-by-day-of-week', async (req: Request, res: Response) => {
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE 'UTC')::date BETWEEN $2::date AND $3::date" : '';
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
       `SELECT
-         EXTRACT(DOW FROM checked_in_at AT TIME ZONE 'UTC')::int AS dow,
+         EXTRACT(DOW FROM checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::int AS dow,
          ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
          COUNT(*)::int AS count
        FROM mood_checkins
@@ -972,7 +857,7 @@ router.get('/mood-activity-correlations', async (req: Request, res: Response) =>
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE 'UTC')::date BETWEEN $2::date AND $3::date" : '';
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
@@ -1017,7 +902,7 @@ router.get('/mood-activity-combinations', async (req: Request, res: Response) =>
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE 'UTC')::date BETWEEN $2::date AND $3::date" : '';
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
@@ -1072,7 +957,7 @@ router.get('/mood-count-range', async (req: Request, res: Response) => {
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND checked_in_at >= $2::date AND checked_in_at < ($3::date + INTERVAL '1 day')" : '';
+    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
@@ -1105,13 +990,13 @@ router.get('/mood-heatmap', async (req: Request, res: Response) => {
 
     const result = await query(
       `SELECT
-         TO_CHAR(DATE(checked_in_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
+         TO_CHAR(DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')), 'YYYY-MM-DD') AS date,
          ROUND(AVG(mood)::numeric, 1)::float AS avg_mood
        FROM mood_checkins
        WHERE user_id = $1
-         AND checked_in_at >= $2::date
-         AND checked_in_at < ($2::date + INTERVAL '1 year')
-       GROUP BY DATE(checked_in_at AT TIME ZONE 'UTC')
+         AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date >= $2::date
+         AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date < ($2::date + INTERVAL '1 year')
+       GROUP BY DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))
        ORDER BY date ASC`,
       [user_id, `${yearNum}-01-01`]
     );

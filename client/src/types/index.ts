@@ -67,16 +67,6 @@ export interface Stats {
   member_since: string;
 }
 
-export interface Streak {
-  current_streak: number;
-  longest_streak: number;
-  last_checkin: string | null;
-  current_streak_start: string | null;
-  current_streak_end: string | null;
-  longest_streak_start: string | null;
-  longest_streak_end: string | null;
-}
-
 export interface TopVenue {
   venue_id: string;
   venue_name: string;

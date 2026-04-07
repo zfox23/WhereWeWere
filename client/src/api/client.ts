@@ -59,8 +59,6 @@ export const stats = {
     }
     return request<any>(`/stats/summary?${qp.toString()}`);
   },
-  streaks: (userId: string) =>
-    request<any>(`/stats/streaks?user_id=${userId}`),
   topVenues: (userId: string, limit = 10, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId, limit: String(limit) });
     if (from && to) {
