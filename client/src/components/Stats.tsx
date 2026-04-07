@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   MapPin,
   CalendarDays,
+  MapPinCheck,
   Flame,
   Trophy,
   BarChart3,
@@ -208,11 +209,20 @@ export function CategoryChart({ data }: { data: CategoryBreakdown[] }) {
   );
 }
 
-export function Heatmap({ days, year, onYearChange, onDayClick }: {
+export function Heatmap({
+  days,
+  year,
+  onYearChange,
+  onDayClick,
+  showTitleIcon = true,
+  showTitleYear = true,
+}: {
   days: HeatmapDay[];
   year: number;
   onYearChange?: (year: number) => void;
   onDayClick?: (date: string) => void;
+  showTitleIcon?: boolean;
+  showTitleYear?: boolean;
 }) {
   const dayMap = new Map(days.map((d) => [d.date, d.count]));
   const startDate = new Date(year, 0, 1);
@@ -262,11 +272,11 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
   const currentYear = new Date().getFullYear();
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+    <div className="">
       <div className="flex items-center justify-start mb-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-          <CalendarDays size={16} className="text-green-600" />
-          {year} Activity
+          {showTitleIcon ? <MapPinCheck size={16} className="text-primary-600" /> : null}
+          {showTitleYear ? `${year} Activity` : 'Venue Activity'}
         </h3>
         {onYearChange && (
           <div className="flex items-center gap-2">
@@ -333,8 +343,8 @@ export function Heatmap({ days, year, onYearChange, onDayClick }: {
           ))}
         </div>
         {/* Legend */}
-        <div className="flex items-center gap-1 mt-2 justify-end">
-          <span className="text-[10px] text-gray-400 mr-1">Less</span>
+        <div className="flex items-center gap-1 mt-2 justify-start">
+          <span className="text-[10px] text-gray-400 mr-1">Fewer</span>
           <div className="w-[12px] h-[12px] rounded-sm bg-gray-100 dark:bg-gray-800" />
           <div className="w-[12px] h-[12px] rounded-sm bg-primary-200" />
           <div className="w-[12px] h-[12px] rounded-sm bg-primary-300" />
@@ -425,14 +435,6 @@ export default function StatsView() {
         <TopVenuesList venues={topVenues} />
         <CategoryChart data={categories} />
       </div>
-
-      {/* Heatmap */}
-      <Heatmap
-        days={heatmapDays}
-        year={heatmapYear}
-        onYearChange={setHeatmapYear}
-        onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
-      />
     </div>
   );
 }

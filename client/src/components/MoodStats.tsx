@@ -2,14 +2,18 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   CalendarDays,
+  Smile,
   BarChart3,
   Activity,
+  House,
+  Loader2,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import { stats } from '../api/client';
 import { MoodIcon } from './MoodIcons';
 import { PeriodRangeSelector } from './PeriodRangeSelector';
+import { StatCard } from './Stats';
 import {
   PeriodMode,
   getPeriodDateRange,
@@ -101,16 +105,22 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
 
   const n = data.length;
 
-  // X ticks: one per month boundary
-  const xticks: { x: number; label: string }[] = [];
+  // X ticks: one per month boundary, skipping ticks that are too close together
+  const xticks: { key: string; x: number; label: string }[] = [];
   let pm = '';
+  let lastTickX = -Infinity;
   data.forEach((d, i) => {
     const mo = d.date.slice(0, 7);
     if (mo !== pm) {
-      xticks.push({
-        x: toX(i, n),
-        label: new Date(d.date + 'T12:00').toLocaleString('en-US', { month: 'short', day: 'numeric' }),
-      });
+      const x = toX(i, n);
+      if (x - lastTickX >= 55) {
+        xticks.push({
+          key: mo,
+          x,
+          label: new Date(d.date + 'T12:00').toLocaleString('en-US', { month: 'short', day: 'numeric' }),
+        });
+        lastTickX = x;
+      }
       pm = mo;
     }
   });
@@ -243,7 +253,7 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
 
         {/* X axis ticks + labels */}
         {xticks.map((t) => (
-          <g key={t.label}>
+          <g key={t.key}>
             <line x1={t.x} y1={PT + CH} x2={t.x} y2={PT + CH + 4} stroke={AC} strokeWidth={1} />
             <text
               x={t.x}
@@ -327,22 +337,6 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
           }}
         >
           {selectedPoint.date} • avg {selectedPoint.avg_mood.toFixed(1)}
-        </div>
-      )}
-
-      {selectedPoint && displayIndex !== null && !isScrubbing && (
-        <div className="absolute left-1/2 -translate-x-1/2 bottom-2 z-10">
-          <button
-            type="button"
-            onClick={() => {
-              const day = data[displayIndex]?.date;
-              if (!day) return;
-              openInNewTab(`/?from=${day}&to=${day}`);
-            }}
-            className="text-xs px-2.5 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/35"
-          >
-            Open {data[displayIndex]?.date} in Home
-          </button>
         </div>
       )}
     </div>
@@ -432,45 +426,26 @@ function MoodMonthlySection({
   dailyData,
   moodCounts,
   dowData,
+  corrData,
+  comboData,
   chartMode,
   onChartModeChange,
   periodMode,
-  onPeriodModeChange,
   monthLoading,
-  year,
-  onYearChange,
   selectedMonth,
-  onSelectedMonthChange,
 }: {
   monthlyData: MonthlyPt[];
   dailyData: DailyPt[];
   moodCounts: MoodCount[];
   dowData: DowPt[];
+  corrData: CorrPt[];
+  comboData: ComboPt[];
   chartMode: 'line' | 'span';
   onChartModeChange: (mode: 'line' | 'span') => void;
   periodMode: PeriodMode;
-  onPeriodModeChange: (mode: PeriodMode) => void;
   monthLoading: boolean;
-  year: number;
-  onYearChange: (y: number) => void;
   selectedMonth: string;
-  onSelectedMonthChange: (month: string) => void;
 }) {
-  const currentYear = new Date().getFullYear();
-  const currentMonthIso = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-
-  const selectMonth = (month: string) => {
-    onSelectedMonthChange(month);
-    const nextYear = parseInt(month.slice(0, 4), 10);
-    if (nextYear !== year) onYearChange(nextYear);
-  };
-
-  const resetToDefaultView = () => {
-    onPeriodModeChange('triple');
-    onYearChange(currentYear);
-    onSelectedMonthChange(currentMonthIso);
-  };
-
   const monthMap = useMemo(() => {
     const m = new Map<string, Map<number, number>>();
     for (const p of monthlyData) {
@@ -497,6 +472,13 @@ function MoodMonthlySection({
     [monthMap, selectedMonth, periodMode, moodCounts]
   );
 
+  const totalCheckins = moodCounts.reduce((s, d) => s + d.count, 0);
+  const avgMood =
+    totalCheckins > 0
+      ? moodCounts.reduce((s, d) => s + d.mood * d.count, 0) / totalCheckins
+      : null;
+  const activeDays = dailyData.filter((d) => d.count > 0).length;
+
   const pieTotal = pie.reduce((s, d) => s + d.count, 0);
   const selLabel = selectedMonth
     ? new Date(selectedMonth + '-01T12:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -505,74 +487,62 @@ function MoodMonthlySection({
   const visibleRange = useMemo(() => getPeriodDateRange(selectedMonth, periodMode), [selectedMonth, periodMode]);
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-      <PeriodRangeSelector
-        periodMode={periodMode}
-        onPeriodModeChange={onPeriodModeChange}
-        year={year}
-        onYearChange={onYearChange}
-        selectedMonth={selectedMonth}
-        onSelectedMonthChange={selectMonth}
-      />
-
-      <div className="my-2 flex justify-center">
-        <button
-          type="button"
-          onClick={() => {
-            if (visibleRange.from && visibleRange.to) {
-              openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
-            } else {
-              openInNewTab('/');
-            }
-          }}
-          className="rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/60 dark:bg-indigo-900/20 dark:text-indigo-300 dark:hover:bg-indigo-900/35"
-        >
-          Open {rangeLabel || selLabel || 'This Period'} in Home
-        </button>
-      </div>
-
-      {/* Pie + legend for selected month */}
-      <div className="grid grid-cols-1 sm:grid-cols-[auto,1fr] gap-4 sm:gap-6 mb-6 items-center">
-        <div className="mx-auto sm:mx-0">
-          <MoodPieChart slices={pie} />
+    <div className="space-y-4">
+      {totalCheckins > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <StatCard icon={Smile} label="Mood Check-ins" value={totalCheckins} />
+          <StatCard icon={Activity} label="Avg Mood" value={avgMood !== null ? avgMood.toFixed(1) : '—'} />
+          <StatCard icon={CalendarDays} label="Active Days" value={activeDays} />
         </div>
-        <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-1 gap-2 pt-1">
-          {([5, 4, 3, 2, 1] as const).map((m) => {
-            const cnt = pie.find((d) => d.mood === m)?.count || 0;
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => {
-                  const qp = new URLSearchParams();
-                  if (visibleRange.from && visibleRange.to) {
-                    qp.set('from', visibleRange.from);
-                    qp.set('to', visibleRange.to);
-                  }
-                  qp.set('mood', String(m));
-                  openInNewTab(`/?${qp.toString()}`);
-                }}
-                className="w-full flex items-center gap-2 rounded-lg bg-gray-50/80 dark:bg-gray-800/60 px-2.5 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/25 transition-colors"
-                title={`Open Home filtered to ${MOOD_LABELS[m]} mood for this visible period`}
-              >
-                <div className="w-3.5 h-3.5 rounded-sm shrink-0" style={{ backgroundColor: MOOD_HEX[m] }} />
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 text-right min-w-[20px]">
-                  {cnt}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {MOOD_LABELS[m]}
-                </span>
-                <span className="text-xs text-gray-400 ml-auto">
-                  ({pieTotal ? Math.round((cnt / pieTotal) * 100) : 0}%)
-                </span>
-              </button>
-            );
-          })}
+      )}
+
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+        {/* Pie + legend for selected month */}
+        <div className="grid grid-cols-1 sm:grid-cols-[auto,1fr] gap-4 sm:gap-6 items-center">
+          <div className="mx-auto sm:mx-0">
+            <MoodPieChart slices={pie} />
+          </div>
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-1 gap-2 pt-1">
+            {([5, 4, 3, 2, 1] as const).map((m) => {
+              const cnt = pie.find((d) => d.mood === m)?.count || 0;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    const qp = new URLSearchParams();
+                    if (visibleRange.from && visibleRange.to) {
+                      qp.set('from', visibleRange.from);
+                      qp.set('to', visibleRange.to);
+                    }
+                    qp.set('mood', String(m));
+                    openInNewTab(`/?${qp.toString()}`);
+                  }}
+                  className="w-full flex items-center gap-2 rounded-lg bg-gray-50/80 dark:bg-gray-800/60 px-2.5 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/25 transition-colors"
+                  title={`Open Home filtered to ${MOOD_LABELS[m]} mood for this visible period`}
+                >
+                  <div className="w-3.5 h-3.5 rounded-sm shrink-0" style={{ backgroundColor: MOOD_HEX[m] }} />
+                  <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 text-right min-w-[20px]">
+                    {cnt}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {MOOD_LABELS[m]}
+                  </span>
+                  <span className="text-xs text-gray-400 ml-auto">
+                    ({pieTotal ? Math.round((cnt / pieTotal) * 100) : 0}%)
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Selected month trend */}
-      <div className="mb-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-2">
+          <BarChart3 size={16} className="text-indigo-500" />
+          Mood Trend
+        </h3>
         <div className="flex flex-wrap items-center justify-center gap-2">
           <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
             {(['line', 'span'] as const).map((m) => (
@@ -602,8 +572,17 @@ function MoodMonthlySection({
         </div>
       </div>
 
-      <div className="mt-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-2">
+          <CalendarDays size={16} className="text-amber-500" />
+          Day of Week
+        </h3>
         <MoodDowChart data={dowData} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <MoodActivityCorrelations data={corrData} />
+        <MoodActivityCombinations data={comboData} />
       </div>
     </div>
   );
@@ -645,7 +624,11 @@ function MoodDowChart({ data }: { data: DowPt[] }) {
 
 // ─── Activity–Mood Correlations ───────────────────────────────────────────────
 
-function MoodActivityCorrelations({ data }: { data: CorrPt[] }) {
+function MoodActivityCorrelations({
+  data,
+}: {
+  data: CorrPt[];
+}) {
   type SortKey = keyof CorrPt;
   const [sortKey, setSortKey] = useState<SortKey>('mood_impact');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -669,8 +652,8 @@ function MoodActivityCorrelations({ data }: { data: CorrPt[] }) {
     </span>
   );
 
-  return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+  const content = (
+    <>
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-1.5">
         <Activity size={16} className="text-rose-500" />
         Activity Impact
@@ -734,11 +717,21 @@ function MoodActivityCorrelations({ data }: { data: CorrPt[] }) {
           </table>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+      {content}
     </div>
   );
 }
 
-function MoodActivityCombinations({ data }: { data: ComboPt[] }) {
+function MoodActivityCombinations({
+  data,
+}: {
+  data: ComboPt[];
+}) {
   type SortKey = keyof ComboPt;
   const [sortKey, setSortKey] = useState<SortKey>('mood_impact');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -762,8 +755,8 @@ function MoodActivityCombinations({ data }: { data: ComboPt[] }) {
     </span>
   );
 
-  return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+  const content = (
+    <>
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-1.5">
         <BarChart3 size={16} className="text-fuchsia-500" />
         Activity Combinations
@@ -823,6 +816,12 @@ function MoodActivityCombinations({ data }: { data: ComboPt[] }) {
           </table>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+      {content}
     </div>
   );
 }
@@ -833,10 +832,16 @@ export function MoodYearInPixels({
   data,
   year,
   onYearChange,
+  showYearControls = true,
+  showTitleIcon = true,
+  showTitleYear = true,
 }: {
   data: HeatPt[];
   year: number;
-  onYearChange: (y: number) => void;
+  onYearChange?: (y: number) => void;
+  showYearControls?: boolean;
+  showTitleIcon?: boolean;
+  showTitleYear?: boolean;
 }) {
   const dayMap = new Map(data.map((d) => [d.date, d.avg_mood]));
   const startDate = new Date(year, 0, 1);
@@ -866,29 +871,31 @@ export function MoodYearInPixels({
   const currentYear = new Date().getFullYear();
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+    <div className="">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-          <CalendarDays size={16} className="text-emerald-500" />
-          {year} Year in Pixels
+          {showTitleIcon ? <Smile size={16} className="text-emerald-500" /> : null}
+          {showTitleYear ? `${year} Year in Pixels` : 'Year in Pixels'}
         </h3>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => onYearChange(year - 1)}
-            className="p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <span className="text-xs font-medium text-gray-500 w-10 text-center">{year}</span>
-          {year < currentYear && (
+        {showYearControls && onYearChange && (
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => onYearChange(year + 1)}
+              onClick={() => onYearChange(year - 1)}
               className="p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
             >
-              <ChevronRight size={14} />
+              <ChevronLeft size={14} />
             </button>
-          )}
-        </div>
+            <span className="text-xs font-medium text-gray-500 w-10 text-center">{year}</span>
+            {year < currentYear && (
+              <button
+                onClick={() => onYearChange(year + 1)}
+                className="p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              >
+                <ChevronRight size={14} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -931,7 +938,7 @@ export function MoodYearInPixels({
                     key={di}
                     className="w-[12px] h-[12px] rounded-sm cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 dark:hover:ring-gray-500"
                     style={{ backgroundColor: MOOD_HEX[r] }}
-                    title={`${day.date}: avg ${day.mood.toFixed(1)} — click to view`}
+                    title={`${day.date}: avg ${day.mood.toFixed(1)}`}
                     onClick={() => openInNewTab(`/?from=${day.date}&to=${day.date}`)}
                   />
                 );
@@ -945,15 +952,12 @@ export function MoodYearInPixels({
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-2 mt-2">
-          <div className="w-[12px] h-[12px] rounded-sm bg-gray-100 dark:bg-gray-800" />
-          <span className="text-[10px] text-gray-400 mr-2">No data</span>
+        <div className="flex items-center gap-1 mt-2 justify-start">
+          <span className="text-[10px] text-gray-400 mr-1">{MOOD_LABELS[1]}</span>
           {([1, 2, 3, 4, 5] as const).map((m) => (
-            <div key={m} className="flex items-center gap-0.5">
-              <div className="w-[12px] h-[12px] rounded-sm" style={{ backgroundColor: MOOD_HEX[m] }} />
-              <span className="text-[10px] text-gray-400">{MOOD_LABELS[m]}</span>
-            </div>
+            <div key={m} className="w-[12px] h-[12px] rounded-sm" style={{ backgroundColor: MOOD_HEX[m] }} />
           ))}
+          <span className="text-[10px] text-gray-400 ml-1">{MOOD_LABELS[5]}</span>
         </div>
       </div>
     </div>
@@ -1040,6 +1044,11 @@ export function MoodsTab() {
     }
   }, [periodMode, searchParams, selectedMonth, setSearchParams]);
 
+  const visibleRange = useMemo(
+    () => getPeriodDateRange(selectedMonth, periodMode),
+    [selectedMonth, periodMode]
+  );
+
   // Selected-month data (line/span + count summary)
   useEffect(() => {
     const isAll = periodMode === 'all';
@@ -1081,28 +1090,51 @@ export function MoodsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Monthly breakdown with pie + line/span */}
+      <div className="flex items-center gap-2">
+        <PeriodRangeSelector
+          periodMode={periodMode}
+          onPeriodModeChange={setPeriodMode}
+          year={year}
+          onYearChange={setYear}
+          selectedMonth={selectedMonth}
+          onSelectedMonthChange={(month) => {
+            setSelectedMonth(month);
+            const nextYear = parseInt(month.slice(0, 4), 10);
+            if (nextYear !== year) setYear(nextYear);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            if (visibleRange.from && visibleRange.to) {
+              openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
+            } else {
+              openInNewTab('/');
+            }
+          }}
+          className="shrink-0 rounded-md p-1 text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300"
+          title="Open selected period in Home"
+          aria-label="Open selected period in Home"
+        >
+          <House size={14} />
+        </button>
+        {monthLoading && <Loader2 className="animate-spin text-primary-600 shrink-0" size={16} />}
+      </div>
+
       <MoodMonthlySection
         monthlyData={monthlyData}
         dailyData={dailyData}
         moodCounts={moodCounts}
         dowData={dowData}
+        corrData={corrData}
+        comboData={comboData}
         chartMode={chartMode}
         onChartModeChange={setChartMode}
         periodMode={periodMode}
-        onPeriodModeChange={setPeriodMode}
         monthLoading={monthLoading}
-        year={year}
-        onYearChange={setYear}
         selectedMonth={selectedMonth}
-        onSelectedMonthChange={setSelectedMonth}
       />
 
-      {/* Activity correlations */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <MoodActivityCorrelations data={corrData} />
-        <MoodActivityCombinations data={comboData} />
-      </div>
     </div>
   );
 }

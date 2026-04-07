@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarDays, MapPin, SmilePlus } from 'lucide-react';
+import { Brain, MapPin, SmilePlus } from 'lucide-react';
 import { MoodsTab } from '../components/MoodStats';
 import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
@@ -44,8 +44,7 @@ export default function Profile() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Profile</h1>
-
+      
       {/* Tab bar */}
       <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit">
         <button
@@ -59,16 +58,6 @@ export default function Profile() {
           Places
         </button>
         <button
-          onClick={() => setActiveTab('reflect')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'reflect'
-            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
-            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-            }`}
-        >
-          <CalendarDays size={14} />
-          Reflect
-        </button>
-        <button
           onClick={() => setActiveTab('moods')}
           className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'moods'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
@@ -77,6 +66,16 @@ export default function Profile() {
         >
           <SmilePlus size={14} />
           Moods
+        </button>
+        <button
+          onClick={() => setActiveTab('reflect')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'reflect'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+        >
+          <Brain size={14} />
+          Reflect
         </button>
       </div>
 

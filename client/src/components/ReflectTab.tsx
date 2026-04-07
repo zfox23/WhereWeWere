@@ -103,7 +103,12 @@ function OnThisDaySection({
               <span className="text-xs text-gray-400">{year.year}</span>
             </div>
             <div className="space-y-3 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
-              {year.items.reverse().map((item) => {
+              {[...year.items]
+                .sort(
+                  (a, b) =>
+                    new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
+                )
+                .map((item) => {
                 const detailHref = item.type === 'location'
                   ? `/venues/${item.venue_id}`
                   : `/mood-checkins/${item.id}`;
@@ -144,7 +149,7 @@ function OnThisDaySection({
                     ) : null}
                   </div>
                 );
-              })}
+                })}
             </div>
           </div>
         ))}
@@ -155,8 +160,7 @@ function OnThisDaySection({
 
 export function ReflectTab() {
   const navigate = useNavigate();
-  const [locationYear, setLocationYear] = useState(new Date().getFullYear());
-  const [moodYear, setMoodYear] = useState(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [locationHeatmap, setLocationHeatmap] = useState<HeatmapDay[]>([]);
   const [moodHeatmap, setMoodHeatmap] = useState<MoodHeatmapPoint[]>([]);
   const [reflections, setReflections] = useState<ReflectionYear[]>([]);
@@ -164,6 +168,10 @@ export function ReflectTab() {
   const [reflectionsLoading, setReflectionsLoading] = useState(true);
   const [locationLoading, setLocationLoading] = useState(true);
   const [moodLoading, setMoodLoading] = useState(true);
+  const [hasLoadedLocation, setHasLoadedLocation] = useState(false);
+  const [hasLoadedMood, setHasLoadedMood] = useState(false);
+  const currentYear = new Date().getFullYear();
+  const heatmapsRefreshing = locationLoading || moodLoading;
 
   useEffect(() => {
     let cancelled = false;
@@ -198,7 +206,7 @@ export function ReflectTab() {
     let cancelled = false;
     setLocationLoading(true);
 
-    stats.heatmap(USER_ID, locationYear)
+    stats.heatmap(USER_ID, selectedYear)
       .then((data) => {
         if (!cancelled) {
           setLocationHeatmap(data);
@@ -213,19 +221,20 @@ export function ReflectTab() {
       .finally(() => {
         if (!cancelled) {
           setLocationLoading(false);
+          setHasLoadedLocation(true);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [locationYear]);
+  }, [selectedYear]);
 
   useEffect(() => {
     let cancelled = false;
     setMoodLoading(true);
 
-    stats.moodHeatmap(USER_ID, moodYear)
+    stats.moodHeatmap(USER_ID, selectedYear)
       .then((data) => {
         if (!cancelled) {
           setMoodHeatmap(data);
@@ -240,33 +249,83 @@ export function ReflectTab() {
       .finally(() => {
         if (!cancelled) {
           setMoodLoading(false);
+          setHasLoadedMood(true);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [moodYear]);
+  }, [selectedYear]);
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 xl:grid-cols-2">
-        {locationLoading ? (
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 space-y-4">
+        <div className="flex items-center justify-start gap-3">
+          <CalendarDays size={16} className="text-purple-500" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedYear(selectedYear - 1)}
+              disabled={heatmapsRefreshing}
+              className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              &larr; {selectedYear - 1}
+            </button>
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 min-w-[3rem] text-center">
+              {selectedYear}
+            </span>
+            {selectedYear < currentYear && (
+              <button
+                onClick={() => setSelectedYear(selectedYear + 1)}
+                disabled={heatmapsRefreshing}
+                className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {selectedYear + 1} &rarr;
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+        {locationLoading && !hasLoadedLocation ? (
           <ReflectLoadingCard label="Loading location heatmap" />
         ) : (
-          <Heatmap
-            days={locationHeatmap}
-            year={locationYear}
-            onYearChange={setLocationYear}
-            onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
-          />
+          <div className={`relative transition-opacity ${locationLoading ? 'opacity-80' : 'opacity-100'}`}>
+            <Heatmap
+              days={locationHeatmap}
+              year={selectedYear}
+              showTitleIcon={true}
+              showTitleYear={false}
+              onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
+            />
+            {locationLoading && (
+              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">
+                <Loader2 className="animate-spin text-primary-600" size={16} />
+              </div>
+            )}
+          </div>
         )}
 
-        {moodLoading ? (
+        {moodLoading && !hasLoadedMood ? (
           <ReflectLoadingCard label="Loading mood heatmap" />
         ) : (
-          <MoodYearInPixels data={moodHeatmap} year={moodYear} onYearChange={setMoodYear} />
+          <div className={`relative transition-opacity ${moodLoading ? 'opacity-80' : 'opacity-100'}`}>
+            <MoodYearInPixels
+              data={moodHeatmap}
+              year={selectedYear}
+              onYearChange={setSelectedYear}
+              showYearControls={false}
+              showTitleIcon={true}
+              showTitleYear={false}
+            />
+            {moodLoading && (
+              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">
+                <Loader2 className="animate-spin text-primary-600" size={16} />
+              </div>
+            )}
+          </div>
         )}
+        </div>
       </div>
 
       {reflectionsLoading ? (

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import {
   MONTH_NAMES,
   PeriodMode,
@@ -49,7 +49,7 @@ export function PeriodRangeSelector({
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-1 items-center gap-2">
       <button
         type="button"
         onClick={resetToDefaultView}
@@ -57,7 +57,7 @@ export function PeriodRangeSelector({
         title="Reset to current month and 3-month view"
         aria-label="Reset to current month and 3-month view"
       >
-        <TrendingUp size={14} />
+        <RotateCcw size={14} />
       </button>
       <div className="flex shrink-0 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
         {([

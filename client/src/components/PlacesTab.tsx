@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Clock,
   Globe,
+  House,
   Loader2,
   MapPin,
   Sun,
@@ -302,13 +303,6 @@ function VenuePinsMap({
   if (loading) {
     return (
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] overflow-hidden">
-        <div className="p-4 pb-2">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-            <MapPin size={16} className="text-primary-600" />
-            Venue Check-ins
-          </h3>
-          <p className="text-xs text-gray-400 mt-0.5">Loading venues for the selected period</p>
-        </div>
         <div className="h-[500px] flex items-center justify-center">
           <Loader2 className="animate-spin text-primary-600" size={28} />
         </div>
@@ -318,13 +312,6 @@ function VenuePinsMap({
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] overflow-hidden">
-      <div className="p-4 pb-2">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-          <MapPin size={16} className="text-primary-600" />
-          Venue Check-ins
-        </h3>
-        <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
-      </div>
       {data.length === 0 ? (
         <div className="h-[280px] px-6 py-10 flex items-center justify-center text-center text-sm text-gray-400">
           No venue check-ins in this time period.
@@ -700,6 +687,21 @@ export function PlacesTab() {
           selectedMonth={placesSelectedMonth}
           onSelectedMonthChange={setPlacesSelectedMonth}
         />
+        <button
+          type="button"
+          onClick={() => {
+            if (placesVisibleRange.from && placesVisibleRange.to) {
+              window.open(`/?from=${placesVisibleRange.from}&to=${placesVisibleRange.to}`, '_blank', 'noopener,noreferrer');
+            } else {
+              window.open('/', '_blank', 'noopener,noreferrer');
+            }
+          }}
+          className="shrink-0 rounded-md p-1 text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300"
+          title="Open selected period in Home"
+          aria-label="Open selected period in Home"
+        >
+          <House size={14} />
+        </button>
         {placesLoading && <Loader2 className="animate-spin text-primary-600 shrink-0" size={16} />}
       </div>
 
