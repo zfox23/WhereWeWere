@@ -373,6 +373,48 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// DELETE /:id - delete venue when it has no check-ins
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const venueResult = await query(
+      `SELECT v.id,
+              COUNT(c.id)::int AS checkin_count,
+              COUNT(child.id)::int AS child_count
+       FROM venues v
+       LEFT JOIN checkins c ON c.venue_id = v.id
+       LEFT JOIN venues child ON child.parent_venue_id = v.id
+       WHERE v.id = $1
+       GROUP BY v.id`,
+      [id]
+    );
+
+    if (venueResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Venue not found' });
+    }
+
+    const venue = venueResult.rows[0];
+    const checkinCount = Number(venue.checkin_count) || 0;
+    const childCount = Number(venue.child_count) || 0;
+
+    if (checkinCount > 0) {
+      return res.status(409).json({ error: 'Cannot delete a venue with check-ins' });
+    }
+
+    if (childCount > 0) {
+      return res.status(409).json({ error: 'Cannot delete a venue that has child venues' });
+    }
+
+    await query('DELETE FROM venues WHERE id = $1', [id]);
+
+    return res.json({ message: 'Venue deleted', id });
+  } catch (err) {
+    console.error('Error deleting venue:', err);
+    return res.status(500).json({ error: 'Failed to delete venue' });
+  }
+});
+
 // POST /:id/merge-into - merge this venue into another, moving all check-ins to the target
 router.post('/:id/merge-into', async (req: Request, res: Response) => {
   try {

@@ -58,6 +58,7 @@ export default function CheckInForm({
   const [alsoCheckinParent, setAlsoCheckinParent] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletingVenue, setDeletingVenue] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [venueCheckinCount, setVenueCheckinCount] = useState<number | null>(null);
   const [venueCategoryName, setVenueCategoryName] = useState<string | null>(null);
@@ -124,6 +125,27 @@ export default function CheckInForm({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete.');
       setDeleting(false);
+    }
+  };
+
+  const handleDeleteVenue = async () => {
+    if (!venueId) return;
+    if (!window.confirm(`Delete venue "${venueName}" from the local database? This cannot be undone.`)) return;
+
+    setDeletingVenue(true);
+    setError(null);
+    try {
+      await venues.delete(venueId);
+      setVenueId('');
+      setVenueName('');
+      setVenueCheckinCount(null);
+      setVenueCategoryName(null);
+      setVenueAddress(null);
+      navigate('/check-in');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete venue.');
+    } finally {
+      setDeletingVenue(false);
     }
   };
 
@@ -202,9 +224,29 @@ export default function CheckInForm({
                   {venueCheckinCount} check-in{venueCheckinCount === 1 ? '' : 's'}
                 </Link>
               ) : (
-                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-                  New venue
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                    New venue
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleDeleteVenue}
+                    disabled={deletingVenue}
+                    className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30"
+                  >
+                    {deletingVenue ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 size={12} />
+                        Delete venue
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
             </div>
           ) : (
