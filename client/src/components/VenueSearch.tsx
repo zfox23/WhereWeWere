@@ -73,6 +73,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [mapSearchResults, setMapSearchResults] = useState<PlaceSearchResult[]>([]);
   const [categories, setCategories] = useState<VenueCategory[]>([]);
   const [selectedNearbyMarkerId, setSelectedNearbyMarkerId] = useState<string | null>(null);
+  const [selectedRemoteMarkerId, setSelectedRemoteMarkerId] = useState<string | null>(null);
   const usedPrefetchRef = useRef(false);
 
   // Custom venue form state
@@ -135,11 +136,27 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     ];
   }, [results, coords, getVenueKey, selectedNearbyMarkerId]);
 
+  const remoteMapMarkers = useMemo(() => (
+    results.map((venue) => ({
+      lat: venue.latitude,
+      lng: venue.longitude,
+      label: venue.name,
+      id: getVenueKey(venue),
+      variant: selectedRemoteMarkerId === getVenueKey(venue) ? 'selected' as const : 'default' as const,
+    }))
+  ), [results, getVenueKey, selectedRemoteMarkerId]);
+
   useEffect(() => {
     if (!selectedNearbyMarkerId) return;
     if (venuesByMarkerId.has(selectedNearbyMarkerId)) return;
     setSelectedNearbyMarkerId(null);
   }, [venuesByMarkerId, selectedNearbyMarkerId]);
+
+  useEffect(() => {
+    if (!selectedRemoteMarkerId) return;
+    if (venuesByMarkerId.has(selectedRemoteMarkerId)) return;
+    setSelectedRemoteMarkerId(null);
+  }, [venuesByMarkerId, selectedRemoteMarkerId]);
 
   // Determine coordinates from explicit params or LocationContext prefetch.
   // Avoid a second geolocation flow here, which can duplicate nearby requests.
@@ -393,6 +410,24 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     void handleSelectOsm(venue);
   }, [venuesByMarkerId]);
 
+  const handleRemoteMarkerSelect = useCallback((markerId: string) => {
+    setSelectedRemoteMarkerId(markerId);
+  }, []);
+
+  const handleRemoteMarkerConfirm = useCallback((markerId: string) => {
+    const venue = venuesByMarkerId.get(markerId);
+    if (!venue) return;
+
+    setSelectedRemoteMarkerId(markerId);
+
+    if (venue.source === 'local') {
+      handleSelectLocal(venue);
+      return;
+    }
+
+    void handleSelectOsm(venue);
+  }, [venuesByMarkerId]);
+
   const handleCreateCustom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customName.trim() || customLat == null || customLng == null) return;
@@ -493,24 +528,19 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               </span>
             )}
           </div>
-            {coords && nearbyMapMarkers.length > 0 ? (
+          {coords && nearbyMapMarkers.length > 0 ? (
             <div className="h-48 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
               <MapView
                 center={[coords.lat, coords.lon]}
                 zoom={15}
-                  markers={nearbyMapMarkers}
-                  selectedMarkerId={selectedNearbyMarkerId ?? undefined}
-                  onMarkerSelect={handleMapMarkerSelect}
-                  onMarkerClick={handleMapMarkerConfirm}
+                markers={nearbyMapMarkers}
+                selectedMarkerId={selectedNearbyMarkerId ?? undefined}
+                onMarkerSelect={handleMapMarkerSelect}
+                onMarkerClick={handleMapMarkerConfirm}
                 className="h-48 w-full"
               />
             </div>
           ) : null}
-            {coords && results.length > 0 && (
-              <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                Tip: click a pin to highlight it, then use the popup to select the venue.
-              </p>
-            )}
         </div>
       )}
 
@@ -580,6 +610,10 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               viewCenter={remoteMapCenter}
               zoom={13}
               onChange={(lat, lng) => setRemoteCoords({ lat, lon: lng })}
+              markers={remoteMapMarkers}
+              selectedMarkerId={selectedRemoteMarkerId ?? undefined}
+              onMarkerSelect={handleRemoteMarkerSelect}
+              onMarkerClick={handleRemoteMarkerConfirm}
               className="h-48 w-full"
             />
           </div>

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -19,7 +19,55 @@ interface Props {
   zoom?: number;
   /** Called whenever the user stops dragging the map */
   onChange: (lat: number, lng: number) => void;
+  markers?: Array<{
+    lat: number;
+    lng: number;
+    label: string;
+    id?: string;
+    variant?: 'default' | 'selected';
+  }>;
+  selectedMarkerId?: string;
+  onMarkerSelect?: (id: string) => void;
+  onMarkerClick?: (id: string) => void;
   className?: string;
+}
+
+const markerShadowUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
+
+function createMarkerIcon(color: string): L.Icon {
+  const svg = encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41" fill="none">
+      <path fill="${color}" stroke="#1f2937" stroke-width="1.25" d="M12.5 1C6.15 1 1 6.15 1 12.5c0 8.84 11.5 27.5 11.5 27.5S24 21.34 24 12.5C24 6.15 18.85 1 12.5 1Z"/>
+      <circle cx="12.5" cy="12.5" r="4.5" fill="white"/>
+    </svg>`
+  );
+
+  return L.icon({
+    iconUrl: `data:image/svg+xml;charset=UTF-8,${svg}`,
+    shadowUrl: markerShadowUrl,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41],
+  });
+}
+
+const defaultMarkerIcon = createMarkerIcon('#2563eb');
+const selectedMarkerIcon = createMarkerIcon('#dc2626');
+
+function getMarkerIcon(
+  marker: NonNullable<Props['markers']>[number],
+  selectedMarkerId?: string
+): L.Icon {
+  if (selectedMarkerId && marker.id === selectedMarkerId) {
+    return selectedMarkerIcon;
+  }
+
+  if (marker.variant === 'selected') {
+    return selectedMarkerIcon;
+  }
+
+  return defaultMarkerIcon;
 }
 
 function CenterTracker({
@@ -59,6 +107,10 @@ export default function VenueEditMap({
   viewCenter = null,
   zoom = 15,
   onChange,
+  markers = [],
+  selectedMarkerId,
+  onMarkerSelect,
+  onMarkerClick,
   className = '',
 }: Props) {
   return (
@@ -78,6 +130,33 @@ export default function VenueEditMap({
         <InitialView center={initialCenter} zoom={zoom} />
         <SyncedView center={viewCenter} />
         <CenterTracker onChange={onChange} />
+        {markers.map((marker, index) => (
+          <Marker
+            key={marker.id ?? index}
+            position={[marker.lat, marker.lng]}
+            icon={getMarkerIcon(marker, selectedMarkerId)}
+            eventHandlers={
+              marker.id && onMarkerSelect
+                ? {
+                    click: () => onMarkerSelect(marker.id!),
+                  }
+                : undefined
+            }
+          >
+            <Popup>
+              {onMarkerClick && marker.id ? (
+                <button
+                  onClick={() => onMarkerClick(marker.id!)}
+                  className="text-sm font-medium text-primary-600 hover:underline cursor-pointer bg-transparent border-none p-0"
+                >
+                  Select {marker.label}
+                </button>
+              ) : (
+                <span className="text-sm font-medium">{marker.label}</span>
+              )}
+            </Popup>
+          </Marker>
+        ))}
       </MapContainer>
 
       {/* Fixed crosshair overlay — sits above the map tiles */}
