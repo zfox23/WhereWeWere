@@ -1,3 +1,5 @@
+import type { TimestampReconciliationScanResult } from '../types';
+
 const API_BASE = '/api/v1';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -344,4 +346,11 @@ export const settings = {
     request<any>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
   updateProfile: (data: any) =>
     request<any>('/settings/profile', { method: 'PUT', body: JSON.stringify(data) }),
+  timestampReconciliationPreview: () =>
+    request<TimestampReconciliationScanResult>('/settings/timestamp-reconciliation'),
+  applyTimestampReconciliation: (updates: any[]) =>
+    request<{ updated: number }>('/settings/timestamp-reconciliation/apply', {
+      method: 'POST',
+      body: JSON.stringify({ updates }),
+    }),
 };

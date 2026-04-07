@@ -1,5 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { query } from '../db';
+import { pool, query } from '../db';
+import {
+  computeAppliedReconciliation,
+  getTimestampReconciliationSuggestions,
+  type TimestampReconciliationUpdate,
+} from '../services/timestampReconciliation';
 
 const router = Router();
 
@@ -50,6 +55,16 @@ router.get('/', async (_req: Request, res: Response) => {
   }
 });
 
+router.get('/timestamp-reconciliation', async (_req: Request, res: Response) => {
+  try {
+    const result = await getTimestampReconciliationSuggestions(USER_ID);
+    res.json(result);
+  } catch (err) {
+    console.error('Error scanning timestamp reconciliation suggestions:', err);
+    res.status(500).json({ error: 'Failed to scan timestamp reconciliation suggestions' });
+  }
+});
+
 // PUT / - update integration settings
 router.put('/', async (req: Request, res: Response) => {
   try {
@@ -97,6 +112,65 @@ router.put('/', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error updating settings:', err);
     res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+router.post('/timestamp-reconciliation/apply', async (req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const updates = Array.isArray(req.body?.updates) ? req.body.updates as TimestampReconciliationUpdate[] : [];
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'updates must contain at least one item' });
+    }
+
+    await client.query('BEGIN');
+
+    let updated = 0;
+
+    for (const update of updates) {
+      if (!update?.id || (update.type !== 'venue' && update.type !== 'mood') || !update.suggested_timezone) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Each update must include id, type, and suggested_timezone' });
+      }
+
+      const applied = await computeAppliedReconciliation(update);
+      if (!applied) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Unable to reconcile ${update.type} check-in ${update.id}` });
+      }
+
+      if (update.type === 'venue') {
+        await client.query(
+          `UPDATE checkins
+           SET checked_in_at = $2::timestamptz,
+               checkin_timezone = $3,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [update.id, applied.checkedInAt, applied.timeZone]
+        );
+      } else {
+        await client.query(
+          `UPDATE mood_checkins
+           SET checked_in_at = $2::timestamptz,
+               mood_timezone = $3,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [update.id, applied.checkedInAt, applied.timeZone]
+        );
+      }
+
+      updated += 1;
+    }
+
+    await client.query('COMMIT');
+    res.json({ updated });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error applying timestamp reconciliation updates:', err);
+    res.status(500).json({ error: 'Failed to apply timestamp reconciliation updates' });
+  } finally {
+    client.release();
   }
 });
 

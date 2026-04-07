@@ -24,7 +24,7 @@ export function createApp() {
   const app = express();
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
 
   // Container health endpoint for compose/orchestrators.
   app.get('/healthz', (_req, res) => {

@@ -123,6 +123,37 @@ export interface BackupImportResult {
   errors: string[];
 }
 
+export interface TimestampReconciliationSuggestion {
+  id: string;
+  type: 'venue' | 'mood';
+  detail_path: string;
+  original_timestamp: string;
+  original_timezone: string | null;
+  suggested_timezone: string;
+  reconciled_timestamp: string;
+  reason: string;
+}
+
+export interface TimestampReconciliationUninferableMoodCheckin {
+  id: string;
+  type: 'mood';
+  detail_path: string;
+  original_timestamp: string;
+  original_timezone: string | null;
+  reason: string;
+}
+
+export interface TimestampReconciliationScanResult {
+  suggestions: TimestampReconciliationSuggestion[];
+  uninferable_mood_checkins: TimestampReconciliationUninferableMoodCheckin[];
+}
+
+export interface TimestampReconciliationUpdate {
+  id: string;
+  type: 'venue' | 'mood';
+  suggested_timezone: string;
+}
+
 export interface MoodActivityGroup {
   id: string;
   name: string;
