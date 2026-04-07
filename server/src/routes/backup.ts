@@ -77,6 +77,7 @@ interface BackupCheckin {
   venue_id: string;
   notes: string | null;
   checked_in_at: string;
+  checkin_timezone: string | null;
   created_at: string;
   updated_at: string;
   swarm_id: string | null;
@@ -105,6 +106,7 @@ interface BackupMoodCheckin {
   mood: number;
   note: string | null;
   checked_in_at: string;
+  mood_timezone: string | null;
   created_at: string;
   updated_at: string;
   daylio_hash: string | null;
@@ -272,7 +274,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       ),
       query(
         `SELECT id, venue_id, notes,
-                checked_in_at, created_at, updated_at, swarm_id
+                checked_in_at, checkin_timezone, created_at, updated_at, swarm_id
          FROM checkins
          WHERE user_id = $1
          ORDER BY checked_in_at ASC`,
@@ -294,7 +296,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         [USER_ID]
       ),
       query(
-        `SELECT id, mood, note, checked_in_at, created_at, updated_at, daylio_hash
+        `SELECT id, mood, note, checked_in_at, mood_timezone, created_at, updated_at, daylio_hash
          FROM mood_checkins
          WHERE user_id = $1
          ORDER BY checked_in_at ASC`,
@@ -520,16 +522,16 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         `INSERT INTO checkins (
            id, user_id, venue_id,
            notes,
-           checked_in_at, created_at, updated_at,
+           checked_in_at, checkin_timezone, created_at, updated_at,
            swarm_id
          )
          VALUES (
            $1, $2, $3,
            $4,
-           COALESCE($5::timestamptz, NOW()),
-           COALESCE($6::timestamptz, NOW()),
+           COALESCE($5::timestamptz, NOW()), $6,
            COALESCE($7::timestamptz, NOW()),
-           $8
+           COALESCE($8::timestamptz, NOW()),
+           $9
          )
          ON CONFLICT (id) DO NOTHING`,
         [
@@ -538,6 +540,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           checkin.venue_id,
           checkin.notes || null,
           checkin.checked_in_at || null,
+          toStringOrNull(checkin.checkin_timezone),
           checkin.created_at || null,
           checkin.updated_at || null,
           checkin.swarm_id || null,
@@ -618,15 +621,15 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       const result = await client.query(
         `INSERT INTO mood_checkins (
            id, user_id, mood, note,
-           checked_in_at, created_at, updated_at,
+           checked_in_at, mood_timezone, created_at, updated_at,
            daylio_hash
          )
          VALUES (
            $1, $2, $3, $4,
-           COALESCE($5::timestamptz, NOW()),
-           COALESCE($6::timestamptz, NOW()),
+           COALESCE($5::timestamptz, NOW()), $6,
            COALESCE($7::timestamptz, NOW()),
-           $8
+           COALESCE($8::timestamptz, NOW()),
+           $9
          )
          ON CONFLICT (id) DO NOTHING`,
         [
@@ -635,6 +638,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           mood,
           moodCheckin.note || null,
           moodCheckin.checked_in_at || null,
+          toStringOrNull(moodCheckin.mood_timezone),
           moodCheckin.created_at || null,
           moodCheckin.updated_at || null,
           moodCheckin.daylio_hash || null,

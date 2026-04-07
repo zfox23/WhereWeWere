@@ -350,9 +350,6 @@ function BackupRestoreSection() {
         <Download size={20} className="text-gray-600 dark:text-gray-400" />
         Backup & Restore
       </h2>
-      <p className="text-sm text-gray-500 dark:text-gray-400">
-        Create a full versioned backup of your data, then restore from that backup file later.
-      </p>
 
       <div className="flex flex-wrap gap-2">
         <button
