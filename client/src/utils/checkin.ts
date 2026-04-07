@@ -68,7 +68,7 @@ export function formatTime(dateStr: string, timeZone?: string | null): string {
 
 export function formatMalojaDate(dateStr: string): string {
   const d = new Date(dateStr);
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+  return `${d.getUTCFullYear()}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
 
 export function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {

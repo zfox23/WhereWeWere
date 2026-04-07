@@ -149,4 +149,45 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// GET /by-date - fetch all scrobbles for a specific date
+router.get('/by-date', async (req: Request, res: Response) => {
+  try {
+    const dateStr = req.query.date as string | undefined;
+    if (!dateStr) {
+      return res.json([]);
+    }
+
+    // Get maloja_url from settings
+    const settingsResult = await query(
+      'SELECT maloja_url FROM user_settings WHERE user_id = $1',
+      [USER_ID]
+    );
+    const malojaUrl = settingsResult.rows[0]?.maloja_url;
+    if (!malojaUrl) return res.json([]);
+
+    // Fetch scrobbles from Maloja for the date
+    const baseUrl = malojaUrl.replace(/\/+$/, '');
+    const response = await fetch(`${baseUrl}/apis/mlj_1/scrobbles?in=${dateStr}`);
+    
+    if (!response.ok) {
+      console.error(`Failed to fetch Maloja scrobbles for ${dateStr}:`, response.statusText);
+      return res.json([]);
+    }
+
+    const data = await response.json() as { list?: MalojaScrobble[] };
+    const scrobbles = (data.list || []).map(s => ({
+      artists: s.track?.artists || [],
+      title: s.track?.title || '',
+      time: s.time,
+    }));
+
+    // Sort by time (most recent first) and return
+    scrobbles.sort((a, b) => b.time - a.time);
+    res.json(scrobbles);
+  } catch (err) {
+    console.error('Error fetching scrobbles by date:', err);
+    res.status(500).json({ error: 'Failed to fetch scrobbles' });
+  }
+});
+
 export const scrobblesRouter = router;

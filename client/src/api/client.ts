@@ -294,6 +294,8 @@ export const immich = {
 export const scrobbles = {
   forCheckins: (checkinIds: string[]) =>
     request<Record<string, any[]>>(`/scrobbles?checkin_ids=${checkinIds.join(',')}`),
+  forDate: (date: string) =>
+    request<any[]>(`/scrobbles/by-date?date=${encodeURIComponent(date)}`),
 };
 
 // Mood Checkins
