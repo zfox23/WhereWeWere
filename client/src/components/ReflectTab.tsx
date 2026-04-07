@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { CalendarDays, History, Loader2, MapPin, SmilePlus } from 'lucide-react';
 import { settings, stats } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
@@ -64,8 +64,6 @@ function OnThisDaySection({
   data: ReflectionYear[];
   moodIconPack: UserSettings['mood_icon_pack'];
 }) {
-  const navigate = useNavigate();
-
   if (data.length === 0) {
     return (
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
@@ -81,7 +79,7 @@ function OnThisDaySection({
   function handleYearClick(items: ReflectionItem[]) {
     if (items.length === 0) return;
     const date = items[0].checked_in_at.slice(0, 10);
-    navigate(`/?from=${date}&to=${date}`);
+    window.open(`/?from=${date}&to=${date}`, '_blank', 'noopener,noreferrer');
   }
 
   return (
@@ -112,6 +110,9 @@ function OnThisDaySection({
                 const detailHref = item.type === 'location'
                   ? `/venues/${item.venue_id}`
                   : `/mood-checkins/${item.id}`;
+                const timeHref = item.type === 'location'
+                  ? `/checkins/${item.id}`
+                  : `/mood-checkins/${item.id}`;
                 const title = item.type === 'location'
                   ? item.venue_name
                   : item.mood && item.mood >= 1 && item.mood <= 5
@@ -121,18 +122,13 @@ function OnThisDaySection({
 
                 return (
                   <div key={`${item.type}-${item.id}`} className="text-xs space-y-0">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-                      <Link to={detailHref} className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-                        {formatReflectionTime(item.checked_in_at, timeZone)}
-                      </Link>
-                    </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {item.type === 'mood' && item.mood ? (
                         <span className={`font-semibold ${MOOD_COLORS[item.mood] || 'text-gray-700 dark:text-gray-300'}`}>
                           {title}
                         </span>
                       ) : null}
-                      <Link to={detailHref} className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
+                      <Link to={detailHref} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
                         {item.type === 'location' ? title : ''}
                       </Link>
                       {item.type === 'location' && (item.venue_category || item.city) ? (
@@ -147,6 +143,11 @@ function OnThisDaySection({
                         {`"${item.note}"`}
                       </p>
                     ) : null}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                      <Link to={timeHref} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
+                        {formatReflectionTime(item.checked_in_at, timeZone)}
+                      </Link>
+                    </div>
                   </div>
                 );
                 })}
@@ -159,7 +160,6 @@ function OnThisDaySection({
 }
 
 export function ReflectTab() {
-  const navigate = useNavigate();
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [locationHeatmap, setLocationHeatmap] = useState<HeatmapDay[]>([]);
   const [moodHeatmap, setMoodHeatmap] = useState<MoodHeatmapPoint[]>([]);
@@ -296,7 +296,7 @@ export function ReflectTab() {
               year={selectedYear}
               showTitleIcon={true}
               showTitleYear={false}
-              onDayClick={(date) => navigate(`/?from=${date}&to=${date}`)}
+              onDayClick={(date) => window.open(`/?from=${date}&to=${date}`, '_blank', 'noopener,noreferrer')}
             />
             {locationLoading && (
               <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">

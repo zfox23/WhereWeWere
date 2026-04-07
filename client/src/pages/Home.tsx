@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
@@ -82,6 +82,7 @@ function ExpandableFAB() {
           >
             <Smile size={18} className="text-green-500" />
             Mood
+            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">M</kbd>
           </Link>
           <Link
             to="/check-in"
@@ -90,6 +91,7 @@ function ExpandableFAB() {
           >
             <MapPin size={18} className="text-primary-500" />
             Location
+            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">L</kbd>
           </Link>
         </div>
       )}
@@ -110,6 +112,7 @@ function ExpandableFAB() {
 
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [includeLocation, setIncludeLocation] = useState(true);
   const [includeMood, setIncludeMood] = useState(true);
@@ -258,6 +261,25 @@ export default function Home() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offsetRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isEditable =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable;
+      if (isEditable || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'l' || e.key === 'L') {
+        navigate('/check-in');
+      } else if (e.key === 'm' || e.key === 'M') {
+        navigate('/mood-check-in');
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [navigate]);
 
   const setFilter = useCallback((key: string, value: string) => {
     setSearchParams((prev) => {
