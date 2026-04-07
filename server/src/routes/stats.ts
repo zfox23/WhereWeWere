@@ -670,8 +670,12 @@ router.get('/insights', async (req: Request, res: Response) => {
 // GET /reflections?user_id= - check-ins from this date in past years
 router.get('/reflections', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, target_date } = req.query;
     if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const targetDate = typeof target_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(target_date)
+      ? target_date
+      : new Date().toISOString().slice(0, 10);
 
     // Find location and mood check-ins that happened on this month/day in prior years.
     const result = await query(
@@ -691,7 +695,7 @@ router.get('/reflections', async (req: Request, res: Response) => {
            c.checkin_timezone AS venue_timezone,
            EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::int AS reflection_year,
            (
-             EXTRACT(YEAR FROM NOW() AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::int
+             EXTRACT(YEAR FROM $2::date)::int
              - EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::int
            )::int AS years_ago,
            NULL::smallint AS mood,
@@ -701,9 +705,9 @@ router.get('/reflections', async (req: Request, res: Response) => {
          JOIN venues v ON c.venue_id = v.id
          LEFT JOIN venue_categories vc ON v.category_id = vc.id
          WHERE c.user_id = $1
-           AND TO_CHAR(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'), 'MM-DD') = TO_CHAR(NOW() AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'), 'MM-DD')
+             AND TO_CHAR(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'), 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
            AND EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))
-               < EXTRACT(YEAR FROM NOW() AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))
+               < EXTRACT(YEAR FROM $2::date)
        )
        UNION ALL
        (
@@ -722,7 +726,7 @@ router.get('/reflections', async (req: Request, res: Response) => {
            NULL::text AS venue_timezone,
            EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::int AS reflection_year,
            (
-             EXTRACT(YEAR FROM NOW() AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::int
+             EXTRACT(YEAR FROM $2::date)::int
              - EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::int
            )::int AS years_ago,
            mc.mood,
@@ -744,12 +748,12 @@ router.get('/reflections', async (req: Request, res: Response) => {
            ) AS activities
          FROM mood_checkins mc
          WHERE mc.user_id = $1
-           AND TO_CHAR(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'), 'MM-DD') = TO_CHAR(NOW() AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'), 'MM-DD')
+           AND TO_CHAR(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'), 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
            AND EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))
-               < EXTRACT(YEAR FROM NOW() AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))
+               < EXTRACT(YEAR FROM $2::date)
        )
        ORDER BY checked_in_at DESC`,
-      [user_id]
+      [user_id, targetDate]
     );
 
     // Group by year

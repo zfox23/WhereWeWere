@@ -129,8 +129,13 @@ export const stats = {
   },
   insights: (userId: string) =>
     request<any[]>(`/stats/insights?user_id=${userId}`),
-  reflections: (userId: string) =>
-    request<any[]>(`/stats/reflections?user_id=${userId}`),
+  reflections: (userId: string, targetDate?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (targetDate) {
+      qp.set('target_date', targetDate);
+    }
+    return request<any[]>(`/stats/reflections?${qp.toString()}`);
+  },
   additionalStats: (userId: string) =>
     request<any>(`/stats/additional-stats?user_id=${userId}`),
   moodDaily: (userId: string, from?: string, to?: string) => {

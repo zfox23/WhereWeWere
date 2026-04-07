@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarDays, History, Loader2, MapPin, SmilePlus } from 'lucide-react';
-import { settings, stats } from '../api/client';
+import { immich as immichApi, settings, stats } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
 import { MoodYearInPixels } from './MoodStats';
+import { PhotoStrip } from './PhotoStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
 import { resolveActivityIcon } from '../utils/icons';
-import type { HeatmapDay, UserSettings } from '../types';
+import type { HeatmapDay, ImmichAsset, UserSettings } from '../types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
+const IMMICH_CHECKIN_BATCH_SIZE = 30;
 
 type ReflectionItem = {
   type: 'location' | 'mood';
@@ -38,6 +40,14 @@ type MoodHeatmapPoint = {
   avg_mood: number;
 };
 
+function getLocalDateIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function ReflectLoadingCard({ label }: { label: string }) {
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 min-h-[220px] flex items-center justify-center gap-3 text-sm text-gray-500 dark:text-gray-400">
@@ -57,12 +67,26 @@ function formatReflectionTime(dateStr: string, timeZone?: string | null) {
   }).format(new Date(dateStr));
 }
 
+function buildImmichDayUrl(immichUrl: string, date: string) {
+  const dayStart = new Date(`${date}T00:00:00.000Z`);
+  const dayEnd = new Date(`${date}T23:59:59.999Z`);
+  const query = JSON.stringify({
+    takenAfter: dayStart.toISOString(),
+    takenBefore: dayEnd.toISOString(),
+  });
+  return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
+}
+
 function OnThisDaySection({
   data,
   moodIconPack,
+  immichUrl,
+  photosByYear,
 }: {
   data: ReflectionYear[];
   moodIconPack: UserSettings['mood_icon_pack'];
+  immichUrl: string | null;
+  photosByYear: Record<number, ImmichAsset[]>;
 }) {
   if (data.length === 0) {
     return (
@@ -89,7 +113,15 @@ function OnThisDaySection({
         On This Day
       </h3>
       <div className="space-y-4">
-        {data.map((year) => (
+        {data.map((year) => {
+          const sortedItems = [...year.items].sort(
+            (a, b) =>
+              new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
+          );
+          const yearDate = sortedItems[0]?.checked_in_at.slice(0, 10) || null;
+          const yearAssets = photosByYear[year.year] || [];
+
+          return (
           <div key={year.year}>
             <div className="flex items-center gap-2 mb-2">
               <button
@@ -101,12 +133,7 @@ function OnThisDaySection({
               <span className="text-xs text-gray-400">{year.year}</span>
             </div>
             <div className="space-y-3 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
-              {[...year.items]
-                .sort(
-                  (a, b) =>
-                    new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
-                )
-                .map((item) => {
+              {sortedItems.map((item) => {
                 const detailHref = item.type === 'location'
                   ? `/venues/${item.venue_id}`
                   : `/mood-checkins/${item.id}`;
@@ -151,9 +178,18 @@ function OnThisDaySection({
                   </div>
                 );
                 })}
+
+              {immichUrl && yearDate && yearAssets.length > 0 && (
+                <PhotoStrip
+                  assets={yearAssets}
+                  moreUrl={buildImmichDayUrl(immichUrl, yearDate)}
+                  immichUrl={immichUrl}
+                />
+              )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -164,6 +200,8 @@ export function ReflectTab() {
   const [locationHeatmap, setLocationHeatmap] = useState<HeatmapDay[]>([]);
   const [moodHeatmap, setMoodHeatmap] = useState<MoodHeatmapPoint[]>([]);
   const [reflections, setReflections] = useState<ReflectionYear[]>([]);
+  const [immichUrl, setImmichUrl] = useState<string | null>(null);
+  const [photosByYear, setPhotosByYear] = useState<Record<number, ImmichAsset[]>>({});
   const [moodIconPack, setMoodIconPack] = useState<UserSettings['mood_icon_pack']>('emoji');
   const [reflectionsLoading, setReflectionsLoading] = useState(true);
   const [locationLoading, setLocationLoading] = useState(true);
@@ -177,10 +215,15 @@ export function ReflectTab() {
     let cancelled = false;
     setReflectionsLoading(true);
 
-    Promise.all([stats.reflections(USER_ID), settings.get()])
+    Promise.all([stats.reflections(USER_ID, getLocalDateIso()), settings.get()])
       .then(([data, userSettings]) => {
         if (cancelled) return;
         setReflections(data);
+        if (userSettings?.immich_url) {
+          setImmichUrl(userSettings.immich_url.replace(/\/+$/, ''));
+        } else {
+          setImmichUrl(null);
+        }
         if (userSettings?.mood_icon_pack) {
           setMoodIconPack(userSettings.mood_icon_pack);
         }
@@ -201,6 +244,76 @@ export function ReflectTab() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!immichUrl || reflections.length === 0) {
+      setPhotosByYear({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const yearToCheckinIds = new Map<number, string[]>();
+    const allCheckinIds: string[] = [];
+
+    for (const year of reflections) {
+      const ids = year.items.map((item) => item.id);
+      yearToCheckinIds.set(year.year, ids);
+      allCheckinIds.push(...ids);
+    }
+
+    if (allCheckinIds.length === 0) {
+      setPhotosByYear({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const batches: string[][] = [];
+    for (let i = 0; i < allCheckinIds.length; i += IMMICH_CHECKIN_BATCH_SIZE) {
+      batches.push(allCheckinIds.slice(i, i + IMMICH_CHECKIN_BATCH_SIZE));
+    }
+
+    Promise.all(batches.map((batch) => immichApi.photosForCheckins(batch)))
+      .then((batchMaps) => {
+        if (cancelled) return;
+
+        const photoMap: Record<string, ImmichAsset[]> = {};
+        for (const batchMap of batchMaps) {
+          for (const [checkinId, assets] of Object.entries(batchMap)) {
+            photoMap[checkinId] = assets;
+          }
+        }
+
+        const byYear: Record<number, ImmichAsset[]> = {};
+
+        for (const [year, ids] of yearToCheckinIds.entries()) {
+          const deduped = new Map<string, ImmichAsset>();
+          for (const checkinId of ids) {
+            for (const asset of photoMap[checkinId] || []) {
+              if (!deduped.has(asset.id)) {
+                deduped.set(asset.id, asset);
+              }
+            }
+          }
+          byYear[year] = Array.from(deduped.values());
+        }
+
+        setPhotosByYear(byYear);
+      })
+      .catch((err) => {
+        console.error('Failed to load reflection photos:', err);
+        if (!cancelled) {
+          setPhotosByYear({});
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [immichUrl, reflections]);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,7 +376,12 @@ export function ReflectTab() {
       {reflectionsLoading ? (
         <ReflectLoadingCard label="Loading reflections" />
       ) : (
-        <OnThisDaySection data={reflections} moodIconPack={moodIconPack} />
+        <OnThisDaySection
+          data={reflections}
+          moodIconPack={moodIconPack}
+          immichUrl={immichUrl}
+          photosByYear={photosByYear}
+        />
       )}
 
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 space-y-4">
