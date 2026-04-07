@@ -21,6 +21,23 @@ Set these values in your `.env` file before running `docker compose up -d`:
 
 If either key is missing, the server will fail fast on startup and the client may show a `502` while proxying `/api`.
 
+## Testing
+
+Baseline automated testing is now set up for both workspaces.
+
+- Run all tests: `npm run test`
+- Run client tests only: `npm run test --workspace=client`
+- Run server tests only: `npm run test --workspace=server`
+- Run backend integration tests: `npm run test:integration`
+- Run coverage for both workspaces: `npm run test:coverage`
+
+Integration tests require a dedicated database whose name includes `test`.
+By default, the server integration command uses:
+
+- `postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test`
+
+Testing standards and implementation roadmap are documented in `docs/testing-strategy.md`.
+
 ## Motivation
 
 I've been using Foursquare Swarm, Last.fm, Google Location History, Google Photos, and other similar services since ~2010, and it's starting to scare me how much data third parties have on me. That fear remains even though I've allowed those parties to have that data.

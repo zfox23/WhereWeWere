@@ -7,7 +7,12 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
-    "backfill:checkin-timezone": "tsx src/db/backfill-checkin-timezone.ts"
+    "backfill:checkin-timezone": "tsx src/db/backfill-checkin-timezone.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "DATABASE_URL=${DATABASE_URL:-postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test} vitest run -c vitest.integration.config.ts",
+    "test:integration:watch": "DATABASE_URL=${DATABASE_URL:-postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test} vitest -c vitest.integration.config.ts"
   },
   "dependencies": {
     "@types/web-push": "^3.6.4",
@@ -28,9 +33,13 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.12.0",
     "@types/pg": "^8.11.11",
+    "@types/supertest": "^6.0.2",
     "@types/unzipper": "^0.10.11",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^2.1.8",
+    "supertest": "^7.1.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
 }
