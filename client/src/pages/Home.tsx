@@ -257,6 +257,7 @@ export default function Home() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offsetRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const setFilter = useCallback((key: string, value: string) => {
     setSearchParams((prev) => {
@@ -530,11 +531,16 @@ export default function Home() {
       {/* Search bar */}
       <div className="flex gap-2">
         <div className="relative flex-1">
-          <Search
-            size={18}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-          />
+          <button
+            type="button"
+            onClick={() => searchInputRef.current?.focus()}
+            className="absolute left-3 top-1/2 z-10 -translate-y-1/2 text-primary-400 transition-colors hover:text-primary-500"
+            aria-label="Focus search"
+          >
+            <Search size={18} />
+          </button>
           <input
+            ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setFilter('q', e.target.value)}
