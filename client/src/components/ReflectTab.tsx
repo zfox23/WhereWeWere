@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, History, Loader2, MapPin, SmilePlus } from 'lucide-react';
+import { CalendarDays, History, Loader2, MapPin, SmilePlus, Compass } from 'lucide-react';
 import { immich as immichApi, settings, stats, scrobbles } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
 import { MoodYearInPixels } from './MoodStats';
@@ -84,6 +84,10 @@ function buildImmichDayUrl(immichUrl: string, date: string) {
   return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
 }
 
+function buildDawarichDayUrl(dawarichUrl: string, date: string) {
+  return `${dawarichUrl}/map/v2?end_at=${date}T23%3A59%3A59-04%3A00&start_at=${date}T00%3A00%3A00-04%3A00`;
+}
+
 function OnThisDaySection({
   data,
   moodIconPack,
@@ -91,6 +95,7 @@ function OnThisDaySection({
   photosByYear,
   malojaUrl,
   scrobblesByDate,
+  dawarichUrl,
 }: {
   data: ReflectionYear[];
   moodIconPack: UserSettings['mood_icon_pack'];
@@ -98,6 +103,7 @@ function OnThisDaySection({
   photosByYear: Record<number, ImmichAsset[]>;
   malojaUrl: string | null;
   scrobblesByDate: Record<string, Scrobble[]>;
+  dawarichUrl: string | null;
 }) {
   if (data.length === 0) {
     return (
@@ -142,6 +148,20 @@ function OnThisDaySection({
                 {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago
               </button>
               <span className="text-xs text-gray-400">{year.year}</span>
+              {dawarichUrl && (
+                <button
+                  onClick={() => {
+                    const date = year.items[0]?.checked_in_at.slice(0, 10);
+                    if (date) {
+                      window.open(buildDawarichDayUrl(dawarichUrl, date), '_blank', 'noopener,noreferrer');
+                    }
+                  }}
+                  className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                  title="Open in Dawarich"
+                >
+                  <Compass size={14} />
+                </button>
+              )}
             </div>
             <div className="space-y-3 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
               {sortedItems.map((item) => {
@@ -221,6 +241,7 @@ export function ReflectTab() {
   const [reflections, setReflections] = useState<ReflectionYear[]>([]);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
+  const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [photosByYear, setPhotosByYear] = useState<Record<number, ImmichAsset[]>>({});
   const [scrobblesByDate, setScrobblesByDate] = useState<Record<string, Scrobble[]>>({});
   const [moodIconPack, setMoodIconPack] = useState<UserSettings['mood_icon_pack']>('emoji');
@@ -249,6 +270,11 @@ export function ReflectTab() {
           setMalojaUrl(userSettings.maloja_url.replace(/\/+$/, ''));
         } else {
           setMalojaUrl(null);
+        }
+        if (userSettings?.dawarich_url) {
+          setDawarichUrl(userSettings.dawarich_url.replace(/\/+$/, ''));
+        } else {
+          setDawarichUrl(null);
         }
         if (userSettings?.mood_icon_pack) {
           setMoodIconPack(userSettings.mood_icon_pack);
@@ -474,6 +500,7 @@ export function ReflectTab() {
           photosByYear={photosByYear}
           malojaUrl={malojaUrl}
           scrobblesByDate={scrobblesByDate}
+          dawarichUrl={dawarichUrl}
         />
       )}
 
