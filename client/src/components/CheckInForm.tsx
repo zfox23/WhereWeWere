@@ -11,6 +11,21 @@ function toLocalDatetimeString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function getLocalTimeZoneAbbreviation(localDateTime: string): string {
+  const date = new Date(localDateTime);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const timeZonePart = new Intl.DateTimeFormat('en-US', {
+    timeZoneName: 'short',
+  })
+    .formatToParts(date)
+    .find((part) => part.type === 'timeZoneName');
+
+  return timeZonePart?.value ?? '';
+}
+
 interface CheckInFormProps {
   venueId?: string;
   venueName?: string;
@@ -47,6 +62,7 @@ export default function CheckInForm({
   const [venueCheckinCount, setVenueCheckinCount] = useState<number | null>(null);
   const [venueCategoryName, setVenueCategoryName] = useState<string | null>(null);
   const [venueAddress, setVenueAddress] = useState<string | null>(null);
+  const timeZoneAbbreviation = getLocalTimeZoneAbbreviation(checkedInAt);
 
   const isEditMode = !!editCheckinId;
 
@@ -218,12 +234,19 @@ export default function CheckInForm({
 
       {/* Time */}
       <div>
-        <label
-          htmlFor="checkin-time"
-          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
-        >
-          Time
-        </label>
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <label
+            htmlFor="checkin-time"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            Time
+          </label>
+          {timeZoneAbbreviation && (
+            <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+              {timeZoneAbbreviation}
+            </span>
+          )}
+        </div>
         <input
           type="datetime-local"
           id="checkin-time"
@@ -245,6 +268,12 @@ export default function CheckInForm({
           id="checkin-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.shiftKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
           placeholder="What are you up to?"
           rows={3}
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
@@ -273,6 +302,9 @@ export default function CheckInForm({
           <>
             <MapPin size={16} />
             {isEditMode ? 'Update Check In' : 'Check In'}
+            <span className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
+              Shift+Enter
+            </span>
           </>
         )}
       </button>
