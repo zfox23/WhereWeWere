@@ -47,50 +47,6 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* Main */}
       <main className="max-w-5xl mx-auto px-4 py-6 flex-1 w-full">{children}</main>
 
-      {/* Footer — hidden on homepage */}
-      {!isHomePage && (
-        <footer className="bg-white/50 dark:bg-gray-900/50 backdrop-blur-md border-t border-white/40 dark:border-gray-700/40 mt-8">
-          <div className="max-w-5xl mx-auto px-4 py-10">
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-8">
-              <div>
-                <Link to="/" className="text-lg font-bold bg-gradient-to-r from-primary-600 to-amber-500 bg-clip-text text-transparent flex items-center gap-2">
-                  <MapPin size={20} className="text-primary-600" />
-                  WhereWeWere
-                </Link>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 max-w-xs">
-                  Rediscover who you are.
-                </p>
-              </div>
-              <div className="flex gap-12">
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Navigate</h4>
-                  <ul className="space-y-2">
-                    <li>
-                      <Link to="/" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
-                        <Home size={14} />
-                        Home
-                      </Link>
-                    </li>
-                    <li>
-                      <Link to="/profile" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
-                        <User size={14} />
-                        Profile
-                      </Link>
-                    </li>
-                    <li>
-                      <Link to="/settings" className="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-600 transition-colors flex items-center gap-1.5">
-                        <Settings size={14} />
-                        Settings
-                      </Link>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </footer>
-      )}
-
       {/* Bottom nav (mobile) — glass */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-t border-white/40 dark:border-gray-700/40 z-50">
         <div className="flex justify-around">

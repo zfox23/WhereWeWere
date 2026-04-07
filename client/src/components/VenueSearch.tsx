@@ -3,6 +3,7 @@ import { Search, MapPin, Plus, Loader2, Navigation } from 'lucide-react';
 import { venues } from '../api/client';
 import { useLocation } from '../contexts/LocationContext';
 import { haversineDistance } from '../utils/geo';
+import MapView from './MapView';
 import VenueEditMap from './VenueEditMap';
 import type { NearbyVenue, VenueCategory } from '../types';
 
@@ -71,6 +72,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [mapSearchLoading, setMapSearchLoading] = useState(false);
   const [mapSearchResults, setMapSearchResults] = useState<PlaceSearchResult[]>([]);
   const [categories, setCategories] = useState<VenueCategory[]>([]);
+  const [selectedNearbyMarkerId, setSelectedNearbyMarkerId] = useState<string | null>(null);
   const usedPrefetchRef = useRef(false);
 
   // Custom venue form state
@@ -102,6 +104,42 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     if (venue.osm_id) return `osm:${venue.osm_id}`;
     return `${venue.name}:${venue.latitude}:${venue.longitude}`;
   }, []);
+
+  const venuesByMarkerId = useMemo(() => {
+    const markerMap = new Map<string, NearbyVenue>();
+    results.forEach((venue) => {
+      markerMap.set(getVenueKey(venue), venue);
+    });
+    return markerMap;
+  }, [results, getVenueKey]);
+
+  const nearbyMapMarkers = useMemo(() => {
+    const venueMarkers = results.map((venue) => ({
+      lat: venue.latitude,
+      lng: venue.longitude,
+      label: venue.name,
+      id: getVenueKey(venue),
+      variant: selectedNearbyMarkerId === getVenueKey(venue) ? 'selected' as const : 'default' as const,
+    }));
+
+    if (!coords) return venueMarkers;
+
+    return [
+      {
+        lat: coords.lat,
+        lng: coords.lon,
+        label: 'Your current location',
+        variant: 'current' as const,
+      },
+      ...venueMarkers,
+    ];
+  }, [results, coords, getVenueKey, selectedNearbyMarkerId]);
+
+  useEffect(() => {
+    if (!selectedNearbyMarkerId) return;
+    if (venuesByMarkerId.has(selectedNearbyMarkerId)) return;
+    setSelectedNearbyMarkerId(null);
+  }, [venuesByMarkerId, selectedNearbyMarkerId]);
 
   // Determine coordinates from explicit params or LocationContext prefetch.
   // Avoid a second geolocation flow here, which can duplicate nearby requests.
@@ -337,6 +375,24 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     }
   };
 
+  const handleMapMarkerSelect = useCallback((markerId: string) => {
+    setSelectedNearbyMarkerId(markerId);
+  }, []);
+
+  const handleMapMarkerConfirm = useCallback((markerId: string) => {
+    const venue = venuesByMarkerId.get(markerId);
+    if (!venue) return;
+
+    setSelectedNearbyMarkerId(markerId);
+
+    if (venue.source === 'local') {
+      handleSelectLocal(venue);
+      return;
+    }
+
+    void handleSelectOsm(venue);
+  }, [venuesByMarkerId]);
+
   const handleCreateCustom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customName.trim() || customLat == null || customLng == null) return;
@@ -420,6 +476,43 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           </button>
         </div>
       </div>
+
+      {searchMode === 'nearby' && (
+        <div className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+              Near Me search center
+            </span>
+            {coords ? (
+              <span className="font-mono text-[11px] text-gray-500 dark:text-gray-400">
+                {coords.lat.toFixed(5)}, {coords.lon.toFixed(5)}
+              </span>
+            ) : (
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                {prefetched.loading ? 'Detecting location...' : 'Location unavailable'}
+              </span>
+            )}
+          </div>
+            {coords && nearbyMapMarkers.length > 0 ? (
+            <div className="h-48 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+              <MapView
+                center={[coords.lat, coords.lon]}
+                zoom={15}
+                  markers={nearbyMapMarkers}
+                  selectedMarkerId={selectedNearbyMarkerId ?? undefined}
+                  onMarkerSelect={handleMapMarkerSelect}
+                  onMarkerClick={handleMapMarkerConfirm}
+                className="h-48 w-full"
+              />
+            </div>
+          ) : null}
+            {coords && results.length > 0 && (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Tip: click a pin to highlight it, then use the popup to select the venue.
+              </p>
+            )}
+        </div>
+      )}
 
       {searchMode === 'remote' && effectiveCoords && (
         <div className="space-y-1.5 rounded-lg border border-gray-200 dark:border-gray-700 p-2.5">
