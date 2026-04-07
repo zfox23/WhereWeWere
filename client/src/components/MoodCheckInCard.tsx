@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import { Link } from 'react-router-dom';
-import { Pencil, ChevronDown, ChevronUp } from 'lucide-react';
-import { immich as immichApi } from '../api/client';
+import { Check, Pencil } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
 import type { TimelineItem, ImmichAsset, Scrobble } from '../types';
-import { formatDate, buildImmichTimeUrl } from '../utils/checkin';
-import { PhotoStrip } from './PhotoStrip';
 import { ScrobbleList } from './ScrobbleList';
+import { CardShell } from './checkin-card/CardShell';
+import { MarkdownNote } from './checkin-card/MarkdownNote';
+import { PhotoSection } from './checkin-card/PhotoSection';
+import { TimestampLink } from './checkin-card/TimestampLink';
+import { useResolvedPhotos } from './checkin-card/useResolvedPhotos';
 
 interface MoodCheckInCardProps {
   item: TimelineItem;
@@ -27,50 +28,13 @@ function renderIcon(iconName?: string): React.ReactNode {
 }
 
 export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl }: MoodCheckInCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [isLong, setIsLong] = useState(false);
-  const [selfFetchedAssets, setSelfFetchedAssets] = useState<ImmichAsset[] | null>(null);
-  const noteRef = useRef<HTMLDivElement | null>(null);
+  const { pathname } = useLocation();
   const mood = item.mood || 3;
   const activities = item.activities || [];
-  const note = item.notes;
-
-  useEffect(() => {
-    if (photos !== undefined) return;
-    if (!immichUrl) return;
-    let cancelled = false;
-    immichApi.photos(item.id).then((data) => {
-      if (!cancelled) setSelfFetchedAssets(data.assets);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [item.id, immichUrl, photos]);
-
-  useEffect(() => {
-    if (!note || expanded || !noteRef.current) {
-      if (!note) setIsLong(false);
-      return;
-    }
-
-    const el = noteRef.current;
-    const checkOverflow = () => {
-      setIsLong(el.scrollHeight > el.clientHeight + 1);
-    };
-
-    checkOverflow();
-
-    const observer = new ResizeObserver(checkOverflow);
-    observer.observe(el);
-
-    return () => observer.disconnect();
-  }, [note, expanded]);
-
-  const resolvedAssets = photos !== undefined ? photos : selfFetchedAssets;
-  const hasPhotos = resolvedAssets && resolvedAssets.length > 0;
-  const showInTime = immichUrl && resolvedAssets === null;
-  const showImmichRow = hasPhotos || showInTime;
+  const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos);
 
   return (
-    <div className={`bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 hover:shadow-md transition-all`}>
+    <CardShell>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           {/* Mood header */}
@@ -99,67 +63,24 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, p
           )}
 
           {/* Note (truncated to 3 lines) */}
-          {note && (
-            <div className="mt-2">
-              <div
-                ref={noteRef}
-                className={`prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-p:leading-relaxed prose-headings:my-1 prose-ul:my-0.5 prose-ol:my-0.5 text-gray-700 dark:text-gray-300 ${!expanded ? 'line-clamp-3' : ''}`}
-              >
-                <ReactMarkdown components={{ a: ({ ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>{note}</ReactMarkdown>
-              </div>
-              {isLong && (
-                <button
-                  onClick={() => setExpanded(!expanded)}
-                  className="flex items-center gap-0.5 mt-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-                >
-                  {expanded ? (
-                    <>Show less <ChevronUp size={12} /></>
-                  ) : (
-                    <>Read more <ChevronDown size={12} /></>
-                  )}
-                </button>
-              )}
-            </div>
-          )}
+          <MarkdownNote note={item.notes} collapsible />
 
-          {/* Immich photo thumbnails */}
-          {immichUrl && hasPhotos && (
-            <PhotoStrip
-              assets={resolvedAssets!}
-              moreUrl={buildImmichTimeUrl(immichUrl, item.checked_in_at)}
-              immichUrl={immichUrl}
-            />
-          )}
-
-          {/* Immich links */}
-          {showImmichRow && showInTime && (
-            <div className="flex items-center gap-2 mt-2 text-indigo-600 dark:text-indigo-300">
-                <a
-                  href={buildImmichTimeUrl(immichUrl!, item.checked_in_at)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs font-medium hover:text-indigo-800 dark:hover:text-indigo-500"
-                >
-                  in time
-                </a>
-            </div>
-          )}
+          <PhotoSection
+            immichUrl={immichUrl}
+            assets={resolvedAssets}
+            checkedInAt={item.checked_in_at}
+          />
 
           {/* Scrobbles */}
           {scrobbles && <ScrobbleList scrobbles={scrobbles} checkedInAt={item.checked_in_at} malojaUrl={malojaUrl} />}
 
           {/* Timestamp */}
-          <div className="flex items-center gap-1.5 flex-wrap mt-2">
-            <Link
-              to={`/mood-checkins/${item.id}`}
-              className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-              title={item.checked_in_at}
-            >
-              <time dateTime={item.checked_in_at}>
-                {formatDate(item.checked_in_at, item.mood_timezone)}
-              </time>
-            </Link>
-          </div>
+          <TimestampLink
+            to={`/mood-checkins/${item.id}`}
+            checkedInAt={item.checked_in_at}
+            timezone={item.mood_timezone}
+            mode={pathname === '/' ? 'time' : 'full'}
+          />
         </div>
 
         {/* Edit button */}
@@ -173,6 +94,6 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, p
           </Link>
         </div>
       </div>
-    </div>
+    </CardShell>
   );
 }

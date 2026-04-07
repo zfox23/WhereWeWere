@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { Camera, Calendar, Map, MapPin, Pencil } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import { MapPin, Clock, Pencil, Camera, Link2, Map, Calendar } from 'lucide-react';
-import { immich as immichApi } from '../api/client';
 import type { CheckIn, Scrobble, ImmichAsset } from '../types';
-import { formatDate, buildImmichTimeUrl } from '../utils/checkin';
-import { PhotoStrip } from './PhotoStrip';
 import { ScrobbleList } from './ScrobbleList';
+import { CardShell } from './checkin-card/CardShell';
+import { MarkdownNote } from './checkin-card/MarkdownNote';
+import { PhotoSection } from './checkin-card/PhotoSection';
+import { TimestampLink } from './checkin-card/TimestampLink';
+import { useResolvedPhotos } from './checkin-card/useResolvedPhotos';
 
 interface CheckInCardProps {
   checkin: CheckIn;
@@ -28,31 +28,14 @@ function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): stri
 }
 
 export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl, dawarichUrl }: CheckInCardProps) {
-  // Self-fetch photos as fallback when parent doesn't manage them (photos === undefined)
-  const [selfFetchedAssets, setSelfFetchedAssets] = useState<ImmichAsset[] | null>(null);
   const { pathname } = useLocation();
 
+  const isHomePage = pathname === '/';
   const showOnThisDay = pathname.startsWith("/venues");
-
-  useEffect(() => {
-    if (photos !== undefined) return; // Parent manages photos
-    if (!immichUrl) return;
-    let cancelled = false;
-    immichApi.photos(checkin.id).then((data) => {
-      if (!cancelled) setSelfFetchedAssets(data.assets);
-    }).catch(() => { });
-    return () => { cancelled = true; };
-  }, [checkin.id, immichUrl, photos]);
-
-  const resolvedAssets = photos !== undefined ? photos : selfFetchedAssets;
-
-  const hasPhotos = resolvedAssets && resolvedAssets.length > 0;
-  // Show "in time" only while still loading (null) as a fallback link
-  const showInTime = immichUrl && resolvedAssets === null;
-  const showImmichRow = showInTime;
+  const resolvedAssets = useResolvedPhotos(checkin.id, immichUrl, photos);
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 hover:shadow-md transition-all">
+    <CardShell>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           {/* Venue name */}
@@ -85,53 +68,25 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
           )}
 
           {/* Notes */}
-          {checkin.notes && (
-            <div className="mt-2 prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-p:leading-relaxed prose-headings:my-1 prose-ul:my-0.5 prose-ol:my-0.5 text-gray-700 dark:text-gray-300">
-              <ReactMarkdown components={{ a: ({ ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>{checkin.notes}</ReactMarkdown>
-            </div>
-          )}
+          <MarkdownNote note={checkin.notes} />
 
-          {/* Immich photo thumbnails */}
-          {immichUrl && hasPhotos && (
-            <PhotoStrip
-              assets={resolvedAssets!}
-              moreUrl={buildImmichTimeUrl(immichUrl, checkin.checked_in_at)}
-              immichUrl={immichUrl}
-            />
-          )}
-
-          {/* Immich links */}
-          {showImmichRow && (
-            <div className="flex items-center gap-2 mt-2 text-indigo-600 dark:text-indigo-300">
-              <Camera size={12} />
-              {showInTime && (
-                <a
-                  href={buildImmichTimeUrl(immichUrl!, checkin.checked_in_at)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs font-medium hover:text-indigo-800 dark:hover:text-indigo-500"
-                >
-                  in time
-                </a>
-              )}
-            </div>
-          )}
+          <PhotoSection
+            immichUrl={immichUrl}
+            assets={resolvedAssets}
+            checkedInAt={checkin.checked_in_at}
+            fallbackLinkContent={<Camera size={12} />}
+          />
 
           {/* Scrobbles */}
           {scrobbles && <ScrobbleList scrobbles={scrobbles} checkedInAt={checkin.checked_in_at} malojaUrl={malojaUrl} />}
 
           {/* Date/time */}
-          <div className="flex items-center gap-1.5 flex-wrap mt-2">
-            <Link
-              to={`/checkins/${checkin.id}`}
-              className="text-sm text-gray-500 dark:text-gray-300 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-              title={checkin.checked_in_at}
-            >
-              <time dateTime={checkin.checked_in_at}>
-                {formatDate(checkin.checked_in_at, checkin.venue_timezone)}
-              </time>
-            </Link>
-          </div>
+          <TimestampLink
+            to={`/checkins/${checkin.id}`}
+            checkedInAt={checkin.checked_in_at}
+            timezone={checkin.venue_timezone}
+            mode={isHomePage ? 'time' : 'full'}
+          />
         </div>
 
         {/* Action buttons */}
@@ -165,6 +120,6 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
           </Link>
         </div>
       </div>
-    </div>
+    </CardShell>
   );
 }

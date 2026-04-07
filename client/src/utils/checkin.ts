@@ -54,6 +54,18 @@ export function formatDate(dateStr: string, timeZone?: string | null): string {
   return new Intl.DateTimeFormat('en-US', options).format(date);
 }
 
+export function formatTime(dateStr: string, timeZone?: string | null): string {
+  const date = new Date(dateStr);
+  const displayTimeZone = normalizeTimezoneForDisplay(timeZone);
+  const options: Intl.DateTimeFormatOptions = {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+    ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
+  };
+  return new Intl.DateTimeFormat('en-US', options).format(date);
+}
+
 export function formatMalojaDate(dateStr: string): string {
   const d = new Date(dateStr);
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
