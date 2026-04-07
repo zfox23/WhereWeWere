@@ -260,6 +260,12 @@ export function ReflectTab() {
 
   return (
     <div className="space-y-6">
+      {reflectionsLoading ? (
+        <ReflectLoadingCard label="Loading reflections" />
+      ) : (
+        <OnThisDaySection data={reflections} moodIconPack={moodIconPack} />
+      )}
+
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 space-y-4">
         <div className="flex items-center justify-start gap-3">
           <CalendarDays size={16} className="text-purple-500" />
@@ -327,12 +333,6 @@ export function ReflectTab() {
         )}
         </div>
       </div>
-
-      {reflectionsLoading ? (
-        <ReflectLoadingCard label="Loading reflections" />
-      ) : (
-        <OnThisDaySection data={reflections} moodIconPack={moodIconPack} />
-      )}
     </div>
   );
 }

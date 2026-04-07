@@ -9,13 +9,40 @@ import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../types';
 import VenueEditMap from '../components/VenueEditMap';
 import CheckInCard from '../components/CheckInCard';
 import MapView from '../components/MapView';
+import { useLocation } from '../contexts/LocationContext';
 import { buildImmichMapUrl } from '../utils/checkin';
+import { haversineDistance } from '../utils/geo';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
 function normalizeCoordinate(value: unknown, fallback = 0): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+function getBearingDegrees(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
+  const phi1 = toRadians(fromLat);
+  const phi2 = toRadians(toLat);
+  const lambdaDelta = toRadians(toLon - fromLon);
+
+  const y = Math.sin(lambdaDelta) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambdaDelta);
+
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return (bearing + 360) % 360;
+}
+
+function formatDistance(distanceMeters: number): string {
+  if (distanceMeters < 1000) {
+    return `${Math.round(distanceMeters)}m`;
+  }
+  return `${(distanceMeters / 1000).toFixed(1)}km`;
 }
 
 function buildOpenStreetMapUrl(
@@ -45,8 +72,35 @@ function buildOpenStreetMapUrl(
   return `https://www.openstreetmap.org/search?query=${query}`;
 }
 
+function buildGoogleMapsUrl(
+  venueName: string,
+  fullAddress: string,
+  latitude: number | null,
+  longitude: number | null,
+): string | null {
+  const address = fullAddress.trim();
+  const name = venueName.trim();
+
+  if (address) {
+    const query = encodeURIComponent(`${name} ${address}`.trim());
+    return `https://www.google.com/maps/search/?api=1&query=${query}`;
+  }
+
+  if (latitude != null && longitude != null) {
+    const query = encodeURIComponent(`${latitude.toFixed(6)},${longitude.toFixed(6)}`);
+    return `https://www.google.com/maps/search/?api=1&query=${query}`;
+  }
+
+  if (name) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`;
+  }
+
+  return null;
+}
+
 export default function VenueDetail() {
   const { id } = useParams<{ id: string }>();
+  const { coords } = useLocation();
   const [venue, setVenue] = useState<Venue | null>(null);
   const [venueCheckins, setVenueCheckins] = useState<CheckIn[]>([]);
   const [loading, setLoading] = useState(true);
@@ -247,6 +301,20 @@ export default function VenueDetail() {
   const safeEditLat = normalizeCoordinate(editLat);
   const safeEditLng = normalizeCoordinate(editLng);
   const hasVenueCoords = venue.latitude != null && venue.longitude != null;
+  const fullCoordinates = hasVenueCoords ? `${venueLat.toFixed(6)}, ${venueLng.toFixed(6)}` : '';
+  const locationLine = fullAddress || fullCoordinates;
+  const venueDistanceMeters = coords && hasVenueCoords
+    ? haversineDistance(coords.lat, coords.lon, venueLat, venueLng)
+    : null;
+  const venueBearing = coords && hasVenueCoords
+    ? getBearingDegrees(coords.lat, coords.lon, venueLat, venueLng)
+    : null;
+  const googleMapsUrl = buildGoogleMapsUrl(
+    venue.name,
+    fullAddress,
+    hasVenueCoords ? venueLat : null,
+    hasVenueCoords ? venueLng : null,
+  );
   const openStreetMapUrl = buildOpenStreetMapUrl(
     venue.osm_id,
     hasVenueCoords ? venueLat : null,
@@ -275,10 +343,37 @@ export default function VenueDetail() {
                 <span>{venue.category_name}</span>
               </div>
             )}
-            {fullAddress && (
-              <div className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
-                <Navigation size={14} />
-                <span>{fullAddress}</span>
+            {locationLine && (
+              <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
+                {venueDistanceMeters != null && venueBearing != null && (
+                  googleMapsUrl ? (
+                    <a
+                      href={googleMapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Open venue in Google Maps"
+                      title="Open venue in Google Maps"
+                      className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                    >
+                      <Navigation
+                        size={10}
+                        className="text-gray-500 dark:text-gray-400"
+                        style={{ transform: `rotate(${venueBearing}deg)` }}
+                      />
+                      <span>{formatDistance(venueDistanceMeters)}</span>
+                    </a>
+                  ) : (
+                    <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                      <Navigation
+                        size={10}
+                        className="text-gray-500 dark:text-gray-400"
+                        style={{ transform: `rotate(${venueBearing}deg)` }}
+                      />
+                      <span>{formatDistance(venueDistanceMeters)}</span>
+                    </span>
+                  )
+                )}
+                <span>{locationLine}</span>
               </div>
             )}
             {venue.checkin_count != null && (
