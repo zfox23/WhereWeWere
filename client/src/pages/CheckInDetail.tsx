@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft } from 'lucide-react';
+import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft, CalendarDays } from 'lucide-react';
 import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import type { Scrobble, ImmichAsset } from '../types';
 import MapView from '../components/MapView';
@@ -38,6 +38,12 @@ function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {
   const takenBefore = new Date(t.getTime() + 2 * 60 * 60 * 1000).toISOString();
   const query = JSON.stringify({ takenAfter, takenBefore });
   return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
+}
+
+function getLocalDateKey(dateStr: string, timeZone?: string | null): string {
+  return new Date(dateStr).toLocaleDateString('en-CA', {
+    ...(timeZone ? { timeZone } : {}),
+  });
 }
 
 const THUMB_SIZE = 92;
@@ -122,6 +128,8 @@ export default function CheckInDetail() {
   const fullAddress = [checkin.venue_address, checkin.venue_city, checkin.venue_state, checkin.venue_country]
     .filter(Boolean)
     .join(', ');
+  const dayKey = getLocalDateKey(checkin.checked_in_at, checkin.venue_timezone);
+  const dayTimelinePath = `/?from=${dayKey}&to=${dayKey}`;
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
@@ -165,14 +173,6 @@ export default function CheckInDetail() {
         {fullAddress && (
           <p className="text-sm text-gray-500 dark:text-gray-400">{fullAddress}</p>
         )}
-
-        {/* Date/time */}
-        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-          <Clock size={14} />
-          <time dateTime={checkin.checked_in_at}>
-            {formatDate(checkin.checked_in_at, checkin.venue_timezone)}
-          </time>
-        </div>
 
         {/* Notes */}
         {checkin.notes && (
@@ -267,6 +267,22 @@ export default function CheckInDetail() {
             </div>
           </div>
         )}
+
+        {/* Date/time */}
+        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <Clock size={14} />
+          <time dateTime={checkin.checked_in_at}>
+            {formatDate(checkin.checked_in_at, checkin.venue_timezone)}
+          </time>
+          <Link
+            to={dayTimelinePath}
+            aria-label="View this day on Home"
+            title="View this day on Home"
+            className="inline-flex items-center justify-center rounded-md p-1 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <CalendarDays size={14} />
+          </Link>
+        </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">

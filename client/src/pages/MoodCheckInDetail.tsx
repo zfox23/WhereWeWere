@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Clock, Pencil, Trash2, Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Clock, Pencil, Trash2, Loader2, AlertCircle, ArrowLeft, CalendarDays } from 'lucide-react';
 import { moodCheckins, settings as settingsApi } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from '../components/MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
@@ -19,6 +19,13 @@ function formatDate(dateStr: string, timeZone?: string | null): string {
     timeZoneName: 'short',
     ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
   }).format(date);
+}
+
+function getLocalDateKey(dateStr: string, timeZone?: string | null): string {
+  const displayTimeZone = normalizeTimezoneForDisplay(timeZone);
+  return new Date(dateStr).toLocaleDateString('en-CA', {
+    ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
+  });
 }
 
 export default function MoodCheckInDetail() {
@@ -76,6 +83,8 @@ export default function MoodCheckInDetail() {
   }
 
   const mood = checkin.mood;
+  const dayKey = getLocalDateKey(checkin.checked_in_at, checkin.mood_timezone);
+  const dayTimelinePath = `/?from=${dayKey}&to=${dayKey}`;
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
@@ -126,6 +135,14 @@ export default function MoodCheckInDetail() {
           <time dateTime={checkin.checked_in_at}>
             {formatDate(checkin.checked_in_at, checkin.mood_timezone)}
           </time>
+          <Link
+            to={dayTimelinePath}
+            aria-label="View this day on Home"
+            title="View this day on Home"
+            className="inline-flex items-center justify-center rounded-md p-1 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <CalendarDays size={14} />
+          </Link>
         </div>
 
         {/* Actions */}

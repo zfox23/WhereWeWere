@@ -174,6 +174,8 @@ export default function Home() {
   const country = searchParams.get('country') || '';
   const mood = searchParams.get('mood') || '';
   const activity = searchParams.get('activity') || '';
+  const typeParam = searchParams.get('type') || '';
+  const timelineType = typeParam === 'location' || typeParam === 'mood' ? typeParam : '';
   const [fromDateInput, setFromDateInput] = useState(fromDate);
   const [toDateInput, setToDateInput] = useState(toDate);
   const [categoryInput, setCategoryInput] = useState(category);
@@ -220,6 +222,38 @@ export default function Home() {
       setIncludeLocation(true);
     }
   }, [hasLocationTypeFilter]);
+
+  useEffect(() => {
+    if (hasMoodTypeFilter || hasLocationTypeFilter) return;
+    if (timelineType === 'location') {
+      setIncludeLocation(true);
+      setIncludeMood(false);
+      return;
+    }
+    if (timelineType === 'mood') {
+      setIncludeLocation(false);
+      setIncludeMood(true);
+      return;
+    }
+    setIncludeLocation(true);
+    setIncludeMood(true);
+  }, [hasLocationTypeFilter, hasMoodTypeFilter, timelineType]);
+
+  useEffect(() => {
+    if (hasMoodTypeFilter || hasLocationTypeFilter) return;
+    const nextType = includeLocation && includeMood ? '' : includeLocation ? 'location' : 'mood';
+    if (nextType === timelineType) return;
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (nextType) {
+        next.set('type', nextType);
+      } else {
+        next.delete('type');
+      }
+      return next;
+    }, { replace: true });
+  }, [hasLocationTypeFilter, hasMoodTypeFilter, includeLocation, includeMood, setSearchParams, timelineType]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
@@ -307,6 +341,7 @@ export default function Home() {
       next.delete('venue_id');
       next.delete('category');
       next.delete('country');
+      next.delete('type');
       if (value) {
         next.set(key, value);
       } else {
@@ -326,6 +361,7 @@ export default function Home() {
       const next = new URLSearchParams(prev);
       next.delete('mood');
       next.delete('activity');
+      next.delete('type');
       if (value) {
         next.set(key, value);
       } else {
