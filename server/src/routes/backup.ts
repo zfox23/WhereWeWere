@@ -125,6 +125,19 @@ interface BackupPushSubscription {
   updated_at: string;
 }
 
+interface BackupSleepEntry {
+  id: string;
+  sleep_as_android_id: number;
+  sleep_timezone: string;
+  started_at: string;
+  ended_at: string;
+  rating: number;
+  comment: string | null;
+  is_pending: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 interface BackupV1 {
   format: typeof BACKUP_FORMAT;
   schemaVersion: 1;
@@ -140,6 +153,7 @@ interface BackupV1 {
     moodCheckins: BackupMoodCheckin[];
     moodCheckinActivities: BackupMoodCheckinActivity[];
     pushSubscriptions: BackupPushSubscription[];
+    sleepEntries: BackupSleepEntry[];
   };
 }
 
@@ -216,6 +230,7 @@ function ensureV1Backup(raw: unknown): BackupV1 {
       moodCheckins: asArray<BackupMoodCheckin>(migratedData.moodCheckins),
       moodCheckinActivities: asArray<BackupMoodCheckinActivity>(migratedData.moodCheckinActivities),
       pushSubscriptions: asArray<BackupPushSubscription>(migratedData.pushSubscriptions),
+      sleepEntries: asArray<BackupSleepEntry>(migratedData.sleepEntries),
     },
   };
 }
@@ -233,6 +248,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       moodCheckinsResult,
       moodCheckinActivitiesResult,
       pushSubscriptionsResult,
+      sleepEntriesResult,
     ] = await Promise.all([
       query(
         `SELECT id, username, email, display_name, created_at, updated_at
@@ -317,6 +333,15 @@ router.get('/export', async (_req: Request, res: Response) => {
          ORDER BY created_at ASC`,
         [USER_ID]
       ),
+      query(
+        `SELECT id, sleep_as_android_id, sleep_timezone,
+                started_at, ended_at, rating, comment,
+                is_pending, created_at, updated_at
+         FROM sleep_entries
+         WHERE user_id = $1
+         ORDER BY started_at ASC`,
+        [USER_ID]
+      ),
     ]);
 
     const payload: BackupV1 = {
@@ -338,6 +363,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         moodCheckins: moodCheckinsResult.rows,
         moodCheckinActivities: moodCheckinActivitiesResult.rows,
         pushSubscriptions: pushSubscriptionsResult.rows,
+        sleepEntries: sleepEntriesResult.rows,
       },
     };
 
@@ -366,6 +392,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       moodCheckins: { inserted: 0, skipped: 0 },
       moodCheckinActivities: { inserted: 0, skipped: 0 },
       pushSubscriptions: { inserted: 0, skipped: 0 },
+      sleepEntries: { inserted: 0, skipped: 0 },
     };
     const errors: string[] = [];
 
@@ -704,6 +731,49 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         counts.pushSubscriptions.inserted += 1;
       } else {
         counts.pushSubscriptions.skipped += 1;
+      }
+    }
+
+    for (const sleepEntry of backup.data.sleepEntries) {
+      if (!sleepEntry?.id || sleepEntry.sleep_as_android_id == null) {
+        counts.sleepEntries.skipped += 1;
+        errors.push('Skipped sleep entry with missing id/sleep_as_android_id');
+        continue;
+      }
+
+      const result = await client.query(
+        `INSERT INTO sleep_entries (
+           id, user_id, sleep_as_android_id, sleep_timezone,
+           started_at, ended_at, rating, comment,
+           is_pending, created_at, updated_at
+         )
+         VALUES (
+           $1, $2, $3, $4,
+           COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()),
+           $7, $8,
+           COALESCE($9, false),
+           COALESCE($10::timestamptz, NOW()), COALESCE($11::timestamptz, NOW())
+         )
+         ON CONFLICT (user_id, sleep_as_android_id) DO NOTHING`,
+        [
+          sleepEntry.id,
+          USER_ID,
+          sleepEntry.sleep_as_android_id,
+          sleepEntry.sleep_timezone || 'UTC',
+          sleepEntry.started_at || null,
+          sleepEntry.ended_at || null,
+          toNumber(sleepEntry.rating, 0),
+          toStringOrNull(sleepEntry.comment),
+          typeof sleepEntry.is_pending === 'boolean' ? sleepEntry.is_pending : false,
+          sleepEntry.created_at || null,
+          sleepEntry.updated_at || null,
+        ]
+      );
+
+      if (result.rowCount === 1) {
+        counts.sleepEntries.inserted += 1;
+      } else {
+        counts.sleepEntries.skipped += 1;
       }
     }
 
