@@ -147,29 +147,29 @@ router.get('/photos', async (req: Request, res: Response) => {
       })
     );
 
-    // Deduplicate: assign each asset to the check-in closest in time
-    // Build map of assetId -> { asset, candidates: [{ checkinId, distance }] }
-    const assetCandidates = new Map<string, { asset: ImmichAssetItem; candidates: { checkinId: string; distance: number }[] }>();
+    // Deduplicate: assign each asset to the latest check-in timestamp.
+    // Build map of assetId -> { asset, candidates: [{ checkinId, checkinTime }] }
+    const assetCandidates = new Map<
+      string,
+      { asset: ImmichAssetItem; candidates: { checkinId: string; checkinTime: number }[] }
+    >();
 
     for (const [checkinId, assets] of perCheckinAssets) {
       const checkinTime = checkinTimes.get(checkinId)!.getTime();
       for (const asset of assets) {
-        const assetTime = new Date(asset.localDateTime).getTime();
-        const distance = Math.abs(assetTime - checkinTime);
-
         if (!assetCandidates.has(asset.id)) {
           assetCandidates.set(asset.id, { asset, candidates: [] });
         }
-        assetCandidates.get(asset.id)!.candidates.push({ checkinId, distance });
+        assetCandidates.get(asset.id)!.candidates.push({ checkinId, checkinTime });
       }
     }
 
-    // Assign each asset to the closest check-in
+    // Assign each asset to the latest check-in
     const result: Record<string, { id: string; thumbhash: string | null; originalFileName: string }[]> = {};
     for (const id of checkinIds) result[id] = [];
 
     for (const [, { asset, candidates }] of assetCandidates) {
-      candidates.sort((a, b) => a.distance - b.distance);
+      candidates.sort((a, b) => b.checkinTime - a.checkinTime);
       const bestCheckinId = candidates[0].checkinId;
       if (result[bestCheckinId]) {
         result[bestCheckinId].push({
