@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats } from '../api/client';
@@ -82,19 +82,18 @@ function ExpandableFAB() {
 
   return (
     <>
-      {expanded && (
-        <div
-          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm"
-          onClick={() => setExpanded(false)}
-        />
-      )}
+      <div
+        className={`fixed inset-0 z-30 bg-black/20 backdrop-blur-sm transition-opacity duration-200 ${expanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => setExpanded(false)}
+      />
 
-      {expanded && (
-        <div className="fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className={`fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end transition-all duration-200 ease-out ${expanded ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'}`} aria-hidden={!expanded}>
           <Link
             to="/sleep-check-in"
             onClick={() => setExpanded(false)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium"
+            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+            style={{ transitionDelay: expanded ? '0ms' : '80ms' }}
+            tabIndex={expanded ? 0 : -1}
           >
             <Moon size={18} className="text-indigo-500" />
             Sleep
@@ -103,7 +102,9 @@ function ExpandableFAB() {
           <Link
             to="/mood-check-in"
             onClick={() => setExpanded(false)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium"
+            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+            style={{ transitionDelay: expanded ? '40ms' : '40ms' }}
+            tabIndex={expanded ? 0 : -1}
           >
             <Smile size={18} className="text-green-500" />
             Mood
@@ -112,18 +113,19 @@ function ExpandableFAB() {
           <Link
             to="/check-in"
             onClick={() => setExpanded(false)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium"
+            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+            style={{ transitionDelay: expanded ? '80ms' : '0ms' }}
+            tabIndex={expanded ? 0 : -1}
           >
             <MapPin size={18} className="text-primary-500" />
             Location
             <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">L</kbd>
           </Link>
-        </div>
-      )}
+      </div>
 
       <button
         onClick={() => setExpanded(!expanded)}
-        className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-primary-500/30 hover:shadow-xl hover:shadow-primary-500/40 hover:scale-105 transition-all"
+        className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-primary-500/30 hover:shadow-lg hover:shadow-primary-500/50 hover:scale-105 transition-all"
       >
         <Plus
           size={24}
@@ -318,6 +320,8 @@ export default function Home() {
   }, []);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const feedContainerRef = useRef<HTMLDivElement>(null);
+  const revealObserverRef = useRef<IntersectionObserver | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offsetRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -574,6 +578,41 @@ export default function Home() {
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, fetchTimeline]);
 
+  useEffect(() => {
+    const feed = feedContainerRef.current;
+    if (!feed) return;
+
+    const cards = Array.from(feed.querySelectorAll<HTMLElement>('[data-home-reveal]'));
+    if (cards.length === 0) return;
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) {
+      cards.forEach((card) => card.classList.add('is-visible'));
+      return;
+    }
+
+    revealObserverRef.current?.disconnect();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15, rootMargin: '0px 0px -8% 0px' }
+    );
+
+    cards.forEach((card) => {
+      if (card.classList.contains('is-visible')) return;
+      observer.observe(card);
+    });
+
+    revealObserverRef.current = observer;
+    return () => observer.disconnect();
+  }, [items, includeLocation, includeMood, loading, loadingMore]);
+
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
     setIncludeLocation(true);
@@ -694,7 +733,8 @@ export default function Home() {
       )}
 
       {/* Expanded filters */}
-      {showFilters && (
+      <div className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out ${showFilters ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}>
+        <div className="min-h-0">
         <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
@@ -897,7 +937,8 @@ export default function Home() {
             </div>
           </div>
         </div>
-      )}
+        </div>
+      </div>
 
       {openTimelineDotDate && (
         <button
@@ -937,7 +978,7 @@ export default function Home() {
           )}
         </div>
       ) : (
-        <div className="space-y-0">
+        <div ref={feedContainerRef} className="space-y-0">
           {Array.from(grouped.entries()).map(([date, dateItems]) => (
             <div key={date} className="relative">
               {/* Date header with timeline dot */}
@@ -1005,48 +1046,53 @@ export default function Home() {
               {/* Cards with vertical line */}
               {dateItems.length > 0 ? (
                 <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-6 pb-4 space-y-3">
-                  {dateItems.map((item) =>
-                    item.type === 'mood' ? (
-                      <MoodCheckInCard
-                        key={item.id}
-                        item={item}
-                        iconPack={iconPack}
-                        immichUrl={immichUrl}
-                        photos={photosMap[item.id] ?? null}
-                        scrobbles={dedupedScrobblesMap[item.id]}
-                        malojaUrl={malojaUrl}
-                      />
-                    ) : item.type === 'sleep' ? (
-                      <SleepCard
-                        key={item.id}
-                        item={item}
-                      />
-                    ) : (
-                      <CheckInCard
-                        key={item.id}
-                        checkin={{
-                          id: item.id,
-                          user_id: item.user_id,
-                          venue_id: item.venue_id!,
-                          venue_name: item.venue_name,
-                          venue_category: item.venue_category,
-                          venue_latitude: item.venue_latitude,
-                          venue_longitude: item.venue_longitude,
-                          venue_timezone: item.venue_timezone,
-                          parent_venue_id: item.parent_venue_id,
-                          parent_venue_name: item.parent_venue_name,
-                          notes: item.notes,
-                          checked_in_at: item.checked_in_at,
-                          created_at: item.created_at,
-                        }}
-                        immichUrl={immichUrl}
-                        photos={photosMap[item.id] ?? null}
-                        scrobbles={dedupedScrobblesMap[item.id]}
-                        malojaUrl={malojaUrl}
-                        dawarichUrl={dawarichUrl}
-                      />
-                    )
-                  )}
+                  {dateItems.map((item, index) => {
+                    const revealStyle: CSSProperties = {
+                      transitionDelay: `${Math.min(index, 8) * 36}ms`,
+                    };
+
+                    return (
+                      <div key={item.id} data-home-reveal className="motion-safe-reveal" style={revealStyle}>
+                        {item.type === 'mood' ? (
+                          <MoodCheckInCard
+                            item={item}
+                            iconPack={iconPack}
+                            immichUrl={immichUrl}
+                            photos={photosMap[item.id] ?? null}
+                            scrobbles={dedupedScrobblesMap[item.id]}
+                            malojaUrl={malojaUrl}
+                          />
+                        ) : item.type === 'sleep' ? (
+                          <SleepCard
+                            item={item}
+                          />
+                        ) : (
+                          <CheckInCard
+                            checkin={{
+                              id: item.id,
+                              user_id: item.user_id,
+                              venue_id: item.venue_id!,
+                              venue_name: item.venue_name,
+                              venue_category: item.venue_category,
+                              venue_latitude: item.venue_latitude,
+                              venue_longitude: item.venue_longitude,
+                              venue_timezone: item.venue_timezone,
+                              parent_venue_id: item.parent_venue_id,
+                              parent_venue_name: item.parent_venue_name,
+                              notes: item.notes,
+                              checked_in_at: item.checked_in_at,
+                              created_at: item.created_at,
+                            }}
+                            immichUrl={immichUrl}
+                            photos={photosMap[item.id] ?? null}
+                            scrobbles={dedupedScrobblesMap[item.id]}
+                            malojaUrl={malojaUrl}
+                            dawarichUrl={dawarichUrl}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-6 pb-4">

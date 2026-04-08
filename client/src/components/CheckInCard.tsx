@@ -91,17 +91,6 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
 
         {/* Action buttons */}
         <div className="flex items-center gap-1 shrink-0">
-          {dawarichUrl && (
-            <a
-              href={buildDawarichCheckinUrl(dawarichUrl, checkin.checked_in_at)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
-              title='View on Dawarich'
-            >
-              <Map size={14} />
-            </a>
-          )}
           { showOnThisDay &&
             <Link
               to={`/?from=${checkin.checked_in_at.substring(0, 10)}&to=${checkin.checked_in_at.substring(0, 10)}`}

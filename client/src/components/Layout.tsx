@@ -45,7 +45,11 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       {/* Main */}
-      <main className="max-w-5xl mx-auto px-4 py-6 flex-1 w-full">{children}</main>
+      <main className="max-w-5xl mx-auto px-4 py-6 flex-1 w-full">
+        <div key={pathname} className="page-enter">
+          {children}
+        </div>
+      </main>
 
       {/* Bottom nav (mobile) — glass */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-t border-white/40 dark:border-gray-700/40 z-50">
