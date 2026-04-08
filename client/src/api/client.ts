@@ -267,6 +267,11 @@ export const sleepEntries = {
     request<void>(`/sleep-entries/${id}`, { method: 'DELETE' }),
 };
 
+// Sleep as Android webhook
+export const sleepWebhook = {
+  stats: () => request<{ count: number }>('/webhook/sleep-as-android/stats'),
+};
+
 // Backup / Restore
 export const backupApi = {
   export: async () => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2, RotateCcw, ShieldAlert, Palette, ChevronDown, ChevronRight } from 'lucide-react';
-import { settings, importApi, jobs, moodActivities, backupApi } from '../api/client';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2, RotateCcw, ShieldAlert, Palette, ChevronDown, ChevronRight, Copy, Webhook } from 'lucide-react';
+import { settings, importApi, jobs, moodActivities, backupApi, sleepWebhook } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
 import ActivityGroupManager from '../components/ActivityGroupManager';
@@ -342,13 +342,10 @@ function SleepAsAndroidImportSection() {
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
         <Moon size={20} className="text-gray-600 dark:text-gray-400" />
-        Sleep as Android Import
+        Sleep as Android
       </h2>
-      <p className="text-sm text-gray-500 dark:text-gray-400">
-        Import your sleep sessions from a Sleep as Android CSV export.
-      </p>
 
-      <div
+      <div className="space-y-3"
         onClick={() => fileInputRef.current?.click()}
         className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 dark:hover:bg-primary-900/20 transition-colors"
       >
@@ -1464,12 +1461,30 @@ export default function Settings() {
   const [integrationSaving, setIntegrationSaving] = useState(false);
   const [integrationMsg, setIntegrationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Sleep as Android webhook
+  const [webhookEventCount, setWebhookEventCount] = useState<number | null>(null);
+  const [webhookCopied, setWebhookCopied] = useState(false);
+  const webhookUrl = `${window.location.origin}/api/v1/webhook/sleep-as-android`;
+
   // Notifications
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [moodReminderTimes, setMoodReminderTimes] = useState<string[]>([]);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const notificationsLoadedRef = useRef(false);
+
+  useEffect(() => {
+    sleepWebhook.stats()
+      .then((data) => setWebhookEventCount(data.count))
+      .catch(() => setWebhookEventCount(null));
+  }, []);
+
+  const handleWebhookCopy = () => {
+    navigator.clipboard.writeText(webhookUrl).then(() => {
+      setWebhookCopied(true);
+      setTimeout(() => setWebhookCopied(false), 2000);
+    });
+  };
 
   useEffect(() => {
     async function loadSettings() {
@@ -2009,6 +2024,34 @@ export default function Settings() {
                     placeholder="https://maloja.example.com"
                   />
                 </div>
+              </div>
+
+              <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1.5">
+                  <Moon size={14} className="text-indigo-500" />
+                  Sleep as Android
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  Enter this URL in Sleep as Android under Settings → Services → Automation → Webhooks to receive live sleep tracking events.
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 min-w-0 truncate rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-800 dark:text-gray-200">
+                    {webhookUrl}
+                  </code>
+                  <button
+                    onClick={handleWebhookCopy}
+                    title={webhookCopied ? 'Copied!' : 'Copy URL'}
+                    className="shrink-0 flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    {webhookCopied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
+                    {webhookCopied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {webhookEventCount === null
+                    ? 'Loading webhook stats…'
+                    : `${webhookEventCount} Webhook Event${webhookEventCount === 1 ? '' : 's'} Received`}
+                </p>
               </div>
             </div>
 
