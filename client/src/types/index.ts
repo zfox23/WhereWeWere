@@ -36,7 +36,6 @@ export interface Venue {
 export interface CheckIn {
   id: string;
   user_id: string;
-  client_ref_id?: string | null;
   venue_id: string;
   venue_name?: string;
   venue_category?: string;
@@ -174,7 +173,6 @@ export interface MoodActivity {
 export interface MoodCheckIn {
   id: string;
   user_id: string;
-  client_ref_id?: string | null;
   mood: number;
   note: string | null;
   mood_timezone?: string | null;

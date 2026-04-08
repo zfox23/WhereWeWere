@@ -29,53 +29,6 @@ async function inferVenueTimezone(venueId: string): Promise<string | null> {
   return tzResults[0] || null;
 }
 
-function isClientRefUniqueViolation(err: unknown): boolean {
-  const pgErr = err as { code?: string; constraint?: string };
-  return pgErr?.code === '23505' && pgErr?.constraint === 'checkins_user_client_ref_id_unique';
-}
-
-async function createCheckinWithIdempotency(params: {
-  userId: string;
-  venueId: string;
-  notes: string | null;
-  checkedInAt: string | null;
-  checkinTimezone: string | null;
-  clientRefId: string | null;
-}): Promise<{ row: any; created: boolean }> {
-  const {
-    userId,
-    venueId,
-    notes,
-    checkedInAt,
-    checkinTimezone,
-    clientRefId,
-  } = params;
-
-  try {
-    const result = await query(
-      `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, client_ref_id)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6)
-       RETURNING *`,
-      [userId, venueId, notes, checkedInAt, checkinTimezone, clientRefId]
-    );
-    return { row: result.rows[0], created: true };
-  } catch (err) {
-    if (clientRefId && isClientRefUniqueViolation(err)) {
-      const existingResult = await query(
-        `SELECT *
-         FROM checkins
-         WHERE user_id = $1 AND client_ref_id = $2
-         LIMIT 1`,
-        [userId, clientRefId]
-      );
-      if (existingResult.rows.length > 0) {
-        return { row: existingResult.rows[0], created: false };
-      }
-    }
-    throw err;
-  }
-}
-
 // GET / - list check-ins with venue info
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -202,26 +155,22 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST / - create check-in
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { user_id, venue_id, notes, checked_in_at, also_checkin_parent, client_ref_id } = req.body;
+    const { user_id, venue_id, notes, checked_in_at, also_checkin_parent } = req.body;
 
     if (!user_id || !venue_id) {
       return res.status(400).json({ error: 'user_id and venue_id are required' });
     }
 
     const checkinTimezone = await inferVenueTimezone(venue_id);
-    const normalizedClientRefId = typeof client_ref_id === 'string' && client_ref_id.trim().length > 0
-      ? client_ref_id.trim()
-      : null;
-    const checkinInsert = await createCheckinWithIdempotency({
-      userId: user_id,
-      venueId: venue_id,
-      notes: notes || null,
-      checkedInAt: checked_in_at || null,
-      checkinTimezone,
-      clientRefId: normalizedClientRefId,
-    });
 
-    const checkin = checkinInsert.row;
+    const result = await query(
+      `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
+       RETURNING *`,
+      [user_id, venue_id, notes || null, checked_in_at || null, checkinTimezone]
+    );
+
+    const checkin = result.rows[0];
 
     // Optionally create a check-in at the parent venue too
     let parent_checkin = null;
@@ -232,20 +181,17 @@ router.post('/', async (req: Request, res: Response) => {
       );
       const parentVenueId = venueResult.rows[0]?.parent_venue_id;
       if (parentVenueId) {
-        const parentClientRefId = normalizedClientRefId ? `${normalizedClientRefId}:parent` : null;
-        const parentInsert = await createCheckinWithIdempotency({
-          userId: user_id,
-          venueId: parentVenueId,
-          notes: notes || null,
-          checkedInAt: checked_in_at || null,
-          checkinTimezone: await inferVenueTimezone(parentVenueId),
-          clientRefId: parentClientRefId,
-        });
-        parent_checkin = parentInsert.row;
+        const parentResult = await query(
+          `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone)
+           VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
+           RETURNING *`,
+          [user_id, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId)]
+        );
+        parent_checkin = parentResult.rows[0];
       }
     }
 
-    res.status(checkinInsert.created ? 201 : 200).json({ ...checkin, parent_checkin });
+    res.status(201).json({ ...checkin, parent_checkin });
   } catch (err) {
     console.error('Error creating check-in:', err);
     res.status(500).json({ error: 'Failed to create check-in' });

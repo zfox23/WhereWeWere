@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, MapPin, Trash2 } from 'lucide-react';
 import { checkins, venues } from '../api/client';
 import VenueSearch from './VenueSearch';
-import { makeClientRefId } from '../utils/idempotency';
 
 const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -56,7 +55,6 @@ export default function CheckInForm({
     if (initialCheckedInAt) return toLocalDatetimeString(new Date(initialCheckedInAt));
     return toLocalDatetimeString(new Date());
   });
-  const [createClientRefId, setCreateClientRefId] = useState(() => makeClientRefId('checkin'));
   const [alsoCheckinParent, setAlsoCheckinParent] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -132,10 +130,6 @@ export default function CheckInForm({
 
   const handleDeleteVenue = async () => {
     if (!venueId) return;
-    if (!navigator.onLine) {
-      setError('Deleting venues requires an internet connection.');
-      return;
-    }
     if (!window.confirm(`Delete venue "${venueName}" from the local database? This cannot be undone.`)) return;
 
     setDeletingVenue(true);
@@ -177,7 +171,6 @@ export default function CheckInForm({
           notes: notes.trim() || null,
           checked_in_at: new Date(checkedInAt).toISOString(),
           also_checkin_parent: alsoCheckinParent && !!parentVenueId,
-          client_ref_id: createClientRefId,
         });
 
         // Reset form
@@ -187,7 +180,6 @@ export default function CheckInForm({
         }
         setNotes('');
         setCheckedInAt(toLocalDatetimeString(new Date()));
-        setCreateClientRefId(makeClientRefId('checkin'));
       }
 
       onSuccess?.();

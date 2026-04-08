@@ -147,19 +147,6 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(201).json(result.rows[0]);
   } catch (err: any) {
     if (err?.code === '23505') {
-      const requestedExternalId = Number(req.body?.sleep_as_android_id);
-      if (Number.isFinite(requestedExternalId)) {
-        const existing = await query(
-          `SELECT *
-           FROM sleep_entries
-           WHERE user_id = $1 AND sleep_as_android_id = $2
-           LIMIT 1`,
-          [USER_ID, requestedExternalId]
-        );
-        if (existing.rows.length > 0) {
-          return res.status(200).json(existing.rows[0]);
-        }
-      }
       return res.status(409).json({ error: 'Duplicate sleep_as_android_id for this user' });
     }
     console.error('Error creating sleep entry:', err);

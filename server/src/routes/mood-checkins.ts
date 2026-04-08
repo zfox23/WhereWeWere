@@ -5,11 +5,6 @@ const router = Router();
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
-function isClientRefUniqueViolation(err: unknown): boolean {
-  const pgErr = err as { code?: string; constraint?: string };
-  return pgErr?.code === '23505' && pgErr?.constraint === 'mood_checkins_user_client_ref_id_unique';
-}
-
 // GET / - list mood checkins with activities
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -113,25 +108,20 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST / - create mood checkin
 router.post('/', async (req: Request, res: Response) => {
   const client = await pool.connect();
-  let normalizedClientRefId: string | null = null;
   try {
-    const { mood, note, checked_in_at, mood_timezone, activity_ids, client_ref_id } = req.body;
+    const { mood, note, checked_in_at, mood_timezone, activity_ids } = req.body;
 
     if (!mood || mood < 1 || mood > 5) {
       return res.status(400).json({ error: 'mood must be between 1 and 5' });
     }
 
-    normalizedClientRefId = typeof client_ref_id === 'string' && client_ref_id.trim().length > 0
-      ? client_ref_id.trim()
-      : null;
-
     await client.query('BEGIN');
 
     const result = await client.query(
-      `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone, client_ref_id)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6)
+      `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
        RETURNING *`,
-      [USER_ID, mood, note || null, checked_in_at || null, mood_timezone || null, normalizedClientRefId]
+      [USER_ID, mood, note || null, checked_in_at || null, mood_timezone || null]
     );
 
     const moodCheckin = result.rows[0];
@@ -151,21 +141,6 @@ router.post('/', async (req: Request, res: Response) => {
 
     res.status(201).json(moodCheckin);
   } catch (err) {
-    if (normalizedClientRefId && isClientRefUniqueViolation(err)) {
-      await client.query('ROLLBACK');
-      const existingResult = await query(
-        `SELECT *
-         FROM mood_checkins
-         WHERE user_id = $1 AND client_ref_id = $2
-         LIMIT 1`,
-        [USER_ID, normalizedClientRefId]
-      );
-
-      if (existingResult.rows.length > 0) {
-        return res.status(200).json(existingResult.rows[0]);
-      }
-    }
-
     await client.query('ROLLBACK');
     console.error('Error creating mood checkin:', err);
     res.status(500).json({ error: 'Failed to create mood checkin' });
