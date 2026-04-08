@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, History, Loader2, MapPin, SmilePlus, Compass } from 'lucide-react';
+import { CalendarDays, History, Loader2, MapPin, SmilePlus, Compass, Moon } from 'lucide-react';
 import { immich as immichApi, settings, stats, scrobbles } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
 import { MoodYearInPixels } from './MoodStats';
@@ -34,6 +34,12 @@ type ReflectionYear = {
   year: number;
   years_ago: number;
   items: ReflectionItem[];
+  sleep_entries: {
+    id: string;
+    started_at: string;
+    ended_at: string;
+    sleep_timezone?: string | null;
+  }[];
 };
 
 type MoodHeatmapPoint = {
@@ -72,6 +78,17 @@ function formatReflectionTime(dateStr: string, timeZone?: string | null) {
     timeZoneName: 'short',
     ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
   }).format(new Date(dateStr));
+}
+
+function formatSleepDuration(startedAt: string, endedAt: string) {
+  const diffMs = Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
+  const totalMinutes = Math.round(diffMs / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
 }
 
 function buildImmichDayUrl(immichUrl: string, date: string) {
@@ -135,6 +152,9 @@ function OnThisDaySection({
             (a, b) =>
               new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
           );
+          const sortedSleepEntries = [...(year.sleep_entries || [])].sort(
+            (a, b) => new Date(a.ended_at).getTime() - new Date(b.ended_at).getTime()
+          );
           const yearDate = sortedItems[0]?.checked_in_at.slice(0, 10) || null;
           const yearAssets = photosByYear[year.year] || [];
 
@@ -164,6 +184,19 @@ function OnThisDaySection({
               )}
             </div>
             <div className="space-y-3 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
+              {sortedSleepEntries.map((entry) => (
+                <Link
+                  key={entry.id}
+                  to={`/sleep-entries/${entry.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+                >
+                  <Moon size={13} className="shrink-0" />
+                  <span>Slept for {formatSleepDuration(entry.started_at, entry.ended_at)}</span>
+                </Link>
+              ))}
+
               {sortedItems.map((item) => {
                 const detailHref = item.type === 'location'
                   ? `/venues/${item.venue_id}`
