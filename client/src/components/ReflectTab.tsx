@@ -9,7 +9,7 @@ import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
 import { resolveActivityIcon } from '../utils/icons';
-import type { HeatmapDay, ImmichAsset, UserSettings } from '../types';
+import type { HeatmapDay, ImmichAsset, SleepDailyPoint, UserSettings } from '../types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const IMMICH_CHECKIN_BATCH_SIZE = 30;
@@ -46,6 +46,134 @@ type MoodHeatmapPoint = {
   date: string;
   avg_mood: number;
 };
+
+function formatMinutesToDuration(minutes: number): string {
+  const rounded = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(rounded / 60);
+  const mins = rounded % 60;
+
+  if (hours === 0) return `${mins}m`;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}m`;
+}
+
+function SleepYearInPixels({
+  data,
+  year,
+}: {
+  data: SleepDailyPoint[];
+  year: number;
+}) {
+  const dayMap = new Map(data.map((d) => [d.date, d.total_sleep_minutes]));
+  const countMap = new Map(data.map((d) => [d.date, d.count]));
+  const startDate = new Date(year, 0, 1);
+  const endDate = new Date(year, 11, 31);
+
+  const allDays: { date: string; duration: number | null; count: number }[] = [];
+  const cursor = new Date(startDate);
+  while (cursor <= endDate) {
+    const y = cursor.getFullYear();
+    const m = String(cursor.getMonth() + 1).padStart(2, '0');
+    const d = String(cursor.getDate()).padStart(2, '0');
+    const date = `${y}-${m}-${d}`;
+    allDays.push({
+      date,
+      duration: dayMap.get(date) ?? null,
+      count: countMap.get(date) ?? 0,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const startDow = new Date(startDate).getDay();
+  const padded = [...Array.from({ length: startDow }, () => null as null), ...allDays];
+  const weeks: (typeof padded)[] = [];
+  for (let i = 0; i < padded.length; i += 7) {
+    weeks.push(padded.slice(i, i + 7));
+  }
+
+  const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  function durationColor(minutes: number): string {
+    if (minutes < 240) return 'bg-rose-300';
+    if (minutes < 360) return 'bg-orange-300';
+    if (minutes < 420) return 'bg-cyan-300';
+    if (minutes < 480) return 'bg-sky-400';
+    return 'bg-indigo-500';
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+          <Moon size={16} className="text-indigo-500" />
+          Sleep in Pixels
+        </h3>
+      </div>
+
+      <div className="overflow-x-auto">
+        <div className="relative h-4 mb-1" style={{ minWidth: weeks.length * 15 }}>
+          {monthLabels.map((month, i) => {
+            const weekIndex = Math.floor((i * 52) / 12);
+            return (
+              <span
+                key={month}
+                className="absolute text-[10px] text-gray-400"
+                style={{ left: weekIndex * 15 }}
+              >
+                {month}
+              </span>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-[3px]">
+          {weeks.map((week, weekIndex) => (
+            <div key={weekIndex} className="flex flex-col gap-[3px]">
+              {week.map((day, dayIndex) => {
+                if (!day) {
+                  return <div key={dayIndex} className="w-[12px] h-[12px]" />;
+                }
+
+                if (day.duration === null || day.count === 0) {
+                  return (
+                    <div
+                      key={dayIndex}
+                      className="w-[12px] h-[12px] rounded-sm bg-gray-100 dark:bg-gray-800"
+                      title={`${day.date}: no sleep data`}
+                    />
+                  );
+                }
+
+                return (
+                  <div
+                    key={dayIndex}
+                    className={`w-[12px] h-[12px] rounded-sm cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 dark:hover:ring-gray-500 ${durationColor(day.duration)}`}
+                    title={`${day.date}: total ${formatMinutesToDuration(day.duration)} (${day.count} sleep entr${day.count === 1 ? 'y' : 'ies'})`}
+                    onClick={() => window.open(`/?from=${day.date}&to=${day.date}`, '_blank', 'noopener,noreferrer')}
+                  />
+                );
+              })}
+              {week.length < 7 &&
+                Array.from({ length: 7 - week.length }, (_, idx) => (
+                  <div key={`pad-${idx}`} className="w-[12px] h-[12px]" />
+                ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1 mt-2 justify-start">
+          <span className="text-[10px] text-gray-400 mr-1">&le;4h</span>
+          <div className="w-[12px] h-[12px] rounded-sm bg-rose-300" title="Under 4h" />
+          <div className="w-[12px] h-[12px] rounded-sm bg-orange-300" title="4h-6h" />
+          <div className="w-[12px] h-[12px] rounded-sm bg-cyan-300" title="6h-7h" />
+          <div className="w-[12px] h-[12px] rounded-sm bg-sky-400" title="7h-8h" />
+          <div className="w-[12px] h-[12px] rounded-sm bg-indigo-500" title="8h+" />
+          <span className="text-[10px] text-gray-400 ml-1">&ge;8h</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type Scrobble = {
   artists: string[];
@@ -271,6 +399,7 @@ export function ReflectTab() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [locationHeatmap, setLocationHeatmap] = useState<HeatmapDay[]>([]);
   const [moodHeatmap, setMoodHeatmap] = useState<MoodHeatmapPoint[]>([]);
+  const [sleepHeatmap, setSleepHeatmap] = useState<SleepDailyPoint[]>([]);
   const [reflections, setReflections] = useState<ReflectionYear[]>([]);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
@@ -281,10 +410,12 @@ export function ReflectTab() {
   const [reflectionsLoading, setReflectionsLoading] = useState(true);
   const [locationLoading, setLocationLoading] = useState(true);
   const [moodLoading, setMoodLoading] = useState(true);
+  const [sleepLoading, setSleepLoading] = useState(true);
   const [hasLoadedLocation, setHasLoadedLocation] = useState(false);
   const [hasLoadedMood, setHasLoadedMood] = useState(false);
+  const [hasLoadedSleep, setHasLoadedSleep] = useState(false);
   const currentYear = new Date().getFullYear();
-  const heatmapsRefreshing = locationLoading || moodLoading;
+  const heatmapsRefreshing = locationLoading || moodLoading || sleepLoading;
 
   useEffect(() => {
     let cancelled = false;
@@ -521,6 +652,37 @@ export function ReflectTab() {
     };
   }, [selectedYear]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setSleepLoading(true);
+
+    const from = `${selectedYear}-01-01`;
+    const to = `${selectedYear}-12-31`;
+
+    stats.sleepDaily(USER_ID, from, to)
+      .then((data) => {
+        if (!cancelled) {
+          setSleepHeatmap(data);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load sleep heatmap:', err);
+        if (!cancelled) {
+          setSleepHeatmap([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSleepLoading(false);
+          setHasLoadedSleep(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedYear]);
+
   return (
     <div className="space-y-6">
       {reflectionsLoading ? (
@@ -596,6 +758,22 @@ export function ReflectTab() {
               showTitleYear={false}
             />
             {moodLoading && (
+              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">
+                <Loader2 className="animate-spin text-primary-600" size={16} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {sleepLoading && !hasLoadedSleep ? (
+          <ReflectLoadingCard label="Loading sleep heatmap" />
+        ) : (
+          <div className={`relative transition-opacity ${sleepLoading ? 'opacity-80' : 'opacity-100'}`}>
+            <SleepYearInPixels
+              data={sleepHeatmap}
+              year={selectedYear}
+            />
+            {sleepLoading && (
               <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">
                 <Loader2 className="animate-spin text-primary-600" size={16} />
               </div>

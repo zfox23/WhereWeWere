@@ -16,7 +16,6 @@ export function PhotoSection({ immichUrl, assets, checkedInAt, fallbackLinkConte
   }
 
   const hasPhotos = Boolean(assets && assets.length > 0);
-  const showInTime = assets === null;
 
   return (
     <>
@@ -26,20 +25,6 @@ export function PhotoSection({ immichUrl, assets, checkedInAt, fallbackLinkConte
           moreUrl={buildImmichTimeUrl(immichUrl, checkedInAt)}
           immichUrl={immichUrl}
         />
-      )}
-
-      {showInTime && (
-        <div className="flex items-center gap-2 mt-2 text-indigo-600 dark:text-indigo-300">
-          {fallbackLinkContent}
-          <a
-            href={buildImmichTimeUrl(immichUrl, checkedInAt)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs font-medium hover:text-indigo-800 dark:hover:text-indigo-500"
-          >
-            in time
-          </a>
-        </div>
       )}
     </>
   );

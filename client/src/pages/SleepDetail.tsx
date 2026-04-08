@@ -152,7 +152,7 @@ export default function SleepDetail() {
             <Clock size={14} />
             <span>Start: <time dateTime={entry.started_at}>{formatDate(entry.started_at, entry.sleep_timezone)}</time></span>
           </div>
-          { entry.ended_at ?? 
+          { entry.ended_at ? 
           <div className="flex items-center gap-2">
             <Clock size={14} />
             <span>End: <time dateTime={entry.ended_at}>{formatDate(entry.ended_at, entry.sleep_timezone)}</time></span>
@@ -164,7 +164,7 @@ export default function SleepDetail() {
             >
               <CalendarDays size={14} />
             </Link>
-          </div> }
+          </div> : null}
         </div>
 
         <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">

@@ -70,6 +70,16 @@ type ComboPt = {
 };
 type HeatPt = { date: string; avg_mood: number };
 type MoodCount = { mood: number; count: number };
+type SleepDailyPt = { date: string; total_sleep_minutes: number | null };
+
+function formatSleepMinutesShort(minutes: number): string {
+  const rounded = Math.max(0, Math.round(minutes));
+  const h = Math.floor(rounded / 60);
+  const m = rounded % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
 // ─── SVG Line/Span Chart ──────────────────────────────────────────────────────
 
 const SW = 760, SH = 280, PL = 42, PR = 16, PT = 14, PB = 34;
@@ -83,7 +93,17 @@ function toY(m: number): number {
   return PT + ((5 - m) / 4) * CH;
 }
 
-function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'span' }) {
+function MoodLineSpanChart({
+  data,
+  mode,
+  sleepTotalsByDate,
+  showSleepBars,
+}: {
+  data: DailyPt[];
+  mode: 'line' | 'span';
+  sleepTotalsByDate: Map<string, number>;
+  showSleepBars: boolean;
+}) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
@@ -176,6 +196,14 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
   const displayIndex = activeIndex ?? pinnedIndex;
   const selectedPoint = displayIndex !== null ? data[displayIndex] : null;
   const selectedX = displayIndex !== null ? toX(displayIndex, n) : null;
+  const sleepTotals = data.map((d) => Math.max(0, sleepTotalsByDate.get(d.date) || 0));
+  const maxSleepMinutes = Math.max(...sleepTotals, 0);
+  const toSleepY = (minutes: number) => {
+    if (maxSleepMinutes <= 0) return PT + CH;
+    return PT + CH - (minutes / maxSleepMinutes) * CH;
+  };
+  const step = n <= 1 ? CW : CW / (n - 1);
+  const barWidth = Math.max(2, Math.min(10, step * 0.6));
 
   return (
     <div className="relative">
@@ -268,6 +296,49 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
           </g>
         ))}
 
+        {showSleepBars && (
+          <>
+            {sleepTotals.map((minutes, i) => {
+              if (minutes <= 0) return null;
+              const x = toX(i, n) - barWidth / 2;
+              const y = toSleepY(minutes);
+              const h = PT + CH - y;
+              return (
+                <rect
+                  key={`sleep-${data[i].date}`}
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={h}
+                  rx={1}
+                  fill="rgba(20, 184, 166, 0.35)"
+                >
+                  <title>{`${data[i].date}: sleep ${formatSleepMinutesShort(minutes)}`}</title>
+                </rect>
+              );
+            })}
+
+            {maxSleepMinutes > 0 &&
+              [0, 0.33, 0.66, 1].map((ratio) => {
+                const val = maxSleepMinutes * ratio;
+                const y = toSleepY(val);
+                return (
+                  <text
+                    key={`sleep-label-${ratio}`}
+                    x={SW - 2}
+                    y={y + 3}
+                    textAnchor="end"
+                    fontSize={10}
+                    fill="rgba(13, 148, 136, 0.85)"
+                    fontFamily="system-ui, sans-serif"
+                  >
+                    {formatSleepMinutesShort(val)}
+                  </text>
+                );
+              })}
+          </>
+        )}
+
         {mode === 'span' && (
           <>
             <path d={spanArea} fill="rgba(99,102,241,0.18)" />
@@ -337,6 +408,7 @@ function MoodLineSpanChart({ data, mode }: { data: DailyPt[]; mode: 'line' | 'sp
           }}
         >
           {selectedPoint.date} • avg {selectedPoint.avg_mood.toFixed(1)}
+          {showSleepBars && ` • sleep ${formatSleepMinutesShort(sleepTotalsByDate.get(selectedPoint.date) || 0)}`}
         </div>
       )}
     </div>
@@ -428,8 +500,11 @@ function MoodMonthlySection({
   dowData,
   corrData,
   comboData,
+  sleepDailyData,
   chartMode,
   onChartModeChange,
+  showSleepBars,
+  onShowSleepBarsChange,
   periodMode,
   monthLoading,
   selectedMonth,
@@ -440,8 +515,11 @@ function MoodMonthlySection({
   dowData: DowPt[];
   corrData: CorrPt[];
   comboData: ComboPt[];
+  sleepDailyData: SleepDailyPt[];
   chartMode: 'line' | 'span';
   onChartModeChange: (mode: 'line' | 'span') => void;
+  showSleepBars: boolean;
+  onShowSleepBarsChange: (show: boolean) => void;
   periodMode: PeriodMode;
   monthLoading: boolean;
   selectedMonth: string;
@@ -485,6 +563,10 @@ function MoodMonthlySection({
     : '';
   const rangeLabel = useMemo(() => getPeriodRangeLabel(selectedMonth, periodMode), [selectedMonth, periodMode]);
   const visibleRange = useMemo(() => getPeriodDateRange(selectedMonth, periodMode), [selectedMonth, periodMode]);
+  const sleepTotalsByDate = useMemo(
+    () => new Map(sleepDailyData.map((d) => [d.date, Math.max(0, d.total_sleep_minutes || 0)])),
+    [sleepDailyData]
+  );
 
   return (
     <div className="space-y-4">
@@ -558,11 +640,27 @@ function MoodMonthlySection({
             </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => onShowSleepBarsChange(!showSleepBars)}
+            className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${showSleepBars
+              ? 'bg-teal-500 text-white border-teal-500'
+              : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            title="Show or hide total sleep bars with right-axis labels"
+          >
+            Sleep Bars
+          </button>
         </div>
 
         <div className="relative">
           <div className={monthLoading ? 'opacity-65 transition-opacity' : 'opacity-100 transition-opacity'}>
-            <MoodLineSpanChart data={dailyData} mode={chartMode} />
+            <MoodLineSpanChart
+              data={dailyData}
+              mode={chartMode}
+              sleepTotalsByDate={sleepTotalsByDate}
+              showSleepBars={showSleepBars}
+            />
           </div>
           {monthLoading && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -983,6 +1081,8 @@ export function MoodsTab() {
   const [dowData, setDowData] = useState<DowPt[]>([]);
   const [corrData, setCorrData] = useState<CorrPt[]>([]);
   const [comboData, setComboData] = useState<ComboPt[]>([]);
+  const [sleepDailyData, setSleepDailyData] = useState<SleepDailyPt[]>([]);
+  const [showSleepBars, setShowSleepBars] = useState(false);
   const [monthLoading, setMonthLoading] = useState(true);
 
   // Year-scoped data
@@ -1076,13 +1176,15 @@ export function MoodsTab() {
       stats.moodByDayOfWeek(USER_ID, rangeStart, rangeEnd),
       stats.moodActivityCorrelations(USER_ID, rangeStart, rangeEnd),
       stats.moodActivityCombinations(USER_ID, rangeStart, rangeEnd),
+      stats.sleepDaily(USER_ID, rangeStart, rangeEnd),
     ])
-      .then(([daily, counts, dow, corr, combos]) => {
+      .then(([daily, counts, dow, corr, combos, sleepDaily]) => {
         setDailyData(daily);
         setMoodCounts(counts);
         setDowData(dow);
         setCorrData(corr);
         setComboData(combos);
+        setSleepDailyData(sleepDaily);
       })
       .catch(console.error)
       .finally(() => setMonthLoading(false));
@@ -1128,8 +1230,11 @@ export function MoodsTab() {
         dowData={dowData}
         corrData={corrData}
         comboData={comboData}
+        sleepDailyData={sleepDailyData}
         chartMode={chartMode}
         onChartModeChange={setChartMode}
+        showSleepBars={showSleepBars}
+        onShowSleepBarsChange={setShowSleepBars}
         periodMode={periodMode}
         monthLoading={monthLoading}
         selectedMonth={selectedMonth}

@@ -1066,7 +1066,7 @@ router.get('/sleep-summary', async (req: Request, res: Response) => {
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
     const whereRange = hasRange
-      ? "AND (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
+      ? "AND (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
       : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
@@ -1104,13 +1104,13 @@ router.get('/sleep-daily', async (req: Request, res: Response) => {
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
     const whereRange = hasRange
-      ? "AND (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
+      ? "AND (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
       : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
     const result = await query(
       `SELECT
-         TO_CHAR((started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date, 'YYYY-MM-DD') AS date,
+         TO_CHAR((ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date, 'YYYY-MM-DD') AS date,
          COUNT(*)::int AS count,
          ROUND(AVG(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::numeric, 1)::float AS avg_duration_minutes,
          ROUND(SUM(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::numeric, 1)::float AS total_sleep_minutes,
@@ -1118,7 +1118,7 @@ router.get('/sleep-daily', async (req: Request, res: Response) => {
        FROM sleep_entries
        WHERE user_id = $1
          ${whereRange}
-       GROUP BY (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date
+       GROUP BY (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date
        ORDER BY date ASC`,
       params
     );
@@ -1138,7 +1138,7 @@ router.get('/sleep-rating-distribution', async (req: Request, res: Response) => 
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
     const whereRange = hasRange
-      ? "AND (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
+      ? "AND (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
       : '';
     const params = hasRange ? [user_id, from, to] : [user_id];
 
