@@ -149,8 +149,7 @@ export default function CheckInForm({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitCheckIn = async () => {
     if (!venueId && !isEditMode) {
       setError('Please select a venue.');
       return;
@@ -189,6 +188,11 @@ export default function CheckInForm({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void submitCheckIn();
   };
 
   return (
@@ -313,7 +317,7 @@ export default function CheckInForm({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && e.shiftKey) {
               e.preventDefault();
-              e.currentTarget.form?.requestSubmit();
+              void submitCheckIn();
             }
           }}
           placeholder="What are you up to?"
