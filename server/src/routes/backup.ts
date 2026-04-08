@@ -744,11 +744,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
     const deleteAllCheckins = Boolean(rawOptions.delete_all_checkins);
     const deleteVenueCheckins = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
     const deleteMoodCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
+    const deleteSleepEntries = deleteAllCheckins || Boolean(rawOptions.delete_sleep_entries);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
     const resetMoodSettings = Boolean(rawOptions.reset_mood_settings);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && !deleteMoodCheckins && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
+    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -773,6 +774,11 @@ router.post('/start-over', async (req: Request, res: Response) => {
     if (deleteMoodCheckins) {
       const moodCheckinResult = await client.query('DELETE FROM mood_checkins WHERE user_id = $1', [USER_ID]);
       counts.mood_checkins = moodCheckinResult.rowCount ?? 0;
+    }
+
+    if (deleteSleepEntries) {
+      const sleepEntriesResult = await client.query('DELETE FROM sleep_entries WHERE user_id = $1', [USER_ID]);
+      counts.sleep_entries = sleepEntriesResult.rowCount ?? 0;
     }
 
     if (resetMoodSettings) {

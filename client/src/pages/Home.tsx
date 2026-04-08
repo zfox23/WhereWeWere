@@ -5,6 +5,7 @@ import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
+import SleepCard from '../components/SleepCard';
 import { MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -26,8 +27,15 @@ function formatDateHeader(dateStr: string) {
  * Falls back to browser local time if no timezone is stored.
  */
 function getLocalDateKey(item: TimelineItem): string {
-  const tz = item.type === 'location' ? item.venue_timezone : item.mood_timezone;
-  return new Date(item.checked_in_at).toLocaleDateString('en-CA', {
+  const dateValue = item.type === 'sleep'
+    ? item.sleep_ended_at || item.checked_in_at
+    : item.checked_in_at;
+  const tz = item.type === 'location'
+    ? item.venue_timezone
+    : item.type === 'mood'
+      ? item.mood_timezone
+      : item.sleep_timezone;
+  return new Date(dateValue).toLocaleDateString('en-CA', {
     ...(tz ? { timeZone: tz } : {}),
   });
 }
@@ -564,7 +572,11 @@ export default function Home() {
   const hasTypeSelectionFilter = !includeLocation || !includeMood;
   const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || hasTypeSelectionFilter;
   const visibleItems = useMemo(
-    () => items.filter((item) => (item.type === 'location' ? includeLocation : includeMood)),
+    () => items.filter((item) => {
+      if (item.type === 'location') return includeLocation;
+      if (item.type === 'mood') return includeMood;
+      return includeLocation && includeMood;
+    }),
     [items, includeLocation, includeMood]
   );
   const rawGrouped = groupByDate(visibleItems);
@@ -938,6 +950,11 @@ export default function Home() {
                         photos={photosMap[item.id] ?? null}
                         scrobbles={dedupedScrobblesMap[item.id]}
                         malojaUrl={malojaUrl}
+                      />
+                    ) : item.type === 'sleep' ? (
+                      <SleepCard
+                        key={item.id}
+                        item={item}
                       />
                     ) : (
                       <CheckInCard

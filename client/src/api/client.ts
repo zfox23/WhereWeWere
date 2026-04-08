@@ -178,6 +178,30 @@ export const stats = {
     if (from && to) { qp.set('from', from); qp.set('to', to); }
     return request<any[]>(`/stats/mood-count-range?${qp.toString()}`);
   },
+  sleepSummary: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any>(`/stats/sleep-summary?${qp.toString()}`);
+  },
+  sleepDaily: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/sleep-daily?${qp.toString()}`);
+  },
+  sleepRatingDistribution: (userId: string, from?: string, to?: string) => {
+    const qp = new URLSearchParams({ user_id: userId });
+    if (from && to) {
+      qp.set('from', from);
+      qp.set('to', to);
+    }
+    return request<any[]>(`/stats/sleep-rating-distribution?${qp.toString()}`);
+  },
 };
 
 // Search
@@ -215,6 +239,32 @@ export const importApi = {
     }
     return res.json();
   },
+  sleepAsAndroid: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/import/sleep-as-android`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(error.message || `Import failed: ${res.status}`);
+    }
+    return res.json();
+  },
+};
+
+// Sleep entries
+export const sleepEntries = {
+  list: (params?: Record<string, string>) =>
+    request<any[]>(`/sleep-entries?${new URLSearchParams(params)}`),
+  get: (id: string) => request<any>(`/sleep-entries/${id}`),
+  create: (data: any) =>
+    request<any>('/sleep-entries', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) =>
+    request<any>(`/sleep-entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request<void>(`/sleep-entries/${id}`, { method: 'DELETE' }),
 };
 
 // Backup / Restore
@@ -252,6 +302,7 @@ export const backupApi = {
       delete_all_checkins: boolean;
       delete_venue_checkins: boolean;
       delete_mood_checkins: boolean;
+      delete_sleep_entries: boolean;
       reset_account_settings: boolean;
       reset_mood_settings: boolean;
       reset_integrations_settings: boolean;

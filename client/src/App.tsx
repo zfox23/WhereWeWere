@@ -10,6 +10,8 @@ import CheckInDetail from './pages/CheckInDetail';
 import Settings from './pages/Settings';
 import MoodCheckIn from './pages/MoodCheckIn';
 import MoodCheckInDetail from './pages/MoodCheckInDetail';
+import SleepCheckIn from './pages/SleepCheckIn';
+import SleepDetail from './pages/SleepDetail';
 
 export default function App() {
   return (
@@ -20,6 +22,8 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/check-in" element={<CheckIn />} />
         <Route path="/mood-check-in" element={<MoodCheckIn />} />
+        <Route path="/sleep-check-in" element={<SleepCheckIn />} />
+        <Route path="/sleep-entries/:id" element={<SleepDetail />} />
         <Route path="/mood-checkins/:id" element={<MoodCheckInDetail />} />
         <Route path="/checkins/:id" element={<CheckInDetail />} />
         <Route path="/venues/:id" element={<VenueDetail />} />

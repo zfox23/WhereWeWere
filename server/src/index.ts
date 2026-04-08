@@ -15,8 +15,10 @@ import { moodCheckinsRouter } from './routes/mood-checkins';
 import { moodActivitiesRouter } from './routes/mood-activities';
 import { timelineRouter } from './routes/timeline';
 import { importDaylioRouter } from './routes/import-daylio';
+import { importSleepAsAndroidRouter } from './routes/import-sleep-as-android';
 import { pushRouter } from './routes/push';
 import { backupRouter } from './routes/backup';
+import { sleepEntriesRouter } from './routes/sleep-entries';
 import { sendMoodReminder } from './services/pushReminder';
 import { runMigrations } from './db/runMigrations';
 
@@ -45,6 +47,8 @@ export function createApp() {
   app.use('/api/v1/mood-activities', moodActivitiesRouter);
   app.use('/api/v1/timeline', timelineRouter);
   app.use('/api/v1/import/daylio', importDaylioRouter);
+  app.use('/api/v1/import/sleep-as-android', importSleepAsAndroidRouter);
+  app.use('/api/v1/sleep-entries', sleepEntriesRouter);
   app.use('/api/v1/push', pushRouter);
   app.use('/api/v1/backup', backupRouter);
 

@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Brain, MapPin, SmilePlus } from 'lucide-react';
+import { Brain, MapPin, Moon, SmilePlus } from 'lucide-react';
 import { MoodsTab } from '../components/MoodStats';
 import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
+import { SleepTab } from '../components/SleepTab';
 
 export default function Profile() {
-  type ProfileTab = 'places' | 'reflect' | 'moods';
+  type ProfileTab = 'places' | 'reflect' | 'moods' | 'sleep';
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
-    return value === 'places' || value === 'reflect' || value === 'moods';
+    return value === 'places' || value === 'reflect' || value === 'moods' || value === 'sleep';
   };
 
   const getTabFromLocation = (): ProfileTab => {
@@ -68,6 +69,16 @@ export default function Profile() {
           Moods
         </button>
         <button
+          onClick={() => setActiveTab('sleep')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'sleep'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+        >
+          <Moon size={14} />
+          Sleep
+        </button>
+        <button
           onClick={() => setActiveTab('reflect')}
           className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'reflect'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
@@ -79,7 +90,13 @@ export default function Profile() {
         </button>
       </div>
 
-      {activeTab === 'places' ? <PlacesTab /> : activeTab === 'reflect' ? <ReflectTab /> : <MoodsTab />}
+      {activeTab === 'places'
+        ? <PlacesTab />
+        : activeTab === 'reflect'
+          ? <ReflectTab />
+          : activeTab === 'sleep'
+            ? <SleepTab />
+            : <MoodsTab />}
     </div>
   );
 }

@@ -30,6 +30,7 @@ router.get('/', async (req: Request, res: Response) => {
     const params: unknown[] = [];
     const locationConditions: string[] = [];
     const moodConditions: string[] = [];
+    const sleepConditions: string[] = [];
     let paramIndex = 1;
     const hasMoodTypeFilter = Boolean(req.query.mood || req.query.activity);
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
@@ -39,6 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (user_id) {
       locationConditions.push(`c.user_id = $${paramIndex}`);
       moodConditions.push(`mc.user_id = $${paramIndex}`);
+      sleepConditions.push(`se.user_id = $${paramIndex}`);
       params.push(user_id);
       paramIndex++;
     }
@@ -46,6 +48,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (fromDate) {
       locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${paramIndex}::date`);
       moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date >= $${paramIndex}::date`);
+      sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= $${paramIndex}::date`);
       params.push(fromDate);
       paramIndex++;
     }
@@ -53,6 +56,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (toDate) {
       locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $${paramIndex}::date`);
       moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date <= $${paramIndex}::date`);
+      sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date <= $${paramIndex}::date`);
       params.push(toDate);
       paramIndex++;
     }
@@ -107,6 +111,9 @@ router.get('/', async (req: Request, res: Response) => {
       moodConditions.push(
         `mc.note ILIKE '%' || $${paramIndex} || '%'`
       );
+      sleepConditions.push(
+        `se.comment ILIKE '%' || $${paramIndex} || '%'`
+      );
       params.push(searchQuery);
       paramIndex++;
     }
@@ -116,6 +123,9 @@ router.get('/', async (req: Request, res: Response) => {
       : '';
     const moodWhere = moodConditions.length > 0
       ? `WHERE ${moodConditions.join(' AND ')}`
+      : '';
+    const sleepWhere = sleepConditions.length > 0
+      ? `WHERE ${sleepConditions.join(' AND ')}`
       : '';
 
     params.push(parseInt(limit as string, 10));
@@ -132,7 +142,13 @@ router.get('/', async (req: Request, res: Response) => {
               c.checkin_timezone AS venue_timezone,
              vc.name AS venue_category,
              pv.id AS parent_venue_id, pv.name AS parent_venue_name,
-        NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities
+        NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
+        NULL::bigint AS sleep_as_android_id,
+        NULL::timestamptz AS sleep_started_at,
+        NULL::timestamptz AS sleep_ended_at,
+        NULL::text AS sleep_timezone,
+        NULL::numeric AS sleep_rating,
+        NULL::text AS sleep_comment
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
@@ -157,9 +173,30 @@ router.get('/', async (req: Request, res: Response) => {
                JOIN mood_activity_groups mag ON ma.group_id = mag.id
                WHERE mca.mood_checkin_id = mc.id),
                '[]'::json
-             ) AS activities
+             ) AS activities,
+             NULL::bigint AS sleep_as_android_id,
+             NULL::timestamptz AS sleep_started_at,
+             NULL::timestamptz AS sleep_ended_at,
+             NULL::text AS sleep_timezone,
+             NULL::numeric AS sleep_rating,
+             NULL::text AS sleep_comment
       FROM mood_checkins mc
       ${moodWhere}
+    `;
+
+    const sleepSelect = `
+      SELECT 'sleep' AS type, se.id, se.user_id, NULL AS venue_id, se.comment AS notes,
+             se.started_at AS checked_in_at, se.created_at,
+             NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
+             NULL::text AS venue_timezone,
+             NULL AS venue_category,
+             NULL AS parent_venue_id, NULL AS parent_venue_name,
+             NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
+             se.sleep_as_android_id, se.started_at AS sleep_started_at,
+             se.ended_at AS sleep_ended_at, se.sleep_timezone,
+             se.rating AS sleep_rating, se.comment AS sleep_comment
+      FROM sleep_entries se
+      ${sleepWhere}
     `;
 
     let sql: string;
@@ -184,6 +221,10 @@ router.get('/', async (req: Request, res: Response) => {
         UNION ALL
         (
           ${moodSelect}
+        )
+        UNION ALL
+        (
+          ${sleepSelect}
         )
         ORDER BY checked_in_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}

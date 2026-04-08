@@ -1008,4 +1008,112 @@ router.get('/mood-heatmap', async (req: Request, res: Response) => {
   }
 });
 
+// GET /sleep-summary?user_id=&from=&to= - aggregate sleep stats for a date range
+router.get('/sleep-summary', async (req: Request, res: Response) => {
+  try {
+    const { user_id, from, to } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange
+      ? "AND (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
+      : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
+
+    const result = await query(
+      `SELECT
+         COUNT(*)::int AS total_sleeps,
+         ROUND(AVG(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::numeric, 1)::float AS avg_duration_minutes,
+         ROUND(SUM(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::numeric, 1)::float AS total_sleep_minutes,
+         ROUND(AVG(NULLIF(rating, 0))::numeric, 2)::float AS avg_rating,
+         COUNT(*) FILTER (WHERE rating > 0)::int AS rated_count
+       FROM sleep_entries
+       WHERE user_id = $1
+         ${whereRange}`,
+      params
+    );
+
+    res.json(result.rows[0] || {
+      total_sleeps: 0,
+      avg_duration_minutes: 0,
+      total_sleep_minutes: 0,
+      avg_rating: null,
+      rated_count: 0,
+    });
+  } catch (err) {
+    console.error('Error getting sleep-summary:', err);
+    res.status(500).json({ error: 'Failed to get sleep summary' });
+  }
+});
+
+// GET /sleep-daily?user_id=&from=&to= - nightly sleep duration and rating per day
+router.get('/sleep-daily', async (req: Request, res: Response) => {
+  try {
+    const { user_id, from, to } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange
+      ? "AND (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
+      : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
+
+    const result = await query(
+      `SELECT
+         TO_CHAR((started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date, 'YYYY-MM-DD') AS date,
+         COUNT(*)::int AS count,
+         ROUND(AVG(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::numeric, 1)::float AS avg_duration_minutes,
+         ROUND(SUM(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::numeric, 1)::float AS total_sleep_minutes,
+         ROUND(AVG(NULLIF(rating, 0))::numeric, 2)::float AS avg_rating
+       FROM sleep_entries
+       WHERE user_id = $1
+         ${whereRange}
+       GROUP BY (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date
+       ORDER BY date ASC`,
+      params
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getting sleep-daily:', err);
+    res.status(500).json({ error: 'Failed to get sleep daily stats' });
+  }
+});
+
+// GET /sleep-rating-distribution?user_id=&from=&to= - rounded-star distribution + unrated
+router.get('/sleep-rating-distribution', async (req: Request, res: Response) => {
+  try {
+    const { user_id, from, to } = req.query;
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
+    const whereRange = hasRange
+      ? "AND (started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
+      : '';
+    const params = hasRange ? [user_id, from, to] : [user_id];
+
+    const result = await query(
+      `SELECT
+         CASE
+           WHEN rating <= 0 THEN 0
+           ELSE LEAST(5, GREATEST(1, ROUND(rating)::int))
+         END AS stars,
+         COUNT(*)::int AS count
+       FROM sleep_entries
+       WHERE user_id = $1
+         ${whereRange}
+       GROUP BY stars
+       ORDER BY stars ASC`,
+      params
+    );
+
+    const map = new Map(result.rows.map((row: any) => [Number(row.stars), Number(row.count)]));
+    const response = [0, 1, 2, 3, 4, 5].map((stars) => ({ stars, count: map.get(stars) || 0 }));
+    res.json(response);
+  } catch (err) {
+    console.error('Error getting sleep-rating-distribution:', err);
+    res.status(500).json({ error: 'Failed to get sleep rating distribution' });
+  }
+});
+
 export const statsRouter = router;
