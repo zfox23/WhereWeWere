@@ -138,7 +138,7 @@ export default function SleepCard({ item }: SleepCardProps) {
         <div className="flex items-center gap-1 shrink-0">
           <Link
             to={`/sleep-check-in?edit=${item.id}`}
-            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-all opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
             title="Edit"
           >
             <Pencil size={14} />

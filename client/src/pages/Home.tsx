@@ -151,6 +151,7 @@ export default function Home() {
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
+  const [openTimelineDotDate, setOpenTimelineDotDate] = useState<string | null>(null);
   const [iconPack, setIconPack] = useState('emoji');
   const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
@@ -898,6 +899,15 @@ export default function Home() {
         </div>
       )}
 
+      {openTimelineDotDate && (
+        <button
+          type="button"
+          aria-label="Close timeline quick actions"
+          onClick={() => setOpenTimelineDotDate(null)}
+          className="fixed inset-0 z-20 cursor-default"
+        />
+      )}
+
       {/* Feed */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -932,7 +942,51 @@ export default function Home() {
             <div key={date} className="relative">
               {/* Date header with timeline dot */}
               <div className="flex items-center gap-3 py-2">
-                <div className="w-3 h-3 rounded-full bg-primary-500 shrink-0 ring-4 ring-primary-100 dark:ring-primary-900/30 relative z-10" />
+                <div className="relative z-30">
+                  <button
+                    type="button"
+                    onClick={() => setOpenTimelineDotDate((prev) => prev === date ? null : date)}
+                    className="group -m-1.5 p-1.5 shrink-0 relative z-10 flex items-center justify-center"
+                    aria-label={`Open quick check-in actions for ${formatDateHeader(date)}`}
+                    aria-expanded={openTimelineDotDate === date}
+                  >
+                    <span className={`w-3 h-3 rounded-full bg-primary-500 ring-4 dark:ring-primary-900/30 flex items-center justify-center transition-transform group-hover:scale-110 ${openTimelineDotDate === date ? 'ring-primary-200 dark:ring-primary-800/70' : 'ring-primary-100'}`}>
+                      <Plus size={8} className={`text-white transition-opacity ${openTimelineDotDate === date ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                    </span>
+                  </button>
+                  <div
+                    className={`absolute left-5 top-1/2 -translate-y-1/2 z-30 flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 px-2 py-1 shadow-lg backdrop-blur-sm transition-all duration-200 ease-out ${openTimelineDotDate === date ? 'opacity-100 translate-x-0 scale-100 pointer-events-auto' : 'opacity-0 -translate-x-1 scale-95 pointer-events-none'}`}
+                    aria-hidden={openTimelineDotDate !== date}
+                  >
+                    <Link
+                      to={`/check-in?date=${encodeURIComponent(date)}`}
+                      className="p-1.5 rounded-full text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/30 transition-colors"
+                      title="Location check-in"
+                      onClick={() => setOpenTimelineDotDate(null)}
+                      tabIndex={openTimelineDotDate === date ? 0 : -1}
+                    >
+                      <MapPin size={14} />
+                    </Link>
+                    <Link
+                      to={`/mood-check-in?date=${encodeURIComponent(date)}`}
+                      className="p-1.5 rounded-full text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/30 transition-colors"
+                      title="Mood check-in"
+                      onClick={() => setOpenTimelineDotDate(null)}
+                      tabIndex={openTimelineDotDate === date ? 0 : -1}
+                    >
+                      <Smile size={14} />
+                    </Link>
+                    <Link
+                      to={`/sleep-check-in?date=${encodeURIComponent(date)}`}
+                      className="p-1.5 rounded-full text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 transition-colors"
+                      title="Sleep check-in"
+                      onClick={() => setOpenTimelineDotDate(null)}
+                      tabIndex={openTimelineDotDate === date ? 0 : -1}
+                    >
+                      <Moon size={14} />
+                    </Link>
+                  </div>
+                </div>
                 <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                   {dawarichUrl ? (
                     <a

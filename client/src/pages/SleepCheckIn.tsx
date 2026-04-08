@@ -4,9 +4,16 @@ import { ArrowLeft, Loader2, Moon, Star, Trash2 } from 'lucide-react';
 import { sleepEntries } from '../api/client';
 import type { SleepEntry } from '../types';
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 function toLocalDatetimeString(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function applyDateToLocalDatetime(date: string, localDateTime: string): string {
+  const [, time = '00:00'] = localDateTime.split('T');
+  return `${date}T${time}`;
 }
 
 function toOffsetDateTime(localDateTime: string): string {
@@ -60,14 +67,23 @@ export default function SleepCheckIn() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const editId = searchParams.get('edit');
+  const dateParam = searchParams.get('date') || '';
+  const hasDatePrefill = DATE_ONLY_PATTERN.test(dateParam);
+
+  const defaultStartedAt = toLocalDatetimeString(new Date(Date.now() - 8 * 60 * 60 * 1000));
+  const defaultEndedAt = toLocalDatetimeString(new Date());
 
   const [loading, setLoading] = useState(!!editId);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [startedAt, setStartedAt] = useState(toLocalDatetimeString(new Date(Date.now() - 8 * 60 * 60 * 1000)));
-  const [endedAt, setEndedAt] = useState(toLocalDatetimeString(new Date()));
+  const [startedAt, setStartedAt] = useState(
+    hasDatePrefill ? applyDateToLocalDatetime(dateParam, defaultStartedAt) : defaultStartedAt
+  );
+  const [endedAt, setEndedAt] = useState(
+    hasDatePrefill ? applyDateToLocalDatetime(dateParam, defaultEndedAt) : defaultEndedAt
+  );
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
 

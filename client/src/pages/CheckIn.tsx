@@ -8,11 +8,22 @@ import MapView from '../components/MapView';
 import { venues, checkins } from '../api/client';
 import type { CheckIn as CheckInType } from '../types';
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function applyDateToIsoString(date: string, fallbackIso?: string): string {
+  const base = fallbackIso ? new Date(fallbackIso) : new Date();
+  const timeHours = base.getHours();
+  const timeMinutes = base.getMinutes();
+  return `${date}T${String(timeHours).padStart(2, '0')}:${String(timeMinutes).padStart(2, '0')}:00`;
+}
+
 export default function CheckIn() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const editId = searchParams.get('edit');
+  const dateParam = searchParams.get('date') || '';
+  const prefillsDate = DATE_ONLY_PATTERN.test(dateParam);
   const [selectedVenue, setSelectedVenue] = useState<SelectedVenue | null>(null);
   const [selectedVenueCoords, setSelectedVenueCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedVenueCoordsLoading, setSelectedVenueCoordsLoading] = useState(false);
@@ -190,7 +201,7 @@ export default function CheckIn() {
             onSuccess={handleSuccess}
             editCheckinId={editId || undefined}
             initialNotes={editCheckin?.notes || ''}
-            initialCheckedInAt={editCheckin?.checked_in_at}
+            initialCheckedInAt={editCheckin?.checked_in_at || (prefillsDate ? applyDateToIsoString(dateParam) : undefined)}
           />
         </div>
       ) : null}

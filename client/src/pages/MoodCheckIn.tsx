@@ -6,9 +6,16 @@ import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
 import type { MoodActivityGroup } from '../types';
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 function toLocalDatetimeString(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function applyDateToLocalDatetime(date: string, localDateTime: string): string {
+  const [, time = '00:00'] = localDateTime.split('T');
+  return `${date}T${time}`;
 }
 
 function toOffsetDateTime(localDateTime: string): string {
@@ -98,10 +105,16 @@ export default function MoodCheckInPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const editId = searchParams.get('edit');
+  const dateParam = searchParams.get('date') || '';
+  const hasDatePrefill = DATE_ONLY_PATTERN.test(dateParam);
+
+  const defaultCheckedInAt = toLocalDatetimeString(new Date());
 
   const [mood, setMood] = useState<number>(0);
   const [note, setNote] = useState('');
-  const [checkedInAt, setCheckedInAt] = useState(toLocalDatetimeString(new Date()));
+  const [checkedInAt, setCheckedInAt] = useState(
+    hasDatePrefill ? applyDateToLocalDatetime(dateParam, defaultCheckedInAt) : defaultCheckedInAt
+  );
   const [selectedActivities, setSelectedActivities] = useState<Set<string>>(new Set());
   const [activityFilter, setActivityFilter] = useState('');
   const [groups, setGroups] = useState<MoodActivityGroup[]>([]);
