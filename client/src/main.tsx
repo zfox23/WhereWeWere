@@ -6,6 +6,7 @@ import App from './App';
 import './index.css';
 import { startGeofenceWatcher } from './services/geofence';
 import { startMoodReminderScheduler } from './services/moodReminders';
+import { initOfflineMutationSync } from './services/offlineMutations';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 // Start geofence watcher for dwell-based check-in notifications
 startGeofenceWatcher();
 startMoodReminderScheduler();
+initOfflineMutationSync();
 
 // Let vite-plugin-pwa choose the correct service worker URL in dev/prod.
 if ('serviceWorker' in navigator) {

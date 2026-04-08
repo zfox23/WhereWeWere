@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Loader2, Moon, Star, Trash2 } from 'lucide-react';
 import { sleepEntries } from '../api/client';
+import { makeSleepExternalId } from '../utils/idempotency';
 import type { SleepEntry } from '../types';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -86,6 +87,7 @@ export default function SleepCheckIn() {
   );
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
+  const [createSleepExternalId, setCreateSleepExternalId] = useState(() => makeSleepExternalId());
 
   const timeZoneAbbreviation = getLocalTimeZoneAbbreviation(endedAt);
 
@@ -134,21 +136,27 @@ export default function SleepCheckIn() {
       return;
     }
 
-    const payload = {
-      started_at: toOffsetDateTime(startedAt),
-      ended_at: toOffsetDateTime(endedAt),
-      sleep_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-      rating,
-      comment: comment.trim() || null,
-    };
-
     setSaving(true);
     setError(null);
     try {
       if (editId) {
-        await sleepEntries.update(editId, payload);
+        await sleepEntries.update(editId, {
+          started_at: toOffsetDateTime(startedAt),
+          ended_at: toOffsetDateTime(endedAt),
+          sleep_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          rating,
+          comment: comment.trim() || null,
+        });
       } else {
-        await sleepEntries.create(payload);
+        await sleepEntries.create({
+          started_at: toOffsetDateTime(startedAt),
+          ended_at: toOffsetDateTime(endedAt),
+          sleep_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          rating,
+          comment: comment.trim() || null,
+          sleep_as_android_id: createSleepExternalId,
+        });
+        setCreateSleepExternalId(makeSleepExternalId());
       }
       navigate('/');
     } catch (err) {

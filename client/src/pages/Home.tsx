@@ -7,6 +7,7 @@ import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
 import SleepCard from '../components/SleepCard';
 import { MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
+import { subscribeOfflineMutations } from '../services/offlineMutations';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
@@ -501,6 +502,14 @@ export default function Home() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
+  }, [fetchTimeline]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeOfflineMutations(() => {
+      offsetRef.current = 0;
+      void fetchTimeline(0, false);
+    });
+    return unsubscribe;
   }, [fetchTimeline]);
 
   // All visible timeline items for cross-type photo/scrobble deduplication

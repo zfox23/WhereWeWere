@@ -1,17 +1,106 @@
 import type { TimestampReconciliationScanResult } from '../types';
+import {
+  applyOfflineMutationsToTimeline,
+  enqueueOfflineMutation,
+  type OfflineEntityType,
+  type OfflineMutationType,
+} from '../services/offlineMutations';
 
 const API_BASE = '/api/v1';
 
+class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export interface CheckinCreatePayload {
+  user_id: string;
+  venue_id: string;
+  notes?: string | null;
+  checked_in_at?: string | null;
+  also_checkin_parent?: boolean;
+  client_ref_id?: string;
+}
+
+export interface MoodCheckinCreatePayload {
+  mood: number;
+  note?: string | null;
+  checked_in_at?: string | null;
+  mood_timezone?: string | null;
+  activity_ids?: string[];
+  client_ref_id?: string;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...options?.headers },
+      ...options,
+    });
+  } catch (err) {
+    if (err instanceof Error) {
+      throw err;
+    }
+    throw new Error('Network request failed');
+  }
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(error.message || `Request failed: ${res.status}`);
+    throw new ApiError(res.status, error.message || error.error || `Request failed: ${res.status}`);
   }
   return res.json();
+}
+
+function isOfflineError(err: unknown): boolean {
+  if (!navigator.onLine) return true;
+  if (!(err instanceof Error)) return false;
+  return err.name === 'TypeError' || /network|fetch/i.test(err.message);
+}
+
+async function executeOfflineCapableMutation<T>(input: {
+  entityType: OfflineEntityType;
+  mutationType: OfflineMutationType;
+  method: 'POST' | 'PUT' | 'DELETE';
+  path: string;
+  payload: Record<string, unknown> | null;
+  entityId?: string;
+  runOnline: () => Promise<T>;
+  buildOptimisticResult: () => T;
+}): Promise<T> {
+  if (!navigator.onLine) {
+    await enqueueOfflineMutation({
+      entityType: input.entityType,
+      mutationType: input.mutationType,
+      method: input.method,
+      path: input.path,
+      payload: input.payload,
+      entityId: input.entityId,
+    });
+    return input.buildOptimisticResult();
+  }
+
+  try {
+    return await input.runOnline();
+  } catch (err) {
+    if (!isOfflineError(err)) {
+      throw err;
+    }
+
+    await enqueueOfflineMutation({
+      entityType: input.entityType,
+      mutationType: input.mutationType,
+      method: input.method,
+      path: input.path,
+      payload: input.payload,
+      entityId: input.entityId,
+    });
+    return input.buildOptimisticResult();
+  }
 }
 
 // Checkins
@@ -19,12 +108,46 @@ export const checkins = {
   list: (params?: Record<string, string>) =>
     request<any[]>(`/checkins?${new URLSearchParams(params)}`),
   get: (id: string) => request<any>(`/checkins/${id}`),
-  create: (data: any) =>
-    request<any>('/checkins', { method: 'POST', body: JSON.stringify(data) }),
+  create: (data: CheckinCreatePayload) =>
+    executeOfflineCapableMutation<any>({
+      entityType: 'checkin',
+      mutationType: 'create',
+      method: 'POST',
+      path: '/checkins',
+      payload: data as unknown as Record<string, unknown>,
+      entityId: data.client_ref_id,
+      runOnline: () => request<any>('/checkins', { method: 'POST', body: JSON.stringify(data) }),
+      buildOptimisticResult: () => ({
+        id: `offline:${data.client_ref_id || crypto.randomUUID()}`,
+        user_id: data.user_id,
+        venue_id: data.venue_id,
+        notes: data.notes || null,
+        checked_in_at: data.checked_in_at || new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }),
+    }),
   update: (id: string, data: any) =>
-    request<any>(`/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    executeOfflineCapableMutation<any>({
+      entityType: 'checkin',
+      mutationType: 'update',
+      method: 'PUT',
+      path: `/checkins/${id}`,
+      payload: data,
+      entityId: id,
+      runOnline: () => request<any>(`/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+      buildOptimisticResult: () => ({ id, ...data, updated_at: new Date().toISOString() }),
+    }),
   delete: (id: string) =>
-    request<void>(`/checkins/${id}`, { method: 'DELETE' }),
+    executeOfflineCapableMutation<void>({
+      entityType: 'checkin',
+      mutationType: 'delete',
+      method: 'DELETE',
+      path: `/checkins/${id}`,
+      payload: null,
+      entityId: id,
+      runOnline: () => request<void>(`/checkins/${id}`, { method: 'DELETE' }),
+      buildOptimisticResult: () => undefined,
+    }),
 };
 
 // Venues
@@ -260,11 +383,45 @@ export const sleepEntries = {
     request<any[]>(`/sleep-entries?${new URLSearchParams(params)}`),
   get: (id: string) => request<any>(`/sleep-entries/${id}`),
   create: (data: any) =>
-    request<any>('/sleep-entries', { method: 'POST', body: JSON.stringify(data) }),
+    executeOfflineCapableMutation<any>({
+      entityType: 'sleep',
+      mutationType: 'create',
+      method: 'POST',
+      path: '/sleep-entries',
+      payload: data,
+      entityId: String(data.sleep_as_android_id || data.client_ref_id || crypto.randomUUID()),
+      runOnline: () => request<any>('/sleep-entries', { method: 'POST', body: JSON.stringify(data) }),
+      buildOptimisticResult: () => ({
+        id: `offline:${data.sleep_as_android_id || crypto.randomUUID()}`,
+        started_at: data.started_at,
+        ended_at: data.ended_at,
+        sleep_timezone: data.sleep_timezone,
+        rating: data.rating,
+        comment: data.comment,
+      }),
+    }),
   update: (id: string, data: any) =>
-    request<any>(`/sleep-entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    executeOfflineCapableMutation<any>({
+      entityType: 'sleep',
+      mutationType: 'update',
+      method: 'PUT',
+      path: `/sleep-entries/${id}`,
+      payload: data,
+      entityId: id,
+      runOnline: () => request<any>(`/sleep-entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+      buildOptimisticResult: () => ({ id, ...data, updated_at: new Date().toISOString() }),
+    }),
   delete: (id: string) =>
-    request<void>(`/sleep-entries/${id}`, { method: 'DELETE' }),
+    executeOfflineCapableMutation<void>({
+      entityType: 'sleep',
+      mutationType: 'delete',
+      method: 'DELETE',
+      path: `/sleep-entries/${id}`,
+      payload: null,
+      entityId: id,
+      runOnline: () => request<void>(`/sleep-entries/${id}`, { method: 'DELETE' }),
+      buildOptimisticResult: () => undefined,
+    }),
 };
 
 // Sleep as Android webhook
@@ -361,12 +518,44 @@ export const moodCheckins = {
   list: (params?: Record<string, string>) =>
     request<any[]>(`/mood-checkins?${new URLSearchParams(params)}`),
   get: (id: string) => request<any>(`/mood-checkins/${id}`),
-  create: (data: any) =>
-    request<any>('/mood-checkins', { method: 'POST', body: JSON.stringify(data) }),
+  create: (data: MoodCheckinCreatePayload) =>
+    executeOfflineCapableMutation<any>({
+      entityType: 'mood',
+      mutationType: 'create',
+      method: 'POST',
+      path: '/mood-checkins',
+      payload: data as unknown as Record<string, unknown>,
+      entityId: data.client_ref_id,
+      runOnline: () => request<any>('/mood-checkins', { method: 'POST', body: JSON.stringify(data) }),
+      buildOptimisticResult: () => ({
+        id: `offline:${data.client_ref_id || crypto.randomUUID()}`,
+        mood: data.mood,
+        note: data.note || null,
+        checked_in_at: data.checked_in_at || new Date().toISOString(),
+      }),
+    }),
   update: (id: string, data: any) =>
-    request<any>(`/mood-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    executeOfflineCapableMutation<any>({
+      entityType: 'mood',
+      mutationType: 'update',
+      method: 'PUT',
+      path: `/mood-checkins/${id}`,
+      payload: data,
+      entityId: id,
+      runOnline: () => request<any>(`/mood-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+      buildOptimisticResult: () => ({ id, ...data, updated_at: new Date().toISOString() }),
+    }),
   delete: (id: string) =>
-    request<void>(`/mood-checkins/${id}`, { method: 'DELETE' }),
+    executeOfflineCapableMutation<void>({
+      entityType: 'mood',
+      mutationType: 'delete',
+      method: 'DELETE',
+      path: `/mood-checkins/${id}`,
+      payload: null,
+      entityId: id,
+      runOnline: () => request<void>(`/mood-checkins/${id}`, { method: 'DELETE' }),
+      buildOptimisticResult: () => undefined,
+    }),
 };
 
 // Mood Activities
@@ -393,8 +582,18 @@ export const moodActivities = {
 
 // Timeline
 export const timeline = {
-  list: (params?: Record<string, string>) =>
-    request<any[]>(`/timeline?${new URLSearchParams(params)}`),
+  list: async (params?: Record<string, string>) => {
+    const isFirstPage = !params?.offset || params.offset === '0';
+    try {
+      const data = await request<any[]>(`/timeline?${new URLSearchParams(params)}`);
+      return isFirstPage ? applyOfflineMutationsToTimeline(data) : data;
+    } catch (err) {
+      if (isFirstPage && isOfflineError(err)) {
+        return applyOfflineMutationsToTimeline([]);
+      }
+      throw err;
+    }
+  },
 };
 
 // Settings

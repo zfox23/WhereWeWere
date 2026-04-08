@@ -4,6 +4,7 @@ import { Loader2, Trash2, ArrowLeft, Check, ChevronDown, Settings as SettingsIco
 import { moodCheckins, moodActivities, settings as settingsApi } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
+import { makeClientRefId } from '../utils/idempotency';
 import type { MoodActivityGroup } from '../types';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -123,6 +124,7 @@ export default function MoodCheckInPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(!!editId);
+  const [createClientRefId, setCreateClientRefId] = useState(() => makeClientRefId('mood'));
   const [notePlaceholder] = useState(
     () => NOTE_PLACEHOLDERS[Math.floor(Math.random() * NOTE_PLACEHOLDERS.length)]
   );
@@ -278,11 +280,13 @@ export default function MoodCheckInPage() {
         checked_in_at: toOffsetDateTime(checkedInAt),
         mood_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
         activity_ids: Array.from(selectedActivities),
+        client_ref_id: createClientRefId,
       };
       if (editId) {
         await moodCheckins.update(editId, data);
       } else {
         await moodCheckins.create(data);
+        setCreateClientRefId(makeClientRefId('mood'));
       }
       navigate('/');
     } catch (err) {
