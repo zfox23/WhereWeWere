@@ -17,6 +17,45 @@ function parseWebhookTimestamp(value: string | undefined): Date | null {
   return isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * Infer the user's local timezone at the given reference time by examining:
+ *   1. The most recent check-in timezone at or before the reference time.
+ *   2. The most recent completed (non-pending) sleep entry timezone (non-UTC).
+ *   3. 'UTC' as a last resort.
+ */
+async function inferSleepTimezone(referenceTime: Date): Promise<string> {
+  const checkinResult = await query(
+    `SELECT checkin_timezone
+     FROM checkins
+     WHERE user_id = $1
+       AND checkin_timezone IS NOT NULL
+       AND checked_in_at <= $2
+     ORDER BY checked_in_at DESC
+     LIMIT 1`,
+    [USER_ID, referenceTime.toISOString()]
+  );
+  if (checkinResult.rows[0]?.checkin_timezone) {
+    return checkinResult.rows[0].checkin_timezone as string;
+  }
+
+  const sleepResult = await query(
+    `SELECT sleep_timezone
+     FROM sleep_entries
+     WHERE user_id = $1
+       AND is_pending = FALSE
+       AND sleep_timezone IS NOT NULL
+       AND sleep_timezone != 'UTC'
+     ORDER BY ended_at DESC
+     LIMIT 1`,
+    [USER_ID]
+  );
+  if (sleepResult.rows[0]?.sleep_timezone) {
+    return sleepResult.rows[0].sleep_timezone as string;
+  }
+
+  return 'UTC';
+}
+
 // POST / - receive a Sleep as Android webhook event
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -40,17 +79,19 @@ router.post('/', async (req: Request, res: Response) => {
       // Real CSV-exported IDs are tiny sequential integers; ms timestamps
       // are in the 10^12 range so there is no overlap.
       const androidId = startTime.getTime();
+      const timezone = await inferSleepTimezone(startTime);
 
       await query(
         `INSERT INTO sleep_entries
            (user_id, sleep_as_android_id, sleep_timezone, started_at, ended_at, is_pending)
-         VALUES ($1, $2, 'UTC', $3, $3, TRUE)
+         VALUES ($1, $2, $3, $4, $4, TRUE)
          ON CONFLICT (user_id, sleep_as_android_id) DO UPDATE
            SET started_at  = EXCLUDED.started_at,
                ended_at    = EXCLUDED.ended_at,
+               sleep_timezone = EXCLUDED.sleep_timezone,
                is_pending  = TRUE,
                updated_at  = NOW()`,
-        [USER_ID, androidId, startTime.toISOString()]
+        [USER_ID, androidId, timezone, startTime.toISOString()]
       );
     } else if (event === 'sleep_tracking_stopped') {
       const startTime = parseWebhookTimestamp(value1);

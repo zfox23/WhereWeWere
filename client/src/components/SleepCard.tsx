@@ -126,7 +126,7 @@ export default function SleepCard({ item }: SleepCardProps) {
               to={`/sleep-entries/${item.id}`}
               className="text-xs hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
             >
-              {formatClockTime(startedAt, timezone)} - {formatTimeWithShortDate(endedAt, timezone)}
+              {formatClockTime(startedAt, timezone)} - {endedAt && formatTimeWithShortDate(endedAt, timezone)}
             </Link>
 
             <span className="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:text-indigo-300">
