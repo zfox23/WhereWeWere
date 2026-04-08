@@ -34,6 +34,7 @@ router.get('/', async (req: Request, res: Response) => {
     let paramIndex = 1;
     const hasMoodTypeFilter = Boolean(req.query.mood || req.query.activity);
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
+    const hasSleepTypeFilter = Boolean(req.query.sleep_duration);
     const fromDate = extractDateString(from);
     const toDate = extractDateString(to);
 
@@ -100,6 +101,18 @@ router.get('/', async (req: Request, res: Response) => {
       );
       params.push(req.query.activity);
       paramIndex++;
+    }
+
+    if (req.query.sleep_duration) {
+      const durationFilter = String(req.query.sleep_duration).toLowerCase();
+      if (durationFilter === 'lte6') {
+        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) <= 21600`);
+      } else if (durationFilter === '6to8') {
+        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) > 21600`);
+        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) < 28800`);
+      } else if (durationFilter === 'gte8') {
+        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) >= 28800`);
+      }
     }
 
     if (req.query.q) {
@@ -210,6 +223,12 @@ router.get('/', async (req: Request, res: Response) => {
     } else if (hasLocationTypeFilter) {
       sql = `
         ${locationSelect}
+        ORDER BY checked_in_at DESC
+        LIMIT ${limitParam} OFFSET ${offsetParam}
+      `;
+    } else if (hasSleepTypeFilter) {
+      sql = `
+        ${sleepSelect}
         ORDER BY checked_in_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}
       `;

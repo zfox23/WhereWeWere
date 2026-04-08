@@ -140,9 +140,12 @@ function ExpandableFAB() {
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const typeParam = searchParams.get('type') || '';
+  const timelineType = typeParam === 'location' || typeParam === 'mood' || typeParam === 'sleep' ? typeParam : '';
   const [items, setItems] = useState<TimelineItem[]>([]);
-  const [includeLocation, setIncludeLocation] = useState(true);
-  const [includeMood, setIncludeMood] = useState(true);
+  const [includeLocation, setIncludeLocation] = useState(() => timelineType !== 'mood' && timelineType !== 'sleep');
+  const [includeMood, setIncludeMood] = useState(() => timelineType !== 'location' && timelineType !== 'sleep');
+  const [includeSleep, setIncludeSleep] = useState(() => timelineType !== 'location' && timelineType !== 'mood');
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [activityOptions, setActivityOptions] = useState<{ id: string; name: string; groupName: string }[]>([]);
@@ -194,8 +197,7 @@ export default function Home() {
   const country = searchParams.get('country') || '';
   const mood = searchParams.get('mood') || '';
   const activity = searchParams.get('activity') || '';
-  const typeParam = searchParams.get('type') || '';
-  const timelineType = typeParam === 'location' || typeParam === 'mood' ? typeParam : '';
+  const sleepDuration = searchParams.get('sleep_duration') || '';
   const [fromDateInput, setFromDateInput] = useState(fromDate);
   const [toDateInput, setToDateInput] = useState(toDate);
   const [categoryInput, setCategoryInput] = useState(category);
@@ -222,17 +224,22 @@ export default function Home() {
   const [showFilters, setShowFilters] = useState(false);
   const hasMoodTypeFilter = Boolean(mood || activity);
   const hasLocationTypeFilter = Boolean(venueId || category || country);
-  const moodFiltersDisabled = hasLocationTypeFilter;
-  const locationFiltersDisabled = hasMoodTypeFilter;
-  const moodTypeToggleDisabled = hasLocationTypeFilter;
-  const locationTypeToggleDisabled = hasMoodTypeFilter;
+  const hasSleepTypeFilter = Boolean(sleepDuration);
+  const moodFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter;
+  const locationFiltersDisabled = hasMoodTypeFilter || hasSleepTypeFilter;
+  const sleepFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter;
+  const moodTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter;
+  const locationTypeToggleDisabled = hasMoodTypeFilter || hasSleepTypeFilter;
+  const sleepTypeToggleDisabled = hasMoodTypeFilter || hasLocationTypeFilter;
   const moodSectionDisabled = moodFiltersDisabled || !includeMood;
   const locationSectionDisabled = locationFiltersDisabled || !includeLocation;
+  const sleepSectionDisabled = sleepFiltersDisabled;
 
   useEffect(() => {
     if (hasMoodTypeFilter) {
       setIncludeLocation(false);
       setIncludeMood(true);
+      setIncludeSleep(false);
     }
   }, [hasMoodTypeFilter]);
 
@@ -240,28 +247,54 @@ export default function Home() {
     if (hasLocationTypeFilter) {
       setIncludeMood(false);
       setIncludeLocation(true);
+      setIncludeSleep(false);
     }
   }, [hasLocationTypeFilter]);
 
   useEffect(() => {
-    if (hasMoodTypeFilter || hasLocationTypeFilter) return;
+    if (hasSleepTypeFilter) {
+      setIncludeLocation(false);
+      setIncludeMood(false);
+      setIncludeSleep(true);
+    }
+  }, [hasSleepTypeFilter]);
+
+  useEffect(() => {
+    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter) return;
     if (timelineType === 'location') {
       setIncludeLocation(true);
       setIncludeMood(false);
+      setIncludeSleep(false);
       return;
     }
     if (timelineType === 'mood') {
       setIncludeLocation(false);
       setIncludeMood(true);
+      setIncludeSleep(false);
+      return;
+    }
+    if (timelineType === 'sleep') {
+      setIncludeLocation(false);
+      setIncludeMood(false);
+      setIncludeSleep(true);
       return;
     }
     setIncludeLocation(true);
     setIncludeMood(true);
-  }, [hasLocationTypeFilter, hasMoodTypeFilter, timelineType]);
+    setIncludeSleep(true);
+  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, timelineType]);
 
   useEffect(() => {
-    if (hasMoodTypeFilter || hasLocationTypeFilter) return;
-    const nextType = includeLocation && includeMood ? '' : includeLocation ? 'location' : 'mood';
+    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter) return;
+    const nextType = includeLocation && includeMood && includeSleep
+      ? ''
+      : includeLocation && !includeMood && !includeSleep
+        ? 'location'
+        : !includeLocation && includeMood && !includeSleep
+          ? 'mood'
+          : !includeLocation && !includeMood && includeSleep
+            ? 'sleep'
+            : '';
     if (nextType === timelineType) return;
 
     setSearchParams((prev) => {
@@ -273,14 +306,14 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
-  }, [hasLocationTypeFilter, hasMoodTypeFilter, includeLocation, includeMood, setSearchParams, timelineType]);
+  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, includeLocation, includeMood, includeSleep, setSearchParams, timelineType]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
-    if (fromDate || toDate || venueId || category || country || mood || activity) {
+    if (fromDate || toDate || venueId || category || country || mood || activity || sleepDuration) {
       setShowFilters(true);
     }
-  }, [fromDate, toDate, venueId, category, country, mood, activity]);
+  }, [fromDate, toDate, venueId, category, country, mood, activity, sleepDuration]);
 
   useEffect(() => {
     setFromDateInput(fromDate);
@@ -365,6 +398,7 @@ export default function Home() {
       next.delete('venue_id');
       next.delete('category');
       next.delete('country');
+      next.delete('sleep_duration');
       next.delete('type');
       if (value) {
         next.set(key, value);
@@ -377,6 +411,7 @@ export default function Home() {
     if (value) {
       setIncludeMood(true);
       setIncludeLocation(false);
+      setIncludeSleep(false);
     }
   }, [setSearchParams]);
 
@@ -385,6 +420,7 @@ export default function Home() {
       const next = new URLSearchParams(prev);
       next.delete('mood');
       next.delete('activity');
+      next.delete('sleep_duration');
       next.delete('type');
       if (value) {
         next.set(key, value);
@@ -397,24 +433,57 @@ export default function Home() {
     if (value) {
       setIncludeLocation(true);
       setIncludeMood(false);
+      setIncludeSleep(false);
+    }
+  }, [setSearchParams]);
+
+  const setSleepTypeFilter = useCallback((value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('venue_id');
+      next.delete('category');
+      next.delete('country');
+      next.delete('mood');
+      next.delete('activity');
+      next.delete('type');
+      if (value) {
+        next.set('sleep_duration', value);
+      } else {
+        next.delete('sleep_duration');
+      }
+      return next;
+    }, { replace: true });
+
+    if (!value) {
+      setIncludeLocation(true);
+      setIncludeMood(true);
+      setIncludeSleep(true);
     }
   }, [setSearchParams]);
 
   const toggleLocationType = useCallback(() => {
     if (locationTypeToggleDisabled) return;
     setIncludeLocation((prev) => {
-      if (prev && !includeMood) return prev;
+      if (prev && !includeMood && !includeSleep) return prev;
       return !prev;
     });
-  }, [includeMood, locationTypeToggleDisabled]);
+  }, [includeMood, includeSleep, locationTypeToggleDisabled]);
 
   const toggleMoodType = useCallback(() => {
     if (moodTypeToggleDisabled) return;
     setIncludeMood((prev) => {
-      if (prev && !includeLocation) return prev;
+      if (prev && !includeLocation && !includeSleep) return prev;
       return !prev;
     });
-  }, [includeLocation, moodTypeToggleDisabled]);
+  }, [includeLocation, includeSleep, moodTypeToggleDisabled]);
+
+  const toggleSleepType = useCallback(() => {
+    if (sleepTypeToggleDisabled) return;
+    setIncludeSleep((prev) => {
+      if (prev && !includeLocation && !includeMood) return prev;
+      return !prev;
+    });
+  }, [includeLocation, includeMood, sleepTypeToggleDisabled]);
 
   const handleDateInputChange = useCallback((key: 'from' | 'to', value: string) => {
     if (key === 'from') {
@@ -470,6 +539,7 @@ export default function Home() {
           if (country) params.country = country;
           if (mood) params.mood = mood;
           if (activity) params.activity = activity;
+          if (sleepDuration) params.sleep_duration = sleepDuration;
 
         const data = await timelineApi.list(params);
         if (append) {
@@ -486,7 +556,7 @@ export default function Home() {
         setLoadingMore(false);
       }
     },
-    [searchQuery, fromDate, toDate, venueId, category, country, mood, activity]
+    [searchQuery, fromDate, toDate, venueId, category, country, mood, activity, sleepDuration]
   );
 
   // Initial load + reload on filter changes
@@ -611,24 +681,26 @@ export default function Home() {
 
     revealObserverRef.current = observer;
     return () => observer.disconnect();
-  }, [items, includeLocation, includeMood, loading, loadingMore]);
+  }, [items, includeLocation, includeMood, includeSleep, loading, loadingMore]);
 
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
     setIncludeLocation(true);
     setIncludeMood(true);
+    setIncludeSleep(true);
     setShowFilters(false);
   };
 
-  const hasTypeSelectionFilter = !includeLocation || !includeMood;
-  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || hasTypeSelectionFilter;
+  const hasTypeSelectionFilter = !includeLocation || !includeMood || !includeSleep;
+  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || sleepDuration || hasTypeSelectionFilter;
   const visibleItems = useMemo(
     () => items.filter((item) => {
       if (item.type === 'location') return includeLocation;
       if (item.type === 'mood') return includeMood;
-      return includeLocation && includeMood;
+      if (item.type === 'sleep') return includeSleep;
+      return false;
     }),
-    [items, includeLocation, includeMood]
+    [items, includeLocation, includeMood, includeSleep]
   );
   const rawGrouped = groupByDate(visibleItems);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
@@ -652,8 +724,12 @@ export default function Home() {
     filterPills.push({ label: `Mood: ${moodNum >= 1 && moodNum <= 5 ? MOOD_LABELS[moodNum] : mood}`, key: 'mood' });
   }
   if (activity) filterPills.push({ label: `Activity: ${activity}`, key: 'activity' });
-  if (includeLocation && !includeMood) filterPills.push({ label: 'Type: Location only', key: 'type_mood' });
-  if (!includeLocation && includeMood) filterPills.push({ label: 'Type: Mood only', key: 'type_location' });
+  if (sleepDuration === 'lte6') filterPills.push({ label: 'Sleep: <=6h', key: 'sleep_duration' });
+  if (sleepDuration === '6to8') filterPills.push({ label: 'Sleep: 6h-8h', key: 'sleep_duration' });
+  if (sleepDuration === 'gte8') filterPills.push({ label: 'Sleep: >=8h', key: 'sleep_duration' });
+  if (includeLocation && !includeMood && !includeSleep) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
+  if (!includeLocation && includeMood && !includeSleep) filterPills.push({ label: 'Type: Mood only', key: 'type_mood_only' });
+  if (!includeLocation && !includeMood && includeSleep) filterPills.push({ label: 'Type: Sleep only', key: 'type_sleep_only' });
 
   return (
     <div className="space-y-4">
@@ -707,10 +783,17 @@ export default function Home() {
                       next.delete('to');
                       return next;
                     }, { replace: true });
-                  } else if (pill.key === 'type_mood') {
+                  } else if (pill.key === 'type_location_only') {
                     setIncludeMood(true);
-                  } else if (pill.key === 'type_location') {
+                    setIncludeSleep(true);
+                  } else if (pill.key === 'type_mood_only') {
                     setIncludeLocation(true);
+                    setIncludeSleep(true);
+                  } else if (pill.key === 'type_sleep_only') {
+                    setIncludeLocation(true);
+                    setIncludeMood(true);
+                  } else if (pill.key === 'sleep_duration') {
+                    setSleepTypeFilter('');
                   } else {
                     setFilter(pill.key, '');
                   }
@@ -780,7 +863,7 @@ export default function Home() {
               />
             </div>
           </div>
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid gap-3 lg:grid-cols-3">
             <div className={`rounded-xl border p-3 space-y-3 ${locationFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-sky-200 dark:border-sky-800/60 bg-sky-50/50 dark:bg-sky-950/20'}`}>
               <div>
                 <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -796,7 +879,7 @@ export default function Home() {
               </div>
               {locationFiltersDisabled && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Clear mood filters to enable location filtering.
+                  Clear mood/sleep filters to enable location filtering.
                 </p>
               )}
               <div className="grid grid-cols-1 gap-3">
@@ -886,7 +969,7 @@ export default function Home() {
               </div>
               {moodFiltersDisabled && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Clear location filters to enable mood filtering.
+                  Clear location/sleep filters to enable mood filtering.
                 </p>
               )}
               <div>
@@ -933,6 +1016,52 @@ export default function Home() {
                     </optgroup>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${sleepFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20'}`}>
+              <div>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={includeSleep}
+                    disabled={sleepTypeToggleDisabled}
+                    onChange={toggleSleepType}
+                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
+                  />
+                  <span>Sleep</span>
+                </label>
+              </div>
+              {sleepFiltersDisabled && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Clear location/mood filters to enable sleep filtering.
+                </p>
+              )}
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Duration</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {[
+                    { value: 'lte6', label: '<=6h' },
+                    { value: '6to8', label: '6h-8h' },
+                    { value: 'gte8', label: '>=8h' },
+                  ].map((bucket) => {
+                    const isActive = sleepDuration === bucket.value;
+                    return (
+                      <button
+                        key={bucket.value}
+                        disabled={sleepSectionDisabled}
+                        onClick={() => setSleepTypeFilter(isActive ? '' : bucket.value)}
+                        className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isActive
+                            ? 'bg-amber-500 text-white border-amber-500'
+                            : 'bg-white/70 dark:bg-gray-800/70 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-300 dark:hover:border-amber-600'
+                        }`}
+                      >
+                        {bucket.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -996,17 +1125,21 @@ export default function Home() {
                     </span>
                   </button>
                   <div
-                    className={`absolute left-5 top-1/2 -translate-y-1/2 z-30 flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 px-2 py-1 shadow-lg backdrop-blur-sm transition-all duration-200 ease-out ${openTimelineDotDate === date ? 'opacity-100 translate-x-0 scale-100 pointer-events-auto' : 'opacity-0 -translate-x-1 scale-95 pointer-events-none'}`}
+                    className={`absolute -left-[9px] top-1/2 -translate-y-1/2 z-30 flex items-center gap-3 rounded-full border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 px-2 py-1 shadow-lg backdrop-blur-sm transition-all duration-200 ease-out ${openTimelineDotDate === date ? 'opacity-100 translate-x-0 scale-100 pointer-events-auto' : 'opacity-0 -translate-x-1 scale-95 pointer-events-none'}`}
                     aria-hidden={openTimelineDotDate !== date}
                   >
+                    <button className={`w-3 h-3 rounded-full bg-primary-500 ring-4 rotate-45 dark:ring-primary-900/30 flex items-center justify-center transition-transform group-hover:scale-110 ${openTimelineDotDate === date ? 'ring-primary-200 dark:ring-primary-800/70' : 'ring-primary-100'}`}
+                      onClick={() => setOpenTimelineDotDate(null)}>
+                      <Plus size={8} className={`text-white transition-opacity ${openTimelineDotDate === date ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                    </button>
                     <Link
                       to={`/check-in?date=${encodeURIComponent(date)}`}
-                      className="p-1.5 rounded-full text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/30 transition-colors"
+                      className="p-1.5 ml-2 rounded-full text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/30 transition-colors"
                       title="Location check-in"
                       onClick={() => setOpenTimelineDotDate(null)}
                       tabIndex={openTimelineDotDate === date ? 0 : -1}
                     >
-                      <MapPin size={14} />
+                      <MapPin size={24} />
                     </Link>
                     <Link
                       to={`/mood-check-in?date=${encodeURIComponent(date)}`}
@@ -1015,7 +1148,7 @@ export default function Home() {
                       onClick={() => setOpenTimelineDotDate(null)}
                       tabIndex={openTimelineDotDate === date ? 0 : -1}
                     >
-                      <Smile size={14} />
+                      <Smile size={24} />
                     </Link>
                     <Link
                       to={`/sleep-check-in?date=${encodeURIComponent(date)}`}
@@ -1024,7 +1157,7 @@ export default function Home() {
                       onClick={() => setOpenTimelineDotDate(null)}
                       tabIndex={openTimelineDotDate === date ? 0 : -1}
                     >
-                      <Moon size={14} />
+                      <Moon size={24} />
                     </Link>
                   </div>
                 </div>
