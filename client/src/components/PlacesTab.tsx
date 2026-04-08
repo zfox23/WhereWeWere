@@ -15,6 +15,7 @@ import { CircleMarker, MapContainer, Marker, Popup as LeafletPopup, TileLayer, T
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { stats } from '../api/client';
+import { useTheme } from '../contexts/ThemeContext';
 import { PeriodRangeSelector } from './PeriodRangeSelector';
 import {
   CategoryChart,
@@ -71,22 +72,32 @@ const TIME_COLORS: Record<string, string> = {
   Evening: 'bg-indigo-400',
   Night: 'bg-slate-500',
 };
+const LIGHT_TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
-function getVenuePinIcon(checkinCount: number): L.DivIcon {
+function getVenuePinIcon(checkinCount: number, resolvedTheme: 'light' | 'dark'): L.DivIcon {
   const badge = checkinCount > 99 ? '99+' : String(checkinCount);
   const size = checkinCount >= 25 ? 42 : checkinCount >= 10 ? 38 : 34;
   const pointerHeight = 12;
-  const background = checkinCount >= 25
-    ? 'linear-gradient(135deg, #b91c1c 0%, #ea580c 100%)'
-    : checkinCount >= 10
-      ? 'linear-gradient(135deg, #0f766e 0%, #0284c7 100%)'
-      : 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)';
+  const background = resolvedTheme === 'dark'
+    ? checkinCount >= 25
+      ? 'linear-gradient(135deg, #fdba74 0%, #f97316 100%)'
+      : checkinCount >= 10
+        ? 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)'
+        : 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)'
+    : checkinCount >= 25
+      ? 'linear-gradient(135deg, #c2410c 0%, #f97316 100%)'
+      : checkinCount >= 10
+        ? 'linear-gradient(135deg, #ea580c 0%, #fb923c 100%)'
+        : 'linear-gradient(135deg, #f97316 0%, #fdba74 100%)';
+  const pointerColor = resolvedTheme === 'dark' ? '#f97316' : '#c2410c';
 
   return L.divIcon({
     className: 'venue-pin-icon',
     html: `<div style="position: relative; width: ${size}px; height: ${size + pointerHeight}px;">
       <div style="position: absolute; left: 0; top: 0; width: ${size}px; height: ${size}px; border-radius: 9999px; background: ${background}; border: 2px solid rgba(255,255,255,0.95); box-shadow: 0 8px 16px rgba(15, 23, 42, 0.22); display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: ${badge.length > 2 ? 10 : 11}px; line-height: 1;">${badge}</div>
-      <div style="position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: ${pointerHeight}px solid #1f2937;"></div>
+      <div style="position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: ${pointerHeight}px solid ${pointerColor};"></div>
     </div>`,
     iconSize: [size, size + pointerHeight],
     iconAnchor: [size / 2, size + pointerHeight],
@@ -171,6 +182,7 @@ function VenueMapMarkers({
 }) {
   const navigate = useNavigate();
   const map = useMap();
+  const { resolvedTheme } = useTheme();
   const [zoom, setZoom] = useState(() => map.getZoom());
 
   useMapEvents({
@@ -188,7 +200,7 @@ function VenueMapMarkers({
             <Marker
               key={venue.venue_id}
               position={[venue.latitude, venue.longitude]}
-              icon={getVenuePinIcon(venue.checkin_count)}
+              icon={getVenuePinIcon(venue.checkin_count, resolvedTheme)}
             >
               <LeafletPopup>
                 <div className="text-sm min-w-[220px] max-w-[260px]">
@@ -227,9 +239,9 @@ function VenueMapMarkers({
             center={[item.latitude, item.longitude]}
             radius={getClusterRadius(item.venues.length, item.checkinCount)}
             pathOptions={{
-              color: '#0f766e',
+              color: resolvedTheme === 'dark' ? '#fb923c' : '#c2410c',
               weight: 2,
-              fillColor: '#14b8a6',
+              fillColor: resolvedTheme === 'dark' ? '#f97316' : '#ea580c',
               fillOpacity: 0.34,
             }}
             eventHandlers={{
@@ -295,6 +307,7 @@ function VenuePinsMap({
     const avgLng = data.reduce((sum, item) => sum + item.longitude, 0) / data.length;
     return [avgLat, avgLng];
   }, [data]);
+  const { resolvedTheme } = useTheme();
 
   const subtitle = range.from && range.to
     ? `${periodLabel} • ${data.length} venue${data.length !== 1 ? 's' : ''}`
@@ -326,7 +339,11 @@ function VenuePinsMap({
             className="w-full h-full"
             style={{ height: '100%' }}
           >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <TileLayer
+              key={resolvedTheme}
+              attribution={TILE_ATTRIBUTION}
+              url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
+            />
             <MapBoundsController data={data} />
             <VenueMapMarkers data={data} range={range} />
           </MapContainer>
