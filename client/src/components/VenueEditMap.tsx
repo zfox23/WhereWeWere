@@ -128,11 +128,17 @@ const CIRCLE_COLORS = {
   },
 } as const;
 
+type MarkerIcons = {
+  default: L.Icon;
+  current: L.DivIcon;
+  selected: L.Icon;
+};
+
 function getMarkerIcon(
   marker: NonNullable<Props['markers']>[number],
   selectedMarkerId: string | undefined,
-  icons: { default: L.Icon; current: L.Icon; selected: L.Icon }
-): L.Icon {
+  icons: MarkerIcons
+): L.Icon | L.DivIcon {
   if (selectedMarkerId && marker.id === selectedMarkerId) {
     return icons.selected;
   }
