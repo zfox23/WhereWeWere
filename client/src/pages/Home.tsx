@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile } from 'lucide-react';
+import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
@@ -91,6 +91,15 @@ function ExpandableFAB() {
 
       {expanded && (
         <div className="fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <Link
+            to="/sleep-check-in"
+            onClick={() => setExpanded(false)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium"
+          >
+            <Moon size={18} className="text-indigo-500" />
+            Sleep
+            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">S</kbd>
+          </Link>
           <Link
             to="/mood-check-in"
             onClick={() => setExpanded(false)}
@@ -325,6 +334,8 @@ export default function Home() {
         navigate('/check-in');
       } else if (e.key === 'm' || e.key === 'M') {
         navigate('/mood-check-in');
+      } else if (e.key === 's' || e.key === 'S') {
+        navigate('/sleep-check-in');
       }
     };
     document.addEventListener('keydown', handleKeyDown);
