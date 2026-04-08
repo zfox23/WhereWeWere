@@ -345,10 +345,8 @@ function SleepAsAndroidImportSection() {
         Sleep as Android
       </h2>
 
-      <div className="space-y-3"
-        onClick={() => fileInputRef.current?.click()}
-        className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 dark:hover:bg-primary-900/20 transition-colors"
-      >
+      <div className="space-y-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 dark:hover:bg-primary-900/20 transition-colors"
+        onClick={() => fileInputRef.current?.click()}>
         <Upload size={24} className="mx-auto text-gray-400 mb-2" />
         <p className="text-sm text-gray-600 dark:text-gray-400">
           {selectedFile ? selectedFile.name : 'Select a Sleep as Android .csv file'}
