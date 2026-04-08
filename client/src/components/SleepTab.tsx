@@ -18,45 +18,85 @@ const USER_ID = '00000000-0000-0000-0000-000000000001';
 function formatDuration(minutes: number | null): string {
   if (!minutes || minutes <= 0) return '0m';
   const rounded = Math.round(minutes);
-  const h = Math.floor(rounded / 60);
-  const m = rounded % 60;
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
+  const MINUTES_PER_HOUR = 60;
+  const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR;
+  const MINUTES_PER_YEAR = 365 * MINUTES_PER_DAY;
+
+  let remaining = rounded;
+  const years = Math.floor(remaining / MINUTES_PER_YEAR);
+  remaining -= years * MINUTES_PER_YEAR;
+
+  const days = Math.floor(remaining / MINUTES_PER_DAY);
+  remaining -= days * MINUTES_PER_DAY;
+
+  const hours = Math.floor(remaining / MINUTES_PER_HOUR);
+  const mins = remaining % MINUTES_PER_HOUR;
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years}y`);
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0) parts.push(`${mins}m`);
+
+  return parts.join(' ') || '0m';
 }
 
-function DailySleepChart({ data }: { data: SleepDailyPoint[] }) {
-  if (data.length === 0) {
-    return <p className="text-sm text-gray-400">No sleep entries in this period.</p>;
-  }
+type SleepTotalDay = {
+  date: string;
+  totalMinutes: number;
+};
 
-  const max = Math.max(...data.map((d) => Number(d.total_sleep_minutes || 0)), 1);
+function SleepRankedDaysCard({
+  title,
+  days,
+  emptyText,
+}: {
+  title: string;
+  days: SleepTotalDay[];
+  emptyText: string;
+}) {
+  const max = Math.max(...days.map((day) => day.totalMinutes), 1);
 
   return (
-    <div className="space-y-2">
-      {data.slice(-12).map((point) => {
-        const total = Number(point.total_sleep_minutes || 0);
-        return (
-          <div key={point.date} className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => window.open(`/?from=${point.date}&to=${point.date}`, '_blank', 'noopener,noreferrer')}
-              className="text-xs text-left text-gray-600 dark:text-gray-300 hover:text-primary-600 min-w-[84px]"
-            >
-              {point.date}
-            </button>
-            <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-5 overflow-hidden">
-              <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${(total / max) * 100}%` }} />
-            </div>
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-300 w-14 text-right">{formatDuration(total)}</span>
-          </div>
-        );
-      })}
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{title}</h3>
+      {days.length === 0 ? (
+        <p className="text-sm text-gray-400">{emptyText}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {days.map((day, idx) => (
+            <li key={`${title}-${day.date}`} className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.open(`/?from=${day.date}&to=${day.date}`, '_blank', 'noopener,noreferrer')}
+                className="text-xs text-left text-gray-500 dark:text-gray-400 hover:text-primary-600 w-24 shrink-0"
+              >
+                {day.date}
+              </button>
+              <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-5 relative overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all bg-indigo-500"
+                  style={{ width: `${(day.totalMinutes / max) * 100}%` }}
+                />
+              </div>
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400 w-12 text-right">
+                {formatDuration(day.totalMinutes)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
-function RatingDistribution({ data }: { data: SleepRatingBucket[] }) {
+function RatingDistribution({
+  data,
+  avgRating,
+}: {
+  data: SleepRatingBucket[];
+  avgRating: number | null;
+}) {
   const rated = data.filter((d) => d.stars > 0);
   const max = Math.max(...rated.map((d) => d.count), 1);
 
@@ -66,7 +106,7 @@ function RatingDistribution({ data }: { data: SleepRatingBucket[] }) {
         const count = data.find((d) => d.stars === stars)?.count || 0;
         return (
           <div key={stars} className="flex items-center gap-2">
-            <span className="text-xs text-gray-600 dark:text-gray-300 w-12">{'★'.repeat(stars)}</span>
+            <span className="text-xs text-gray-600 dark:text-gray-300 w-6 flex items-center gap-1"><span>{stars}</span><Star size={12} /></span>
             <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
               <div className="h-full bg-amber-500 rounded-full" style={{ width: `${(count / max) * 100}%` }} />
             </div>
@@ -76,6 +116,9 @@ function RatingDistribution({ data }: { data: SleepRatingBucket[] }) {
       })}
       <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
         Unrated: {data.find((d) => d.stars === 0)?.count || 0}
+      </p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Average Rating: {avgRating ? avgRating.toFixed(2) : '—'}
       </p>
     </div>
   );
@@ -109,6 +152,25 @@ export function SleepTab() {
     () => getPeriodRangeLabel(selectedMonth, periodMode),
     [selectedMonth, periodMode]
   );
+
+  const rankedSleepDays = useMemo(() => {
+    const totals = daily
+      .map((point) => ({
+        date: point.date,
+        totalMinutes: Math.max(0, Number(point.total_sleep_minutes || 0)),
+      }))
+      .filter((point) => point.totalMinutes > 0);
+
+    const longest = [...totals]
+      .sort((a, b) => b.totalMinutes - a.totalMinutes || b.date.localeCompare(a.date))
+      .slice(0, 10);
+
+    const shortest = [...totals]
+      .sort((a, b) => a.totalMinutes - b.totalMinutes || a.date.localeCompare(b.date))
+      .slice(0, 10);
+
+    return { longest, shortest };
+  }, [daily]);
 
   useEffect(() => {
     let cancelled = false;
@@ -223,21 +285,26 @@ export function SleepTab() {
 
       <p className="text-sm text-gray-500 dark:text-gray-400">{rangeLabel}</p>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard icon={Moon} label="Sleeps" value={summary?.total_sleeps ?? 0} />
         <StatCard icon={Moon} label="Avg Duration" value={formatDuration(summary?.avg_duration_minutes ?? 0)} />
         <StatCard icon={Moon} label="Total Sleep" value={formatDuration(summary?.total_sleep_minutes ?? 0)} />
-        <StatCard icon={Star} label="Avg Rating" value={summary?.avg_rating ? summary.avg_rating.toFixed(2) : '—'} />
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4">
-        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Daily Sleep Totals</h3>
-          <DailySleepChart data={daily} />
-        </div>
+      <div className="grid md:grid-cols-3 gap-4">
+        <SleepRankedDaysCard
+          title="Longest Sleeps"
+          days={rankedSleepDays.longest}
+          emptyText="No sleep entries in this period."
+        />
+        <SleepRankedDaysCard
+          title="Shortest Sleeps"
+          days={rankedSleepDays.shortest}
+          emptyText="No sleep entries in this period."
+        />
         <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Rating Distribution</h3>
-          <RatingDistribution data={ratings} />
+          <RatingDistribution data={ratings} avgRating={summary?.avg_rating ?? null} />
         </div>
       </div>
     </div>
