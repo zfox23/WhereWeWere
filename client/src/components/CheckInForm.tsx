@@ -157,6 +157,7 @@ export default function CheckInForm({
 
     setSubmitting(true);
     setError(null);
+    let succeeded = false;
 
     try {
       if (isEditMode) {
@@ -182,12 +183,13 @@ export default function CheckInForm({
         setCheckedInAt(toLocalDatetimeString(new Date()));
       }
 
-      onSuccess?.();
+      succeeded = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : isEditMode ? 'Failed to update.' : 'Failed to check in.');
     } finally {
       setSubmitting(false);
     }
+    if (succeeded) onSuccess?.();
   };
 
   const handleSubmit = (e: React.FormEvent) => {

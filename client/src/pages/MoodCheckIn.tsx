@@ -274,6 +274,7 @@ export default function MoodCheckInPage() {
   const handleSubmit = async () => {
     if (mood === 0) return;
     setSaving(true);
+    let succeeded = false;
     try {
       const data = {
         mood,
@@ -287,12 +288,13 @@ export default function MoodCheckInPage() {
       } else {
         await moodCheckins.create(data);
       }
-      navigate('/');
+      succeeded = true;
     } catch (err) {
       console.error('Failed to save mood checkin:', err);
     } finally {
       setSaving(false);
     }
+    if (succeeded) navigate('/');
   };
 
   const handleDelete = async () => {

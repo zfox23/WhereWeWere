@@ -147,18 +147,20 @@ export default function SleepCheckIn() {
 
     setSaving(true);
     setError(null);
+    let succeeded = false;
     try {
       if (editId) {
         await sleepEntries.update(editId, payload);
       } else {
         await sleepEntries.create(payload);
       }
-      navigate('/');
+      succeeded = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save sleep entry');
     } finally {
       setSaving(false);
     }
+    if (succeeded) navigate('/');
   };
 
   const handleDelete = async () => {
