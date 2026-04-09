@@ -4,6 +4,7 @@ import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, Che
 import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import type { Scrobble, ImmichAsset } from '../types';
 import MapView from '../components/MapView';
+import { usePageTitle } from '../utils/pageTitle';
 
 function formatDate(dateStr: string, timeZone?: string | null): string {
   const options: Intl.DateTimeFormatOptions = {
@@ -59,6 +60,8 @@ export default function CheckInDetail() {
   const [scrobbles, setScrobbles] = useState<Scrobble[]>([]);
   const [photos, setPhotos] = useState<ImmichAsset[]>([]);
   const [deleting, setDeleting] = useState(false);
+
+  usePageTitle(checkin?.venue_name ? `Check-In: ${checkin.venue_name}` : 'Check-In');
 
   useEffect(() => {
     settings.get().then((s) => {

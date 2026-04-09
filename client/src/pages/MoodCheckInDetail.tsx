@@ -5,6 +5,7 @@ import { moodCheckins, settings as settingsApi } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from '../components/MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
+import { usePageTitle } from '../utils/pageTitle';
 
 function formatDate(dateStr: string, timeZone?: string | null): string {
   const date = new Date(dateStr);
@@ -36,6 +37,10 @@ export default function MoodCheckInDetail() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [iconPack, setIconPack] = useState('emoji');
+
+  usePageTitle(
+    typeof checkin?.mood === 'number' ? `Mood Check-In: ${MOOD_LABELS[checkin.mood]}` : 'Mood Check-In'
+  );
 
   useEffect(() => {
     if (!id) return;

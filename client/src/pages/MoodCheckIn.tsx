@@ -5,6 +5,7 @@ import { moodCheckins, moodActivities, settings as settingsApi } from '../api/cl
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
 import { resolveActivityIcon } from '../utils/icons';
 import type { MoodActivityGroup } from '../types';
+import { usePageTitle } from '../utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -105,6 +106,8 @@ export default function MoodCheckInPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const editId = searchParams.get('edit');
+  usePageTitle(editId ? 'Edit Mood Check-In' : 'New Mood Check-In');
+
   const dateParam = searchParams.get('date') || '';
   const hasDatePrefill = DATE_ONLY_PATTERN.test(dateParam);
 

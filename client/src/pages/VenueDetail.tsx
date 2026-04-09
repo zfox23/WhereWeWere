@@ -12,6 +12,7 @@ import MapView from '../components/MapView';
 import { useLocation } from '../contexts/LocationContext';
 import { buildImmichMapUrl } from '../utils/checkin';
 import { haversineDistance } from '../utils/geo';
+import { usePageTitle } from '../utils/pageTitle';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -134,6 +135,8 @@ export default function VenueDetail() {
   const [mergeConfirming, setMergeConfirming] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
   const mergeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  usePageTitle(venue?.name ? `Venue: ${venue.name}` : 'Venue');
 
   useEffect(() => {
     settings.get().then((s) => {

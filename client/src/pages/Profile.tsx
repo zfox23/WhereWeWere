@@ -4,6 +4,7 @@ import { MoodsTab } from '../components/MoodStats';
 import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
 import { SleepTab } from '../components/SleepTab';
+import { usePageTitle } from '../utils/pageTitle';
 
 export default function Profile() {
   type ProfileTab = 'places' | 'reflect' | 'moods' | 'sleep';
@@ -18,6 +19,15 @@ export default function Profile() {
   };
 
   const [activeTab, setActiveTab] = useState<ProfileTab>(getTabFromLocation);
+
+  const tabTitleMap: Record<ProfileTab, string> = {
+    places: 'Profile: Places',
+    moods: 'Profile: Moods',
+    sleep: 'Profile: Sleep',
+    reflect: 'Profile: Reflect',
+  };
+  usePageTitle(tabTitleMap[activeTab]);
+
   useEffect(() => {
     const syncTabFromLocation = () => {
       setActiveTab(getTabFromLocation());

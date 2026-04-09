@@ -4,6 +4,7 @@ import { AlertCircle, ArrowLeft, CalendarDays, Clock, Loader2, Moon, Pencil, Sta
 import { sleepEntries } from '../api/client';
 import type { SleepEntry } from '../types';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
+import { usePageTitle } from '../utils/pageTitle';
 
 function formatDuration(startedAt: string, endedAt: string): string {
   const startMs = new Date(startedAt).getTime();
@@ -71,6 +72,8 @@ export default function SleepDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  usePageTitle(entry ? `Sleep Entry: ${formatDuration(entry.started_at, entry.ended_at)}` : 'Sleep Entry');
 
   useEffect(() => {
     if (!id) return;

@@ -7,6 +7,7 @@ import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
 import SleepCard from '../components/SleepCard';
 import { MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
+import { usePageTitle } from '../utils/pageTitle';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
@@ -138,6 +139,8 @@ function ExpandableFAB() {
 }
 
 export default function Home() {
+  usePageTitle('Home');
+
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const typeParam = searchParams.get('type') || '';

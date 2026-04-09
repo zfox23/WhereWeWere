@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Loader2, Moon, Star, Trash2 } from 'lucide-react';
 import { sleepEntries } from '../api/client';
 import type { SleepEntry } from '../types';
+import { usePageTitle } from '../utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -67,6 +68,8 @@ export default function SleepCheckIn() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const editId = searchParams.get('edit');
+  usePageTitle(editId ? 'Edit Sleep Entry' : 'New Sleep Entry');
+
   const dateParam = searchParams.get('date') || '';
   const hasDatePrefill = DATE_ONLY_PATTERN.test(dateParam);
 

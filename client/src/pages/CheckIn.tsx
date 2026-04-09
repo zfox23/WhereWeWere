@@ -7,6 +7,7 @@ import CheckInForm from '../components/CheckInForm';
 import MapView from '../components/MapView';
 import { venues, checkins } from '../api/client';
 import type { CheckIn as CheckInType } from '../types';
+import { usePageTitle } from '../utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -22,6 +23,8 @@ export default function CheckIn() {
   const [searchParams] = useSearchParams();
 
   const editId = searchParams.get('edit');
+  usePageTitle(editId ? 'Edit Check-In' : 'New Check-In');
+
   const dateParam = searchParams.get('date') || '';
   const prefillsDate = DATE_ONLY_PATTERN.test(dateParam);
   const [selectedVenue, setSelectedVenue] = useState<SelectedVenue | null>(null);

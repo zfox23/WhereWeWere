@@ -5,6 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
 import ActivityGroupManager from '../components/ActivityGroupManager';
 import { PushSettings } from '../components/PushSettings';
+import { usePageTitle } from '../utils/pageTitle';
 import type {
   UserSettings,
   ImportResult,
@@ -1424,6 +1425,8 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
 }
 
 export default function Settings() {
+  usePageTitle('Settings');
+
   type SettingsTab = 'account' | 'mood' | 'integrations' | 'data';
   const TIME_24H_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
