@@ -1,10 +1,16 @@
 import type { TimestampReconciliationScanResult } from '../types';
 
 const API_BASE = '/api/v1';
+const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
+
+function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
+  if (!API_ACCESS_TOKEN) return headers;
+  return { ...headers, 'X-WhereWeWere-Token': API_ACCESS_TOKEN };
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: withAuthHeader({ 'Content-Type': 'application/json', ...options?.headers }),
     ...options,
   });
   if (!res.ok) {
@@ -217,6 +223,7 @@ export const importApi = {
     files.forEach((f) => form.append('files', f));
     const res = await fetch(`${API_BASE}/import/swarm`, {
       method: 'POST',
+      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {
@@ -231,6 +238,7 @@ export const importApi = {
     form.append('source_timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
     const res = await fetch(`${API_BASE}/import/daylio`, {
       method: 'POST',
+      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {
@@ -242,6 +250,7 @@ export const importApi = {
   replaceDaylioBreaks: async () => {
     const res = await fetch(`${API_BASE}/import/daylio/replace-br`, {
       method: 'POST',
+      headers: withAuthHeader(),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ message: res.statusText }));
@@ -254,6 +263,7 @@ export const importApi = {
     form.append('file', file);
     const res = await fetch(`${API_BASE}/import/sleep-as-android`, {
       method: 'POST',
+      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {

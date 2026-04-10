@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import type { Request, Response, NextFunction } from 'express';
 import { config } from './config';
 import { checkinsRouter } from './routes/checkins';
 import { venuesRouter } from './routes/venues';
@@ -26,13 +27,47 @@ import { runMigrations } from './db/runMigrations';
 export function createApp() {
   const app = express();
 
-  app.use(cors());
+  if (config.trustProxy) {
+    app.set('trust proxy', true);
+  }
+
+  const corsOptions: cors.CorsOptions = config.corsOrigins.length > 0
+    ? {
+      origin: (origin, callback) => {
+        // Allow non-browser requests and same-origin navigations without Origin header.
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        if (config.corsOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error('Origin not allowed by CORS'));
+      },
+    }
+    : {};
+
+  app.use(cors(corsOptions));
   app.use(express.json({ limit: '10mb' }));
 
   // Container health endpoint for compose/orchestrators.
   app.get('/healthz', (_req, res) => {
     res.status(200).json({ ok: true });
   });
+
+  if (config.apiAccessToken) {
+    app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
+      const token = req.header('x-wherewewere-token');
+      if (token !== config.apiAccessToken) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      next();
+    });
+  }
 
   // API routes
   app.use('/api/v1/checkins', checkinsRouter);

@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+      #- postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wherewewere -d wherewewere"]
       interval: 10s
@@ -19,8 +20,8 @@ services:
 
   server:
     build:
-      context: .
-      dockerfile: server/Dockerfile
+      context: ./server
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       db:
@@ -29,22 +30,27 @@ services:
       DATABASE_URL: postgres://wherewewere:wherewewere@db:5432/wherewewere
       PORT: 3001
       NODE_ENV: production
-      SESSION_SECRET: change-me-in-production
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY is required}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY is required}
     ports:
       - "3001:3001"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3001/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 15s
+      start_period: 30s
 
   client:
     build:
-      context: .
-      dockerfile: client/Dockerfile
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
     restart: unless-stopped
     depends_on:
       server:
@@ -57,3 +63,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+volumes:
+  postgres_data:
