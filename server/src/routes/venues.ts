@@ -12,11 +12,65 @@ function toNumberOrNull(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function serializeVenue<T extends Record<string, unknown>>(venue: T): T {
+function serializeVenue<T extends { latitude?: unknown; longitude?: unknown }>(venue: T): T {
   return {
     ...venue,
     latitude: toNumberOrNull(venue.latitude),
     longitude: toNumberOrNull(venue.longitude),
+  } as T;
+}
+
+type GeocodableVenue = {
+  id?: string | null;
+  latitude?: unknown;
+  longitude?: unknown;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+};
+
+async function geocodeVenueLocationIfMissing<T extends GeocodableVenue>(venue: T): Promise<T> {
+  const latitude = toNumberOrNull(venue.latitude);
+  const longitude = toNumberOrNull(venue.longitude);
+  const venueId = typeof venue.id === 'string' ? venue.id : null;
+
+  if (!venueId || latitude == null || longitude == null) {
+    return venue;
+  }
+
+  const hasCountry = typeof venue.country === 'string' && venue.country.trim() !== '';
+  const hasState = typeof venue.state === 'string' && venue.state.trim() !== '';
+  const hasCity = typeof venue.city === 'string' && venue.city.trim() !== '';
+
+  if (hasCountry && hasState && hasCity) {
+    return venue;
+  }
+
+  const geo = await reverseGeocode(latitude, longitude);
+  if (!geo.country && !geo.state && !geo.city) {
+    return venue;
+  }
+
+  const updated = await query(
+    `UPDATE venues
+     SET country = COALESCE(NULLIF(TRIM(country), ''), $2),
+         state = COALESCE(NULLIF(TRIM(state), ''), $3),
+         city = COALESCE(NULLIF(TRIM(city), ''), $4),
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING city, state, country`,
+    [venueId, geo.country || null, geo.state || null, geo.city || null]
+  );
+
+  if (updated.rows.length === 0) {
+    return venue;
+  }
+
+  return {
+    ...venue,
+    city: updated.rows[0].city,
+    state: updated.rows[0].state,
+    country: updated.rows[0].country,
   };
 }
 
@@ -321,7 +375,9 @@ router.post('/', async (req: Request, res: Response) => {
       osm_id: osm_id || null,
     });
 
-    res.status(201).json(venue);
+    const geocodedVenue = await geocodeVenueLocationIfMissing(venue);
+
+    res.status(201).json(serializeVenue(geocodedVenue));
   } catch (err) {
     console.error('Error creating venue:', err);
     res.status(500).json({ error: 'Failed to create venue' });
@@ -511,7 +567,12 @@ router.post('/import-osm', async (req: Request, res: Response) => {
       latitude: parseFloat(String(latitude)),
       longitude: parseFloat(String(longitude)),
       osm_id,
-    }) as any;
+    });
+
+    const geocodedChildVenue = await geocodeVenueLocationIfMissing(childVenue) as typeof childVenue & {
+      parent_venue_id?: string | null;
+      parent_venue_name?: string | null;
+    };
 
     // Try to find an enclosing parent venue (e.g. the airport containing a terminal)
     if (latitude && longitude) {
@@ -552,10 +613,10 @@ router.post('/import-osm', async (req: Request, res: Response) => {
           // Link child to parent
           await query(
             'UPDATE venues SET parent_venue_id = $1 WHERE id = $2 AND parent_venue_id IS NULL',
-            [parentVenue.id, childVenue.id]
+            [parentVenue.id, geocodedChildVenue.id]
           );
-          childVenue.parent_venue_id = parentVenue.id;
-          childVenue.parent_venue_name = parentVenue.name;
+          geocodedChildVenue.parent_venue_id = parentVenue.id;
+          geocodedChildVenue.parent_venue_name = parentVenue.name;
         }
       } catch (parentErr) {
         // Non-fatal — venue was created, just no parent link
@@ -563,7 +624,7 @@ router.post('/import-osm', async (req: Request, res: Response) => {
       }
     }
 
-    res.status(201).json(childVenue);
+    res.status(201).json(serializeVenue(geocodedChildVenue));
   } catch (err) {
     console.error('Error importing OSM venue:', err);
     res.status(500).json({ error: 'Failed to import OSM venue' });

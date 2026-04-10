@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2, RotateCcw, ShieldAlert, Palette, ChevronDown, ChevronRight, Copy, Webhook } from 'lucide-react';
+import { User, Link2, Loader2, Check, AlertCircle, Upload, FileText, Cog, Clock, CheckCircle2, XCircle, Play, Send, Ban, StopCircle, Monitor, Sun, Moon, Bell, BellOff, Download, Smile, Plus, Trash2, RotateCcw, ShieldAlert, Palette, ChevronDown, ChevronRight, Copy, Webhook, Ruler, DownloadIcon } from 'lucide-react';
 import { settings, importApi, jobs, moodActivities, backupApi, sleepWebhook } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
@@ -60,7 +60,7 @@ function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => voi
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-        <Upload size={20} className="text-gray-600 dark:text-gray-400" />
+        <DownloadIcon size={20} className="text-gray-600 dark:text-gray-400" />
         Swarm Import
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -174,8 +174,11 @@ function DaylioImportSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [replacingBreaks, setReplacingBreaks] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [replaceUpdatedCount, setReplaceUpdatedCount] = useState<number | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -202,10 +205,24 @@ function DaylioImportSection() {
     }
   };
 
+  const handleReplaceBreaks = async () => {
+    setReplacingBreaks(true);
+    setReplaceError(null);
+    setReplaceUpdatedCount(null);
+    try {
+      const data = await importApi.replaceDaylioBreaks();
+      setReplaceUpdatedCount(data.updated);
+    } catch (err) {
+      setReplaceError(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setReplacingBreaks(false);
+    }
+  };
+
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-        <Upload size={20} className="text-gray-600 dark:text-gray-400" />
+        <DownloadIcon size={20} className="text-gray-600 dark:text-gray-400" />
         Daylio Import
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -303,6 +320,43 @@ function DaylioImportSection() {
           )}
         </div>
       )}
+
+      <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-2">
+        <button
+          onClick={handleReplaceBreaks}
+          disabled={replacingBreaks || importing}
+          className="btn-secondary"
+        >
+          {replacingBreaks ? (
+            <>
+              <Loader2 size={16} className="animate-spin mr-2" />
+              Replacing...
+            </>
+          ) : (
+            <>
+              <Ruler size={16} className="mr-2" />
+              Replace &lt;br&gt; with newlines
+            </>
+          )}
+        </button>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Maintenance: replace literal &lt;br&gt; text in existing Mood checkins with real newlines.
+        </p>
+
+        {replaceError && (
+          <div className="flex items-center gap-2 text-sm text-red-600">
+            <AlertCircle size={16} />
+            {replaceError}
+          </div>
+        )}
+
+        {replaceUpdatedCount !== null && (
+          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+            <Check size={16} />
+            Updated {replaceUpdatedCount} Mood checkin{replaceUpdatedCount === 1 ? '' : 's'}.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1427,11 +1481,11 @@ function JobsSection({ refreshKey }: { refreshKey: number }) {
 export default function Settings() {
   usePageTitle('Settings');
 
-  type SettingsTab = 'account' | 'mood' | 'integrations' | 'data';
+  type SettingsTab = 'account' | 'display' | 'mood' | 'integrations' | 'data';
   const TIME_24H_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
   const isSettingsTab = (value: string | null): value is SettingsTab => {
-    return value === 'account' || value === 'mood' || value === 'integrations' || value === 'data';
+    return value === 'account' || value === 'display' || value === 'mood' || value === 'integrations' || value === 'data';
   };
 
   const getTabFromLocation = (): SettingsTab => {
@@ -1474,6 +1528,11 @@ export default function Settings() {
   const [notifMsg, setNotifMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const notificationsLoadedRef = useRef(false);
 
+  // Display settings
+  const [distanceUnit, setDistanceUnit] = useState<'metric' | 'imperial'>('metric');
+  const [displaySaving, setDisplaySaving] = useState(false);
+  const [displayMsg, setDisplayMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   useEffect(() => {
     sleepWebhook.stats()
       .then((data) => setWebhookEventCount(data.count))
@@ -1501,6 +1560,7 @@ export default function Settings() {
         setMalojaUrl(s.maloja_url || '');
         setNotificationsEnabled(s.notifications_enabled ?? true);
         setMoodReminderTimes(Array.isArray(s.mood_reminder_times) ? s.mood_reminder_times : []);
+        setDistanceUnit(s.distance_unit === 'imperial' ? 'imperial' : 'metric');
       } catch (err) {
         console.error('Failed to load settings:', err);
       } finally {
@@ -1618,6 +1678,20 @@ export default function Settings() {
     }
   };
 
+  const saveDisplay = async () => {
+    setDisplaySaving(true);
+    setDisplayMsg(null);
+    try {
+      await settings.update({ distance_unit: distanceUnit });
+      setData((prev) => (prev ? { ...prev, distance_unit: distanceUnit } : prev));
+      setDisplayMsg({ type: 'success', text: 'Display settings saved.' });
+    } catch (err) {
+      setDisplayMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });
+    } finally {
+      setDisplaySaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!notificationsLoadedRef.current) return;
 
@@ -1693,9 +1767,10 @@ export default function Settings() {
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
 
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-2">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {([
             { value: 'account' as const, label: 'Account', icon: User },
+            { value: 'display' as const, label: 'Display', icon: Ruler },
             { value: 'mood' as const, label: 'Mood', icon: Smile },
             { value: 'integrations' as const, label: 'Integrations', icon: Link2 },
             { value: 'data' as const, label: 'Data', icon: Download },
@@ -1944,6 +2019,50 @@ export default function Settings() {
                 No activity groups created yet. Create one to get started!
               </p>
             )}
+          </div>
+        </>
+      )}
+
+      {activeTab === 'display' && (
+        <>
+          <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Ruler size={20} className="text-primary-600" />
+              Distance Units
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Choose how distances are shown across the app.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {([
+                { value: 'metric' as const, label: 'Metric', hint: 'Meters and kilometers (m, km)' },
+                { value: 'imperial' as const, label: 'Imperial', hint: 'Feet and miles (ft, mi)' },
+              ]).map(({ value, label, hint }) => (
+                <button
+                  key={value}
+                  onClick={() => setDistanceUnit(value)}
+                  className={`flex flex-col items-start gap-1 p-3 rounded-xl border transition-all text-sm font-medium ${distanceUnit === value
+                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    }`}
+                >
+                  <span>{label}</span>
+                  <span className="text-xs font-normal opacity-80">{hint}</span>
+                </button>
+              ))}
+            </div>
+
+            {displayMsg && (
+              <div className={`flex items-center gap-2 text-sm ${displayMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                {displayMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+                {displayMsg.text}
+              </div>
+            )}
+            <button onClick={saveDisplay} disabled={displaySaving} className="btn-primary">
+              {displaySaving ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+              Save Display Settings
+            </button>
           </div>
         </>
       )}

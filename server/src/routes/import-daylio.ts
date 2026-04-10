@@ -516,5 +516,24 @@ router.post('/', daylioUpload.single('file'), async (req: Request, res: Response
   }
 });
 
+// POST /replace-br - replace literal <br> with newline in existing mood checkin notes
+router.post('/replace-br', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `UPDATE mood_checkins
+       SET note = REPLACE(note, '<br>', E'\n')
+       WHERE user_id = $1
+         AND note IS NOT NULL
+         AND POSITION('<br>' IN note) > 0`,
+      [USER_ID]
+    );
+
+    return res.json({ updated: result.rowCount ?? 0 });
+  } catch (err: any) {
+    console.error('Failed to replace <br> in mood checkins:', err);
+    return res.status(500).json({ error: 'Failed to replace line breaks' });
+  }
+});
+
 
 export const importDaylioRouter = router;

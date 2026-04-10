@@ -239,6 +239,16 @@ export const importApi = {
     }
     return res.json();
   },
+  replaceDaylioBreaks: async () => {
+    const res = await fetch(`${API_BASE}/import/daylio/replace-br`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(error.error || error.message || `Update failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ updated: number }>;
+  },
   sleepAsAndroid: async (file: File) => {
     const form = new FormData();
     form.append('file', file);
