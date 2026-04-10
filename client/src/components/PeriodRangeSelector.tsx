@@ -23,6 +23,7 @@ interface PeriodRangeSelectorProps {
   onSelectedWeekChange?: (weekEndIso: string) => void;
   resetMode?: PeriodMode;
   allTimeLabel?: string;
+  allTimeStartDate?: string;
   onOpenHome?: () => void;
 }
 
@@ -37,6 +38,7 @@ export function PeriodRangeSelector({
   onSelectedWeekChange,
   resetMode = 'triple',
   allTimeLabel = 'All available data',
+  allTimeStartDate,
   onOpenHome,
 }: PeriodRangeSelectorProps) {
   const currentYear = new Date().getFullYear();
@@ -146,7 +148,9 @@ export function PeriodRangeSelector({
         )}
         {periodMode === 'all' ? (
           <div className="min-w-0 flex-1 flex items-center">
-            <span className="text-[11px] text-gray-400 italic">{allTimeLabel}</span>
+            <span className="text-[11px] text-gray-400 italic">
+              {allTimeStartDate ? `${allTimeStartDate} to Present` : allTimeLabel}
+            </span>
           </div>
         ) : periodMode === 'weekly' ? (
           <div className="relative h-6 min-w-0 flex-1 overflow-hidden">

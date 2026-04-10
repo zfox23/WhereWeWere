@@ -150,6 +150,11 @@ export function SleepTab() {
   const [summary, setSummary] = useState<SleepSummaryStats | null>(null);
   const [daily, setDaily] = useState<SleepDailyPoint[]>([]);
   const [ratings, setRatings] = useState<SleepRatingBucket[]>([]);
+  const [earliestSleepDate, setEarliestSleepDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    stats.earliestDates(USER_ID).then((d) => setEarliestSleepDate(d.sleep)).catch(console.error);
+  }, []);
 
   const visibleRange = useMemo(
     () => getPeriodDateRange(selectedMonth, periodMode, selectedWeek),
@@ -279,6 +284,7 @@ export function SleepTab() {
           onSelectedMonthChange={setSelectedMonth}
           selectedWeek={selectedWeek}
           onSelectedWeekChange={setSelectedWeek}
+          allTimeStartDate={earliestSleepDate ?? undefined}
           onOpenHome={() => {
             if (visibleRange.from && visibleRange.to) {
               window.open(`/?from=${visibleRange.from}&to=${visibleRange.to}`, '_blank', 'noopener,noreferrer');

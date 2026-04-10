@@ -146,6 +146,8 @@ export const stats = {
   },
   additionalStats: (userId: string) =>
     request<any>(`/stats/additional-stats?user_id=${userId}`),
+  earliestDates: (userId: string) =>
+    request<{ checkins: string | null; mood: string | null; sleep: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
   moodDaily: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
     if (from && to) { qp.set('from', from); qp.set('to', to); }

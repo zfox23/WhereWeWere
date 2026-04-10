@@ -1168,4 +1168,38 @@ router.get('/sleep-rating-distribution', async (req: Request, res: Response) => 
   }
 });
 
+// GET /earliest-dates?user_id= - earliest entry date for each data type
+router.get('/earliest-dates', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id is required' });
+    }
+
+    const [checkinsResult, moodResult, sleepResult] = await Promise.all([
+      query(
+        `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')))::text AS date FROM checkins WHERE user_id = $1`,
+        [user_id]
+      ),
+      query(
+        `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')))::text AS date FROM mood_checkins WHERE user_id = $1`,
+        [user_id]
+      ),
+      query(
+        `SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC')))::text AS date FROM sleep_entries WHERE user_id = $1`,
+        [user_id]
+      ),
+    ]);
+
+    res.json({
+      checkins: checkinsResult.rows[0]?.date ?? null,
+      mood: moodResult.rows[0]?.date ?? null,
+      sleep: sleepResult.rows[0]?.date ?? null,
+    });
+  } catch (err) {
+    console.error('Error getting earliest dates:', err);
+    res.status(500).json({ error: 'Failed to get earliest dates' });
+  }
+});
+
 export const statsRouter = router;

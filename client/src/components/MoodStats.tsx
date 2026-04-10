@@ -1089,6 +1089,11 @@ export function MoodsTab() {
   const [sleepDailyData, setSleepDailyData] = useState<SleepDailyPt[]>([]);
   const [showSleepBars, setShowSleepBars] = useState(false);
   const [monthLoading, setMonthLoading] = useState(true);
+  const [earliestMoodDate, setEarliestMoodDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    stats.earliestDates(USER_ID).then((d) => setEarliestMoodDate(d.mood)).catch(console.error);
+  }, []);
 
   // Year-scoped data
   useEffect(() => {
@@ -1212,6 +1217,7 @@ export function MoodsTab() {
             const nextYear = parseInt(month.slice(0, 4), 10);
             if (nextYear !== year) setYear(nextYear);
           }}
+          allTimeStartDate={earliestMoodDate ?? undefined}
           onOpenHome={() => {
             if (visibleRange.from && visibleRange.to) {
               openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);

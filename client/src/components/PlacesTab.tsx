@@ -400,10 +400,6 @@ function VenuePinsMap({
   }, [data]);
   const { resolvedTheme } = useTheme();
 
-  const subtitle = range.from && range.to
-    ? `${periodLabel} • ${data.length} venue${data.length !== 1 ? 's' : ''}`
-    : `All available data • ${data.length} venue${data.length !== 1 ? 's' : ''}`;
-
   if (loading) {
     return (
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] overflow-hidden">
@@ -635,6 +631,7 @@ export function PlacesTab() {
   const [topCities, setTopCities] = useState<CityData[]>([]);
   const [placesLoading, setPlacesLoading] = useState(true);
   const [initialPlacesLoaded, setInitialPlacesLoaded] = useState(false);
+  const [earliestCheckinDate, setEarliestCheckinDate] = useState<string | null>(null);
 
   const placesVisibleRange = useMemo(
     () => getPeriodDateRange(placesSelectedMonth, placesPeriodMode, placesSelectedWeek),
@@ -644,6 +641,10 @@ export function PlacesTab() {
     () => getPeriodRangeLabel(placesSelectedMonth, placesPeriodMode, placesSelectedWeek),
     [placesSelectedMonth, placesPeriodMode, placesSelectedWeek]
   );
+
+  useEffect(() => {
+    stats.earliestDates(USER_ID).then((d) => setEarliestCheckinDate(d.checkins)).catch(console.error);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -807,6 +808,7 @@ export function PlacesTab() {
           onSelectedMonthChange={setPlacesSelectedMonth}
           selectedWeek={placesSelectedWeek}
           onSelectedWeekChange={setPlacesSelectedWeek}
+          allTimeStartDate={earliestCheckinDate ?? undefined}
           onOpenHome={() => {
             if (placesVisibleRange.from && placesVisibleRange.to) {
               window.open(`/?from=${placesVisibleRange.from}&to=${placesVisibleRange.to}`, '_blank', 'noopener,noreferrer');
