@@ -1,6 +1,6 @@
-export type PeriodMode = 'single' | 'triple' | 'twelve' | 'all';
+export type PeriodMode = 'single' | 'weekly' | 'triple' | 'twelve' | 'all';
 
-const PERIOD_VALUES: PeriodMode[] = ['single', 'triple', 'twelve', 'all'];
+const PERIOD_VALUES: PeriodMode[] = ['single', 'weekly', 'triple', 'twelve', 'all'];
 
 export const MONTH_NAMES = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -24,6 +24,21 @@ export function isoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+export function isValidDateParam(value: string | null): value is string {
+  return value !== null && /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(value);
+}
+
+export function getCurrentDateIso(baseDate = new Date()): string {
+  return isoDate(baseDate);
+}
+
+export function shiftDateDays(iso: string, deltaDays: number): string {
+  const [year, month, day] = iso.split('-').map((value) => parseInt(value, 10));
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + deltaDays);
+  return isoDate(date);
+}
+
 export function getCurrentMonthIso(baseDate = new Date()): string {
   return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -34,18 +49,24 @@ export function shiftMonth(month: string, delta: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export function getVisibleMonths(selectedMonth: string, year: number, total = 15): string[] {
+export function getVisibleMonths(selectedMonth: string, year: number, total = 24): string[] {
   if (!selectedMonth) {
     return Array.from({ length: total }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
   }
 
-  const endOffset = Math.floor(total / 2);
+  const endOffset = Math.floor(total / 6);
   const startOffset = total - endOffset - 1;
   return Array.from({ length: total }, (_, index) => shiftMonth(selectedMonth, index - startOffset));
 }
 
+export function getVisibleWeeks(selectedWeekEndIso: string, total = 11): string[] {
+  const endOffset = Math.floor(total / 6);
+  const startOffset = total - endOffset - 1;
+  return Array.from({ length: total }, (_, index) => shiftDateDays(selectedWeekEndIso, (index - startOffset) * 7));
+}
+
 export function getAdditionalIncludedMonths(selectedMonth: string, periodMode: PeriodMode): Set<string> {
-  if (!selectedMonth || periodMode === 'single' || periodMode === 'all') {
+  if (!selectedMonth || periodMode === 'single' || periodMode === 'weekly' || periodMode === 'all') {
     return new Set<string>();
   }
 
@@ -57,18 +78,31 @@ export function getAdditionalIncludedMonths(selectedMonth: string, periodMode: P
   return months;
 }
 
-export function getPeriodDateRange(selectedMonth: string, periodMode: PeriodMode): { from: string; to: string } {
+export function getPeriodDateRange(selectedMonth: string, periodMode: PeriodMode, selectedWeekEndIso?: string): { from: string; to: string } {
   if (periodMode === 'all' || !selectedMonth) {
     return { from: '', to: '' };
   }
 
+  if (periodMode === 'weekly') {
+    const weeklyAnchor = selectedWeekEndIso ?? getCurrentDateIso();
+    const [year, month, day] = weeklyAnchor.split('-').map((value) => parseInt(value, 10));
+    const endDate = new Date(year, month - 1, day);
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - 6);
+    return {
+      from: isoDate(startDate),
+      to: isoDate(endDate),
+    };
+  }
+
   const [year, month] = selectedMonth.split('-').map((value) => parseInt(value, 10));
+  const endDate = new Date(year, month, 0);
+
   const startDate = periodMode === 'single'
     ? new Date(year, month - 1, 1)
     : periodMode === 'triple'
       ? new Date(year, month - 3, 1)
       : new Date(year, month - 12, 1);
-  const endDate = new Date(year, month, 0);
 
   return {
     from: isoDate(startDate),
@@ -76,7 +110,7 @@ export function getPeriodDateRange(selectedMonth: string, periodMode: PeriodMode
   };
 }
 
-export function getPeriodRangeLabel(selectedMonth: string, periodMode: PeriodMode): string {
+export function getPeriodRangeLabel(selectedMonth: string, periodMode: PeriodMode, selectedWeekEndIso?: string): string {
   if (periodMode === 'all') {
     return 'All Time';
   }
@@ -88,6 +122,15 @@ export function getPeriodRangeLabel(selectedMonth: string, periodMode: PeriodMod
   const selectedDate = new Date(`${selectedMonth}-01T12:00:00`);
   if (periodMode === 'single') {
     return selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+
+  if (periodMode === 'weekly') {
+    const weeklyAnchor = selectedWeekEndIso ?? getCurrentDateIso();
+    const [year, month, day] = weeklyAnchor.split('-').map((value) => parseInt(value, 10));
+    const end = new Date(year, month - 1, day);
+    const start = new Date(end);
+    start.setDate(end.getDate() - 6);
+    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
   }
 
   const monthsBack = periodMode === 'triple' ? 3 : 12;

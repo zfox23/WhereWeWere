@@ -251,6 +251,8 @@ router.get('/map-data', async (req: Request, res: Response) => {
       `SELECT v.id AS venue_id, v.name AS venue_name,
               v.latitude, v.longitude,
               COUNT(c.id)::int AS checkin_count,
+              (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC))[1] AS last_checkin_at,
+              (ARRAY_AGG(c.checkin_timezone ORDER BY c.checked_in_at DESC))[1] AS last_checkin_timezone,
               ARRAY_AGG(DISTINCT DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')) ORDER BY DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')) DESC) AS dates
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id

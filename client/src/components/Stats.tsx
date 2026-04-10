@@ -68,12 +68,14 @@ export function TopVenuesList({ venues }: { venues: TopVenue[] }) {
                 {i + 1}
               </span>
               <div className="flex-1 min-w-0 truncate">
-                <button
-                  onClick={() => navigate(`/?venue_id=${venue.venue_id}`)}
+                <a
+                  href={`/venues/${venue.venue_id}`}
+                  target='_blank'
+                  rel='noopener noreferrer'
                   className="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 hover:underline text-left"
                 >
                   {venue.venue_name}
-                </button>
+                </a>
                 {venue.category_name && (
                   <p className="text-xs text-gray-500">{venue.category_name}</p>
                 )}

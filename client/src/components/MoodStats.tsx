@@ -5,7 +5,6 @@ import {
   Smile,
   BarChart3,
   Activity,
-  House,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -16,9 +15,11 @@ import { PeriodRangeSelector } from './PeriodRangeSelector';
 import { StatCard } from './Stats';
 import {
   PeriodMode,
+  getCurrentDateIso,
   getPeriodDateRange,
   getPeriodRangeLabel,
   isoDate,
+  isValidDateParam,
   isValidMonthParam,
   parsePeriodParam,
   resolveMonthForYear,
@@ -535,7 +536,7 @@ function MoodMonthlySection({
 
   const pie = useMemo(
     () => {
-      if (periodMode === 'all') return moodCounts;
+      if (periodMode === 'all' || periodMode === 'weekly') return moodCounts;
       const months = periodMode === 'single'
         ? [selectedMonth]
         : periodMode === 'triple'
@@ -1069,11 +1070,15 @@ export function MoodsTab() {
   const initialMonthParam = isValidMonthParam(searchParams.get('moodsMonth'))
     ? searchParams.get('moodsMonth')
     : null;
+  const initialWeekParam = isValidDateParam(searchParams.get('moodsWeek'))
+    ? searchParams.get('moodsWeek')
+    : null;
   const initialPeriodParam = parsePeriodParam(searchParams.get('moodsPeriod'));
   const [chartMode, setChartMode] = useState<'line' | 'span'>('line');
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPeriodParam ?? 'single');
   const [year, setYear] = useState(initialMonthParam ? parseInt(initialMonthParam.slice(0, 4), 10) : new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(initialMonthParam ?? '');
+  const [selectedWeek, setSelectedWeek] = useState(initialWeekParam ?? getCurrentDateIso());
 
   const [dailyData, setDailyData] = useState<DailyPt[]>([]);
   const [moodCounts, setMoodCounts] = useState<MoodCount[]>([]);
@@ -1105,6 +1110,7 @@ export function MoodsTab() {
 
   useEffect(() => {
     const monthParam = isValidMonthParam(searchParams.get('moodsMonth')) ? searchParams.get('moodsMonth') : null;
+    const weekParam = isValidDateParam(searchParams.get('moodsWeek')) ? searchParams.get('moodsWeek') : null;
     const periodParam = parsePeriodParam(searchParams.get('moodsPeriod'));
 
     if (periodParam && periodParam !== periodMode) {
@@ -1116,6 +1122,14 @@ export function MoodsTab() {
       const monthYear = parseInt(monthParam.slice(0, 4), 10);
       if (monthYear !== year) {
         setYear(monthYear);
+      }
+    }
+
+    if (weekParam && weekParam !== selectedWeek) {
+      setSelectedWeek(weekParam);
+      const weekYear = parseInt(weekParam.slice(0, 4), 10);
+      if (weekYear !== year) {
+        setYear(weekYear);
       }
     }
   }, [searchParams]);
@@ -1138,36 +1152,28 @@ export function MoodsTab() {
       next.set('moodsPeriod', periodMode);
       changed = true;
     }
+    if (next.get('moodsWeek') !== selectedWeek) {
+      next.set('moodsWeek', selectedWeek);
+      changed = true;
+    }
 
     if (changed) {
       setSearchParams(next, { replace: true });
     }
-  }, [periodMode, searchParams, selectedMonth, setSearchParams]);
+  }, [periodMode, searchParams, selectedMonth, selectedWeek, setSearchParams]);
 
   const visibleRange = useMemo(
-    () => getPeriodDateRange(selectedMonth, periodMode),
-    [selectedMonth, periodMode]
+    () => getPeriodDateRange(selectedMonth, periodMode, selectedWeek),
+    [selectedMonth, periodMode, selectedWeek]
   );
 
   // Selected-month data (line/span + count summary)
   useEffect(() => {
     const isAll = periodMode === 'all';
-    if (!isAll && !selectedMonth) return;
+    if (!isAll && !visibleRange.from) return;
 
-    let rangeStart: string | undefined;
-    let rangeEnd: string | undefined;
-
-    if (!isAll && selectedMonth) {
-      const [y, m] = selectedMonth.split('-').map((v) => parseInt(v, 10));
-      const startDate = periodMode === 'single'
-        ? new Date(y, m - 1, 1)
-        : periodMode === 'triple'
-          ? new Date(y, m - 3, 1)
-          : new Date(y, m - 12, 1);
-      const endDate = new Date(y, m, 0);
-      rangeStart = isoDate(startDate);
-      rangeEnd = isoDate(endDate);
-    }
+    const rangeStart = isAll ? undefined : visibleRange.from;
+    const rangeEnd = isAll ? undefined : visibleRange.to;
 
     setMonthLoading(true);
     Promise.all([
@@ -1188,7 +1194,7 @@ export function MoodsTab() {
       })
       .catch(console.error)
       .finally(() => setMonthLoading(false));
-  }, [selectedMonth, periodMode]);
+  }, [periodMode, visibleRange.from, visibleRange.to]);
 
   return (
     <div className="space-y-6">
@@ -1199,28 +1205,21 @@ export function MoodsTab() {
           year={year}
           onYearChange={setYear}
           selectedMonth={selectedMonth}
+          selectedWeek={selectedWeek}
+          onSelectedWeekChange={setSelectedWeek}
           onSelectedMonthChange={(month) => {
             setSelectedMonth(month);
             const nextYear = parseInt(month.slice(0, 4), 10);
             if (nextYear !== year) setYear(nextYear);
           }}
-        />
-        <button
-          type="button"
-          onClick={() => {
+          onOpenHome={() => {
             if (visibleRange.from && visibleRange.to) {
               openInNewTab(`/?from=${visibleRange.from}&to=${visibleRange.to}`);
             } else {
               openInNewTab('/');
             }
           }}
-          className="shrink-0 rounded-md p-1 text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300"
-          title="Open selected period in Home"
-          aria-label="Open selected period in Home"
-        >
-          <House size={14} />
-        </button>
-        {monthLoading && <Loader2 className="animate-spin text-primary-600 shrink-0" size={16} />}
+        />
       </div>
 
       <MoodMonthlySection

@@ -6,12 +6,14 @@ import {
   CalendarDays,
   Clock,
   Globe,
-  House,
   Loader2,
   MapPin,
+  Moon,
+  MoonStarIcon,
   Sun,
+  SunriseIcon,
 } from 'lucide-react';
-import { CircleMarker, MapContainer, Marker, Popup as LeafletPopup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { CircleMarker, FeatureGroup, MapContainer, Marker, Polyline, Popup as LeafletPopup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { stats } from '../api/client';
@@ -24,9 +26,11 @@ import {
 } from './Stats';
 import {
   PeriodMode,
+  getCurrentDateIso,
   getCurrentMonthIso,
   getPeriodDateRange,
   getPeriodRangeLabel,
+  isValidDateParam,
   isValidMonthParam,
   parsePeriodParam,
 } from '../utils/periodRange';
@@ -38,6 +42,7 @@ import type {
   Stats as StatsType,
   TopVenue,
 } from '../types';
+import { formatDate } from '../utils/checkin';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -55,15 +60,22 @@ type ClusteredVenueItem =
     venues: MapDataPoint[];
   };
 
+interface VenueMarkerPlacement {
+  venue: MapDataPoint;
+  displayPosition: [number, number];
+  originalPosition: [number, number];
+  displaced: boolean;
+}
+
 interface DayOfWeekData { day: string; count: number }
 interface TimeOfDayData { period: string; count: number }
 interface BusiestDayData { date: string; count: number }
 interface CityData { city: string; country: string; checkin_count: number; unique_venues: number }
 const TIME_ICONS: Record<string, React.ElementType> = {
-  Morning: Sun,
+  Morning: SunriseIcon,
   Afternoon: Sun,
-  Evening: Clock,
-  Night: Clock,
+  Evening: Moon,
+  Night: MoonStarIcon,
 };
 
 const TIME_COLORS: Record<string, string> = {
@@ -134,17 +146,20 @@ function getClusterRadius(venueCount: number, checkinCount: number): number {
   return 16;
 }
 
-function buildClusteredVenueItems(map: L.Map, data: MapDataPoint[], zoom: number): ClusteredVenueItem[] {
-  if (zoom >= 8) {
+function buildClusteredVenueItems(map: L.Map, data: MapDataPoint[], zoom: number, maxZoom: number): ClusteredVenueItem[] {
+  if (zoom >= maxZoom) {
     return data.map((venue) => ({ kind: 'venue', venue }));
   }
 
-  const cellSize = zoom <= 2 ? 160 : zoom <= 4 ? 120 : zoom <= 6 ? 92 : 76;
+  // Cluster any pins whose projected pixel coordinates fall in the same ~44 px cell.
+  // 44 px matches the largest pin diameter so visually-overlapping pins always merge,
+  // and this threshold applies at every zoom level without any early exit.
+  const CLUSTER_CELL_PX = 44;
   const buckets = new Map<string, MapDataPoint[]>();
 
   for (const venue of data) {
     const point = map.project([venue.latitude, venue.longitude], zoom);
-    const key = `${Math.floor(point.x / cellSize)}:${Math.floor(point.y / cellSize)}`;
+    const key = `${Math.floor(point.x / CLUSTER_CELL_PX)}:${Math.floor(point.y / CLUSTER_CELL_PX)}`;
     const bucket = buckets.get(key);
     if (bucket) {
       bucket.push(venue);
@@ -173,14 +188,71 @@ function buildClusteredVenueItems(map: L.Map, data: MapDataPoint[], zoom: number
   });
 }
 
+function splitFormattedTimestamp(value: string): { datePart: string; timePart: string } {
+  const parts = value.split(', ');
+  if (parts.length >= 4) {
+    return {
+      datePart: parts.slice(0, 3).join(', '),
+      timePart: parts.slice(3).join(', '),
+    };
+  }
+
+  return { datePart: value, timePart: '' };
+}
+
+function buildMaxZoomPlacements(map: L.Map, venues: MapDataPoint[], zoom: number): VenueMarkerPlacement[] {
+  const MIN_MARKER_SPACING_PX = 44;
+  const placedPoints: L.Point[] = [];
+
+  const overlaps = (candidate: L.Point): boolean => {
+    return placedPoints.some((point) => candidate.distanceTo(point) < MIN_MARKER_SPACING_PX);
+  };
+
+  const findPlacementPoint = (basePoint: L.Point): L.Point => {
+    if (!overlaps(basePoint)) return basePoint;
+
+    // Search outward on a square lattice until a free marker-tip position is found.
+    for (let ring = 1; ring <= 300; ring += 1) {
+      for (let dx = -ring; dx <= ring; dx += 1) {
+        for (let dy = -ring; dy <= ring; dy += 1) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+
+          const candidate = L.point(
+            basePoint.x + dx * MIN_MARKER_SPACING_PX,
+            basePoint.y + dy * MIN_MARKER_SPACING_PX
+          );
+
+          if (!overlaps(candidate)) {
+            return candidate;
+          }
+        }
+      }
+    }
+
+    return basePoint;
+  };
+
+  return venues.map((venue) => {
+    const basePoint = map.project([venue.latitude, venue.longitude], zoom);
+    const placedPoint = findPlacementPoint(basePoint);
+    placedPoints.push(placedPoint);
+
+    const placedLatLng = map.unproject(placedPoint, zoom);
+
+    return {
+      venue,
+      displayPosition: [placedLatLng.lat, placedLatLng.lng],
+      originalPosition: [venue.latitude, venue.longitude],
+      displaced: placedPoint.distanceTo(basePoint) > 0.01,
+    };
+  });
+}
+
 function VenueMapMarkers({
   data,
-  range,
 }: {
   data: MapDataPoint[];
-  range: { from: string; to: string };
 }) {
-  const navigate = useNavigate();
   const map = useMap();
   const { resolvedTheme } = useTheme();
   const [zoom, setZoom] = useState(() => map.getZoom());
@@ -189,50 +261,98 @@ function VenueMapMarkers({
     zoomend: () => setZoom(map.getZoom()),
   });
 
-  const items = useMemo(() => buildClusteredVenueItems(map, data, zoom), [data, map, zoom]);
+  const maxZoom = map.getMaxZoom();
+  const isMaxZoom = zoom >= maxZoom;
+
+  const items = useMemo(
+    () => buildClusteredVenueItems(map, data, zoom, maxZoom),
+    [data, map, zoom, maxZoom]
+  );
+
+  const markerPlacements = useMemo(() => {
+    if (!isMaxZoom) return null;
+
+    const venuesOnly = items
+      .filter((item): item is Extract<ClusteredVenueItem, { kind: 'venue' }> => item.kind === 'venue')
+      .map((item) => item.venue);
+
+    return buildMaxZoomPlacements(map, venuesOnly, zoom);
+  }, [isMaxZoom, items, map, zoom]);
+
+  const placementByVenueId = useMemo(() => {
+    if (!markerPlacements) return null;
+    return new Map(markerPlacements.map((placement) => [placement.venue.venue_id, placement]));
+  }, [markerPlacements]);
 
   return (
     <>
       {items.map((item) => {
         if (item.kind === 'venue') {
           const venue = item.venue;
+          const placement = placementByVenueId?.get(venue.venue_id);
+          const markerPosition: [number, number] = placement?.displayPosition ?? [venue.latitude, venue.longitude];
+          const formattedLastVisit = venue.last_checkin_at
+            ? formatDate(venue.last_checkin_at, venue.last_checkin_timezone)
+            : null;
+          const { datePart, timePart } = formattedLastVisit
+            ? splitFormattedTimestamp(formattedLastVisit)
+            : { datePart: '', timePart: '' };
+          const dayFilter = venue.dates[0] || null;
           return (
-            <Marker
-              key={venue.venue_id}
-              position={[venue.latitude, venue.longitude]}
-              icon={getVenuePinIcon(venue.checkin_count, resolvedTheme)}
-            >
-              <LeafletPopup>
-                <div className="text-sm min-w-[220px] max-w-[260px]">
-                  <p className="font-semibold text-gray-900">{venue.venue_name}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {venue.checkin_count} check-in{venue.checkin_count !== 1 ? 's' : ''}
-                  </p>
-                  {venue.dates.length > 0 && (
-                    <p className="text-xs text-gray-500">Last visit {venue.dates[0]}</p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const params = new URLSearchParams({ venue_id: venue.venue_id });
-                      if (range.from && range.to) {
-                        params.set('from', range.from);
-                        params.set('to', range.to);
-                      }
-                      navigate(`/?${params.toString()}`);
-                    }}
-                    className="mt-3 text-xs font-medium text-primary-600 hover:text-primary-700 hover:underline"
-                  >
-                    Open matching check-ins
-                  </button>
-                </div>
-              </LeafletPopup>
-            </Marker>
+            <FeatureGroup key={venue.venue_id}>
+              {placement?.displaced && (
+                <Polyline
+                  positions={[placement.displayPosition, placement.originalPosition]}
+                  pathOptions={{
+                    color: resolvedTheme === 'dark' ? '#fb923c' : '#c2410c',
+                    weight: 2,
+                    opacity: 0.65,
+                  }}
+                />
+              )}
+              <Marker
+                position={markerPosition}
+                icon={getVenuePinIcon(venue.checkin_count, resolvedTheme)}
+              >
+                <LeafletPopup>
+                  <div className="p-2 text-sm min-w-[220px] max-w-[260px] space-y-1.5 rounded-md border border-gray-200 bg-white text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.open(`/venues/${venue.venue_id}`, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="text-sm text-left font-medium text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
+                    >
+                      {venue.venue_name}
+                    </button>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {venue.checkin_count} check-in{venue.checkin_count !== 1 ? 's' : ''}
+                    </p>
+                    {formattedLastVisit && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Last visit:{' '}
+                        {dayFilter ? (
+                          <a
+                            href={`/?from=${encodeURIComponent(dayFilter)}&to=${encodeURIComponent(dayFilter)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            {datePart}
+                          </a>
+                        ) : (
+                          datePart
+                        )}
+                        {timePart ? `, ${timePart}` : ''}
+                      </p>
+                    )}
+                  </div>
+                </LeafletPopup>
+              </Marker>
+            </FeatureGroup>
           );
         }
 
-        const topVenues = item.venues.slice(0, 5);
-        const hiddenVenueCount = item.venues.length - topVenues.length;
         return (
           <CircleMarker
             key={item.id}
@@ -246,7 +366,7 @@ function VenueMapMarkers({
             }}
             eventHandlers={{
               click: () => {
-                const nextZoom = Math.min(map.getZoom() + 2, 10);
+                const nextZoom = Math.min(map.getZoom() + 2, map.getMaxZoom());
                 map.flyTo([item.latitude, item.longitude], nextZoom, { duration: 0.35 });
               },
             }}
@@ -254,35 +374,6 @@ function VenueMapMarkers({
             <Tooltip direction="center" permanent className="!bg-transparent !border-0 !shadow-none !text-white !font-bold">
               <span className="text-xs">{item.venues.length}</span>
             </Tooltip>
-            <LeafletPopup>
-              <div className="text-sm min-w-[240px] max-w-[280px]">
-                <p className="font-semibold text-gray-900">{item.venues.length} nearby venues</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {item.checkinCount} total check-in{item.checkinCount !== 1 ? 's' : ''}
-                </p>
-                <ul className="mt-3 space-y-1.5 max-h-40 overflow-y-auto">
-                  {topVenues.map((venue) => (
-                    <li key={venue.venue_id} className="text-xs text-gray-600">
-                      <span className="font-medium text-gray-900">{venue.venue_name}</span>
-                      <span className="text-gray-500"> · {venue.checkin_count}</span>
-                    </li>
-                  ))}
-                </ul>
-                {hiddenVenueCount > 0 && (
-                  <p className="text-xs text-gray-400 mt-2">+{hiddenVenueCount} more venue{hiddenVenueCount !== 1 ? 's' : ''}</p>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextZoom = Math.min(map.getZoom() + 2, 10);
-                    map.flyTo([item.latitude, item.longitude], nextZoom, { duration: 0.35 });
-                  }}
-                  className="mt-3 text-xs font-medium text-primary-600 hover:text-primary-700 hover:underline"
-                >
-                  Zoom in
-                </button>
-              </div>
-            </LeafletPopup>
           </CircleMarker>
         );
       })}
@@ -345,7 +436,7 @@ function VenuePinsMap({
               url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
             />
             <MapBoundsController data={data} />
-            <VenueMapMarkers data={data} range={range} />
+            <VenueMapMarkers data={data} />
           </MapContainer>
         </div>
       )}
@@ -524,8 +615,14 @@ export function PlacesTab() {
     return parsePeriodParam(new URLSearchParams(window.location.search).get('placesPeriod')) ?? 'single';
   };
 
+  const getPlacesWeekFromLocation = (): string => {
+    const weekParam = new URLSearchParams(window.location.search).get('placesWeek');
+    return isValidDateParam(weekParam) ? weekParam : getCurrentDateIso();
+  };
+
   const [placesPeriodMode, setPlacesPeriodMode] = useState<PeriodMode>(getPlacesPeriodFromLocation);
   const [placesSelectedMonth, setPlacesSelectedMonth] = useState<string>(getPlacesMonthFromLocation);
+  const [placesSelectedWeek, setPlacesSelectedWeek] = useState<string>(getPlacesWeekFromLocation);
   const [placesYear, setPlacesYear] = useState(() => parseInt(getPlacesMonthFromLocation().slice(0, 4), 10));
   const [summary, setSummary] = useState<StatsType | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
@@ -540,12 +637,12 @@ export function PlacesTab() {
   const [initialPlacesLoaded, setInitialPlacesLoaded] = useState(false);
 
   const placesVisibleRange = useMemo(
-    () => getPeriodDateRange(placesSelectedMonth, placesPeriodMode),
-    [placesSelectedMonth, placesPeriodMode]
+    () => getPeriodDateRange(placesSelectedMonth, placesPeriodMode, placesSelectedWeek),
+    [placesSelectedMonth, placesPeriodMode, placesSelectedWeek]
   );
   const placesRangeLabel = useMemo(
-    () => getPeriodRangeLabel(placesSelectedMonth, placesPeriodMode),
-    [placesSelectedMonth, placesPeriodMode]
+    () => getPeriodRangeLabel(placesSelectedMonth, placesPeriodMode, placesSelectedWeek),
+    [placesSelectedMonth, placesPeriodMode, placesSelectedWeek]
   );
 
   useEffect(() => {
@@ -609,7 +706,7 @@ export function PlacesTab() {
         setTopVenues(tv);
         setCategories(cb);
         setCountries(co);
-        setMapData(md.map((item: any) => ({
+        setMapData(md.map((item: MapDataPoint) => ({
           ...item,
           latitude: Number(item.latitude),
           longitude: Number(item.longitude),
@@ -649,6 +746,7 @@ export function PlacesTab() {
     const syncStateFromLocation = () => {
       const nextMonth = getPlacesMonthFromLocation();
       setPlacesSelectedMonth(nextMonth);
+      setPlacesSelectedWeek(getPlacesWeekFromLocation());
       setPlacesYear(parseInt(nextMonth.slice(0, 4), 10));
       setPlacesPeriodMode(getPlacesPeriodFromLocation());
     };
@@ -679,11 +777,15 @@ export function PlacesTab() {
       url.searchParams.set('placesPeriod', placesPeriodMode);
       changed = true;
     }
+    if (url.searchParams.get('placesWeek') !== placesSelectedWeek) {
+      url.searchParams.set('placesWeek', placesSelectedWeek);
+      changed = true;
+    }
 
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [placesPeriodMode, placesSelectedMonth]);
+  }, [placesPeriodMode, placesSelectedMonth, placesSelectedWeek]);
 
   if (!initialPlacesLoaded) {
     return (
@@ -703,23 +805,16 @@ export function PlacesTab() {
           onYearChange={setPlacesYear}
           selectedMonth={placesSelectedMonth}
           onSelectedMonthChange={setPlacesSelectedMonth}
-        />
-        <button
-          type="button"
-          onClick={() => {
+          selectedWeek={placesSelectedWeek}
+          onSelectedWeekChange={setPlacesSelectedWeek}
+          onOpenHome={() => {
             if (placesVisibleRange.from && placesVisibleRange.to) {
               window.open(`/?from=${placesVisibleRange.from}&to=${placesVisibleRange.to}`, '_blank', 'noopener,noreferrer');
             } else {
               window.open('/', '_blank', 'noopener,noreferrer');
             }
           }}
-          className="shrink-0 rounded-md p-1 text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300"
-          title="Open selected period in Home"
-          aria-label="Open selected period in Home"
-        >
-          <House size={14} />
-        </button>
-        {placesLoading && <Loader2 className="animate-spin text-primary-600 shrink-0" size={16} />}
+        />
       </div>
 
       {summary && (

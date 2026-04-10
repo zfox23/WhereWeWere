@@ -101,6 +101,8 @@ export interface MapDataPoint {
   latitude: number;
   longitude: number;
   checkin_count: number;
+  last_checkin_at?: string;
+  last_checkin_timezone?: string | null;
   dates: string[];
 }
 
@@ -279,6 +281,7 @@ export interface UserSettings {
   notifications_enabled: boolean;
   mood_reminder_times: string[];
   mood_icon_pack: 'emoji' | 'lucide' | 'nature';
+  distance_unit: 'metric' | 'imperial';
 }
 
 export interface ImmichAsset {

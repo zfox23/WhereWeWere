@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { House, Loader2, Moon, Star } from 'lucide-react';
+import { Loader2, Moon, Star } from 'lucide-react';
 import { stats } from '../api/client';
 import { PeriodRangeSelector } from './PeriodRangeSelector';
 import { StatCard } from './Stats';
 import {
   PeriodMode,
+  getCurrentDateIso,
   getCurrentMonthIso,
   getPeriodDateRange,
   getPeriodRangeLabel,
+  isValidDateParam,
   isValidMonthParam,
   parsePeriodParam,
 } from '../utils/periodRange';
@@ -134,8 +136,14 @@ export function SleepTab() {
     return parsePeriodParam(new URLSearchParams(window.location.search).get('sleepPeriod')) ?? 'single';
   };
 
+  const getSleepWeekFromLocation = (): string => {
+    const weekParam = new URLSearchParams(window.location.search).get('sleepWeek');
+    return isValidDateParam(weekParam) ? weekParam : getCurrentDateIso();
+  };
+
   const [periodMode, setPeriodMode] = useState<PeriodMode>(getSleepPeriodFromLocation);
   const [selectedMonth, setSelectedMonth] = useState<string>(getSleepMonthFromLocation);
+  const [selectedWeek, setSelectedWeek] = useState<string>(getSleepWeekFromLocation);
   const [year, setYear] = useState(() => parseInt(getSleepMonthFromLocation().slice(0, 4), 10));
   const [loading, setLoading] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
@@ -144,13 +152,13 @@ export function SleepTab() {
   const [ratings, setRatings] = useState<SleepRatingBucket[]>([]);
 
   const visibleRange = useMemo(
-    () => getPeriodDateRange(selectedMonth, periodMode),
-    [selectedMonth, periodMode]
+    () => getPeriodDateRange(selectedMonth, periodMode, selectedWeek),
+    [selectedMonth, periodMode, selectedWeek]
   );
 
   const rangeLabel = useMemo(
-    () => getPeriodRangeLabel(selectedMonth, periodMode),
-    [selectedMonth, periodMode]
+    () => getPeriodRangeLabel(selectedMonth, periodMode, selectedWeek),
+    [selectedMonth, periodMode, selectedWeek]
   );
 
   const rankedSleepDays = useMemo(() => {
@@ -210,6 +218,7 @@ export function SleepTab() {
     const syncStateFromLocation = () => {
       const nextMonth = getSleepMonthFromLocation();
       setSelectedMonth(nextMonth);
+      setSelectedWeek(getSleepWeekFromLocation());
       setYear(parseInt(nextMonth.slice(0, 4), 10));
       setPeriodMode(getSleepPeriodFromLocation());
     };
@@ -240,11 +249,15 @@ export function SleepTab() {
       url.searchParams.set('sleepPeriod', periodMode);
       changed = true;
     }
+    if (url.searchParams.get('sleepWeek') !== selectedWeek) {
+      url.searchParams.set('sleepWeek', selectedWeek);
+      changed = true;
+    }
 
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [periodMode, selectedMonth]);
+  }, [periodMode, selectedMonth, selectedWeek]);
 
   if (!initialLoaded) {
     return (
@@ -264,23 +277,16 @@ export function SleepTab() {
           onYearChange={setYear}
           selectedMonth={selectedMonth}
           onSelectedMonthChange={setSelectedMonth}
-        />
-        <button
-          type="button"
-          onClick={() => {
+          selectedWeek={selectedWeek}
+          onSelectedWeekChange={setSelectedWeek}
+          onOpenHome={() => {
             if (visibleRange.from && visibleRange.to) {
               window.open(`/?from=${visibleRange.from}&to=${visibleRange.to}`, '_blank', 'noopener,noreferrer');
             } else {
               window.open('/', '_blank', 'noopener,noreferrer');
             }
           }}
-          className="shrink-0 rounded-md p-1 text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300"
-          title="Open selected period in Home"
-          aria-label="Open selected period in Home"
-        >
-          <House size={14} />
-        </button>
-        {loading && <Loader2 className="animate-spin text-primary-600 shrink-0" size={16} />}
+        />
       </div>
 
       <p className="text-sm text-gray-500 dark:text-gray-400">{rangeLabel}</p>
