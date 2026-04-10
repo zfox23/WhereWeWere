@@ -45,7 +45,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       {/* Main */}
-      <main className="max-w-5xl mx-auto px-4 py-6 flex-1 w-full">
+      <main className="max-w-5xl mx-auto px-2 md:px-4 py-6 flex-1 w-full">
         <div key={pathname} className="page-enter">
           {children}
         </div>

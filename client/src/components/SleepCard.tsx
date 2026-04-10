@@ -124,7 +124,7 @@ export default function SleepCard({ item }: SleepCardProps) {
           <div className="mt-2 flex items-center justify-start gap-1 text-sm text-gray-700 dark:text-gray-300">
             <Link
               to={`/sleep-entries/${item.id}`}
-              className="text-xs font-medium hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+              className="text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
             >
               {formatClockTime(startedAt, timezone)} - {endedAt && formatTimeWithShortDate(endedAt, timezone)} {timezoneLabel}
             </Link>

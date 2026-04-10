@@ -1181,7 +1181,7 @@ export default function Home() {
               </div>
               {/* Cards with vertical line */}
               {dateItems.length > 0 ? (
-                <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-6 pb-4 space-y-3">
+                <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-3 pb-4 space-y-3">
                   {dateItems.map((item, index) => {
                     const revealStyle: CSSProperties = {
                       transitionDelay: `${Math.min(index, 8) * 36}ms`,
