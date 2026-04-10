@@ -43,6 +43,7 @@ import type {
   TopVenue,
 } from '../types';
 import { formatDate } from '../utils/checkin';
+import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -84,9 +85,6 @@ const TIME_COLORS: Record<string, string> = {
   Evening: 'bg-indigo-400',
   Night: 'bg-slate-500',
 };
-const LIGHT_TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
 function getVenuePinIcon(checkinCount: number, resolvedTheme: 'light' | 'dark'): L.DivIcon {
   const badge = checkinCount > 99 ? '99+' : String(checkinCount);

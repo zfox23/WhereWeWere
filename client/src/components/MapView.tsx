@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useTheme } from '../contexts/ThemeContext';
+import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
 
 // Fix Leaflet's default icon paths (broken by bundlers)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -69,9 +70,6 @@ function createGpsLockedIcon(ringColor: string, dotColor: string): L.DivIcon {
   });
 }
 
-const LIGHT_TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 const MARKER_COLORS = {
   light: {
     default: '#ea580c',
