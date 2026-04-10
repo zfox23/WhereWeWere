@@ -48,14 +48,14 @@ interface LocationState {
   coords: { lat: number; lon: number } | null;
   nearbyVenues: NearbyVenue[] | null;
   loading: boolean;
-  refetch: () => void;
+  refetch: () => Promise<{ lat: number; lon: number } | null>;
 }
 
 const LocationContext = createContext<LocationState>({
   coords: null,
   nearbyVenues: null,
   loading: false,
-  refetch: () => {},
+  refetch: async () => null,
 });
 
 export function useLocation() {
@@ -101,18 +101,21 @@ export function LocationProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, [coords]);
 
-  const refetch = useCallback(() => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const newCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        setCoords(newCoords);
-        // Force refetch by clearing fetchedCoords
-        fetchedCoordsRef.current = null;
-      },
-      () => {},
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+  const refetch = useCallback(async () => {
+    if (!navigator.geolocation) return null;
+    return new Promise<{ lat: number; lon: number } | null>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const newCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+          setCoords(newCoords);
+          // Force refetch by clearing fetchedCoords
+          fetchedCoordsRef.current = null;
+          resolve(newCoords);
+        },
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
   }, []);
 
   return (

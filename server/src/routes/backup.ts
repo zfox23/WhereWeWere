@@ -41,6 +41,7 @@ interface BackupSettings {
   notifications_enabled: boolean | null;
   mood_reminder_times: string[];
   mood_icon_pack: string | null;
+  distance_unit: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -264,6 +265,7 @@ router.get('/export', async (_req: Request, res: Response) => {
                 notifications_enabled,
                 COALESCE(mood_reminder_times, ARRAY[]::text[]) AS mood_reminder_times,
                 mood_icon_pack,
+          distance_unit,
                 created_at,
                 updated_at
          FROM user_settings
@@ -415,9 +417,9 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
            user_id, dawarich_url, dawarich_api_key,
            immich_url, immich_api_key, maloja_url,
            theme, notifications_enabled, mood_reminder_times,
-           mood_icon_pack
+           mood_icon_pack, distance_unit
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10, $11)
          ON CONFLICT (user_id) DO UPDATE SET
            dawarich_url = EXCLUDED.dawarich_url,
            dawarich_api_key = EXCLUDED.dawarich_api_key,
@@ -428,6 +430,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
            notifications_enabled = COALESCE(EXCLUDED.notifications_enabled, user_settings.notifications_enabled),
            mood_reminder_times = COALESCE(EXCLUDED.mood_reminder_times, user_settings.mood_reminder_times),
            mood_icon_pack = COALESCE(EXCLUDED.mood_icon_pack, user_settings.mood_icon_pack),
+           distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
            updated_at = NOW()`,
         [
           USER_ID,
@@ -440,6 +443,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           typeof s.notifications_enabled === 'boolean' ? s.notifications_enabled : null,
           asArray<string>(s.mood_reminder_times),
           toStringOrNull(s.mood_icon_pack),
+          toStringOrNull(s.distance_unit),
         ]
       );
     }
@@ -900,11 +904,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.user_profile_reset = profileResult.rowCount ?? 0;
 
       const accountSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, theme, notifications_enabled)
-         VALUES ($1, 'system', true)
+        `INSERT INTO user_settings (user_id, theme, notifications_enabled, distance_unit)
+         VALUES ($1, 'system', true, 'metric')
          ON CONFLICT (user_id) DO UPDATE SET
            theme = 'system',
            notifications_enabled = true,
+           distance_unit = 'metric',
            updated_at = NOW()`,
         [USER_ID]
       );

@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, MapPin, Plus, Loader2, Navigation, LocateFixed } from 'lucide-react';
-import { venues } from '../api/client';
+import { settings, venues } from '../api/client';
 import { useLocation } from '../contexts/LocationContext';
-import { haversineDistance } from '../utils/geo';
+import { haversineDistance, getBearingDegrees, formatDistance } from '../utils/geo';
 import VenueEditMap from './VenueEditMap';
 import type { NearbyVenue, VenueCategory } from '../types';
+import type { DistanceUnit } from '../utils/geo';
 
 const NEARBY_PAGE_SIZE = 20;
 const DEFAULT_NEARBY_RADIUS_METERS = 5000;
@@ -31,31 +32,6 @@ interface VenueSearchProps {
   initialLon?: number;
 }
 
-function toRadians(degrees: number): number {
-  return (degrees * Math.PI) / 180;
-}
-
-function getBearingDegrees(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
-  const phi1 = toRadians(fromLat);
-  const phi2 = toRadians(toLat);
-  const lambdaDelta = toRadians(toLon - fromLon);
-
-  const y = Math.sin(lambdaDelta) * Math.cos(phi2);
-  const x =
-    Math.cos(phi1) * Math.sin(phi2) -
-    Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambdaDelta);
-
-  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
-  return (bearing + 360) % 360;
-}
-
-function formatDistance(distanceMeters: number): string {
-  if (distanceMeters < 1000) {
-    return `${Math.round(distanceMeters)}m`;
-  }
-  return `${(distanceMeters / 1000).toFixed(1)}km`;
-}
-
 export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueSearchProps) {
   const prefetched = useLocation();
   const [query, setQuery] = useState('');
@@ -72,6 +48,8 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [mapSearchResults, setMapSearchResults] = useState<PlaceSearchResult[]>([]);
   const [categories, setCategories] = useState<VenueCategory[]>([]);
   const [selectedNearbyMarkerId, setSelectedNearbyMarkerId] = useState<string | null>(null);
+  const [refreshingBrowserLocation, setRefreshingBrowserLocation] = useState(false);
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
   const usedPrefetchRef = useRef(false);
 
   // Custom venue form state
@@ -164,6 +142,18 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   // Load categories for custom venue form
   useEffect(() => {
     venues.categories().then(setCategories).catch(() => { });
+  }, []);
+
+  useEffect(() => {
+    settings
+      .get()
+      .then((s) => {
+        const unit = s?.distance_unit;
+        if (unit === 'metric' || unit === 'imperial') {
+          setDistanceUnit(unit);
+        }
+      })
+      .catch(() => { });
   }, []);
 
   // Keep default custom venue coordinates in sync with detected/prefetched coords.
@@ -347,13 +337,23 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     void searchNearby(query, 0, false, newCoords);
   }, [query, searchNearby]);
 
-  const handleResetToBrowserLocation = useCallback(() => {
-    if (!browserCoords) return;
-
+  const handleResetToBrowserLocation = useCallback(async () => {
+    setRefreshingBrowserLocation(true);
+    setLocationError(null);
     setMapSearchQuery('');
     setMapSearchResults([]);
-    handlePlaceSelect(browserCoords.lat, browserCoords.lon);
-  }, [browserCoords, handlePlaceSelect]);
+
+    const latestCoords = await prefetched.refetch();
+    const coordsToUse = latestCoords ?? browserCoords;
+
+    if (coordsToUse) {
+      handlePlaceSelect(coordsToUse.lat, coordsToUse.lon);
+    } else {
+      setLocationError('Current location unavailable. Check location permissions and try again.');
+    }
+
+    setRefreshingBrowserLocation(false);
+  }, [browserCoords, handlePlaceSelect, prefetched]);
 
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasMoreResults) return;
@@ -462,13 +462,17 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={handleResetToBrowserLocation}
-            disabled={!browserCoords}
+            onClick={() => void handleResetToBrowserLocation()}
+            disabled={!browserCoords || refreshingBrowserLocation}
             aria-label="Reset search center to current location"
             title={browserCoords ? 'Reset to current location' : 'Current location unavailable'}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-primary-400"
           >
-            <LocateFixed size={16} />
+            {refreshingBrowserLocation ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <LocateFixed size={16} />
+            )}
           </button>
           <div className="relative flex-1">
             <Search
@@ -623,7 +627,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                           className="text-gray-500 dark:text-gray-400"
                           style={{ transform: `rotate(${bearing}deg)` }}
                         />
-                        <span>{formatDistance(distanceMeters)}</span>
+                        <span>{formatDistance(distanceMeters, distanceUnit)}</span>
                       </span>
                     )}
                   </div>

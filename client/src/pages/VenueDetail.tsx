@@ -11,39 +11,15 @@ import CheckInCard from '../components/CheckInCard';
 import MapView from '../components/MapView';
 import { useLocation } from '../contexts/LocationContext';
 import { buildImmichMapUrl } from '../utils/checkin';
-import { haversineDistance } from '../utils/geo';
+import { haversineDistance, getBearingDegrees, formatDistance } from '../utils/geo';
 import { usePageTitle } from '../utils/pageTitle';
+import type { DistanceUnit } from '../utils/geo';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
 function normalizeCoordinate(value: unknown, fallback = 0): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function toRadians(degrees: number): number {
-  return (degrees * Math.PI) / 180;
-}
-
-function getBearingDegrees(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
-  const phi1 = toRadians(fromLat);
-  const phi2 = toRadians(toLat);
-  const lambdaDelta = toRadians(toLon - fromLon);
-
-  const y = Math.sin(lambdaDelta) * Math.cos(phi2);
-  const x =
-    Math.cos(phi1) * Math.sin(phi2) -
-    Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambdaDelta);
-
-  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
-  return (bearing + 360) % 360;
-}
-
-function formatDistance(distanceMeters: number): string {
-  if (distanceMeters < 1000) {
-    return `${Math.round(distanceMeters)}m`;
-  }
-  return `${(distanceMeters / 1000).toFixed(1)}km`;
 }
 
 function buildOpenStreetMapUrl(
@@ -110,6 +86,7 @@ export default function VenueDetail() {
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
   const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
 
   // ── Edit mode ─────────────────────────────────────────────────────────────
   const [isEditing, setIsEditing] = useState(false);
@@ -142,6 +119,9 @@ export default function VenueDetail() {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
       if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
+      if (s.distance_unit === 'metric' || s.distance_unit === 'imperial') {
+        setDistanceUnit(s.distance_unit);
+      }
     }).catch(() => { });
   }, []);
 
@@ -363,7 +343,7 @@ export default function VenueDetail() {
                         className="text-gray-500 dark:text-gray-400"
                         style={{ transform: `rotate(${venueBearing}deg)` }}
                       />
-                      <span>{formatDistance(venueDistanceMeters)}</span>
+                      <span>{formatDistance(venueDistanceMeters, distanceUnit)}</span>
                     </a>
                   ) : (
                     <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
@@ -372,7 +352,7 @@ export default function VenueDetail() {
                         className="text-gray-500 dark:text-gray-400"
                         style={{ transform: `rotate(${venueBearing}deg)` }}
                       />
-                      <span>{formatDistance(venueDistanceMeters)}</span>
+                      <span>{formatDistance(venueDistanceMeters, distanceUnit)}</span>
                     </span>
                   )
                 )}

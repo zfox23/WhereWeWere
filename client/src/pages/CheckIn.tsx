@@ -7,6 +7,7 @@ import CheckInForm from '../components/CheckInForm';
 import MapView from '../components/MapView';
 import { venues, checkins } from '../api/client';
 import type { CheckIn as CheckInType } from '../types';
+import { useLocation as useCurrentLocation } from '../contexts/LocationContext';
 import { usePageTitle } from '../utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -21,6 +22,7 @@ function applyDateToIsoString(date: string, fallbackIso?: string): string {
 export default function CheckIn() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { refetch } = useCurrentLocation();
 
   const editId = searchParams.get('edit');
   usePageTitle(editId ? 'Edit Check-In' : 'New Check-In');
@@ -32,6 +34,11 @@ export default function CheckIn() {
   const [selectedVenueCoordsLoading, setSelectedVenueCoordsLoading] = useState(false);
   const [editCheckin, setEditCheckin] = useState<CheckInType | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+
+  useEffect(() => {
+    if (editId) return;
+    void refetch();
+  }, [editId, refetch]);
 
   // Edit mode: fetch existing check-in
   useEffect(() => {
