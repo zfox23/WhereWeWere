@@ -26,14 +26,6 @@ cp .env.example .env
 - `TRUST_PROXY`
   - Set to `true` when running behind a reverse proxy.
 
-## Optional integration variables
-
-- `IMMICH_URL`
-- `IMMICH_API_KEY`
-- `MALOJA_URL`
-- `DAWARICH_URL`
-- `DAWARICH_API_KEY`
-
 ## Notes
 
 - In development, VAPID keys can be generated automatically.

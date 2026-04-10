@@ -28,7 +28,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://wherewewere:wherewewere@db:5432/wherewewere
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
