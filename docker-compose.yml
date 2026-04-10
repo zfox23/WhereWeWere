@@ -28,7 +28,6 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://wherewewere:wherewewere@db:5432/wherewewere
-      PORT: ${SERVER_PORT:-3001}
       NODE_ENV: production
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
@@ -37,9 +36,9 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY is required}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY is required}
     ports:
-      - "${SERVER_PORT:-3001}:${SERVER_PORT:-3001}"
+      - "${SERVER_PORT:-3001}:3001"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:${SERVER_PORT:-3001}/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3001}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
