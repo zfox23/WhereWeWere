@@ -295,12 +295,11 @@ export function SleepTab() {
         />
       </div>
 
-      <p className="text-sm text-gray-500 dark:text-gray-400">{rangeLabel}</p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <StatCard icon={Moon} label="Sleeps" value={summary?.total_sleeps ?? 0} />
+      <div className="grid grid-cols-3 gap-1.5 md:gap-3">
+        <StatCard icon={Moon} label="Entries" value={summary?.total_sleeps ?? 0} />
         <StatCard icon={Moon} label="Avg Duration" value={formatDuration(summary?.avg_duration_minutes ?? 0)} />
-        <StatCard icon={Moon} label="Total Sleep" value={formatDuration(summary?.total_sleep_minutes ?? 0)} />
+        <StatCard icon={Moon} label="Total" value={formatDuration(summary?.total_sleep_minutes ?? 0)} />
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">

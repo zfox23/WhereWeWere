@@ -249,3 +249,10 @@
   border: 1px solid rgb(55 65 81) !important;
 }
 
+.leaflet-zoom-anim
+.leaflet-zoom-animated {
+  transition-timing-function: linear;
+  transition-duration: 100ms;
+}
+
+

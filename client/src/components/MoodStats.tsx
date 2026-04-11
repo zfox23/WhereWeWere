@@ -572,8 +572,8 @@ function MoodMonthlySection({
   return (
     <div className="space-y-4">
       {totalCheckins > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <StatCard icon={Smile} label="Mood Check-ins" value={totalCheckins} />
+        <div className="grid grid-cols-3 gap-1.5 md:gap-3">
+          <StatCard icon={Smile} label="Entries" value={totalCheckins} />
           <StatCard icon={Activity} label="Avg Mood" value={avgMood !== null ? avgMood.toFixed(1) : '—'} />
           <StatCard icon={CalendarDays} label="Active Days" value={activeDays} />
         </div>

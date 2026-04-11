@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useTheme } from '../contexts/ThemeContext';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
+import '../utils/smoothLeafletZoom';
 
 // Ensure Leaflet default icons work when bundled
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -231,7 +232,10 @@ export default function VenueEditMap({
       <MapContainer
         center={initialCenter}
         zoom={zoom}
-        scrollWheelZoom
+        scrollWheelZoom={false}
+        smoothWheelZoom={true}
+        smoothSensitivity={5}
+        zoomSnap={0}
         attributionControl={false}
         className="w-full h-full"
         style={{ minHeight: '220px', height: '100%' }}
