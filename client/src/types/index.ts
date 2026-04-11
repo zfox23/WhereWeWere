@@ -33,6 +33,9 @@ export interface Venue {
   created_at: string;
 }
 
+import type { StoredThemePreference } from '../themes';
+import type { AppThemeId } from '../themes';
+
 export interface CheckIn {
   id: string;
   user_id: string;
@@ -277,7 +280,9 @@ export interface UserSettings {
   immich_url: string | null;
   immich_api_key: string | null;
   maloja_url: string | null;
-  theme: 'system' | 'light' | 'dark';
+  theme: StoredThemePreference;
+  system_light_theme: AppThemeId;
+  system_dark_theme: AppThemeId;
   notifications_enabled: boolean;
   mood_reminder_times: string[];
   mood_icon_pack: 'emoji' | 'lucide' | 'nature';

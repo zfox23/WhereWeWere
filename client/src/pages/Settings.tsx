@@ -5,6 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { MoodIconRow } from '../components/MoodIcons';
 import ActivityGroupManager from '../components/ActivityGroupManager';
 import { PushSettings } from '../components/PushSettings';
+import { DEFAULT_THEME_BY_MODE, SYSTEM_THEME_ID, THEME_GROUPS, getThemeDefinition } from '../themes';
 import { usePageTitle } from '../utils/pageTitle';
 import type {
   UserSettings,
@@ -1730,7 +1731,7 @@ export default function Settings() {
     return () => clearTimeout(timeout);
   }, [notificationsEnabled, moodReminderTimes]);
 
-  const { theme: currentTheme, setTheme } = useTheme();
+  const { theme: currentTheme, setTheme, systemThemeSelection, resolvedThemeId } = useTheme();
 
   useEffect(() => {
     const syncTabFromLocation = () => {
@@ -1838,25 +1839,89 @@ export default function Settings() {
               Appearance
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Choose your preferred color scheme.
+              Choose a preset directly, or let the app switch between a light preset and a dark preset with your system mode.
             </p>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                { value: 'system' as const, label: 'Follow System', icon: Monitor },
-                { value: 'light' as const, label: 'Light', icon: Sun },
-                { value: 'dark' as const, label: 'Dark', icon: Moon },
-              ]).map(({ value, label, icon: Icon }) => (
-                <button
-                  key={value}
-                  onClick={() => setTheme(value)}
-                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${currentTheme === value
-                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                    }`}
-                >
-                  <Icon size={20} />
-                  {label}
-                </button>
+            <button
+              onClick={() => setTheme(SYSTEM_THEME_ID)}
+              className={`w-full rounded-2xl border p-4 text-left transition-all ${currentTheme === SYSTEM_THEME_ID
+                ? 'bg-primary-50/80 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
+                : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                }`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    <Monitor size={18} className="text-primary-600 dark:text-primary-400" />
+                    Follow System
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Uses {getThemeDefinition(systemThemeSelection.light).label} for light mode and {getThemeDefinition(systemThemeSelection.dark).label} for dark mode.
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500">
+                    Selecting any Light or Dark preset below updates the remembered theme for that mode in Follow System.
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500">
+                    Currently active: {getThemeDefinition(resolvedThemeId).label}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 rounded-full border border-white/50 dark:border-gray-700/60 bg-white/70 dark:bg-gray-900/60 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300">
+                  <Sun size={14} />
+                  <span className="h-1.5 w-1.5 rounded-full bg-gray-300 dark:bg-gray-600" />
+                  <Moon size={14} />
+                </div>
+              </div>
+            </button>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {THEME_GROUPS.map(({ mode, label, themes }) => (
+                <div key={mode} className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      {mode === 'light' ? <Sun size={16} className="text-amber-500" /> : <Moon size={16} className="text-primary-400" />}
+                      {label}
+                    </div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      System keeps: {getThemeDefinition(systemThemeSelection[mode]).label}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {themes.map((themeOption) => {
+                      const isSelected = currentTheme === themeOption.id;
+
+                      return (
+                        <button
+                          key={themeOption.id}
+                          onClick={() => setTheme(themeOption.id)}
+                          className={`w-full rounded-2xl border p-4 text-left transition-all ${isSelected
+                            ? 'bg-primary-50/80 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
+                            : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                            }`}
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: `rgb(${themeOption.preview[1]})` }} />
+                                {themeOption.label}
+                              </div>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">
+                                {themeOption.description}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1 rounded-full border border-white/50 dark:border-gray-700/60 bg-white/70 dark:bg-gray-900/60 px-2.5 py-1.5">
+                              {themeOption.preview.map((swatch, index) => (
+                                <span
+                                  key={index}
+                                  className="h-5 w-5 rounded-full border border-black/5 dark:border-white/10"
+                                  style={{ backgroundColor: `rgb(${swatch})` }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

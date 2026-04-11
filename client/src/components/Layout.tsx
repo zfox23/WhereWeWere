@@ -15,14 +15,13 @@ function isActive(pathname: string, to: string) {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
-  const isHomePage = pathname === '/';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-amber-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 pb-16 md:pb-0 flex flex-col">
+    <div className="app-shell min-h-screen pb-16 md:pb-0 flex flex-col">
       {/* Top nav — glass header */}
       <header className="sticky top-0 z-50 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-b border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03]">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link to="/" className="text-xl font-bold bg-gradient-to-r from-primary-600 to-amber-500 bg-clip-text text-transparent">
+          <Link to="/" className="text-xl font-bold text-[#ea580c]">
             WhereWeWere
           </Link>
           <nav className="hidden md:flex items-center gap-1">
