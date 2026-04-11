@@ -118,7 +118,6 @@
       radial-gradient(circle at 22% 24%, rgb(var(--app-glow) / 0.22), transparent 0 28%),
       radial-gradient(circle at 72% 28%, rgb(var(--app-glow-secondary) / 0.16), transparent 0 24%),
       radial-gradient(circle at 55% 78%, rgb(var(--app-glow) / 0.12), transparent 0 30%);
-    animation: app-shimmer-drift 18s ease-in-out infinite alternate;
   }
 
   .app-shell::after {
@@ -129,7 +128,6 @@
       linear-gradient(300deg, transparent 30%, rgb(var(--app-glow-secondary) / 0.1) 48%, transparent 66%);
     background-size: 180% 180%, 160% 160%;
     mix-blend-mode: screen;
-    animation: app-shimmer-sweep 22s linear infinite;
   }
 
   /* Dark mode overrides */
@@ -173,39 +171,6 @@
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes app-shimmer-drift {
-  0% {
-    transform: translate3d(-2%, -1%, 0) scale(1);
-    opacity: 0.58;
-  }
-  50% {
-    transform: translate3d(2%, 1.5%, 0) scale(1.04);
-    opacity: 0.78;
-  }
-  100% {
-    transform: translate3d(1%, -2%, 0) scale(1.02);
-    opacity: 0.62;
-  }
-}
-
-@keyframes app-shimmer-sweep {
-  0% {
-    transform: translate3d(-6%, 0, 0) rotate(0deg);
-    background-position: 0% 50%, 100% 50%;
-    opacity: 0.12;
-  }
-  50% {
-    transform: translate3d(3%, -1%, 0) rotate(1.5deg);
-    background-position: 100% 50%, 0% 50%;
-    opacity: 0.22;
-  }
-  100% {
-    transform: translate3d(6%, 1%, 0) rotate(0deg);
-    background-position: 0% 50%, 100% 50%;
-    opacity: 0.14;
   }
 }
 

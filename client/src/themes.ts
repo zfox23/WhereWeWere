@@ -21,7 +21,6 @@ type PaletteStep = '50' | '100' | '200' | '300' | '400' | '500' | '600' | '700' 
 interface ThemeDefinition {
   id: AppThemeId;
   label: string;
-  description: string;
   mode: ThemeMode;
   palette: Record<PaletteStep, string>;
   preview: [string, string, string];
@@ -48,7 +47,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   sunrise: {
     id: 'sunrise',
     label: 'Sunrise',
-    description: 'Warm citrus highlights with the existing bright, glassy feel.',
     mode: 'light',
     palette: {
       '50': '255 247 237',
@@ -76,7 +74,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   paper: {
     id: 'paper',
     label: 'Paper',
-    description: 'Soft rose accents on an airy editorial light surface.',
     mode: 'light',
     palette: {
       '50': '255 241 242',
@@ -104,7 +101,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   sprout: {
     id: 'sprout',
     label: 'Sprout',
-    description: 'Fresh greens with a cooler, botanical light background.',
     mode: 'light',
     palette: {
       '50': '236 253 245',
@@ -132,7 +128,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   lagoon: {
     id: 'lagoon',
     label: 'Lagoon',
-    description: 'Sea-glass blues with a breezy coastal light backdrop.',
     mode: 'light',
     palette: {
       '50': '240 249 255',
@@ -160,7 +155,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   lavender: {
     id: 'lavender',
     label: 'Lavender',
-    description: 'Gentle lilac accents with a pale studio-paper wash.',
     mode: 'light',
     palette: {
       '50': '250 245 255',
@@ -188,7 +182,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   citrus: {
     id: 'citrus',
     label: 'Citrus',
-    description: 'Lime and chartreuse energy on a bright spring surface.',
     mode: 'light',
     palette: {
       '50': '247 254 231',
@@ -216,7 +209,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   midnight: {
     id: 'midnight',
     label: 'Midnight',
-    description: 'Deep indigo contrast with cool neon-leaning accents.',
     mode: 'dark',
     palette: {
       '50': '238 242 255',
@@ -244,7 +236,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   ocean: {
     id: 'ocean',
     label: 'Ocean',
-    description: 'Dark teal atmosphere with crisp cyan action colors.',
     mode: 'dark',
     palette: {
       '50': '236 254 255',
@@ -272,7 +263,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   ember: {
     id: 'ember',
     label: 'Ember',
-    description: 'A darker furnace palette with copper and amber accents.',
     mode: 'dark',
     palette: {
       '50': '255 251 235',
@@ -300,7 +290,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   aurora: {
     id: 'aurora',
     label: 'Aurora',
-    description: 'Emerald-to-violet highlights drifting across deep night tones.',
     mode: 'dark',
     palette: {
       '50': '236 253 245',
@@ -328,7 +317,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   graphite: {
     id: 'graphite',
     label: 'Graphite',
-    description: 'Slate monochrome with restrained silver-blue highlights.',
     mode: 'dark',
     palette: {
       '50': '248 250 252',
@@ -356,7 +344,6 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   mulberry: {
     id: 'mulberry',
     label: 'Mulberry',
-    description: 'Plum and berry tones with a richer after-hours contrast.',
     mode: 'dark',
     palette: {
       '50': '253 244 255',
