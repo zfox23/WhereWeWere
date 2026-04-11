@@ -12,7 +12,15 @@ export type AppThemeId =
   | 'ember'
   | 'aurora'
   | 'graphite'
-  | 'mulberry';
+  | 'mulberry'
+  | 'blossom'
+  | 'neonwave'
+  | 'forest'
+  | 'sandstone'
+  | 'arctic'
+  | 'coralreef'
+  | 'mocha'
+  | 'sunset';
 export type ThemePreference = 'system' | AppThemeId;
 export type StoredThemePreference = ThemePreference | 'light' | 'dark';
 
@@ -44,6 +52,222 @@ export const DEFAULT_THEME_BY_MODE: Record<ThemeMode, AppThemeId> = {
 export const SYSTEM_THEME_ID = 'system' as const;
 
 export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
+  blossom: {
+    id: 'blossom',
+    label: 'Blossom',
+    mode: 'light',
+    palette: {
+      '50': '255 250 252',
+      '100': '254 240 246',
+      '200': '253 224 235',
+      '300': '251 207 232',
+      '400': '249 168 212',
+      '500': '244 114 182',
+      '600': '236 72 153',
+      '700': '219 39 119',
+      '800': '190 24 93',
+      '900': '157 23 77',
+      '950': '131 24 67',
+    },
+    preview: ['255 250 252', '244 114 182', '219 39 119'],
+    background: {
+      start: '255 250 252',
+      mid: '255 255 255',
+      end: '253 224 235',
+      glow: '244 114 182',
+      glowSecondary: '251 207 232',
+      foreground: '80 7 36',
+    },
+  },
+  neonwave: {
+    id: 'neonwave',
+    label: 'Neon Wave',
+    mode: 'dark',
+    palette: {
+      '50': '245 255 252',
+      '100': '207 250 254',
+      '200': '129 230 217',
+      '300': '34 211 238',
+      '400': '59 130 246',
+      '500': '168 85 247',
+      '600': '236 72 153',
+      '700': '251 191 36',
+      '800': '255 0 110',
+      '900': '0 255 164',
+      '950': '0 0 0',
+    },
+    preview: ['0 0 0', '59 130 246', '251 191 36'],
+    background: {
+      start: '0 0 0',
+      mid: '34 34 59',
+      end: '34 211 238',
+      glow: '59 130 246',
+      glowSecondary: '251 191 36',
+      foreground: '245 255 252',
+    },
+  },
+  forest: {
+    id: 'forest',
+    label: 'Forest',
+    mode: 'dark',
+    palette: {
+      '50': '236 253 245',
+      '100': '209 250 229',
+      '200': '167 243 208',
+      '300': '110 231 183',
+      '400': '52 211 153',
+      '500': '16 185 129',
+      '600': '5 150 105',
+      '700': '4 120 87',
+      '800': '34 49 34',
+      '900': '17 34 17',
+      '950': '8 17 8',
+    },
+    preview: ['8 17 8', '52 211 153', '16 185 129'],
+    background: {
+      start: '8 17 8',
+      mid: '17 34 17',
+      end: '34 49 34',
+      glow: '52 211 153',
+      glowSecondary: '110 231 183',
+      foreground: '209 250 229',
+    },
+  },
+  sandstone: {
+    id: 'sandstone',
+    label: 'Sandstone',
+    mode: 'light',
+    palette: {
+      '50': '255 251 235',
+      '100': '254 243 199',
+      '200': '253 230 138',
+      '300': '252 211 77',
+      '400': '251 191 36',
+      '500': '245 158 11',
+      '600': '217 119 6',
+      '700': '180 83 9',
+      '800': '146 64 14',
+      '900': '120 53 15',
+      '950': '69 26 3',
+    },
+    preview: ['255 251 235', '245 158 11', '180 83 9'],
+    background: {
+      start: '255 251 235',
+      mid: '254 243 199',
+      end: '253 230 138',
+      glow: '251 191 36',
+      glowSecondary: '252 211 77',
+      foreground: '120 53 15',
+    },
+  },
+  arctic: {
+    id: 'arctic',
+    label: 'Arctic',
+    mode: 'light',
+    palette: {
+      '50': '240 249 255',
+      '100': '224 242 254',
+      '200': '186 230 253',
+      '300': '125 211 252',
+      '400': '56 189 248',
+      '500': '14 165 233',
+      '600': '2 132 199',
+      '700': '3 105 161',
+      '800': '7 89 133',
+      '900': '12 74 110',
+      '950': '8 47 73',
+    },
+    preview: ['240 249 255', '14 165 233', '3 105 161'],
+    background: {
+      start: '240 249 255',
+      mid: '224 242 254',
+      end: '186 230 253',
+      glow: '56 189 248',
+      glowSecondary: '125 211 252',
+      foreground: '12 74 110',
+    },
+  },
+  coralreef: {
+    id: 'coralreef',
+    label: 'Coral Reef',
+    mode: 'light',
+    palette: {
+      '50': '255 251 250',
+      '100': '255 237 213',
+      '200': '254 215 170',
+      '300': '253 186 116',
+      '400': '251 146 60',
+      '500': '244 63 94',
+      '600': '236 72 153',
+      '700': '190 24 93',
+      '800': '59 130 246',
+      '900': '34 211 238',
+      '950': '6 182 212',
+    },
+    preview: ['255 251 250', '244 63 94', '34 211 238'],
+    background: {
+      start: '255 251 250',
+      mid: '254 215 170',
+      end: '251 146 60',
+      glow: '244 63 94',
+      glowSecondary: '34 211 238',
+      foreground: '59 130 246',
+    },
+  },
+  mocha: {
+    id: 'mocha',
+    label: 'Mocha',
+    mode: 'dark',
+    palette: {
+      '50': '245 222 179',
+      '100': '222 184 135',
+      '200': '210 180 140',
+      '300': '188 143 143',
+      '400': '160 82 45',
+      '500': '139 69 19',
+      '600': '101 67 33',
+      '700': '70 44 20',
+      '800': '44 34 30',
+      '900': '25 20 20',
+      '950': '15 10 10',
+    },
+    preview: ['15 10 10', '160 82 45', '139 69 19'],
+    background: {
+      start: '25 20 20',
+      mid: '44 34 30',
+      end: '70 44 20',
+      glow: '160 82 45',
+      glowSecondary: '188 143 143',
+      foreground: '245 222 179',
+    },
+  },
+  sunset: {
+    id: 'sunset',
+    label: 'Sunset',
+    mode: 'dark',
+    palette: {
+      '50': '255 244 229',
+      '100': '255 224 178',
+      '200': '255 204 128',
+      '300': '255 183 77',
+      '400': '255 167 38',
+      '500': '255 152 0',
+      '600': '251 140 0',
+      '700': '245 124 0',
+      '800': '239 108 0',
+      '900': '230 81 0',
+      '950': '191 54 12',
+    },
+    preview: ['255 244 229', '255 152 0', '230 81 0'],
+    background: {
+      start: '51 27 0',
+      mid: '191 54 12',
+      end: '255 152 0',
+      glow: '255 167 38',
+      glowSecondary: '255 204 128',
+      foreground: '255 244 229',
+    },
+  },
   sunrise: {
     id: 'sunrise',
     label: 'Sunrise',
@@ -370,6 +594,7 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
   },
 };
 
+
 export const LIGHT_THEMES = [
   THEME_DEFINITIONS.sunrise,
   THEME_DEFINITIONS.paper,
@@ -377,7 +602,12 @@ export const LIGHT_THEMES = [
   THEME_DEFINITIONS.lagoon,
   THEME_DEFINITIONS.lavender,
   THEME_DEFINITIONS.citrus,
+  THEME_DEFINITIONS.blossom,
+  THEME_DEFINITIONS.sandstone,
+  THEME_DEFINITIONS.arctic,
+  THEME_DEFINITIONS.coralreef,
 ] as const;
+
 
 export const DARK_THEMES = [
   THEME_DEFINITIONS.midnight,
@@ -386,6 +616,10 @@ export const DARK_THEMES = [
   THEME_DEFINITIONS.aurora,
   THEME_DEFINITIONS.graphite,
   THEME_DEFINITIONS.mulberry,
+  THEME_DEFINITIONS.neonwave,
+  THEME_DEFINITIONS.forest,
+  THEME_DEFINITIONS.mocha,
+  THEME_DEFINITIONS.sunset,
 ] as const;
 
 export const THEME_GROUPS = [
