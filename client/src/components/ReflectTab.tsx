@@ -296,20 +296,24 @@ function OnThisDaySection({
                 {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago
               </button>
               <span className="text-xs text-gray-400">{year.year}</span>
-              {dawarichUrl && (
-                <button
-                  onClick={() => {
-                    const date = year.items[0]?.checked_in_at.slice(0, 10);
-                    if (date) {
-                      window.open(buildDawarichDayUrl(dawarichUrl, date), '_blank', 'noopener,noreferrer');
-                    }
-                  }}
-                  className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
-                  title="Open in Dawarich"
-                >
-                  <Compass size={14} />
-                </button>
-              )}
+              {dawarichUrl && (() => {
+                const now = new Date();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                const date = `${year.year}-${month}-${day}`;
+                const dawarichLink = buildDawarichDayUrl(dawarichUrl, date);
+                return (
+                  <a
+                    href={dawarichLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                    title="Open in Dawarich"
+                  >
+                    <Compass size={14} />
+                  </a>
+                );
+              })()}
             </div>
             <div className="space-y-3 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
               {sortedSleepEntries.map((entry) => (

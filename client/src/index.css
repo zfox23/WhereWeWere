@@ -100,6 +100,7 @@
       linear-gradient(135deg, rgb(var(--app-bg-start)), rgb(var(--app-bg-mid)) 48%, rgb(var(--app-bg-end)));
     background-size: 3.5px 3.5px, 5.5px 5.5px, 6.5px 6.5px, auto, auto;
     background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+    background-attachment: fixed, fixed, fixed, fixed, fixed;
   }
 
   .app-shell::before,
