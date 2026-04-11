@@ -1933,9 +1933,6 @@ export default function Settings() {
               <Smile size={20} className="text-primary-600" />
               Mood Icons
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Choose which icons represent your mood scale.
-            </p>
             <div className="grid grid-cols-3 gap-2">
               {([
                 { value: 'emoji' as const, label: 'Emoji' },
