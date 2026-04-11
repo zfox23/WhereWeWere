@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   MapPin, Tag, Navigation, Loader2, AlertCircle,
-  Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink
+  Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink,
+  Navigation2
 } from 'lucide-react';
 import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../types';
@@ -338,7 +339,7 @@ export default function VenueDetail() {
                       title="Open venue in Google Maps"
                       className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
                     >
-                      <Navigation
+                      <Navigation2
                         size={10}
                         className="text-gray-500 dark:text-gray-400"
                         style={{ transform: `rotate(${venueBearing}deg)` }}
@@ -347,7 +348,7 @@ export default function VenueDetail() {
                     </a>
                   ) : (
                     <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                      <Navigation
+                      <Navigation2
                         size={10}
                         className="text-gray-500 dark:text-gray-400"
                         style={{ transform: `rotate(${venueBearing}deg)` }}

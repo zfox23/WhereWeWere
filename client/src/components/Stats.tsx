@@ -331,7 +331,7 @@ export default function StatsView() {
     <div className="space-y-6">
       {/* Summary grid */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-1.5 md:gap-3">
           <StatCard
             icon={MapPin}
             label="Check-ins"

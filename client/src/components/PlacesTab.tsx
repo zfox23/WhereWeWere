@@ -44,6 +44,7 @@ import type {
 } from '../types';
 import { formatDate } from '../utils/checkin';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
+import '../utils/smoothLeafletZoom';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -264,7 +265,7 @@ function VenueMapMarkers({
 
   const items = useMemo(
     () => buildClusteredVenueItems(map, data, zoom, maxZoom),
-    [data, map, zoom, maxZoom]
+    [data, zoom, maxZoom]
   );
 
   const markerPlacements = useMemo(() => {
@@ -282,6 +283,36 @@ function VenueMapMarkers({
     return new Map(markerPlacements.map((placement) => [placement.venue.venue_id, placement]));
   }, [markerPlacements]);
 
+  // Memoize formatted venue data to avoid expensive date formatting on every render
+  const formattedVenueData = useMemo(() => {
+    const formatted = new Map<string, { formattedLastVisit: string | null; datePart: string; timePart: string; dayFilter: string | null }>();
+    for (const venue of data) {
+      const formattedLastVisit = venue.last_checkin_at
+        ? formatDate(venue.last_checkin_at, venue.last_checkin_timezone)
+        : null;
+      const { datePart, timePart } = formattedLastVisit
+        ? splitFormattedTimestamp(formattedLastVisit)
+        : { datePart: '', timePart: '' };
+      const dayFilter = venue.dates[0] || null;
+      formatted.set(venue.venue_id, { formattedLastVisit, datePart, timePart, dayFilter });
+    }
+    return formatted;
+  }, [data]);
+
+  // Memoize polyline pathOptions to avoid object creation on every render
+  const polylinePathOptions = useMemo(() => ({
+    light: {
+      color: '#c2410c',
+      weight: 2,
+      opacity: 0.65,
+    },
+    dark: {
+      color: '#fb923c',
+      weight: 2,
+      opacity: 0.65,
+    },
+  }), []);
+
   return (
     <>
       {items.map((item) => {
@@ -289,23 +320,13 @@ function VenueMapMarkers({
           const venue = item.venue;
           const placement = placementByVenueId?.get(venue.venue_id);
           const markerPosition: [number, number] = placement?.displayPosition ?? [venue.latitude, venue.longitude];
-          const formattedLastVisit = venue.last_checkin_at
-            ? formatDate(venue.last_checkin_at, venue.last_checkin_timezone)
-            : null;
-          const { datePart, timePart } = formattedLastVisit
-            ? splitFormattedTimestamp(formattedLastVisit)
-            : { datePart: '', timePart: '' };
-          const dayFilter = venue.dates[0] || null;
+          const venueFormatted = formattedVenueData.get(venue.venue_id) || { formattedLastVisit: null, datePart: '', timePart: '', dayFilter: null };
           return (
             <FeatureGroup key={venue.venue_id}>
               {placement?.displaced && (
                 <Polyline
                   positions={[placement.displayPosition, placement.originalPosition]}
-                  pathOptions={{
-                    color: resolvedTheme === 'dark' ? '#fb923c' : '#c2410c',
-                    weight: 2,
-                    opacity: 0.65,
-                  }}
+                  pathOptions={resolvedTheme === 'dark' ? polylinePathOptions.dark : polylinePathOptions.light}
                 />
               )}
               <Marker
@@ -326,22 +347,22 @@ function VenueMapMarkers({
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {venue.checkin_count} check-in{venue.checkin_count !== 1 ? 's' : ''}
                     </p>
-                    {formattedLastVisit && (
+                    {venueFormatted.formattedLastVisit && (
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         Last visit:{' '}
-                        {dayFilter ? (
+                        {venueFormatted.dayFilter ? (
                           <a
-                            href={`/?from=${encodeURIComponent(dayFilter)}&to=${encodeURIComponent(dayFilter)}`}
+                            href={`/?from=${encodeURIComponent(venueFormatted.dayFilter)}&to=${encodeURIComponent(venueFormatted.dayFilter)}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
                           >
-                            {datePart}
+                            {venueFormatted.datePart}
                           </a>
                         ) : (
-                          datePart
+                          venueFormatted.datePart
                         )}
-                        {timePart ? `, ${timePart}` : ''}
+                        {venueFormatted.timePart ? `, ${venueFormatted.timePart}` : ''}
                       </p>
                     )}
                   </div>
@@ -419,7 +440,10 @@ function VenuePinsMap({
           <MapContainer
             center={center}
             zoom={4}
-            scrollWheelZoom
+            scrollWheelZoom={false}
+            smoothWheelZoom={true}
+            smoothSensitivity={5}
+            zoomSnap={0}
             attributionControl={false}
             className="w-full h-full"
             style={{ height: '100%' }}
@@ -818,9 +842,9 @@ export function PlacesTab() {
       </div>
 
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-1.5 md:gap-3">
           <StatCard icon={MapPin} label="Check-ins" value={summary.total_checkins} />
-          <StatCard icon={MapPin} label="Unique Venues" value={summary.unique_venues} />
+          <StatCard icon={MapPin} label="Unique" value={summary.unique_venues} />
           <StatCard icon={CalendarDays} label="Active Days" value={summary.days_with_checkins} />
         </div>
       )}

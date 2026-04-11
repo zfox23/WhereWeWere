@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, MapPin, Plus, Loader2, Navigation, LocateFixed } from 'lucide-react';
+import { Search, MapPin, Plus, Loader2, Navigation, LocateFixed, Navigation2 } from 'lucide-react';
 import { settings, venues } from '../api/client';
 import { useLocation } from '../contexts/LocationContext';
 import { haversineDistance, getBearingDegrees, formatDistance } from '../utils/geo';
@@ -622,7 +622,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                     </span>
                     {distanceMeters != null && bearing != null && (
                       <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                        <Navigation
+                        <Navigation2
                           size={10}
                           className="text-gray-500 dark:text-gray-400"
                           style={{ transform: `rotate(${bearing}deg)` }}
