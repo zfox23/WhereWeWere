@@ -11,6 +11,8 @@ const router = Router();
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const TIME_24H_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DISTANCE_UNITS = new Set(['metric', 'imperial']);
+const DEFAULT_SYSTEM_LIGHT_THEME = 'sunrise';
+const DEFAULT_SYSTEM_DARK_THEME = 'midnight';
 
 function normalizeReminderTimes(value: unknown): string[] | null {
   if (typeof value === 'undefined') return null;
@@ -36,6 +38,8 @@ router.get('/', async (_req: Request, res: Response) => {
               us.immich_url, us.immich_api_key,
               us.maloja_url,
               COALESCE(us.theme, 'system') AS theme,
+                    COALESCE(us.system_light_theme, $2) AS system_light_theme,
+                    COALESCE(us.system_dark_theme, $3) AS system_dark_theme,
               COALESCE(us.notifications_enabled, true) AS notifications_enabled,
               COALESCE(us.mood_reminder_times, ARRAY[]::text[]) AS mood_reminder_times,
               COALESCE(us.mood_icon_pack, 'emoji') AS mood_icon_pack,
@@ -43,7 +47,7 @@ router.get('/', async (_req: Request, res: Response) => {
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.id = $1`,
-      [USER_ID]
+                  [USER_ID, DEFAULT_SYSTEM_LIGHT_THEME, DEFAULT_SYSTEM_DARK_THEME]
     );
 
     if (result.rows.length === 0) {
@@ -72,7 +76,7 @@ router.put('/', async (req: Request, res: Response) => {
   try {
     const {
       dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
-      theme, notifications_enabled,
+      theme, system_light_theme, system_dark_theme, notifications_enabled,
       mood_reminder_times,
       mood_icon_pack,
       distance_unit,
@@ -88,9 +92,9 @@ router.put('/', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, notifications_enabled,
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, system_light_theme, system_dark_theme, notifications_enabled,
       mood_reminder_times, mood_icon_pack, distance_unit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, $13), COALESCE($9, $14), $10, $11, $12, $15)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
@@ -98,10 +102,12 @@ router.put('/', async (req: Request, res: Response) => {
          immich_api_key = COALESCE($5, user_settings.immich_api_key),
          maloja_url = COALESCE($6, user_settings.maloja_url),
          theme = COALESCE($7, user_settings.theme),
-         notifications_enabled = COALESCE($8, user_settings.notifications_enabled),
-         mood_reminder_times = COALESCE($9::text[], user_settings.mood_reminder_times),
-         mood_icon_pack = COALESCE($10, user_settings.mood_icon_pack),
-         distance_unit = COALESCE($11, user_settings.distance_unit),
+         system_light_theme = COALESCE($8, user_settings.system_light_theme, $13),
+         system_dark_theme = COALESCE($9, user_settings.system_dark_theme, $14),
+         notifications_enabled = COALESCE($10, user_settings.notifications_enabled),
+         mood_reminder_times = COALESCE($11::text[], user_settings.mood_reminder_times),
+         mood_icon_pack = COALESCE($12, user_settings.mood_icon_pack),
+         distance_unit = COALESCE($15, user_settings.distance_unit),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -110,9 +116,13 @@ router.put('/', async (req: Request, res: Response) => {
         immich_url ?? null, immich_api_key ?? null,
         maloja_url ?? null,
         theme ?? null,
+        system_light_theme ?? null,
+        system_dark_theme ?? null,
         notifications_enabled ?? null,
         normalizedReminderTimes,
         mood_icon_pack ?? null,
+        DEFAULT_SYSTEM_LIGHT_THEME,
+        DEFAULT_SYSTEM_DARK_THEME,
         distance_unit ?? null,
       ]
     );

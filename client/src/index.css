@@ -2,9 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-primary-50: 255 247 237;
+  --color-primary-100: 255 237 213;
+  --color-primary-200: 254 215 170;
+  --color-primary-300: 253 186 116;
+  --color-primary-400: 251 146 60;
+  --color-primary-500: 249 115 22;
+  --color-primary-600: 234 88 12;
+  --color-primary-700: 194 65 12;
+  --color-primary-800: 154 52 18;
+  --color-primary-900: 124 45 18;
+  --color-primary-950: 67 20 7;
+  --app-bg-start: 255 247 237;
+  --app-bg-mid: 255 255 255;
+  --app-bg-end: 255 251 235;
+  --app-glow: 251 146 60;
+  --app-glow-secondary: 252 211 77;
+  --app-fg: 17 24 39;
+}
+
 @layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
     @apply antialiased;
+    background-color: rgb(var(--app-bg-mid));
+    color: rgb(var(--app-fg));
   }
 }
 
@@ -60,10 +88,51 @@
     }
   }
 
-  /* Dark mode overrides */
-  .dark body {
-    @apply bg-gray-950;
+  .app-shell {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.05) 0.9px, transparent 1.2px),
+      radial-gradient(circle at 3px 2px, rgb(0 0 0 / 0.035) 0.8px, transparent 1.1px),
+      radial-gradient(circle at 2px 3px, rgb(var(--app-glow-secondary) / 0.025) 0.7px, transparent 1px),
+      radial-gradient(circle at top left, rgb(var(--app-glow) / 0.16), transparent 32%),
+      linear-gradient(135deg, rgb(var(--app-bg-start)), rgb(var(--app-bg-mid)) 48%, rgb(var(--app-bg-end)));
+    background-size: 3.5px 3.5px, 5.5px 5.5px, 6.5px 6.5px, auto, auto;
+    background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
   }
+
+  .app-shell::before,
+  .app-shell::after {
+    content: '';
+    position: absolute;
+    inset: -18%;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.7;
+    will-change: transform, opacity, background-position;
+  }
+
+  .app-shell::before {
+    background:
+      radial-gradient(circle at 22% 24%, rgb(var(--app-glow) / 0.22), transparent 0 28%),
+      radial-gradient(circle at 72% 28%, rgb(var(--app-glow-secondary) / 0.16), transparent 0 24%),
+      radial-gradient(circle at 55% 78%, rgb(var(--app-glow) / 0.12), transparent 0 30%);
+    animation: app-shimmer-drift 18s ease-in-out infinite alternate;
+  }
+
+  .app-shell::after {
+    inset: -35%;
+    opacity: 0.35;
+    background:
+      linear-gradient(115deg, transparent 22%, rgb(255 255 255 / 0.12) 38%, transparent 54%),
+      linear-gradient(300deg, transparent 30%, rgb(var(--app-glow-secondary) / 0.1) 48%, transparent 66%);
+    background-size: 180% 180%, 160% 160%;
+    mix-blend-mode: screen;
+    animation: app-shimmer-sweep 22s linear infinite;
+  }
+
+  /* Dark mode overrides */
   .dark .btn-secondary {
     @apply bg-gray-800/70 text-gray-200 border-gray-700/60 hover:bg-gray-800/90;
   }
@@ -107,6 +176,39 @@
   }
 }
 
+@keyframes app-shimmer-drift {
+  0% {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+    opacity: 0.58;
+  }
+  50% {
+    transform: translate3d(2%, 1.5%, 0) scale(1.04);
+    opacity: 0.78;
+  }
+  100% {
+    transform: translate3d(1%, -2%, 0) scale(1.02);
+    opacity: 0.62;
+  }
+}
+
+@keyframes app-shimmer-sweep {
+  0% {
+    transform: translate3d(-6%, 0, 0) rotate(0deg);
+    background-position: 0% 50%, 100% 50%;
+    opacity: 0.12;
+  }
+  50% {
+    transform: translate3d(3%, -1%, 0) rotate(1.5deg);
+    background-position: 100% 50%, 0% 50%;
+    opacity: 0.22;
+  }
+  100% {
+    transform: translate3d(6%, 1%, 0) rotate(0deg);
+    background-position: 0% 50%, 100% 50%;
+    opacity: 0.14;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .motion-safe-reveal,
   .motion-safe-reveal.is-visible {
@@ -117,6 +219,13 @@
 
   .page-enter {
     animation: none;
+  }
+
+  .app-shell::before,
+  .app-shell::after {
+    animation: none;
+    transform: none;
+    opacity: 0.45;
   }
 }
 
