@@ -4,13 +4,20 @@ import {
   DEFAULT_THEME_BY_MODE,
   SYSTEM_THEME_ID,
   applyThemeToRoot,
+  applyBgToRoot,
   getResolvedThemeMode,
   resolveAppThemeId,
   normalizeThemePreference,
   resolveThemePreference,
+  BG_PATTERN_OPTIONS,
+  BG_GRADIENT_OPTIONS,
+  DEFAULT_BG_PATTERN,
+  DEFAULT_BG_GRADIENT,
   type AppThemeId,
   type ThemeMode,
   type ThemePreference,
+  type BgPatternId,
+  type BgGradientId,
 } from '../themes';
 
 interface ThemeContextValue {
@@ -19,6 +26,10 @@ interface ThemeContextValue {
   systemThemeSelection: Record<ThemeMode, AppThemeId>;
   resolvedTheme: ThemeMode;
   resolvedThemeId: AppThemeId;
+  bgPattern: BgPatternId;
+  setBgPattern: (pattern: BgPatternId) => void;
+  bgGradient: BgGradientId;
+  setBgGradient: (gradient: BgGradientId) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
@@ -27,6 +38,10 @@ const ThemeContext = createContext<ThemeContextValue>({
   systemThemeSelection: DEFAULT_THEME_BY_MODE,
   resolvedTheme: 'light',
   resolvedThemeId: DEFAULT_THEME_BY_MODE.light,
+  bgPattern: DEFAULT_BG_PATTERN,
+  setBgPattern: () => {},
+  bgGradient: DEFAULT_BG_GRADIENT,
+  setBgGradient: () => {},
 });
 
 export function useTheme() {
@@ -50,6 +65,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     dark: resolveAppThemeId(localStorage.getItem('system-dark-theme'), DEFAULT_THEME_BY_MODE.dark),
   }));
   const [systemTheme, setSystemTheme] = useState<ThemeMode>(getSystemTheme);
+
+  const [bgPattern, setBgPatternState] = useState<BgPatternId>(() => {
+    const stored = localStorage.getItem('bg-pattern') as BgPatternId | null;
+    return BG_PATTERN_OPTIONS.some(p => p.id === stored) ? stored! : DEFAULT_BG_PATTERN;
+  });
+  const [bgGradient, setBgGradientState] = useState<BgGradientId>(() => {
+    const stored = localStorage.getItem('bg-gradient') as BgGradientId | null;
+    return BG_GRADIENT_OPTIONS.some(g => g.id === stored) ? stored! : DEFAULT_BG_GRADIENT;
+  });
 
   // Listen for system theme changes
   useEffect(() => {
@@ -93,6 +117,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [resolvedTheme, resolvedThemeId]);
 
+  // Apply background pattern and gradient data attributes.
+  useEffect(() => {
+    applyBgToRoot(document.documentElement, bgPattern, bgGradient);
+  }, [bgPattern, bgGradient]);
+
   const setTheme = (newTheme: ThemePreference) => {
     const nextSystemThemeSelection = newTheme === SYSTEM_THEME_ID
       ? systemThemeSelection
@@ -115,8 +144,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   };
 
+  const setBgPattern = (pattern: BgPatternId) => {
+    setBgPatternState(pattern);
+    localStorage.setItem('bg-pattern', pattern);
+  };
+
+  const setBgGradient = (gradient: BgGradientId) => {
+    setBgGradientState(gradient);
+    localStorage.setItem('bg-gradient', gradient);
+  };
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, systemThemeSelection, resolvedTheme, resolvedThemeId }}>
+    <ThemeContext.Provider value={{ theme, setTheme, systemThemeSelection, resolvedTheme, resolvedThemeId, bgPattern, setBgPattern, bgGradient, setBgGradient }}>
       {children}
     </ThemeContext.Provider>
   );

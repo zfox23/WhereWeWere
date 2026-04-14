@@ -20,6 +20,84 @@
   --app-glow: 251 146 60;
   --app-glow-secondary: 252 211 77;
   --app-fg: 17 24 39;
+
+  /* Background pattern layers (trailing comma composes with gradient layers).
+     Default: dots. Overridden by html[data-bg-pattern] rules below. */
+  --_bg-p:
+    radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.05) 0.9px, transparent 1.2px),
+    radial-gradient(circle at 3px 2px, rgb(0 0 0 / 0.035) 0.8px, transparent 1.1px),
+    radial-gradient(circle at 2px 3px, rgb(var(--app-glow-secondary) / 0.025) 0.7px, transparent 1px),;
+  --_bg-p-sz: 3.5px 3.5px, 5.5px 5.5px, 6.5px 6.5px,;
+
+  /* Background gradient layers. Default: soft. */
+  --_bg-g:
+    radial-gradient(circle at top left, rgb(var(--app-glow) / 0.16), transparent 32%),
+    linear-gradient(135deg, rgb(var(--app-bg-start)), rgb(var(--app-bg-mid)) 48%, rgb(var(--app-bg-end)));
+  --_bg-g-sz: auto, auto;
+}
+
+/* ── Pattern variants ── */
+html[data-bg-pattern="dots"] {
+  --_bg-p:
+    radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.05) 0.9px, transparent 1.2px),
+    radial-gradient(circle at 3px 2px, rgb(0 0 0 / 0.035) 0.8px, transparent 1.1px),
+    radial-gradient(circle at 2px 3px, rgb(var(--app-glow-secondary) / 0.025) 0.7px, transparent 1px),;
+  --_bg-p-sz: 3.5px 3.5px, 5.5px 5.5px, 6.5px 6.5px,;
+}
+
+html[data-bg-pattern="grid"] {
+  --_bg-p:
+    linear-gradient(rgb(var(--app-fg) / 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--app-fg) / 0.055) 1px, transparent 1px),;
+  --_bg-p-sz: 28px 28px, 28px 28px,;
+}
+
+html[data-bg-pattern="crosshatch"] {
+  --_bg-p:
+    repeating-linear-gradient(45deg, transparent 0, transparent 14px, rgb(var(--app-fg) / 0.04) 14px, rgb(var(--app-fg) / 0.04) 15px),
+    repeating-linear-gradient(-45deg, transparent 0, transparent 14px, rgb(var(--app-fg) / 0.04) 14px, rgb(var(--app-fg) / 0.04) 15px),;
+  --_bg-p-sz: auto, auto,;
+}
+
+html[data-bg-pattern="topographic"] {
+  --_bg-p:
+    radial-gradient(circle, rgb(var(--app-glow) / 0.13) 1.5px, transparent 1.5px),
+    radial-gradient(circle, rgb(var(--app-fg) / 0.05) 0.8px, transparent 0.8px),
+    radial-gradient(circle, rgb(var(--app-glow-secondary) / 0.09) 2px, transparent 2px),;
+  --_bg-p-sz: 32px 32px, 16px 16px, 56px 56px,;
+}
+
+html[data-bg-pattern="linen"] {
+  --_bg-p:
+    repeating-linear-gradient(0deg, transparent 0, transparent 7px, rgb(var(--app-fg) / 0.035) 7px, rgb(var(--app-fg) / 0.035) 8px),
+    repeating-linear-gradient(90deg, transparent 0, transparent 31px, rgb(var(--app-fg) / 0.015) 31px, rgb(var(--app-fg) / 0.015) 32px),;
+  --_bg-p-sz: auto, auto,;
+}
+
+html[data-bg-pattern="none"] {
+  --_bg-p: ;
+  --_bg-p-sz: ;
+}
+
+/* ── Gradient variants ── */
+html[data-bg-gradient="soft"] {
+  --_bg-g:
+    radial-gradient(circle at top left, rgb(var(--app-glow) / 0.16), transparent 32%),
+    linear-gradient(135deg, rgb(var(--app-bg-start)), rgb(var(--app-bg-mid)) 48%, rgb(var(--app-bg-end)));
+  --_bg-g-sz: auto, auto;
+}
+
+html[data-bg-gradient="radial"] {
+  --_bg-g:
+    radial-gradient(ellipse 110% 70% at 50% -5%, rgb(var(--app-glow) / 0.22), transparent),
+    radial-gradient(ellipse 70% 50% at 90% 95%, rgb(var(--app-glow-secondary) / 0.1), transparent),
+    radial-gradient(circle at 50% 40%, rgb(var(--app-bg-start)), rgb(var(--app-bg-mid)) 55%, rgb(var(--app-bg-end)));
+  --_bg-g-sz: auto, auto, auto;
+}
+
+html[data-bg-gradient="flat"] {
+  --_bg-g: linear-gradient(175deg, rgb(var(--app-bg-start)), rgb(var(--app-bg-mid)) 40%, rgb(var(--app-bg-end)));
+  --_bg-g-sz: auto;
 }
 
 @layer base {
@@ -92,15 +170,10 @@
     position: relative;
     isolation: isolate;
     overflow: hidden;
-    background:
-      radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.05) 0.9px, transparent 1.2px),
-      radial-gradient(circle at 3px 2px, rgb(0 0 0 / 0.035) 0.8px, transparent 1.1px),
-      radial-gradient(circle at 2px 3px, rgb(var(--app-glow-secondary) / 0.025) 0.7px, transparent 1px),
-      radial-gradient(circle at top left, rgb(var(--app-glow) / 0.16), transparent 32%),
-      linear-gradient(135deg, rgb(var(--app-bg-start)), rgb(var(--app-bg-mid)) 48%, rgb(var(--app-bg-end)));
-    background-size: 3.5px 3.5px, 5.5px 5.5px, 6.5px 6.5px, auto, auto;
-    background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
-    background-attachment: fixed, fixed, fixed, fixed, fixed;
+    background-color: rgb(var(--app-bg-mid));
+    background-image: var(--_bg-p) var(--_bg-g);
+    background-size: var(--_bg-p-sz) var(--_bg-g-sz);
+    background-attachment: fixed;
   }
 
   .app-shell::before,

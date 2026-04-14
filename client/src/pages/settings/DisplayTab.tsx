@@ -1,15 +1,30 @@
 import { useState } from 'react';
-import { Sun, Moon, Monitor, Ruler, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Sun, Moon, Monitor, Ruler, Check, AlertCircle, Loader2, Layers, Blend } from 'lucide-react';
 import { settings } from '../../api/client';
 import { useTheme } from '../../contexts/ThemeContext';
-import { SYSTEM_THEME_ID, THEME_GROUPS, getThemeDefinition } from '../../themes';
+import {
+  SYSTEM_THEME_ID,
+  THEME_GROUPS,
+  getThemeDefinition,
+  BG_PATTERN_OPTIONS,
+  BG_GRADIENT_OPTIONS,
+  BG_GRADIENT_PREVIEWS,
+} from '../../themes';
 
 interface DisplayTabProps {
   initialDistanceUnit: 'metric' | 'imperial';
 }
 
 export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
-  const { theme: currentTheme, setTheme, systemThemeSelection } = useTheme();
+  const {
+    theme: currentTheme,
+    setTheme,
+    systemThemeSelection,
+    bgPattern,
+    setBgPattern,
+    bgGradient,
+    setBgGradient,
+  } = useTheme();
   const [distanceUnit, setDistanceUnit] = useState(initialDistanceUnit);
   const [displaySaving, setDisplaySaving] = useState(false);
   const [displayMsg, setDisplayMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -104,15 +119,89 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
         </div>
       </div>
 
+      {/* Background Pattern Section */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          <Layers size={20} className="text-primary-600" />
+          Background Pattern
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {BG_PATTERN_OPTIONS.map((option) => {
+            const isSelected = bgPattern === option.id;
+            return (
+              <button
+                key={option.id}
+                onClick={() => setBgPattern(option.id)}
+                className={`flex flex-col items-start gap-2 p-3 rounded-xl border transition-all text-left ${
+                  isSelected
+                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
+                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                }`}
+              >
+                {/* Pattern preview swatch */}
+                <div
+                  className="w-full h-10 rounded-lg border border-black/5 dark:border-white/10"
+                  style={{
+                    backgroundColor: 'rgb(255 250 246)',
+                    backgroundImage: option.previewStyle.backgroundImage,
+                    backgroundSize: option.previewStyle.backgroundSize,
+                  }}
+                />
+                <div className="space-y-0.5">
+                  <div className={`text-xs font-semibold ${isSelected ? 'text-primary-700 dark:text-primary-400' : 'text-gray-700 dark:text-gray-200'}`}>
+                    {option.label}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Background Gradient Section */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+          <Blend size={20} className="text-primary-600" />
+          Background Gradient
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {BG_GRADIENT_OPTIONS.map((option) => {
+            const isSelected = bgGradient === option.id;
+            return (
+              <button
+                key={option.id}
+                onClick={() => setBgGradient(option.id)}
+                className={`flex flex-col items-start gap-2 p-3 rounded-xl border transition-all text-left ${
+                  isSelected
+                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
+                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                }`}
+              >
+                {/* Gradient preview swatch */}
+                <div
+                  className="w-full h-12 rounded-lg border border-black/5 dark:border-white/10"
+                  style={{ backgroundImage: BG_GRADIENT_PREVIEWS[option.id] }}
+                />
+                <div className="space-y-0.5">
+                  <div className={`text-xs font-semibold ${isSelected ? 'text-primary-700 dark:text-primary-400' : 'text-gray-700 dark:text-gray-200'}`}>
+                    {option.label}
+                  </div>
+                  <div className="text-[11px] text-gray-400 dark:text-gray-500 leading-tight">
+                    {option.description}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Distance Units Section */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <Ruler size={20} className="text-primary-600" />
           Distance Units
         </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Choose how distances are shown across the app.
-        </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {([

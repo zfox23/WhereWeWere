@@ -665,6 +665,116 @@ export function getResolvedThemeMode(themeId: AppThemeId): ThemeMode {
   return THEME_DEFINITIONS[themeId].mode;
 }
 
+// ─── Background pattern & gradient ───────────────────────────────────────────
+
+export type BgPatternId = 'dots' | 'grid' | 'crosshatch' | 'topographic' | 'linen' | 'none';
+export type BgGradientId = 'soft' | 'radial' | 'flat';
+
+export const DEFAULT_BG_PATTERN: BgPatternId = 'dots';
+export const DEFAULT_BG_GRADIENT: BgGradientId = 'soft';
+
+export interface BgPatternOption {
+  id: BgPatternId;
+  label: string;
+  // Preview style uses hardcoded colors (not CSS vars) for small swatches in Settings
+  previewStyle: {
+    backgroundImage: string;
+    backgroundSize?: string;
+  };
+}
+
+export interface BgGradientOption {
+  id: BgGradientId;
+  label: string;
+  description: string;
+}
+
+export const BG_PATTERN_OPTIONS: BgPatternOption[] = [
+  {
+    id: 'dots',
+    label: 'Dots',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(circle, rgba(0,0,0,0.18) 0.8px, transparent 0.8px)',
+        'radial-gradient(circle, rgba(0,0,0,0.1) 0.55px, transparent 0.55px)',
+      ].join(', '),
+      backgroundSize: '8px 8px, 5px 5px',
+    },
+  },
+  {
+    id: 'grid',
+    label: 'Grid',
+    previewStyle: {
+      backgroundImage: [
+        'linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px)',
+        'linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)',
+      ].join(', '),
+      backgroundSize: '14px 14px, 14px 14px',
+    },
+  },
+  {
+    id: 'crosshatch',
+    label: 'Crosshatch',
+    previewStyle: {
+      backgroundImage: [
+        'repeating-linear-gradient(45deg, transparent 0px, transparent 5px, rgba(0,0,0,0.1) 5px, rgba(0,0,0,0.1) 6px)',
+        'repeating-linear-gradient(-45deg, transparent 0px, transparent 5px, rgba(0,0,0,0.1) 5px, rgba(0,0,0,0.1) 6px)',
+      ].join(', '),
+    },
+  },
+  {
+    id: 'topographic',
+    label: 'Topographic',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(circle, rgba(0,0,0,0.2) 1.5px, transparent 1.5px)',
+        'radial-gradient(circle, rgba(0,0,0,0.08) 0.8px, transparent 0.8px)',
+      ].join(', '),
+      backgroundSize: '20px 20px, 10px 10px',
+    },
+  },
+  {
+    id: 'linen',
+    label: 'Linen',
+    previewStyle: {
+      backgroundImage: [
+        'repeating-linear-gradient(0deg, transparent 0px, transparent 3px, rgba(0,0,0,0.09) 3px, rgba(0,0,0,0.09) 4px)',
+        'repeating-linear-gradient(90deg, transparent 0px, transparent 12px, rgba(0,0,0,0.03) 12px, rgba(0,0,0,0.03) 13px)',
+      ].join(', '),
+    },
+  },
+  {
+    id: 'none',
+    label: 'None',
+    previewStyle: { backgroundImage: 'none' },
+  },
+];
+
+export const BG_GRADIENT_OPTIONS: BgGradientOption[] = [
+  { id: 'soft', label: 'Soft', description: 'Diagonal wash with corner bloom' },
+  { id: 'radial', label: 'Radial', description: 'Top-centered light source' },
+  { id: 'flat', label: 'Flat', description: 'Subtle edge tints only' },
+];
+
+// Fixed preview gradients for Settings UI (warm neutral tones, no CSS vars)
+export const BG_GRADIENT_PREVIEWS: Record<BgGradientId, string> = {
+  soft: [
+    'radial-gradient(circle at 5% 10%, rgba(251,146,60,0.28), transparent 55%)',
+    'linear-gradient(135deg, rgb(255,247,237), rgb(255,255,255) 48%, rgb(255,251,235))',
+  ].join(', '),
+  radial: [
+    'radial-gradient(ellipse 110% 70% at 50% 0%, rgba(251,146,60,0.3), transparent)',
+    'radial-gradient(ellipse 70% 50% at 90% 95%, rgba(252,211,77,0.15), transparent)',
+    'radial-gradient(circle at 50% 40%, rgb(255,247,237), rgb(255,255,255) 55%, rgb(255,251,235))',
+  ].join(', '),
+  flat: 'linear-gradient(175deg, rgb(255,247,237), rgb(255,255,255) 40%, rgb(255,251,235))',
+};
+
+export function applyBgToRoot(root: HTMLElement, pattern: BgPatternId, gradient: BgGradientId) {
+  root.dataset.bgPattern = pattern;
+  root.dataset.bgGradient = gradient;
+}
+
 export function applyThemeToRoot(root: HTMLElement, themeId: AppThemeId) {
   const theme = getThemeDefinition(themeId);
 
