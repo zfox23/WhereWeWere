@@ -135,8 +135,6 @@ export const stats = {
     }
     return request<any[]>(`/stats/top-cities?${qp.toString()}`);
   },
-  insights: (userId: string) =>
-    request<any[]>(`/stats/insights?user_id=${userId}`),
   reflections: (userId: string, targetDate?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
     if (targetDate) {
