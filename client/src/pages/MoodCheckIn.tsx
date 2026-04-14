@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, Trash2, ArrowLeft, Check, ChevronDown, Settings as SettingsIcon } from 'lucide-react';
 import { moodCheckins, moodActivities, settings as settingsApi } from '../api/client';
@@ -171,7 +171,7 @@ export default function MoodCheckInPage() {
   };
 
   const normalizedFilter = activityFilter.trim().toLowerCase();
-  const filteredGroups = normalizedFilter
+  const filteredGroups = useMemo(() => normalizedFilter
     ? (() => {
         const getRank = (activityName: string, groupName: string) => {
           const activity = activityName.toLowerCase();
@@ -212,7 +212,7 @@ export default function MoodCheckInPage() {
 
         return Array.from(grouped.values());
       })()
-    : groups;
+    : groups, [normalizedFilter, groups]);
 
   useEffect(() => {
     if (!normalizedFilter) {
@@ -275,6 +275,7 @@ export default function MoodCheckInPage() {
     if (mood === 0) return;
     setSaving(true);
     let succeeded = false;
+    let createdId: string | undefined;
     try {
       const data = {
         mood,
@@ -286,7 +287,8 @@ export default function MoodCheckInPage() {
       if (editId) {
         await moodCheckins.update(editId, data);
       } else {
-        await moodCheckins.create(data);
+        const result = await moodCheckins.create(data);
+        createdId = result?.id;
       }
       succeeded = true;
     } catch (err) {
@@ -294,7 +296,7 @@ export default function MoodCheckInPage() {
     } finally {
       setSaving(false);
     }
-    if (succeeded) navigate('/');
+    if (succeeded) navigate('/', { state: editId ? undefined : { newId: createdId } });
   };
 
   const handleDelete = async () => {

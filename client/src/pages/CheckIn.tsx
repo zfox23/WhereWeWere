@@ -80,8 +80,8 @@ export default function CheckIn() {
     setSelectedVenue(venue);
   };
 
-  const handleSuccess = () => {
-    navigate('/');
+  const handleSuccess = (newId: string) => {
+    navigate('/', { state: { newId } });
   };
 
   const handleChangeVenue = () => {

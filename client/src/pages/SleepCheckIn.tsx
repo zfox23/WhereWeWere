@@ -148,11 +148,13 @@ export default function SleepCheckIn() {
     setSaving(true);
     setError(null);
     let succeeded = false;
+    let createdId: string | undefined;
     try {
       if (editId) {
         await sleepEntries.update(editId, payload);
       } else {
-        await sleepEntries.create(payload);
+        const result = await sleepEntries.create(payload);
+        createdId = result?.id;
       }
       succeeded = true;
     } catch (err) {
@@ -160,7 +162,7 @@ export default function SleepCheckIn() {
     } finally {
       setSaving(false);
     }
-    if (succeeded) navigate('/');
+    if (succeeded) navigate('/', { state: editId ? undefined : { newId: createdId } });
   };
 
   const handleDelete = async () => {

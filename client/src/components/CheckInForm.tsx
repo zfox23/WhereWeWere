@@ -31,7 +31,7 @@ interface CheckInFormProps {
   venueName?: string;
   parentVenueId?: string | null;
   parentVenueName?: string | null;
-  onSuccess?: () => void;
+  onSuccess?: (id: string) => void;
   editCheckinId?: string;
   initialNotes?: string;
   initialCheckedInAt?: string;
@@ -158,6 +158,7 @@ export default function CheckInForm({
     setSubmitting(true);
     setError(null);
     let succeeded = false;
+    let createdId: string | undefined;
 
     try {
       if (isEditMode) {
@@ -166,13 +167,14 @@ export default function CheckInForm({
           checked_in_at: new Date(checkedInAt).toISOString(),
         });
       } else {
-        await checkins.create({
+        const result = await checkins.create({
           user_id: HARDCODED_USER_ID,
           venue_id: venueId,
           notes: notes.trim() || null,
           checked_in_at: new Date(checkedInAt).toISOString(),
           also_checkin_parent: alsoCheckinParent && !!parentVenueId,
         });
+        createdId = Array.isArray(result) ? result[0]?.id : result?.id;
 
         // Reset form
         if (!initialVenueId) {
@@ -189,7 +191,7 @@ export default function CheckInForm({
     } finally {
       setSubmitting(false);
     }
-    if (succeeded) onSuccess?.();
+    if (succeeded) onSuccess?.(createdId ?? '');
   };
 
   const handleSubmit = (e: React.FormEvent) => {

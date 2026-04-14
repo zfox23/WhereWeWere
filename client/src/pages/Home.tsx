@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
-import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
@@ -143,6 +143,9 @@ export default function Home() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const newId = (location.state as { newId?: string } | null)?.newId ?? null;
+  const newIdAnimatedRef = useRef<string | null>(null);
   const typeParam = searchParams.get('type') || '';
   const timelineType = typeParam === 'location' || typeParam === 'mood' || typeParam === 'sleep' ? typeParam : '';
   const [items, setItems] = useState<TimelineItem[]>([]);
@@ -686,6 +689,16 @@ export default function Home() {
     return () => observer.disconnect();
   }, [items, includeLocation, includeMood, includeSleep, loading, loadingMore]);
 
+  // Scroll to and animate newly created entry
+  useEffect(() => {
+    if (!newId || newId === newIdAnimatedRef.current || loading) return;
+    const el = feedContainerRef.current?.querySelector<HTMLElement>(`[data-new-entry="${newId}"]`);
+    if (!el) return;
+    newIdAnimatedRef.current = newId;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.history.replaceState(null, '', '/');
+  }, [newId, loading, items]);
+
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
     setIncludeLocation(true);
@@ -1187,8 +1200,14 @@ export default function Home() {
                       transitionDelay: `${Math.min(index, 8) * 36}ms`,
                     };
 
+                    const isNew = item.id === newId;
                     return (
-                      <div key={item.id} data-home-reveal className="motion-safe-reveal" style={revealStyle}>
+                      <div
+                        key={item.id}
+                        {...(isNew ? { 'data-new-entry': item.id } : { 'data-home-reveal': '' })}
+                        className={isNew ? 'new-entry-highlight' : 'motion-safe-reveal'}
+                        style={isNew ? undefined : revealStyle}
+                      >
                         {item.type === 'mood' ? (
                           <MoodCheckInCard
                             item={item}
