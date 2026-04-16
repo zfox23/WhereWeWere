@@ -31,7 +31,7 @@ class SmoothWheelZoom extends L.Handler {
     private _prevCenter = L.latLng(0, 0);
     private _prevZoom = 0;
     private _zoomAnimationId = 0;
-    private _timeoutId: ReturnType<typeof setTimeout> | null = null;
+    private _timeoutId: ReturnType<typeof setTimeout> | number | null = null;
     private _moved = false;
 
     addHooks(): void {
