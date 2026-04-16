@@ -8,3 +8,4 @@ uploads/
 coverage/
 .tsbuildinfo
 data/
+android/local.properties

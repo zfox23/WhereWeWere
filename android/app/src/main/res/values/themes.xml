@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme: no action bar; Compose handles all UI -->
+    <style name="Theme.WhereWeWere" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

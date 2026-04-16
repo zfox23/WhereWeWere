@@ -1,0 +1,102 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.kotlinx.serialization)
+    alias(libs.plugins.ksp)
+}
+
+android {
+    namespace 'com.wherewewere.android'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.wherewewere.android'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        vectorDrawables {
+            useSupportLibrary true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    buildFeatures {
+        compose true
+        buildConfig true
+    }
+
+kotlin {
+    jvmToolchain(21)
+}
+
+    packaging {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
+
+dependencies {
+    // Core
+    implementation libs.core.ktx
+    implementation libs.activity.compose
+
+    // Compose
+    implementation platform(libs.compose.bom)
+    implementation libs.compose.ui
+    implementation libs.compose.ui.tooling.preview
+    implementation libs.compose.material3
+    implementation libs.compose.material.icons.extended
+    debugImplementation libs.compose.ui.tooling
+
+    // Lifecycle
+    implementation libs.lifecycle.viewmodel.compose
+    implementation libs.lifecycle.runtime.compose
+
+    // Navigation
+    implementation libs.navigation.compose
+
+    // Hilt
+    implementation libs.hilt.android
+    ksp libs.hilt.compiler
+    implementation libs.hilt.navigation.compose
+
+    // Networking
+    implementation libs.retrofit.core
+    implementation libs.retrofit.kotlinx.serialization
+    implementation libs.okhttp.core
+    implementation libs.okhttp.logging
+    implementation libs.kotlinx.serialization.json
+
+    // Maps
+    implementation libs.osmdroid
+
+    // Location
+    implementation libs.play.services.location
+
+    // Images
+    implementation libs.coil.compose
+    implementation libs.coil.okhttp
+
+    // DataStore
+    implementation libs.datastore.preferences
+
+    // Coroutines
+    implementation libs.kotlinx.coroutines.android
+    implementation libs.kotlinx.coroutines.play.services
+}
