@@ -146,6 +146,18 @@ class CheckInViewModel @Inject constructor(
         loadNearbyVenues(loc.latitude, loc.longitude)
     }
 
+    /** Fetch a fresh GPS fix and unconditionally re-center the search area on it. */
+    fun goToMyLocation() {
+        viewModelScope.launch {
+            val loc = locationManager.getCurrentLocation()
+                ?: locationManager.getLastLocation()
+                ?: return@launch
+            _userLocation.value = loc
+            _searchCenter.value = loc
+            loadNearbyVenues(loc.latitude, loc.longitude)
+        }
+    }
+
     private fun loadNearbyVenues(lat: Double? = null, lon: Double? = null) {
         val center = _searchCenter.value ?: _userLocation.value
         val useLat = lat ?: center?.latitude ?: return

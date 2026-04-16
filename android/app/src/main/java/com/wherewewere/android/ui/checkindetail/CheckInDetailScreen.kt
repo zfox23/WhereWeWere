@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wherewewere.android.ui.components.MapMarker
-import com.wherewewere.android.ui.components.OsmMapView
+import com.wherewewere.android.ui.components.MapView
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -86,7 +86,7 @@ fun CheckInDetailScreen(
                 ) {
                     // Map
                     if (checkin.venueLatitude != null && checkin.venueLongitude != null) {
-                        OsmMapView(
+                        MapView(
                             center = MapMarker(checkin.venueLatitude, checkin.venueLongitude, checkin.venueName ?: ""),
                             zoom = 16.0,
                             modifier = Modifier

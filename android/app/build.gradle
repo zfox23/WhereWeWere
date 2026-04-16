@@ -6,6 +6,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+def localProps = new Properties()
+def localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) localProps.load(new FileInputStream(localPropsFile))
+
 android {
     namespace 'com.wherewewere.android'
     compileSdk 36
@@ -21,6 +25,7 @@ android {
         vectorDrawables {
             useSupportLibrary true
         }
+        manifestPlaceholders = [mapsApiKey: localProps.getProperty("MAPS_API_KEY", "")]
     }
 
     buildTypes {
@@ -84,7 +89,8 @@ dependencies {
     implementation libs.kotlinx.serialization.json
 
     // Maps
-    implementation libs.osmdroid
+    implementation libs.play.services.maps
+    implementation libs.maps.compose
 
     // Location
     implementation libs.play.services.location

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
+import com.wherewewere.android.ui.components.resolveActivityIcon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -132,6 +133,18 @@ fun MoodCheckInScreen(
                 }
             }
 
+            // Notes
+            OutlinedTextField(
+                value = note,
+                onValueChange = viewModel::setNote,
+                label = { Text("Notes (optional)") },
+                minLines = 3,
+                maxLines = 8,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            )
+
             // Activity tags
             if (activityGroups.isNotEmpty()) {
                 Text(
@@ -153,32 +166,25 @@ fun MoodCheckInScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         group.activities.forEach { activity ->
+                            val activityIcon = resolveActivityIcon(activity.icon)
                             FilterChip(
                                 selected = selectedActivityIds.contains(activity.id),
                                 onClick = { viewModel.toggleActivity(activity.id) },
-                                label = {
-                                    Text(
-                                        if (!activity.icon.isNullOrBlank()) "${activity.icon} ${activity.name}"
-                                        else activity.name
-                                    )
-                                },
+                                label = { Text(activity.name) },
+                                leadingIcon = if (activityIcon != null) {
+                                    {
+                                        Icon(
+                                            imageVector = activityIcon,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                        )
+                                    }
+                                } else null,
                             )
                         }
                     }
                 }
             }
-
-            // Notes
-            OutlinedTextField(
-                value = note,
-                onValueChange = viewModel::setNote,
-                label = { Text("Notes (optional)") },
-                minLines = 3,
-                maxLines = 8,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-            )
 
             Spacer(Modifier.height(32.dp))
         }

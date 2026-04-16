@@ -13,8 +13,8 @@
 -dontwarn okhttp3.**
 -dontwarn okio.**
 
-# OSMDroid
--keep class org.osmdroid.** { *; }
+# Google Maps SDK (most rules are in the SDK's own consumer-proguard file)
+-keep class com.google.android.gms.maps.** { *; }
 
 # kotlinx.serialization
 -keepattributes *Annotation*

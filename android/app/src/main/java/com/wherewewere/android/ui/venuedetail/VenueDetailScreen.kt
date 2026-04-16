@@ -17,7 +17,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wherewewere.android.data.model.CheckIn
 import com.wherewewere.android.ui.components.MapMarker
-import com.wherewewere.android.ui.components.OsmMapView
+import com.wherewewere.android.ui.components.MapView
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -96,7 +96,7 @@ fun VenueDetailScreen(
                 ) {
                     // Map header
                     item {
-                        OsmMapView(
+                        MapView(
                             center = MapMarker(venue.latitude, venue.longitude, venue.name),
                             markers = markers,
                             zoom = 15.0,

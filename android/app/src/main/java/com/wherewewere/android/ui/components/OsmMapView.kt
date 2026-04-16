@@ -1,17 +1,20 @@
 package com.wherewewere.android.ui.components
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
-import org.osmdroid.events.MapEventsReceiver
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.MapEventsOverlay
-import org.osmdroid.views.overlay.Marker
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.*
 
 data class MapMarker(
     val lat: Double,
@@ -20,66 +23,70 @@ data class MapMarker(
 )
 
 @Composable
-fun OsmMapView(
+fun MapView(
     center: MapMarker,
     modifier: Modifier = Modifier,
     zoom: Double = 15.0,
     markers: List<MapMarker> = listOf(center),
+    userLocation: MapMarker? = null,
+    searchRadiusMeters: Int? = null,
     onMarkerClick: ((MapMarker) -> Unit)? = null,
     onMapTap: ((lat: Double, lon: Double) -> Unit)? = null,
 ) {
-    val context = LocalContext.current
-    val mapView = remember { MapView(context) }
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(LatLng(center.lat, center.lng), zoom.toFloat())
+    }
 
-    AndroidView(
-        factory = {
-            mapView.apply {
-                setTileSource(TileSourceFactory.MAPNIK)
-                setMultiTouchControls(true)
-                isHorizontalMapRepetitionEnabled = false
-                isVerticalMapRepetitionEnabled = false
-                controller.setZoom(zoom)
-                controller.setCenter(GeoPoint(center.lat, center.lng))
+    // Animate the camera whenever the center changes (e.g. user taps to move search area)
+    LaunchedEffect(center) {
+        cameraPositionState.animate(
+            CameraUpdateFactory.newLatLng(LatLng(center.lat, center.lng))
+        )
+    }
+
+    Box(modifier = modifier) {
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = cameraPositionState,
+            uiSettings = MapUiSettings(
+                zoomControlsEnabled = true,
+                myLocationButtonEnabled = false,
+                compassEnabled = false,
+                mapToolbarEnabled = false,
+            ),
+            onMapClick = { latLng -> onMapTap?.invoke(latLng.latitude, latLng.longitude) },
+        ) {
+            // Search radius circle — native Circle composable, no polygon approximation needed
+            if (searchRadiusMeters != null) {
+                Circle(
+                    center = LatLng(center.lat, center.lng),
+                    radius = searchRadiusMeters.toDouble(),
+                    fillColor = Color(0x1E2196F3),
+                    strokeColor = Color(0xA02196F3.toInt()),
+                    strokeWidth = 3f,
+                )
             }
-        },
-        update = { mv ->
-            mv.overlays.clear()
 
-            // Tap-to-move support — add as the first overlay so markers still receive events
-            if (onMapTap != null) {
-                val eventsOverlay = MapEventsOverlay(object : MapEventsReceiver {
-                    override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
-                        onMapTap(p.latitude, p.longitude)
-                        return true
-                    }
-                    override fun longPressHelper(p: GeoPoint): Boolean = false
-                })
-                mv.overlays.add(eventsOverlay)
+            // Venue / general markers
+            markers.forEach { m ->
+                Marker(
+                    state = MarkerState(LatLng(m.lat, m.lng)),
+                    title = m.label,
+                    onClick = {
+                        onMarkerClick?.invoke(m)
+                        false
+                    },
+                )
             }
 
-            markers.forEach { markerData ->
-                val marker = Marker(mv).apply {
-                    position = GeoPoint(markerData.lat, markerData.lng)
-                    title = markerData.label
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                    if (onMarkerClick != null) {
-                        setOnMarkerClickListener { _, _ ->
-                            onMarkerClick(markerData)
-                            true
-                        }
-                    }
-                }
-                mv.overlays.add(marker)
+            // User location — distinct blue pin
+            if (userLocation != null) {
+                Marker(
+                    state = MarkerState(LatLng(userLocation.lat, userLocation.lng)),
+                    title = userLocation.label,
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                )
             }
-            mv.controller.animateTo(GeoPoint(center.lat, center.lng))
-            mv.invalidate()
-        },
-        modifier = modifier,
-    )
-
-    DisposableEffect(Unit) {
-        onDispose {
-            mapView.onDetach()
         }
     }
 }

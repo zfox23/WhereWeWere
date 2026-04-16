@@ -77,7 +77,7 @@ fun TimelineScreen(
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(title = { Text("Journal") })
+                TopAppBar(title = { Text("WhereWeWere") })
                 SearchBar(
                     inputField = {
                         SearchBarDefaults.InputField(
@@ -86,7 +86,7 @@ fun TimelineScreen(
                             onSearch = {},
                             expanded = false,
                             onExpandedChange = {},
-                            placeholder = { Text("Search journal...") },
+                            placeholder = { Text("Search...") },
                         )
                     },
                     expanded = false,

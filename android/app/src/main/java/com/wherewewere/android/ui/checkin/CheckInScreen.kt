@@ -24,7 +24,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wherewewere.android.data.model.NearbyVenue
 import com.wherewewere.android.ui.components.MapMarker
-import com.wherewewere.android.ui.components.OsmMapView
+import com.wherewewere.android.ui.components.MapView
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,6 +129,7 @@ fun CheckInScreen(
                                         Manifest.permission.ACCESS_COARSE_LOCATION,
                                     )
                                 )
+                                viewModel.goToMyLocation()
                             }) {
                                 Icon(Icons.Default.MyLocation, contentDescription = "Use GPS")
                             }
@@ -142,37 +143,21 @@ fun CheckInScreen(
 
                 // ── Search-center map ──────────────────────────────────────
                 if (searchCenter != null) {
-                    OsmMapView(
+                    MapView(
                         center = MapMarker(searchCenter!!.latitude, searchCenter!!.longitude, "Search area"),
                         zoom = 14.0,
-                        markers = emptyList(),
+                        markers = nearbyVenues
+                            .filter { it.latitude != 0.0 && it.longitude != 0.0 }
+                            .map { MapMarker(it.latitude, it.longitude, it.name) },
+                        userLocation = userLocation?.let {
+                            MapMarker(it.latitude, it.longitude, "My location")
+                        },
+                        searchRadiusMeters = 5000,
                         onMapTap = { lat, lon -> viewModel.setSearchCenter(lat, lon) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(200.dp),
+                            .height(220.dp),
                     )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "Tap map to move search area",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                        val isAtGps = userLocation != null &&
-                            searchCenter?.latitude == userLocation?.latitude &&
-                            searchCenter?.longitude == userLocation?.longitude
-                        TextButton(
-                            onClick = viewModel::resetSearchCenter,
-                            enabled = !isAtGps,
-                        ) {
-                            Text("Reset to my location")
-                        }
-                    }
                 }
 
                 if (isLoadingVenues) {
@@ -228,7 +213,7 @@ fun CheckInScreen(
                     // Map preview if coordinates available
                     val sv = selectedVenue!!
                     if (sv.latitude != 0.0 && sv.longitude != 0.0) {
-                        OsmMapView(
+                        MapView(
                             center = MapMarker(sv.latitude, sv.longitude, sv.name),
                             zoom = 16.0,
                             modifier = Modifier

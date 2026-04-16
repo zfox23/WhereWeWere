@@ -1,5 +1,9 @@
-# Copy this file to local.properties and set your Android SDK path
+# Copy this file to local.properties and fill in the values below.
 # Do NOT commit local.properties to version control
+
+# Google Maps SDK for Android API key (https://console.cloud.google.com)
+MAPS_API_KEY=your_maps_api_key_here
+
 
 # macOS (Android Studio default):
 sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
