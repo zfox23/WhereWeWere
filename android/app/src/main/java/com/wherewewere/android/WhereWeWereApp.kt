@@ -7,6 +7,7 @@ import androidx.work.WorkManager
 import com.wherewewere.android.data.api.NetworkModule
 import com.wherewewere.android.data.db.OfflineQueue
 import com.wherewewere.android.data.preferences.PreferencesRepository
+import com.wherewewere.android.data.sync.CacheSyncWorker
 import com.wherewewere.android.data.sync.ConnectivityMonitor
 import com.wherewewere.android.data.sync.SyncWorker
 import dagger.hilt.android.HiltAndroidApp
@@ -14,23 +15,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
 class WhereWeWereApp : Application(), Configuration.Provider {
 
-    @Inject
-    lateinit var preferencesRepository: PreferencesRepository
-
-    @Inject
-    lateinit var workerFactory: HiltWorkerFactory
-
-    @Inject
-    lateinit var connectivityMonitor: ConnectivityMonitor
-
-    @Inject
-    lateinit var offlineQueue: OfflineQueue
+    @Inject lateinit var preferencesRepository: PreferencesRepository
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+    @Inject lateinit var connectivityMonitor: ConnectivityMonitor
+    @Inject lateinit var offlineQueue: OfflineQueue
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -52,15 +47,24 @@ class WhereWeWereApp : Application(), Configuration.Provider {
             }
         }
 
-        // Schedule a sync whenever the device comes online and there are pending operations
+        // Schedule background work whenever connectivity + pending-mutation state changes
         appScope.launch {
-            combine(connectivityMonitor.isOnline, offlineQueue.pendingCount) { online, pending ->
-                online to pending
-            }.collect { (online, pending) ->
-                if (online && pending > 0) {
-                    SyncWorker.schedule(WorkManager.getInstance(this@WhereWeWereApp))
+            combine(
+                connectivityMonitor.isOnline,
+                offlineQueue.pendingCount,
+            ) { online, pending -> online to pending }
+                .distinctUntilChanged()
+                .collect { (online, pending) ->
+                    if (!online) return@collect
+                    val wm = WorkManager.getInstance(this@WhereWeWereApp)
+                    if (pending > 0) {
+                        // Replay queued mutations, then refresh the read cache
+                        SyncWorker.schedule(wm)
+                    } else {
+                        // No pending mutations — just refresh the read cache
+                        CacheSyncWorker.schedule(wm)
+                    }
                 }
-            }
         }
     }
 }

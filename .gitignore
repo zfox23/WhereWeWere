@@ -7,5 +7,5 @@ build/
 uploads/
 coverage/
 .tsbuildinfo
-data/
+/data/
 android/local.properties
