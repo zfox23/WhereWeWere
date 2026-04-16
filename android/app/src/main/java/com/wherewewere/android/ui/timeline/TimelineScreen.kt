@@ -7,9 +7,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Mood
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -49,6 +51,8 @@ fun TimelineScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val filterType by viewModel.filterType.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+    val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
+    val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -131,6 +135,27 @@ fun TimelineScreen(
                             Icon(Icons.Default.Bedtime, null, Modifier.size(16.dp))
                         },
                     )
+                }
+                // Offline / pending-sync banner
+                if (!isOnline || pendingCount > 0) {
+                    val (icon, label, containerColor) = when {
+                        !isOnline && pendingCount > 0 ->
+                            Triple(Icons.Default.CloudOff, "Offline · $pendingCount pending sync", MaterialTheme.colorScheme.errorContainer)
+                        !isOnline ->
+                            Triple(Icons.Default.CloudOff, "You're offline", MaterialTheme.colorScheme.errorContainer)
+                        else ->
+                            Triple(Icons.Default.Sync, "Syncing $pendingCount ${if (pendingCount == 1) "entry" else "entries"}…", MaterialTheme.colorScheme.secondaryContainer)
+                    }
+                    Surface(color = containerColor, modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text(label, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
                 }
             }
         },

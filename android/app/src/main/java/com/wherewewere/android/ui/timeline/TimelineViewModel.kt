@@ -2,8 +2,10 @@ package com.wherewewere.android.ui.timeline
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.wherewewere.android.data.db.OfflineQueue
 import com.wherewewere.android.data.model.TimelineItem
 import com.wherewewere.android.data.repository.TimelineRepository
+import com.wherewewere.android.data.sync.ConnectivityMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -16,7 +18,13 @@ import javax.inject.Inject
 @HiltViewModel
 class TimelineViewModel @Inject constructor(
     private val repo: TimelineRepository,
+    connectivity: ConnectivityMonitor,
+    offlineQueue: OfflineQueue,
 ) : ViewModel() {
+
+    val isOnline: StateFlow<Boolean> = connectivity.isOnline
+    val pendingCount: StateFlow<Int> = offlineQueue.pendingCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     private val _items = MutableStateFlow<List<TimelineItem>>(emptyList())
     val items: StateFlow<List<TimelineItem>> = _items.asStateFlow()
