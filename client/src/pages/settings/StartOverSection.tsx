@@ -50,7 +50,7 @@ export function StartOverSection() {
   };
 
   return (
-    <div className="bg-red-50/60 dark:bg-red-900/10 backdrop-blur-xl rounded-2xl border border-red-200/80 dark:border-red-900/50 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+    <div className="bg-red-50/60 dark:bg-red-900/10 backdrop-blur-xl rounded-2xl border border-red-200/80 dark:border-red-900/50 shadow-sm shadow-black/3 p-6 space-y-4">
       <h2 className="text-lg font-semibold text-red-700 dark:text-red-300 flex items-center gap-2">
         <ShieldAlert size={20} />
         Start Over (Danger Zone)

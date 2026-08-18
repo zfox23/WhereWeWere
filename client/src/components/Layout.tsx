@@ -19,7 +19,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell min-h-screen pb-16 md:pb-0 flex flex-col">
       {/* Top nav — glass header */}
-      <header className="sticky top-0 z-50 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-b border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03]">
+      <header className="sticky top-0 z-50 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-b border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/" className="text-xl font-bold text-[#ea580c]">
             WhereWeWere

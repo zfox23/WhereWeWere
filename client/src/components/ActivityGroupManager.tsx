@@ -14,7 +14,7 @@ function renderIcon(iconName?: string | null): React.ReactNode {
   if (!iconName) return null;
   const IconComponent = resolveActivityIcon(iconName);
   if (!IconComponent) return null;
-  return <IconComponent size={16} className="flex-shrink-0 text-current" />;
+  return <IconComponent size={16} className="shrink-0 text-current" />;
 }
 
 export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroupManagerProps) {
@@ -337,7 +337,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
                             onClick={() => setSelectedIconActivity(activity.id)}
                             disabled={loading}
                             title="Change icon"
-                            className="flex-shrink-0 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+                            className="shrink-0 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50"
                           >
                             {renderIcon(activity.icon || 'dash')}
                           </button>
@@ -346,7 +346,7 @@ export default function ActivityGroupManager({ groups, onUpdate }: ActivityGroup
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
                         <button
                           onClick={() => setConfirmingDeleteActivityId(activity.id)}
                           disabled={loading}

@@ -45,7 +45,7 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
   return (
     <>
       {/* Appearance Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <Sun size={20} className="text-primary-600" />
           Appearance
@@ -120,7 +120,7 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
       </div>
 
       {/* Background Pattern Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <Layers size={20} className="text-primary-600" />
           Background Pattern
@@ -159,7 +159,7 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
       </div>
 
       {/* Background Gradient Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <Blend size={20} className="text-primary-600" />
           Background Gradient
@@ -197,7 +197,7 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
       </div>
 
       {/* Distance Units Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <Ruler size={20} className="text-primary-600" />
           Distance Units

@@ -173,7 +173,7 @@ export function PeriodRangeSelector({
                 );
               })}
             </div>
-            <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-white/95 via-white/70 to-transparent dark:from-gray-900/95 dark:via-gray-900/70 dark:to-transparent" />
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-linear-to-r from-white/95 via-white/70 to-transparent dark:from-gray-900/95 dark:via-gray-900/70 dark:to-transparent" />
           </div>
         ) : (
           <div className="relative h-6 min-w-0 flex-1 overflow-hidden">
@@ -200,7 +200,7 @@ export function PeriodRangeSelector({
                 );
               })}
             </div>
-            <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-white/95 via-white/70 to-transparent dark:from-gray-900/95 dark:via-gray-900/70 dark:to-transparent" />
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-linear-to-r from-white/95 via-white/70 to-transparent dark:from-gray-900/95 dark:via-gray-900/70 dark:to-transparent" />
           </div>
         )}
         {periodMode !== 'all' && (

@@ -169,7 +169,7 @@ export function PushSettings({ enabled }: PushSettingsProps) {
   };
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-6 space-y-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
         <Bell size={20} className="text-primary-600" />
         Push Notifications

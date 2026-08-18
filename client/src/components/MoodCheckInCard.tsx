@@ -24,7 +24,7 @@ function renderIcon(iconName?: string): React.ReactNode {
   if (!iconName) return null;
   const IconComponent = resolveActivityIcon(iconName);
   if (!IconComponent) return null;
-  return <IconComponent size={14} className="flex-shrink-0 text-current" />;
+  return <IconComponent size={14} className="shrink-0 text-current" />;
 }
 
 export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl }: MoodCheckInCardProps) {

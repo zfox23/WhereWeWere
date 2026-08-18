@@ -423,9 +423,9 @@ export default function MoodCheckInPage() {
 
         <div className="relative z-10 mx-auto -mt-1 flex h-7 w-28 items-center justify-center">
           <div className="flex items-center gap-2">
-            <span className="h-px w-6 bg-gradient-to-r from-transparent to-gray-300/80 dark:to-gray-700/80" />
-            <span className="h-3 w-3 rounded-full border border-white/60 bg-white/80 shadow-sm shadow-black/[0.04] backdrop-blur-xl dark:border-gray-700/60 dark:bg-gray-800/85" />
-            <span className="h-px w-6 bg-gradient-to-l from-transparent to-gray-300/80 dark:to-gray-700/80" />
+            <span className="h-px w-6 bg-linear-to-r from-transparent to-gray-300/80 dark:to-gray-700/80" />
+            <span className="h-3 w-3 rounded-full border border-white/60 bg-white/80 shadow-sm shadow-black/4 backdrop-blur-xl dark:border-gray-700/60 dark:bg-gray-800/85" />
+            <span className="h-px w-6 bg-linear-to-l from-transparent to-gray-300/80 dark:to-gray-700/80" />
           </div>
         </div>
 
@@ -467,7 +467,7 @@ export default function MoodCheckInPage() {
                           className={`w-full rounded-xl border px-3 py-2.5 text-left transition-all ${
                             selectedActivities.has(act.id)
                               ? 'border-primary-500 bg-primary-500 text-white shadow-md shadow-primary-900/20'
-                              : 'border-gray-200 bg-white/80 text-gray-700 shadow-sm shadow-black/[0.02] hover:-translate-y-[1px] hover:border-primary-300 hover:bg-primary-50/70 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-200 dark:hover:border-primary-500 dark:hover:bg-gray-800'
+                              : 'border-gray-200 bg-white/80 text-gray-700 shadow-sm shadow-black/2 hover:-translate-y-px hover:border-primary-300 hover:bg-primary-50/70 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-200 dark:hover:border-primary-500 dark:hover:bg-gray-800'
                           }`}
                         >
                           <span className="flex items-center justify-between gap-3">
@@ -502,9 +502,9 @@ export default function MoodCheckInPage() {
                 {index < filteredGroups.length - 1 && (
                   <div className="pointer-events-none relative z-10 mx-auto flex h-8 items-center justify-center">
                     <div className="flex items-center gap-2">
-                      <span className="h-px w-10 bg-gradient-to-r from-transparent to-gray-300/70 dark:to-gray-700/70" />
-                      <span className="h-2.5 w-2.5 rounded-full border border-white/60 bg-white/75 shadow-sm shadow-black/[0.04] dark:border-gray-700/60 dark:bg-gray-800/80" />
-                      <span className="h-px w-10 bg-gradient-to-l from-transparent to-gray-300/70 dark:to-gray-700/70" />
+                      <span className="h-px w-10 bg-linear-to-r from-transparent to-gray-300/70 dark:to-gray-700/70" />
+                      <span className="h-2.5 w-2.5 rounded-full border border-white/60 bg-white/75 shadow-sm shadow-black/4 dark:border-gray-700/60 dark:bg-gray-800/80" />
+                      <span className="h-px w-10 bg-linear-to-l from-transparent to-gray-300/70 dark:to-gray-700/70" />
                     </div>
                   </div>
                 )}

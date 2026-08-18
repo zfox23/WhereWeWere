@@ -72,7 +72,7 @@ export default function Settings() {
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-2">
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-2">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {([
             { value: 'account' as const, label: 'Account', icon: User },

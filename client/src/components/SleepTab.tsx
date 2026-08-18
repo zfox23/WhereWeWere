@@ -60,7 +60,7 @@ function SleepRankedDaysCard({
   const max = Math.max(...days.map((day) => day.totalMinutes), 1);
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{title}</h3>
       {days.length === 0 ? (
         <p className="text-sm text-gray-400">{emptyText}</p>
@@ -313,7 +313,7 @@ export function SleepTab() {
           days={rankedSleepDays.shortest}
           emptyText="No sleep entries in this period."
         />
-        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/[0.03] p-4">
+        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Rating Distribution</h3>
           <RatingDistribution data={ratings} avgRating={summary?.avg_rating ?? null} />
         </div>
