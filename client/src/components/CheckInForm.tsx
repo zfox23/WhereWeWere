@@ -200,7 +200,7 @@ export default function CheckInForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={handleSubmit} className={`space-y-5 ${isEditMode ? 'pb-56 md:pb-44' : 'pb-40 md:pb-24'}`}>
       {/* Venue selection (hidden in edit mode) */}
       {!isEditMode && (
         <div>
@@ -337,49 +337,55 @@ export default function CheckInForm({
         </p>
       )}
 
-      {/* Submit */}
-      <button
-        type="submit"
-        disabled={submitting || (!venueId && !isEditMode)}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-700 rounded-2xl hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-primary-500/20"
-      >
-        {submitting ? (
-          <>
-            <Loader2 size={16} className="animate-spin" />
-            {isEditMode ? 'Updating...' : 'Checking in...'}
-          </>
-        ) : (
-          <>
-            <MapPin size={16} />
-            {isEditMode ? 'Update Check In' : 'Check In'}
-            <span className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
-              Shift+Enter
-            </span>
-          </>
-        )}
-      </button>
+      {/* Submit — fixed at bottom of screen (above the bottom nav on mobile) */}
+      <div className="fixed inset-x-0 bottom-14 z-40 md:bottom-0">
+        <div className="border-t border-white/40 bg-white/70 backdrop-blur-xl dark:border-gray-700/40 dark:bg-gray-900/70">
+          <div className="mx-auto max-w-5xl space-y-2 px-4 py-3">
+            <button
+              type="submit"
+              disabled={submitting || (!venueId && !isEditMode)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-primary-500 to-primary-700 rounded-2xl hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-primary-500/20"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  {isEditMode ? 'Updating...' : 'Checking in...'}
+                </>
+              ) : (
+                <>
+                  <MapPin size={16} />
+                  {isEditMode ? 'Update Check In' : 'Check In'}
+                  <span className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
+                    Shift+Enter
+                  </span>
+                </>
+              )}
+            </button>
 
-      {/* Delete button (edit mode only) */}
-      {isEditMode && (
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={deleting}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl hover:bg-red-100 dark:hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-        >
-          {deleting ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              Deleting...
-            </>
-          ) : (
-            <>
-              <Trash2 size={16} />
-              Delete Check-in
-            </>
-          )}
-        </button>
-      )}
+            {/* Delete button (edit mode only) */}
+            {isEditMode && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl hover:bg-red-100 dark:hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    Delete Check-in
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </form>
   );
 }

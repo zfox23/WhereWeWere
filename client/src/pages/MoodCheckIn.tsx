@@ -321,7 +321,7 @@ export default function MoodCheckInPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto space-y-3">
+    <div className={`max-w-lg mx-auto space-y-3 ${editId ? 'pb-56 md:pb-44' : 'pb-44 md:pb-28'}`}>
       {/* Header */}
       <div className="flex items-center gap-3 text-gray-900 dark:text-gray-100">
         <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
@@ -518,48 +518,54 @@ export default function MoodCheckInPage() {
         ) : null}
       </div>
 
-      {/* Submit */}
-      <button
-        onClick={handleSubmit}
-        disabled={mood === 0 || saving}
-        className="btn-primary w-full py-3 text-base font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {saving ? (
-          <Loader2 className="animate-spin mx-auto" size={20} />
-        ) : editId ? (
-          <span className="inline-flex items-center gap-2">
-            <span>Update Mood</span>
-            <span className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
-              Shift+Enter
-            </span>
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-2">
-            <span>Check In</span>
-            <span className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
-              Shift+Enter
-            </span>
-          </span>
-        )}
-      </button>
+      {/* Submit — fixed at bottom of screen (above the bottom nav on mobile) */}
+      <div className="fixed inset-x-0 bottom-14 z-40 md:bottom-0">
+        <div className="border-t border-white/40 bg-white/70 backdrop-blur-xl dark:border-gray-700/40 dark:bg-gray-900/70">
+          <div className="mx-auto max-w-lg space-y-2 px-2 py-3 md:px-4">
+            <button
+              onClick={handleSubmit}
+              disabled={mood === 0 || saving}
+              className="btn-primary w-full py-3 text-base font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? (
+                <Loader2 className="animate-spin mx-auto" size={20} />
+              ) : editId ? (
+                <span className="inline-flex items-center gap-2">
+                  <span>Update Mood</span>
+                  <span className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
+                    Shift+Enter
+                  </span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-2">
+                  <span>Check In</span>
+                  <span className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
+                    Shift+Enter
+                  </span>
+                </span>
+              )}
+            </button>
 
-      {/* Delete (edit mode) */}
-      {editId && (
-        <button
-          onClick={handleDelete}
-          disabled={deleting}
-          className="btn-danger w-full py-3 text-base font-semibold flex items-center justify-center gap-2"
-        >
-          {deleting ? (
-            <Loader2 className="animate-spin" size={20} />
-          ) : (
-            <>
-              <Trash2 size={16} />
-              Delete
-            </>
-          )}
-        </button>
-      )}
+            {/* Delete (edit mode) */}
+            {editId && (
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="btn-danger w-full py-3 text-base font-semibold flex items-center justify-center gap-2"
+              >
+                {deleting ? (
+                  <Loader2 className="animate-spin" size={20} />
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    Delete
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
