@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@config '../tailwind.config.js';
 
 :root {
   --color-primary-50: 255 247 237;
@@ -129,13 +128,13 @@ html[data-bg-gradient="flat"] {
     @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm;
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm;
   }
   .btn-secondary {
-    @apply btn bg-white/70 text-gray-700 border border-gray-200/60 hover:bg-white/90 focus:ring-primary-500 backdrop-blur-sm;
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none bg-white/70 text-gray-700 border border-gray-200/60 hover:bg-white/90 focus:ring-primary-500 backdrop-blur-sm;
   }
   .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
   }
   .input {
     @apply block w-full rounded-xl border border-gray-200/60 bg-white/70 px-3 py-2 text-sm shadow-sm backdrop-blur-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 transition-colors;
