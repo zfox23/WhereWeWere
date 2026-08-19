@@ -40,8 +40,6 @@ interface BackupSettings {
   theme: string | null;
   system_light_theme: string | null;
   system_dark_theme: string | null;
-  notifications_enabled: boolean | null;
-  mood_reminder_times: string[];
   mood_icon_pack: string | null;
   distance_unit: string | null;
   created_at?: string;
@@ -120,14 +118,6 @@ interface BackupMoodCheckinActivity {
   activity_id: string;
 }
 
-interface BackupPushSubscription {
-  id: string;
-  subscription_json: unknown;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 interface BackupSleepEntry {
   id: string;
   sleep_as_android_id: number;
@@ -155,7 +145,6 @@ interface BackupV1 {
     moodActivities: BackupMoodActivity[];
     moodCheckins: BackupMoodCheckin[];
     moodCheckinActivities: BackupMoodCheckinActivity[];
-    pushSubscriptions: BackupPushSubscription[];
     sleepEntries: BackupSleepEntry[];
   };
 }
@@ -208,10 +197,7 @@ function ensureV1Backup(raw: unknown): BackupV1 {
     : null;
 
   const settings = migratedData.settings && typeof migratedData.settings === 'object'
-    ? {
-      ...(migratedData.settings as Record<string, unknown>),
-      mood_reminder_times: asArray<string>((migratedData.settings as Record<string, unknown>).mood_reminder_times),
-    } as BackupSettings
+    ? migratedData.settings as BackupSettings
     : null;
 
   return {
@@ -232,7 +218,6 @@ function ensureV1Backup(raw: unknown): BackupV1 {
       moodActivities: asArray<BackupMoodActivity>(migratedData.moodActivities),
       moodCheckins: asArray<BackupMoodCheckin>(migratedData.moodCheckins),
       moodCheckinActivities: asArray<BackupMoodCheckinActivity>(migratedData.moodCheckinActivities),
-      pushSubscriptions: asArray<BackupPushSubscription>(migratedData.pushSubscriptions),
       sleepEntries: asArray<BackupSleepEntry>(migratedData.sleepEntries),
     },
   };
@@ -250,7 +235,6 @@ router.get('/export', async (_req: Request, res: Response) => {
       activitiesResult,
       moodCheckinsResult,
       moodCheckinActivitiesResult,
-      pushSubscriptionsResult,
       sleepEntriesResult,
     ] = await Promise.all([
       query(
@@ -266,10 +250,8 @@ router.get('/export', async (_req: Request, res: Response) => {
                 theme,
                 system_light_theme,
                 system_dark_theme,
-                notifications_enabled,
-                COALESCE(mood_reminder_times, ARRAY[]::text[]) AS mood_reminder_times,
                 mood_icon_pack,
-          distance_unit,
+                distance_unit,
                 created_at,
                 updated_at
          FROM user_settings
@@ -333,13 +315,6 @@ router.get('/export', async (_req: Request, res: Response) => {
         [USER_ID]
       ),
       query(
-        `SELECT id, subscription_json, is_active, created_at, updated_at
-         FROM push_subscriptions
-         WHERE user_id = $1
-         ORDER BY created_at ASC`,
-        [USER_ID]
-      ),
-      query(
         `SELECT id, sleep_as_android_id, sleep_timezone,
                 started_at, ended_at, rating, comment,
                 is_pending, created_at, updated_at
@@ -368,7 +343,6 @@ router.get('/export', async (_req: Request, res: Response) => {
         moodActivities: activitiesResult.rows,
         moodCheckins: moodCheckinsResult.rows,
         moodCheckinActivities: moodCheckinActivitiesResult.rows,
-        pushSubscriptions: pushSubscriptionsResult.rows,
         sleepEntries: sleepEntriesResult.rows,
       },
     };
@@ -397,7 +371,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       moodActivities: { inserted: 0, skipped: 0 },
       moodCheckins: { inserted: 0, skipped: 0 },
       moodCheckinActivities: { inserted: 0, skipped: 0 },
-      pushSubscriptions: { inserted: 0, skipped: 0 },
       sleepEntries: { inserted: 0, skipped: 0 },
     };
     const errors: string[] = [];
@@ -421,24 +394,21 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
            user_id, dawarich_url, dawarich_api_key,
            immich_url, immich_api_key, maloja_url,
            theme, system_light_theme, system_dark_theme,
-           notifications_enabled, mood_reminder_times,
            mood_icon_pack, distance_unit
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::text[], $12, $13)
-         ON CONFLICT (user_id) DO UPDATE SET
-           dawarich_url = EXCLUDED.dawarich_url,
-           dawarich_api_key = EXCLUDED.dawarich_api_key,
-           immich_url = EXCLUDED.immich_url,
-           immich_api_key = EXCLUDED.immich_api_key,
-           maloja_url = EXCLUDED.maloja_url,
-           theme = COALESCE(EXCLUDED.theme, user_settings.theme),
-           system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
-           system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
-           notifications_enabled = COALESCE(EXCLUDED.notifications_enabled, user_settings.notifications_enabled),
-           mood_reminder_times = COALESCE(EXCLUDED.mood_reminder_times, user_settings.mood_reminder_times),
-           mood_icon_pack = COALESCE(EXCLUDED.mood_icon_pack, user_settings.mood_icon_pack),
-           distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
-           updated_at = NOW()`,
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT (user_id) DO UPDATE SET
+            dawarich_url = EXCLUDED.dawarich_url,
+            dawarich_api_key = EXCLUDED.dawarich_api_key,
+            immich_url = EXCLUDED.immich_url,
+            immich_api_key = EXCLUDED.immich_api_key,
+            maloja_url = EXCLUDED.maloja_url,
+            theme = COALESCE(EXCLUDED.theme, user_settings.theme),
+            system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
+            system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
+            mood_icon_pack = COALESCE(EXCLUDED.mood_icon_pack, user_settings.mood_icon_pack),
+            distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
+            updated_at = NOW()`,
         [
           USER_ID,
           toStringOrNull(s.dawarich_url),
@@ -449,8 +419,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           toStringOrNull(s.theme),
           toStringOrNull(s.system_light_theme),
           toStringOrNull(s.system_dark_theme),
-          typeof s.notifications_enabled === 'boolean' ? s.notifications_enabled : null,
-          asArray<string>(s.mood_reminder_times),
           toStringOrNull(s.mood_icon_pack),
           toStringOrNull(s.distance_unit),
         ]
@@ -713,40 +681,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
-    for (const subscription of backup.data.pushSubscriptions) {
-      if (!subscription?.id || !subscription.subscription_json) {
-        counts.pushSubscriptions.skipped += 1;
-        errors.push('Skipped push subscription with missing id/subscription_json');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO push_subscriptions (
-           id, user_id, subscription_json, is_active,
-           created_at, updated_at
-         )
-         VALUES (
-           $1, $2, $3::jsonb, COALESCE($4, true),
-           COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW())
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          subscription.id,
-          USER_ID,
-          JSON.stringify(subscription.subscription_json),
-          subscription.is_active,
-          subscription.created_at || null,
-          subscription.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.pushSubscriptions.inserted += 1;
-      } else {
-        counts.pushSubscriptions.skipped += 1;
-      }
-    }
-
     for (const sleepEntry of backup.data.sleepEntries) {
       if (!sleepEntry?.id || sleepEntry.sleep_as_android_id == null) {
         counts.sleepEntries.skipped += 1;
@@ -869,10 +803,9 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.mood_activity_groups = groupResult.rowCount ?? 0;
 
       const moodSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, mood_reminder_times, mood_icon_pack)
-         VALUES ($1, ARRAY[]::text[], 'emoji')
+        `INSERT INTO user_settings (user_id, mood_icon_pack)
+         VALUES ($1, 'emoji')
          ON CONFLICT (user_id) DO UPDATE SET
-           mood_reminder_times = EXCLUDED.mood_reminder_times,
            mood_icon_pack = EXCLUDED.mood_icon_pack,
            updated_at = NOW()`,
         [USER_ID]
@@ -881,12 +814,6 @@ router.post('/start-over', async (req: Request, res: Response) => {
     }
 
     if (resetIntegrationsSettings) {
-      const pushLogResult = await client.query('DELETE FROM push_delivery_logs WHERE user_id = $1', [USER_ID]);
-      counts.push_delivery_logs = pushLogResult.rowCount ?? 0;
-
-      const pushResult = await client.query('DELETE FROM push_subscriptions WHERE user_id = $1', [USER_ID]);
-      counts.push_subscriptions = pushResult.rowCount ?? 0;
-
       const integrationSettingsResult = await client.query(
         `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url)
          VALUES ($1, NULL, NULL, NULL, NULL, NULL)
@@ -913,13 +840,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.user_profile_reset = profileResult.rowCount ?? 0;
 
       const accountSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, theme, system_light_theme, system_dark_theme, notifications_enabled, distance_unit)
-         VALUES ($1, 'system', 'sunrise', 'midnight', true, 'metric')
+        `INSERT INTO user_settings (user_id, theme, system_light_theme, system_dark_theme, distance_unit)
+         VALUES ($1, 'system', 'sunrise', 'midnight', 'metric')
          ON CONFLICT (user_id) DO UPDATE SET
            theme = 'system',
            system_light_theme = 'sunrise',
            system_dark_theme = 'midnight',
-           notifications_enabled = true,
            distance_unit = 'metric',
            updated_at = NOW()`,
         [USER_ID]

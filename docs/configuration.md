@@ -12,8 +12,6 @@ cp .env.example .env
 
 - `DATABASE_URL`
 - `SESSION_SECRET`
-- `VAPID_PUBLIC_KEY`
-- `VAPID_PRIVATE_KEY`
 
 ## Security hardening
 
@@ -28,6 +26,4 @@ cp .env.example .env
 
 ## Notes
 
-- In development, VAPID keys can be generated automatically.
-- In production, startup fails if VAPID keys are missing.
 - This project is currently a single-user deployment model.

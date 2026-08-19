@@ -20,8 +20,6 @@ cp .env.example .env
 Set in `.env`:
 
 - `SESSION_SECRET`
-- `VAPID_PUBLIC_KEY`
-- `VAPID_PRIVATE_KEY`
 
 Recommended:
 

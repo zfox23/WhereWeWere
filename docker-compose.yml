@@ -33,8 +33,6 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY is required}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY is required}
     ports:
       - "${SERVER_PORT:-3001}:3001"
     healthcheck:

@@ -23,14 +23,6 @@ cp .env.example .env
 Edit `.env` and set:
 
 - `SESSION_SECRET` to a long random value
-- `VAPID_PUBLIC_KEY`
-- `VAPID_PRIVATE_KEY`
-
-Generate VAPID keys:
-
-```bash
-npx web-push generate-vapid-keys
-```
 
 ## 3. Start the stack
 

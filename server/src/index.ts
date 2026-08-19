@@ -18,10 +18,8 @@ import { timelineRouter } from './routes/timeline';
 import { importDaylioRouter } from './routes/import-daylio';
 import { importSleepAsAndroidRouter } from './routes/import-sleep-as-android';
 import { webhookSleepAsAndroidRouter } from './routes/webhook-sleep-as-android';
-import { pushRouter } from './routes/push';
 import { backupRouter } from './routes/backup';
 import { sleepEntriesRouter } from './routes/sleep-entries';
-import { sendMoodReminder } from './services/pushReminder';
 import { runMigrations } from './db/runMigrations';
 
 export function createApp() {
@@ -86,7 +84,6 @@ export function createApp() {
   app.use('/api/v1/import/sleep-as-android', importSleepAsAndroidRouter);
   app.use('/api/v1/webhook/sleep-as-android', webhookSleepAsAndroidRouter);
   app.use('/api/v1/sleep-entries', sleepEntriesRouter);
-  app.use('/api/v1/push', pushRouter);
   app.use('/api/v1/backup', backupRouter);
 
   // In production, serve client
@@ -103,16 +100,6 @@ export function createApp() {
 
 export async function startServer() {
   await runMigrations();
-
-  // Start mood reminder push scheduler
-  const reminderIntervalMs = 60 * 1000; // Check every minute
-  setInterval(async () => {
-    try {
-      await sendMoodReminder();
-    } catch (err) {
-      console.error('Error in mood reminder scheduler:', err);
-    }
-  }, reminderIntervalMs);
 
   const app = createApp();
   app.listen(config.port, () => {

@@ -1,15 +1,5 @@
 # Troubleshooting
 
-## Server fails on startup with VAPID error
-
-Cause: missing `VAPID_PUBLIC_KEY` or `VAPID_PRIVATE_KEY` in production.
-
-Fix:
-
-1. Generate keys with `npx web-push generate-vapid-keys`.
-2. Add both keys to `.env`.
-3. Restart with `docker compose up -d --build`.
-
 ## Browser requests fail with CORS errors
 
 Cause: browser origin not included in `CORS_ORIGINS`.

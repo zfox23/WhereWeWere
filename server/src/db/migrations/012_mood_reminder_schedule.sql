@@ -1,7 +1,3 @@
--- Add per-user daily mood reminder schedule (HH:MM 24-hour local time)
-ALTER TABLE user_settings
-ADD COLUMN IF NOT EXISTS mood_reminder_times TEXT[] DEFAULT ARRAY[]::TEXT[];
-
-UPDATE user_settings
-SET mood_reminder_times = ARRAY[]::TEXT[]
-WHERE mood_reminder_times IS NULL;
+-- (mood_reminder_times was added here historically for the notifications
+--  feature, which has since been removed; see 027_drop_notifications.sql)
+SELECT 1;

@@ -100,8 +100,6 @@ export default function Settings() {
         <AccountTab
           initialUsername={data.username || ''}
           initialDisplayName={data.display_name || ''}
-          initialNotificationsEnabled={data.notifications_enabled ?? true}
-          initialMoodReminderTimes={Array.isArray(data.mood_reminder_times) ? data.mood_reminder_times : []}
         />
       )}
 

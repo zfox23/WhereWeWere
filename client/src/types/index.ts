@@ -283,8 +283,6 @@ export interface UserSettings {
   theme: StoredThemePreference;
   system_light_theme: AppThemeId;
   system_dark_theme: AppThemeId;
-  notifications_enabled: boolean;
-  mood_reminder_times: string[];
   mood_icon_pack: 'emoji' | 'lucide' | 'nature';
   distance_unit: 'metric' | 'imperial';
 }
