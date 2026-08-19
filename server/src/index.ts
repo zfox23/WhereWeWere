@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
 import type { Request, Response, NextFunction } from 'express';
 import { config } from './config';
 import { checkinsRouter } from './routes/checkins';
@@ -85,15 +84,6 @@ export function createApp() {
   app.use('/api/v1/webhook/sleep-as-android', webhookSleepAsAndroidRouter);
   app.use('/api/v1/sleep-entries', sleepEntriesRouter);
   app.use('/api/v1/backup', backupRouter);
-
-  // In production, serve client
-  if (config.nodeEnv === 'production') {
-    const clientDist = path.resolve(__dirname, '../../client/dist');
-    app.use(express.static(clientDist));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(clientDist, 'index.html'));
-    });
-  }
 
   return app;
 }
