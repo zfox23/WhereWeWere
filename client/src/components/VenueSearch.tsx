@@ -720,7 +720,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         <form
           ref={customVenueFormRef}
           onSubmit={handleCreateCustom}
-          className="scroll-mt-[68px] border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50 dark:bg-gray-800"
+          className="scroll-mt-17 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50 dark:bg-gray-800"
         >
           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
             New Custom Venue
