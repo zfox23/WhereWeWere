@@ -199,6 +199,15 @@ export interface SleepEntry {
   updated_at?: string;
 }
 
+export interface TrackPoint {
+  /** Epoch milliseconds, or null if the point had no timestamp */
+  t: number | null;
+  /** Elevation in meters, or null */
+  ele: number | null;
+  /** Heart rate in bpm, or null */
+  hr: number | null;
+}
+
 export interface TrackEntry {
   id: string;
   user_id: string;
@@ -218,6 +227,8 @@ export interface TrackEntry {
   created_at: string;
   updated_at?: string;
   geometry?: [number, number][];
+  /** Per-point series (same order as `geometry`), null for older tracks */
+  points?: TrackPoint[] | null;
 }
 
 export interface SleepSummaryStats {

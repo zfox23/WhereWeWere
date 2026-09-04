@@ -145,6 +145,7 @@ router.get('/:id', async (req: Request, res: Response) => {
               t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
               t.avg_hr, t.max_hr, t.point_count,
               t.created_at, t.updated_at,
+              t.points,
               ST_AsGeoJSON(t.path) AS geojson
        FROM tracks t
        WHERE t.id = $1`,
@@ -167,6 +168,8 @@ router.get('/:id', async (req: Request, res: Response) => {
       // leave empty
     }
     api.geometry = coordinates;
+    api.points =
+      typeof row.points === 'string' ? JSON.parse(row.points) : row.points ?? null;
 
     res.json(api);
   } catch (err) {
@@ -213,14 +216,15 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
          user_id, name, timezone, started_at, ended_at,
          distance_m, elapsed_time_s, moving_time_s,
          elevation_gain_m, avg_speed_mps, max_speed_mps,
-         avg_hr, max_hr, point_count, file_hash, path
+         avg_hr, max_hr, point_count, file_hash, path, points
        )
        VALUES (
          $1, $2, $3, $4::timestamptz, $5::timestamptz,
          $6, $7, $8,
          $9, $10, $11,
          $12, $13, $14, $15,
-         ST_SetSRID(ST_GeomFromText($16), 4326)
+         ST_SetSRID(ST_GeomFromText($16), 4326),
+         $17::jsonb
        )
        RETURNING *`,
       [
@@ -240,6 +244,7 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
         stats.pointCount,
         fileHash,
         stats.wktLineString,
+        JSON.stringify(stats.points),
       ]
     );
 

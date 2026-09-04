@@ -48,3 +48,24 @@ export function formatDistance(distanceMeters: number, unit: DistanceUnit = 'met
   }
   return `${(distanceMeters / 1000).toFixed(1)}km`;
 }
+
+export function formatSpeed(mps: number, unit: DistanceUnit): string {
+  if (unit === 'imperial') {
+    const mph = mps * 2.2369362921;
+    return `${mph.toFixed(1)} mph`;
+  }
+  const kmh = mps * 3.6;
+  return `${kmh.toFixed(1)} km/h`;
+}
+
+/** Shorthand duration: "0", "45s", "45m", "1h", "1h 30m" */
+export function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return totalSeconds <= 0 ? '0' : `${Math.round(totalSeconds)}s`;
+  const totalMinutes = Math.round(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}

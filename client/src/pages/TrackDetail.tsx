@@ -7,6 +7,7 @@ import {
   Clock,
   Flag,
   Heart,
+  LineChart,
   Loader2,
   Mountain,
   Route,
@@ -17,7 +18,8 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { tracks, settings } from '../api/client';
 import type { TrackEntry } from '../types';
-import { formatDistance, type DistanceUnit } from '../utils/geo';
+import TrackGraph from '../components/TrackGraph';
+import { formatDistance, formatSpeed, type DistanceUnit } from '../utils/geo';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
 import { useTheme } from '../contexts/ThemeContext';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
@@ -39,15 +41,6 @@ function formatDuration(totalSeconds: number): string {
   if (hours === 0) return `${minutes}m`;
   if (minutes === 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
-}
-
-function formatSpeed(mps: number, unit: DistanceUnit): string {
-  if (unit === 'imperial') {
-    const mph = mps * 2.2369362921;
-    return `${mph.toFixed(1)} mph`;
-  }
-  const kmh = mps * 3.6;
-  return `${kmh.toFixed(1)} km/h`;
 }
 
 function formatDateTime(dateStr: string, timezone?: string | null): string {
@@ -99,6 +92,7 @@ function createPinIcon(color: string): L.DivIcon {
 
 const START_PIN = createPinIcon('#16a34a');
 const END_PIN = createPinIcon('#991b1b');
+const HOVER_PIN = createPinIcon('#0ea5e9');
 
 function FitToTrack({ coordinates }: { coordinates: [number, number][] }) {
   const map = useMap();
@@ -111,7 +105,13 @@ function FitToTrack({ coordinates }: { coordinates: [number, number][] }) {
   return null;
 }
 
-function TrackMap({ coordinates }: { coordinates: [number, number][] }) {
+function TrackMap({
+  coordinates,
+  hoverPosition,
+}: {
+  coordinates: [number, number][];
+  hoverPosition: [number, number] | null;
+}) {
   const { resolvedTheme } = useTheme();
   const center = useMemo<[number, number]>(() => {
     if (coordinates.length > 0) {
@@ -158,6 +158,7 @@ function TrackMap({ coordinates }: { coordinates: [number, number][] }) {
         <Marker position={end} icon={END_PIN}>
           <Popup>End</Popup>
         </Marker>
+        {hoverPosition && <Marker position={hoverPosition} icon={HOVER_PIN} interactive={false} />}
         <FitToTrack coordinates={coordinates} />
       </MapContainer>
     </div>
@@ -192,6 +193,7 @@ export default function TrackDetail() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   usePageTitle(track ? `Track: ${track.name}` : 'Track');
 
@@ -354,7 +356,34 @@ export default function TrackDetail() {
             </span>
           </span>
         </div>
-        <TrackMap coordinates={track.geometry || []} />
+        <TrackMap
+          coordinates={track.geometry || []}
+          hoverPosition={
+            hoverIndex != null && track.geometry?.[hoverIndex]
+              ? [track.geometry[hoverIndex][1], track.geometry[hoverIndex][0]]
+              : null
+          }
+        />
+      </div>
+
+      {/* Track graph */}
+      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-3">
+        <div className="flex items-center gap-2 px-1.5 pb-1">
+          <LineChart size={14} className="text-rose-500" />
+          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Track Graph</span>
+        </div>
+        {track.points && track.geometry && track.points.length === track.geometry.length ? (
+          <TrackGraph
+            coordinates={track.geometry}
+            points={track.points}
+            distanceUnit={distanceUnit}
+            onHoverPoint={setHoverIndex}
+          />
+        ) : (
+          <p className="px-1.5 pb-2 text-sm text-gray-400 dark:text-gray-500">
+            Per-point data isn't available for this track. Re-upload the GPX file to enable the graph.
+          </p>
+        )}
       </div>
 
       <div className="flex items-center gap-2 pb-20">

@@ -1,5 +1,15 @@
 import { XMLParser } from 'fast-xml-parser';
 
+/** Per-point series data stored alongside the track for graphing. */
+export interface GpxPointSeries {
+  /** Epoch milliseconds, or null if the point had no timestamp */
+  t: number | null;
+  /** Elevation in meters, or null */
+  ele: number | null;
+  /** Heart rate in bpm, or null */
+  hr: number | null;
+}
+
 export interface GpxPoint {
   lat: number;
   lon: number;
@@ -25,6 +35,8 @@ export interface TrackStats {
   wktLineString: string;
   /** GeoJSON coordinates [lon, lat][] for the map */
   coordinates: [number, number][];
+  /** Per-point series (same order as `coordinates`) for graphing */
+  points: GpxPointSeries[];
 }
 
 const EARTH_RADIUS_M = 6371000;
@@ -188,6 +200,12 @@ export function parseGpx(
     coordinates.map(([lon, lat]) => `${lon} ${lat}`).join(', ') +
     `)`;
 
+  const pointsSeries: GpxPointSeries[] = points.map((p) => ({
+    t: p.time ? p.time.getTime() : null,
+    ele: p.ele,
+    hr: p.hr,
+  }));
+
   return {
     name,
     startedAt,
@@ -203,5 +221,6 @@ export function parseGpx(
     pointCount: points.length,
     wktLineString,
     coordinates,
+    points: pointsSeries,
   };
 }
