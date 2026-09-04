@@ -12,6 +12,8 @@ import MoodCheckIn from './pages/MoodCheckIn';
 import MoodCheckInDetail from './pages/MoodCheckInDetail';
 import SleepCheckIn from './pages/SleepCheckIn';
 import SleepDetail from './pages/SleepDetail';
+import TrackCheckIn from './pages/TrackCheckIn';
+import TrackDetail from './pages/TrackDetail';
 
 export default function App() {
   return (
@@ -24,6 +26,8 @@ export default function App() {
         <Route path="/mood-check-in" element={<MoodCheckIn />} />
         <Route path="/sleep-check-in" element={<SleepCheckIn />} />
         <Route path="/sleep-entries/:id" element={<SleepDetail />} />
+        <Route path="/track-check-in" element={<TrackCheckIn />} />
+        <Route path="/tracks/:id" element={<TrackDetail />} />
         <Route path="/mood-checkins/:id" element={<MoodCheckInDetail />} />
         <Route path="/checkins/:id" element={<CheckInDetail />} />
         <Route path="/venues/:id" element={<VenueDetail />} />

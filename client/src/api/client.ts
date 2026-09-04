@@ -287,6 +287,30 @@ export const sleepEntries = {
     request<void>(`/sleep-entries/${id}`, { method: 'DELETE' }),
 };
 
+// Tracks
+export const tracks = {
+  list: (params?: Record<string, string>) =>
+    request<any[]>(`/tracks?${new URLSearchParams(params)}`),
+  get: (id: string) => request<any>(`/tracks/${id}`),
+  delete: (id: string) =>
+    request<{ message: string; id: string }>(`/tracks/${id}`, { method: 'DELETE' }),
+  upload: async (file: File, timezone?: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (timezone) form.append('timezone', timezone);
+    const res = await fetch(`${API_BASE}/tracks`, {
+      method: 'POST',
+      headers: withAuthHeader(),
+      body: form,
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(error.message || `Track upload failed: ${res.status}`);
+    }
+    return res.json();
+  },
+};
+
 // Sleep as Android webhook
 export const sleepWebhook = {
   stats: () => request<{ count: number }>('/webhook/sleep-as-android/stats'),

@@ -199,6 +199,27 @@ export interface SleepEntry {
   updated_at?: string;
 }
 
+export interface TrackEntry {
+  id: string;
+  user_id: string;
+  name: string;
+  timezone: string;
+  started_at: string;
+  ended_at: string;
+  distance_m: number;
+  elapsed_time_s: number;
+  moving_time_s: number;
+  elevation_gain_m: number;
+  avg_speed_mps: number;
+  max_speed_mps: number;
+  avg_hr: number | null;
+  max_hr: number | null;
+  point_count: number;
+  created_at: string;
+  updated_at?: string;
+  geometry?: [number, number][];
+}
+
 export interface SleepSummaryStats {
   total_sleeps: number;
   avg_duration_minutes: number | null;
@@ -243,7 +264,7 @@ export interface ReflectionYear {
 }
 
 export interface TimelineItem {
-  type: 'location' | 'mood' | 'sleep';
+  type: 'location' | 'mood' | 'sleep' | 'track';
   id: string;
   user_id: string;
   checked_in_at: string;
@@ -269,6 +290,13 @@ export interface TimelineItem {
   sleep_timezone?: string | null;
   sleep_rating?: number;
   sleep_comment?: string | null;
+  // Track fields
+  track_name?: string;
+  track_distance_m?: number;
+  track_timezone?: string | null;
+  track_started_at?: string;
+  track_ended_at?: string;
+  track_elapsed_time_s?: number;
 }
 
 export interface UserSettings {

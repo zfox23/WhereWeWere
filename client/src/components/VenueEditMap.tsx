@@ -306,7 +306,7 @@ export default function VenueEditMap({
             src={markerIcons.default.options.iconUrl}
             alt=""
             aria-hidden="true"
-            className="h-[41px] w-[25px]"
+            className="h-10.25 w-6.25"
           />
         </div>
       ) : null}

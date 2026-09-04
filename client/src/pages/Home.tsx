@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon } from 'lucide-react';
+import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon, Route } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
 import SleepCard from '../components/SleepCard';
+import TrackCard from '../components/TrackCard';
 import { MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
 import { usePageTitle } from '../utils/pageTitle';
 
@@ -35,7 +36,9 @@ function getLocalDateKey(item: TimelineItem): string {
     ? item.venue_timezone
     : item.type === 'mood'
       ? item.mood_timezone
-      : item.sleep_timezone;
+      : item.type === 'track'
+        ? item.track_timezone
+        : item.sleep_timezone;
   return new Date(dateValue).toLocaleDateString('en-CA', {
     ...(tz ? { timeZone: tz } : {}),
   });
@@ -90,10 +93,21 @@ function ExpandableFAB() {
 
       <div className={`fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end transition-all duration-200 ease-out ${expanded ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'}`} aria-hidden={!expanded}>
           <Link
+            to="/track-check-in"
+            onClick={() => setExpanded(false)}
+            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+            style={{ transitionDelay: expanded ? '0ms' : '100ms' }}
+            tabIndex={expanded ? 0 : -1}
+          >
+            <Route size={18} className="text-rose-500" />
+            Track
+            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">T</kbd>
+          </Link>
+          <Link
             to="/sleep-check-in"
             onClick={() => setExpanded(false)}
             className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '0ms' : '80ms' }}
+            style={{ transitionDelay: expanded ? '40ms' : '80ms' }}
             tabIndex={expanded ? 0 : -1}
           >
             <Moon size={18} className="text-indigo-500" />
@@ -147,11 +161,12 @@ export default function Home() {
   const newId = (location.state as { newId?: string } | null)?.newId ?? null;
   const newIdAnimatedRef = useRef<string | null>(null);
   const typeParam = searchParams.get('type') || '';
-  const timelineType = typeParam === 'location' || typeParam === 'mood' || typeParam === 'sleep' ? typeParam : '';
+  const timelineType = typeParam === 'location' || typeParam === 'mood' || typeParam === 'sleep' || typeParam === 'track' ? typeParam : '';
   const [items, setItems] = useState<TimelineItem[]>([]);
-  const [includeLocation, setIncludeLocation] = useState(() => timelineType !== 'mood' && timelineType !== 'sleep');
-  const [includeMood, setIncludeMood] = useState(() => timelineType !== 'location' && timelineType !== 'sleep');
-  const [includeSleep, setIncludeSleep] = useState(() => timelineType !== 'location' && timelineType !== 'mood');
+  const [includeLocation, setIncludeLocation] = useState(() => timelineType !== 'mood' && timelineType !== 'sleep' && timelineType !== 'track');
+  const [includeMood, setIncludeMood] = useState(() => timelineType !== 'location' && timelineType !== 'sleep' && timelineType !== 'track');
+  const [includeSleep, setIncludeSleep] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'track');
+  const [includeTrack, setIncludeTrack] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'sleep');
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [activityOptions, setActivityOptions] = useState<{ id: string; name: string; groupName: string }[]>([]);
@@ -234,9 +249,11 @@ export default function Home() {
   const moodFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter;
   const locationFiltersDisabled = hasMoodTypeFilter || hasSleepTypeFilter;
   const sleepFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter;
+  const trackFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter;
   const moodTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter;
   const locationTypeToggleDisabled = hasMoodTypeFilter || hasSleepTypeFilter;
   const sleepTypeToggleDisabled = hasMoodTypeFilter || hasLocationTypeFilter;
+  const trackTypeToggleDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter;
   const moodSectionDisabled = moodFiltersDisabled || !includeMood;
   const locationSectionDisabled = locationFiltersDisabled || !includeLocation;
   const sleepSectionDisabled = sleepFiltersDisabled;
@@ -246,6 +263,7 @@ export default function Home() {
       setIncludeLocation(false);
       setIncludeMood(true);
       setIncludeSleep(false);
+      setIncludeTrack(false);
     }
   }, [hasMoodTypeFilter]);
 
@@ -254,6 +272,7 @@ export default function Home() {
       setIncludeMood(false);
       setIncludeLocation(true);
       setIncludeSleep(false);
+      setIncludeTrack(false);
     }
   }, [hasLocationTypeFilter]);
 
@@ -262,6 +281,7 @@ export default function Home() {
       setIncludeLocation(false);
       setIncludeMood(false);
       setIncludeSleep(true);
+      setIncludeTrack(false);
     }
   }, [hasSleepTypeFilter]);
 
@@ -271,36 +291,50 @@ export default function Home() {
       setIncludeLocation(true);
       setIncludeMood(false);
       setIncludeSleep(false);
+      setIncludeTrack(false);
       return;
     }
     if (timelineType === 'mood') {
       setIncludeLocation(false);
       setIncludeMood(true);
       setIncludeSleep(false);
+      setIncludeTrack(false);
       return;
     }
     if (timelineType === 'sleep') {
       setIncludeLocation(false);
       setIncludeMood(false);
       setIncludeSleep(true);
+      setIncludeTrack(false);
+      return;
+    }
+    if (timelineType === 'track') {
+      setIncludeLocation(false);
+      setIncludeMood(false);
+      setIncludeSleep(false);
+      setIncludeTrack(true);
       return;
     }
     setIncludeLocation(true);
     setIncludeMood(true);
     setIncludeSleep(true);
+    setIncludeTrack(true);
   }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, timelineType]);
 
   useEffect(() => {
     if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter) return;
-    const nextType = includeLocation && includeMood && includeSleep
+    const allOn = includeLocation && includeMood && includeSleep && includeTrack;
+    const nextType = allOn
       ? ''
-      : includeLocation && !includeMood && !includeSleep
+      : includeLocation && !includeMood && !includeSleep && !includeTrack
         ? 'location'
-        : !includeLocation && includeMood && !includeSleep
+        : !includeLocation && includeMood && !includeSleep && !includeTrack
           ? 'mood'
-          : !includeLocation && !includeMood && includeSleep
+          : !includeLocation && !includeMood && includeSleep && !includeTrack
             ? 'sleep'
-            : '';
+            : !includeLocation && !includeMood && !includeSleep && includeTrack
+              ? 'track'
+              : '';
     if (nextType === timelineType) return;
 
     setSearchParams((prev) => {
@@ -312,7 +346,7 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
-  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, includeLocation, includeMood, includeSleep, setSearchParams, timelineType]);
+  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, includeLocation, includeMood, includeSleep, includeTrack, setSearchParams, timelineType]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
@@ -380,6 +414,8 @@ export default function Home() {
         navigate('/mood-check-in');
       } else if (e.key === 's' || e.key === 'S') {
         navigate('/sleep-check-in');
+      } else if (e.key === 't' || e.key === 'T') {
+        navigate('/track-check-in');
       }
     };
     document.addEventListener('keydown', handleKeyDown);
@@ -418,6 +454,7 @@ export default function Home() {
       setIncludeMood(true);
       setIncludeLocation(false);
       setIncludeSleep(false);
+      setIncludeTrack(false);
     }
   }, [setSearchParams]);
 
@@ -440,6 +477,7 @@ export default function Home() {
       setIncludeLocation(true);
       setIncludeMood(false);
       setIncludeSleep(false);
+      setIncludeTrack(false);
     }
   }, [setSearchParams]);
 
@@ -464,32 +502,41 @@ export default function Home() {
       setIncludeLocation(true);
       setIncludeMood(true);
       setIncludeSleep(true);
+      setIncludeTrack(true);
     }
   }, [setSearchParams]);
 
   const toggleLocationType = useCallback(() => {
     if (locationTypeToggleDisabled) return;
     setIncludeLocation((prev) => {
-      if (prev && !includeMood && !includeSleep) return prev;
+      if (prev && !includeMood && !includeSleep && !includeTrack) return prev;
       return !prev;
     });
-  }, [includeMood, includeSleep, locationTypeToggleDisabled]);
+  }, [includeMood, includeSleep, includeTrack, locationTypeToggleDisabled]);
 
   const toggleMoodType = useCallback(() => {
     if (moodTypeToggleDisabled) return;
     setIncludeMood((prev) => {
-      if (prev && !includeLocation && !includeSleep) return prev;
+      if (prev && !includeLocation && !includeSleep && !includeTrack) return prev;
       return !prev;
     });
-  }, [includeLocation, includeSleep, moodTypeToggleDisabled]);
+  }, [includeLocation, includeSleep, includeTrack, moodTypeToggleDisabled]);
 
   const toggleSleepType = useCallback(() => {
     if (sleepTypeToggleDisabled) return;
     setIncludeSleep((prev) => {
-      if (prev && !includeLocation && !includeMood) return prev;
+      if (prev && !includeLocation && !includeMood && !includeTrack) return prev;
       return !prev;
     });
-  }, [includeLocation, includeMood, sleepTypeToggleDisabled]);
+  }, [includeLocation, includeMood, includeTrack, sleepTypeToggleDisabled]);
+
+  const toggleTrackType = useCallback(() => {
+    if (trackTypeToggleDisabled) return;
+    setIncludeTrack((prev) => {
+      if (prev && !includeLocation && !includeMood && !includeSleep) return prev;
+      return !prev;
+    });
+  }, [includeLocation, includeMood, includeSleep, trackTypeToggleDisabled]);
 
   const handleDateInputChange = useCallback((key: 'from' | 'to', value: string) => {
     if (key === 'from') {
@@ -704,19 +751,21 @@ export default function Home() {
     setIncludeLocation(true);
     setIncludeMood(true);
     setIncludeSleep(true);
+    setIncludeTrack(true);
     setShowFilters(false);
   };
 
-  const hasTypeSelectionFilter = !includeLocation || !includeMood || !includeSleep;
+  const hasTypeSelectionFilter = !includeLocation || !includeMood || !includeSleep || !includeTrack;
   const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || sleepDuration || hasTypeSelectionFilter;
   const visibleItems = useMemo(
     () => items.filter((item) => {
       if (item.type === 'location') return includeLocation;
       if (item.type === 'mood') return includeMood;
       if (item.type === 'sleep') return includeSleep;
+      if (item.type === 'track') return includeTrack;
       return false;
     }),
-    [items, includeLocation, includeMood, includeSleep]
+    [items, includeLocation, includeMood, includeSleep, includeTrack]
   );
   const rawGrouped = groupByDate(visibleItems);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
@@ -743,9 +792,10 @@ export default function Home() {
   if (sleepDuration === 'lte6') filterPills.push({ label: 'Sleep: <=6h', key: 'sleep_duration' });
   if (sleepDuration === '6to8') filterPills.push({ label: 'Sleep: 6h-8h', key: 'sleep_duration' });
   if (sleepDuration === 'gte8') filterPills.push({ label: 'Sleep: >=8h', key: 'sleep_duration' });
-  if (includeLocation && !includeMood && !includeSleep) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
-  if (!includeLocation && includeMood && !includeSleep) filterPills.push({ label: 'Type: Mood only', key: 'type_mood_only' });
-  if (!includeLocation && !includeMood && includeSleep) filterPills.push({ label: 'Type: Sleep only', key: 'type_sleep_only' });
+  if (includeLocation && !includeMood && !includeSleep && !includeTrack) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
+  if (!includeLocation && includeMood && !includeSleep && !includeTrack) filterPills.push({ label: 'Type: Mood only', key: 'type_mood_only' });
+  if (!includeLocation && !includeMood && includeSleep && !includeTrack) filterPills.push({ label: 'Type: Sleep only', key: 'type_sleep_only' });
+  if (!includeLocation && !includeMood && !includeSleep && includeTrack) filterPills.push({ label: 'Type: Track only', key: 'type_track_only' });
 
   return (
     <div className="space-y-4">
@@ -802,12 +852,19 @@ export default function Home() {
                   } else if (pill.key === 'type_location_only') {
                     setIncludeMood(true);
                     setIncludeSleep(true);
+                    setIncludeTrack(true);
                   } else if (pill.key === 'type_mood_only') {
                     setIncludeLocation(true);
                     setIncludeSleep(true);
+                    setIncludeTrack(true);
                   } else if (pill.key === 'type_sleep_only') {
                     setIncludeLocation(true);
                     setIncludeMood(true);
+                    setIncludeTrack(true);
+                  } else if (pill.key === 'type_track_only') {
+                    setIncludeLocation(true);
+                    setIncludeMood(true);
+                    setIncludeSleep(true);
                   } else if (pill.key === 'sleep_duration') {
                     setSleepTypeFilter('');
                   } else {
@@ -1080,6 +1137,30 @@ export default function Home() {
                 </div>
               </div>
             </div>
+
+            <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${trackFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-rose-200 dark:border-rose-800/60 bg-rose-50/50 dark:bg-rose-950/20'}`}>
+              <div>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={includeTrack}
+                    disabled={trackTypeToggleDisabled}
+                    onChange={toggleTrackType}
+                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
+                  />
+                  <span>Track</span>
+                </label>
+              </div>
+              {trackFiltersDisabled ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Clear other type filters to enable track filtering.
+                </p>
+              ) : (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  GPX track uploads (rides, runs, etc.)
+                </p>
+              )}
+            </div>
           </div>
         </div>
         </div>
@@ -1219,6 +1300,10 @@ export default function Home() {
                           />
                         ) : item.type === 'sleep' ? (
                           <SleepCard
+                            item={item}
+                          />
+                        ) : item.type === 'track' ? (
+                          <TrackCard
                             item={item}
                           />
                         ) : (

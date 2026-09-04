@@ -31,6 +31,7 @@ router.get('/', async (req: Request, res: Response) => {
     const locationConditions: string[] = [];
     const moodConditions: string[] = [];
     const sleepConditions: string[] = [];
+    const trackConditions: string[] = [];
     let paramIndex = 1;
     const hasMoodTypeFilter = Boolean(req.query.mood || req.query.activity);
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
@@ -42,6 +43,7 @@ router.get('/', async (req: Request, res: Response) => {
       locationConditions.push(`c.user_id = $${paramIndex}`);
       moodConditions.push(`mc.user_id = $${paramIndex}`);
       sleepConditions.push(`se.user_id = $${paramIndex}`);
+      trackConditions.push(`t.user_id = $${paramIndex}`);
       params.push(user_id);
       paramIndex++;
     }
@@ -50,6 +52,7 @@ router.get('/', async (req: Request, res: Response) => {
       locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${paramIndex}::date`);
       moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date >= $${paramIndex}::date`);
       sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= $${paramIndex}::date`);
+      trackConditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= $${paramIndex}::date`);
       params.push(fromDate);
       paramIndex++;
     }
@@ -58,6 +61,7 @@ router.get('/', async (req: Request, res: Response) => {
       locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $${paramIndex}::date`);
       moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date <= $${paramIndex}::date`);
       sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date <= $${paramIndex}::date`);
+      trackConditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date <= $${paramIndex}::date`);
       params.push(toDate);
       paramIndex++;
     }
@@ -119,13 +123,16 @@ router.get('/', async (req: Request, res: Response) => {
       const searchQuery = req.query.q as string;
       locationConditions.push(
         `(c.search_vector @@ plainto_tsquery('english', $${paramIndex})
-         OR v.search_vector @@ plainto_tsquery('english', $${paramIndex}))`
+          OR v.search_vector @@ plainto_tsquery('english', $${paramIndex}))`
       );
       moodConditions.push(
         `mc.note ILIKE '%' || $${paramIndex} || '%'`
       );
       sleepConditions.push(
         `se.comment ILIKE '%' || $${paramIndex} || '%'`
+      );
+      trackConditions.push(
+        `t.name ILIKE '%' || $${paramIndex} || '%'`
       );
       params.push(searchQuery);
       paramIndex++;
@@ -139,6 +146,9 @@ router.get('/', async (req: Request, res: Response) => {
       : '';
     const sleepWhere = sleepConditions.length > 0
       ? `WHERE ${sleepConditions.join(' AND ')}`
+      : '';
+    const trackWhere = trackConditions.length > 0
+      ? `WHERE ${trackConditions.join(' AND ')}`
       : '';
 
     params.push(parseInt(limit as string, 10));
@@ -161,7 +171,13 @@ router.get('/', async (req: Request, res: Response) => {
         NULL::timestamptz AS sleep_ended_at,
         NULL::text AS sleep_timezone,
         NULL::numeric AS sleep_rating,
-        NULL::text AS sleep_comment
+        NULL::text AS sleep_comment,
+        NULL::text AS track_name,
+        NULL::numeric AS track_distance_m,
+        NULL::text AS track_timezone,
+        NULL::timestamptz AS track_started_at,
+        NULL::timestamptz AS track_ended_at,
+        NULL::bigint AS track_elapsed_time_s
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
@@ -192,10 +208,16 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::timestamptz AS sleep_ended_at,
              NULL::text AS sleep_timezone,
              NULL::numeric AS sleep_rating,
-             NULL::text AS sleep_comment
-      FROM mood_checkins mc
-      ${moodWhere}
-    `;
+             NULL::text AS sleep_comment,
+             NULL::text AS track_name,
+             NULL::numeric AS track_distance_m,
+             NULL::text AS track_timezone,
+             NULL::timestamptz AS track_started_at,
+             NULL::timestamptz AS track_ended_at,
+             NULL::bigint AS track_elapsed_time_s
+     FROM mood_checkins mc
+     ${moodWhere}
+   `;
 
     const sleepSelect = `
       SELECT 'sleep' AS type, se.id, se.user_id, NULL AS venue_id, se.comment AS notes,
@@ -207,9 +229,36 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
              se.sleep_as_android_id, se.started_at AS sleep_started_at,
              se.ended_at AS sleep_ended_at, se.sleep_timezone,
-             se.rating AS sleep_rating, se.comment AS sleep_comment
+             se.rating AS sleep_rating, se.comment AS sleep_comment,
+             NULL::text AS track_name,
+             NULL::numeric AS track_distance_m,
+             NULL::text AS track_timezone,
+             NULL::timestamptz AS track_started_at,
+             NULL::timestamptz AS track_ended_at,
+             NULL::bigint AS track_elapsed_time_s
       FROM sleep_entries se
       ${sleepWhere}
+    `;
+
+    const trackSelect = `
+      SELECT 'track' AS type, t.id, t.user_id, NULL AS venue_id, t.name AS notes,
+             t.started_at AS checked_in_at, t.created_at,
+             NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
+             NULL::text AS venue_timezone,
+             NULL AS venue_category,
+             NULL AS parent_venue_id, NULL AS parent_venue_name,
+             NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
+             NULL::bigint AS sleep_as_android_id,
+             NULL::timestamptz AS sleep_started_at,
+             NULL::timestamptz AS sleep_ended_at,
+             NULL::text AS sleep_timezone,
+             NULL::numeric AS sleep_rating,
+             NULL::text AS sleep_comment,
+             t.name AS track_name, t.distance_m AS track_distance_m, t.timezone AS track_timezone,
+             t.started_at AS track_started_at, t.ended_at AS track_ended_at,
+             t.elapsed_time_s AS track_elapsed_time_s
+      FROM tracks t
+      ${trackWhere}
     `;
 
     let sql: string;
@@ -244,6 +293,10 @@ router.get('/', async (req: Request, res: Response) => {
         UNION ALL
         (
           ${sleepSelect}
+        )
+        UNION ALL
+        (
+          ${trackSelect}
         )
         ORDER BY checked_in_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}

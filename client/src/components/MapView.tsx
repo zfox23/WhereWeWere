@@ -140,7 +140,7 @@ export default function MapView({
 
   return (
     <div
-      className={`relative z-0 w-full h-full min-h-[300px] rounded-lg overflow-hidden ${className}`}
+      className={`relative z-0 w-full h-full min-h-75 rounded-lg overflow-hidden ${className}`}
     >
       <MapContainer
         center={center}

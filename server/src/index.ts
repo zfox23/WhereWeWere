@@ -19,6 +19,7 @@ import { importSleepAsAndroidRouter } from './routes/import-sleep-as-android';
 import { webhookSleepAsAndroidRouter } from './routes/webhook-sleep-as-android';
 import { backupRouter } from './routes/backup';
 import { sleepEntriesRouter } from './routes/sleep-entries';
+import { tracksRouter } from './routes/tracks';
 import { runMigrations } from './db/runMigrations';
 
 export function createApp() {
@@ -83,6 +84,7 @@ export function createApp() {
   app.use('/api/v1/import/sleep-as-android', importSleepAsAndroidRouter);
   app.use('/api/v1/webhook/sleep-as-android', webhookSleepAsAndroidRouter);
   app.use('/api/v1/sleep-entries', sleepEntriesRouter);
+  app.use('/api/v1/tracks', tracksRouter);
   app.use('/api/v1/backup', backupRouter);
 
   return app;

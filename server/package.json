@@ -19,6 +19,7 @@
     "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "fast-xml-parser": "^5.11.1",
     "geo-tz": "^8.1.8",
     "multer": "^2.2.0",
     "pg": "^8.23.0",
