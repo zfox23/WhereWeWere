@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { parseGpx } from '../services/gpx';
 
 const router = Router();
@@ -177,12 +178,15 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST / - upload a .gpx file and create a track
 router.post('/', trackUpload.single('file'), async (req: Request, res: Response) => {
   const filePath = (req.file as any)?.path;
+  let fileHash = '';
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'A .gpx file is required' });
     }
 
-    const xml = fs.readFileSync(filePath, 'utf-8');
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+    const xml = fileBuffer.toString('utf-8');
     const fallbackName = (req.file as any).originalname
       .replace(/\.gpx$/i, '')
       .replace(/[_-]+/g, ' ')
@@ -190,19 +194,33 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
 
     const stats = parseGpx(xml, fallbackName);
 
+    // Reject duplicate uploads without touching the database
+    const existing = await query(
+      'SELECT id, name FROM tracks WHERE user_id = $1 AND file_hash = $2 LIMIT 1',
+      [USER_ID, fileHash]
+    );
+
+    if (existing.rows.length > 0) {
+      const dup = existing.rows[0];
+      return res.status(409).json({
+        error: 'This track is a duplicate',
+        duplicate: { id: dup.id, name: dup.name },
+      });
+    }
+
     const result = await query(
       `INSERT INTO tracks (
          user_id, name, timezone, started_at, ended_at,
          distance_m, elapsed_time_s, moving_time_s,
          elevation_gain_m, avg_speed_mps, max_speed_mps,
-         avg_hr, max_hr, point_count, path
+         avg_hr, max_hr, point_count, file_hash, path
        )
        VALUES (
          $1, $2, $3, $4::timestamptz, $5::timestamptz,
          $6, $7, $8,
          $9, $10, $11,
-         $12, $13, $14,
-         ST_SetSRID(ST_GeomFromText($15), 4326)
+         $12, $13, $14, $15,
+         ST_SetSRID(ST_GeomFromText($16), 4326)
        )
        RETURNING *`,
       [
@@ -220,6 +238,7 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
         stats.avgHr,
         stats.maxHr,
         stats.pointCount,
+        fileHash,
         stats.wktLineString,
       ]
     );
@@ -228,6 +247,18 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
   } catch (err: any) {
     if (err instanceof Error && /Invalid GPX|could not parse/.test(err.message)) {
       return res.status(400).json({ error: err.message });
+    }
+    // Race: the unique (user_id, file_hash) index caught a concurrent duplicate
+    if (err?.code === '23505') {
+      const existing = await query(
+        'SELECT id, name FROM tracks WHERE user_id = $1 AND file_hash = $2 LIMIT 1',
+        [USER_ID, fileHash]
+      );
+      const dup = existing.rows[0];
+      return res.status(409).json({
+        error: 'This track is a duplicate',
+        duplicate: dup ? { id: dup.id, name: dup.name } : undefined,
+      });
     }
     console.error('Error creating track:', err);
     res.status(500).json({ error: 'Failed to create track' });

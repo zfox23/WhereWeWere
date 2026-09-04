@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileUp, Loader2, Route, X } from 'lucide-react';
 import { tracks } from '../api/client';
 import { usePageTitle } from '../utils/pageTitle';
@@ -11,6 +11,7 @@ export default function TrackCheckIn() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<{ id: string; name: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -20,6 +21,7 @@ export default function TrackCheckIn() {
       return;
     }
     setError(null);
+    setDuplicate(null);
     setFile(f);
   }, []);
 
@@ -37,6 +39,7 @@ export default function TrackCheckIn() {
     if (!file || uploading) return;
     setUploading(true);
     setError(null);
+    setDuplicate(null);
     try {
       const result = await tracks.upload(
         file,
@@ -44,7 +47,12 @@ export default function TrackCheckIn() {
       );
       navigate('/', { state: { newId: result?.id } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to upload track');
+      const dup = (err as any)?.duplicate;
+      if (dup?.id && dup?.name) {
+        setDuplicate(dup);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to upload track');
+      }
       setUploading(false);
     }
   };
@@ -52,6 +60,7 @@ export default function TrackCheckIn() {
   const clearFile = () => {
     setFile(null);
     setError(null);
+    setDuplicate(null);
     if (inputRef.current) inputRef.current.value = '';
   };
 
@@ -141,6 +150,18 @@ export default function TrackCheckIn() {
           </button>
         )}
       </div>
+
+      {duplicate && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+          This track is a duplicate of{' '}
+          <Link
+            to={`/tracks/${duplicate.id}`}
+            className="font-semibold underline underline-offset-2 hover:text-red-900 dark:hover:text-red-100"
+          >
+            {duplicate.name}
+          </Link>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">

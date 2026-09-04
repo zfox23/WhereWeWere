@@ -304,12 +304,27 @@ export const tracks = {
       body: form,
     });
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.message || `Track upload failed: ${res.status}`);
+      const error = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (res.status === 409 && error.duplicate) {
+        const dup = error.duplicate as { id: string; name: string };
+        const dupError = new Error(
+          (error.message as string) || (error.error as string) || 'This track is a duplicate'
+        );
+        dupError.name = 'DuplicateTrackError';
+        (dupError as any).duplicate = dup;
+        throw dupError;
+      }
+      throw new Error(
+        (error.message as string) || (error.error as string) || `Track upload failed: ${res.status}`
+      );
     }
     return res.json();
   },
 };
+
+export interface DuplicateTrackError extends Error {
+  duplicate: { id: string; name: string };
+}
 
 // Sleep as Android webhook
 export const sleepWebhook = {
