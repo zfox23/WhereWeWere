@@ -79,6 +79,27 @@ router.post('/', async (req: Request, res: Response) => {
       // Real CSV-exported IDs are tiny sequential integers; ms timestamps
       // are in the 10^12 range so there is no overlap.
       const androidId = startTime.getTime();
+
+      // Reconciliation: Sleep as Android can re-send sleep_tracking_started
+      // mid-session (watch reconnect, app restart, phone unlock). Each start
+      // is keyed by its own start-time, so the app's single final
+      // sleep_tracking_stopped will only reference the LAST start — abandoning
+      // any earlier pending sessions, which would otherwise stay open forever
+      // and render as "Slept for 0m" in the timeline. A new start supersedes
+      // any still-pending session, so delete the abandoned ones.
+      const abandoned = await query(
+        `DELETE FROM sleep_entries
+         WHERE user_id = $1 AND is_pending = TRUE`,
+        [USER_ID]
+      );
+      if (abandoned.rowCount) {
+        console.warn(
+          `Sleep webhook: new tracking start at ${startTime.toISOString()} ` +
+          `abandoned ${abandoned.rowCount} still-pending session(s); ` +
+          `deleting them as superseded.`
+        );
+      }
+
       const timezone = await inferSleepTimezone(startTime);
 
       await query(
@@ -97,22 +118,31 @@ router.post('/', async (req: Request, res: Response) => {
       const startTime = parseWebhookTimestamp(value1);
       const endTime = parseWebhookTimestamp(value2) ?? new Date();
 
-      if (startTime) {
-        // Close the specific pending session opened by this start time.
-        const androidId = startTime.getTime();
-        await query(
-          `UPDATE sleep_entries
-           SET ended_at   = $2,
-               is_pending = FALSE,
-               updated_at = NOW()
-           WHERE user_id = $1
-             AND sleep_as_android_id = $3
-             AND is_pending = TRUE`,
-          [USER_ID, endTime.toISOString(), androidId]
-        );
+      const targeted = startTime
+        ? await query(
+            `UPDATE sleep_entries
+             SET ended_at   = $2,
+                 is_pending = FALSE,
+                 updated_at = NOW()
+             WHERE user_id = $1
+               AND sleep_as_android_id = $3
+               AND is_pending = TRUE`,
+            [USER_ID, endTime.toISOString(), startTime.getTime()]
+          )
+        : { rowCount: 0 };
+
+      if (targeted.rowCount) {
+        // Closed the specific pending session opened by this start time.
       } else {
-        // No start-time value – close the most recent open session.
-        await query(
+        // The stop's start-time didn't match any pending session (either the
+        // app re-sent starts and abandoned this one, or the start event never
+        // arrived). Never let a stop be silently dropped: fall back to
+        // closing the most recent open session.
+        console.warn(
+          `Sleep webhook: stop with start=${startTime ? startTime.toISOString() : 'none'} ` +
+          `matched no pending session; falling back to the most recent pending one.`
+        );
+        const fallback = await query(
           `UPDATE sleep_entries
            SET ended_at   = $2,
                is_pending = FALSE,
@@ -125,6 +155,9 @@ router.post('/', async (req: Request, res: Response) => {
            )`,
           [USER_ID, endTime.toISOString()]
         );
+        if (!fallback.rowCount) {
+          console.warn('Sleep webhook: no pending session existed to close at all.');
+        }
       }
     }
     // All other events are logged but require no sleep_entry mutation.
