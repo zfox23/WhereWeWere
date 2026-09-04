@@ -45,7 +45,7 @@ export default function TrackCheckIn() {
         file,
         Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
       );
-      navigate('/', { state: { newId: result?.id } });
+      navigate(`/tracks/${result.id}`);
     } catch (err) {
       const dup = (err as any)?.duplicate;
       if (dup?.id && dup?.name) {
