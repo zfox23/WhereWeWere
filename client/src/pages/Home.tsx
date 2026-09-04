@@ -1305,6 +1305,10 @@ export default function Home() {
                         ) : item.type === 'track' ? (
                           <TrackCard
                             item={item}
+                            immichUrl={immichUrl}
+                            photos={photosMap[item.id] ?? null}
+                            scrobbles={dedupedScrobblesMap[item.id]}
+                            malojaUrl={malojaUrl}
                           />
                         ) : (
                           <CheckInCard
