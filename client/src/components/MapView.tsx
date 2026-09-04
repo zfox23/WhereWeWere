@@ -139,7 +139,9 @@ export default function MapView({
   }, [resolvedTheme]);
 
   return (
-    <div className={`w-full h-full min-h-[300px] rounded-lg overflow-hidden ${className}`}>
+    <div
+      className={`relative z-0 w-full h-full min-h-[300px] rounded-lg overflow-hidden ${className}`}
+    >
       <MapContainer
         center={center}
         zoom={zoom}

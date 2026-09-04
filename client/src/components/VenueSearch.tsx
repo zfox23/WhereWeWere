@@ -63,6 +63,8 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [customAddressError, setCustomAddressError] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const customVenueFormRef = useRef<HTMLFormElement | null>(null);
+  const customNameInputRef = useRef<HTMLInputElement | null>(null);
   const requestIdRef = useRef(0);
   const customAddressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const customAddressRequestIdRef = useRef(0);
@@ -162,6 +164,28 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     setCustomLat((prev) => prev ?? coords.lat);
     setCustomLng((prev) => prev ?? coords.lon);
   }, [coords]);
+
+  // When the custom venue form opens, scroll it to the top of the viewport
+  // (below the sticky header, via scroll-mt on the form) and focus the name
+  // field.
+  //
+  // Note: smooth scrollIntoView works correctly here because .app-shell uses
+  // `overflow: clip` (not `overflow: hidden`). A hidden-overflow ancestor is a
+  // scroll container, so Chrome's smooth scrollIntoView can scroll *that*
+  // box instead of the viewport, stranding the page with the top unreachable.
+  // `overflow: clip` clips the decorative background the same way but is not
+  // scrollable, so scrollIntoView targets the real page scroll.
+  useEffect(() => {
+    if (!showCreateForm) return;
+    const frame = requestAnimationFrame(() => {
+      const form = customVenueFormRef.current;
+      if (form) {
+        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      customNameInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showCreateForm]);
 
   useEffect(() => {
     if (!showCreateForm) {
@@ -541,7 +565,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               onMarkerSelect={handleMapMarkerSelect}
               onMarkerClick={handleMapMarkerConfirm}
               onMapClick={handleMapClick}
-              className="h-80 w-full"
+              className="h-96 w-full"
             />
           </div>
         ) : null}
@@ -694,17 +718,19 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         </button>
       ) : (
         <form
+          ref={customVenueFormRef}
           onSubmit={handleCreateCustom}
-          className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50 dark:bg-gray-800"
+          className="scroll-mt-[68px] border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3 bg-gray-50 dark:bg-gray-800"
         >
           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
             New Custom Venue
           </h4>
           <input
+            ref={customNameInputRef}
             type="text"
             value={customName}
             onChange={(e) => setCustomName(e.target.value)}
-            placeholder="Venue name *"
+            placeholder="Venue name*"
             required
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 dark:text-gray-100 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
@@ -746,16 +772,20 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                   {customLat.toFixed(6)}, {customLng.toFixed(6)}
                 </span>
               </div>
-              <div className="h-56 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+              <div className="h-96 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
                 <VenueEditMap
                   initialCenter={[customLat, customLng]}
                   viewCenter={customMapCenter}
                   zoom={15}
+                  onMapClick={(lat, lng) => {
+                    setCustomLat(lat);
+                    setCustomLng(lng);
+                  }}
                   onChange={(lat, lng) => {
                     setCustomLat(lat);
                     setCustomLng(lng);
                   }}
-                  className="h-56 w-full"
+                  className="h-96 w-full"
                 />
               </div>
             </div>

@@ -209,7 +209,7 @@ export default function VenueEditMap({
   className = '',
 }: Props) {
   const { resolvedTheme } = useTheme();
-  const showCenterPinOverlay = !onMapClick;
+  const showCenterPinOverlay = !onMarkerSelect;
   const markerIcons = useMemo(() => {
     const palette = MARKER_COLORS[resolvedTheme];
     return {
@@ -228,7 +228,7 @@ export default function VenueEditMap({
   ), [circleColors.markerBackground, circleColors.markerBorder, circleColors.stroke]);
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative z-0 ${className}`}>
       <MapContainer
         center={initialCenter}
         zoom={zoom}
@@ -310,13 +310,6 @@ export default function VenueEditMap({
           />
         </div>
       ) : null}
-
-      <div
-        className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-md bg-black/60 px-2 py-0.5 text-[11px] text-white backdrop-blur-sm"
-        style={{ zIndex: 1000 }}
-      >
-        {onMapClick ? 'Tap to move search center' : 'Drag map to move pin'}
-      </div>
     </div>
   );
 }

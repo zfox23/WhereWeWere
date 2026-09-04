@@ -169,7 +169,15 @@ html[data-bg-gradient="flat"] {
   .app-shell {
     position: relative;
     isolation: isolate;
-    overflow: hidden;
+    /*
+     * Use `overflow: clip` instead of `overflow: hidden`. Both clip the
+     * oversize decorative ::before/::after backgrounds identically, but
+     * `hidden` turns the element into a scroll container, which breaks
+     * smooth `scrollIntoView` (Chrome scrolls the hidden-overflow box
+     * instead of the viewport, leaving the page stuck with its top
+     * content unreachable). `clip` is not a scroll container.
+     */
+    overflow: clip;
     background-color: rgb(var(--app-bg-mid));
     background-image: var(--_bg-p) var(--_bg-g);
     background-size: var(--_bg-p-sz) var(--_bg-g-sz);

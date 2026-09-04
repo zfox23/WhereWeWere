@@ -19,7 +19,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell min-h-screen pb-16 md:pb-0 flex flex-col">
       {/* Top nav — glass header */}
-      <header className="sticky top-0 z-50 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-b border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3">
+      <header className="sticky top-0 z-60 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-b border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/" className="text-xl font-bold text-[#ea580c]">
             WhereWeWere
@@ -51,7 +51,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
 
       {/* Bottom nav (mobile) — glass */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-t border-white/40 dark:border-gray-700/40 z-50">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border-t border-white/40 dark:border-gray-700/40 z-60">
         <div className="flex justify-around">
           {navItems.map(({ to, label, icon: Icon }) => (
             <Link
