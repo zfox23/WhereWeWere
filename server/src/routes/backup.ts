@@ -118,6 +118,27 @@ interface BackupMoodCheckinActivity {
   activity_id: string;
 }
 
+interface BackupTrack {
+  id: string;
+  name: string;
+  timezone: string;
+  started_at: string;
+  ended_at: string;
+  distance_m: number;
+  elapsed_time_s: number;
+  moving_time_s: number;
+  elevation_gain_m: number;
+  avg_speed_mps: number;
+  max_speed_mps: number;
+  avg_hr: number | null;
+  max_hr: number | null;
+  point_count: number;
+  file_hash: string | null;
+  geometry: [number, number][] | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface BackupSleepEntry {
   id: string;
   sleep_as_android_id: number;
@@ -146,6 +167,7 @@ interface BackupV1 {
     moodCheckins: BackupMoodCheckin[];
     moodCheckinActivities: BackupMoodCheckinActivity[];
     sleepEntries: BackupSleepEntry[];
+    tracks: BackupTrack[];
   };
 }
 
@@ -219,6 +241,7 @@ function ensureV1Backup(raw: unknown): BackupV1 {
       moodCheckins: asArray<BackupMoodCheckin>(migratedData.moodCheckins),
       moodCheckinActivities: asArray<BackupMoodCheckinActivity>(migratedData.moodCheckinActivities),
       sleepEntries: asArray<BackupSleepEntry>(migratedData.sleepEntries),
+      tracks: asArray<BackupTrack>(migratedData.tracks),
     },
   };
 }
@@ -236,6 +259,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       moodCheckinsResult,
       moodCheckinActivitiesResult,
       sleepEntriesResult,
+      tracksResult,
     ] = await Promise.all([
       query(
         `SELECT id, username, email, display_name, created_at, updated_at
@@ -323,7 +347,52 @@ router.get('/export', async (_req: Request, res: Response) => {
          ORDER BY started_at ASC`,
         [USER_ID]
       ),
+      query(
+        `SELECT t.id, t.name, t.timezone,
+                t.started_at, t.ended_at,
+                t.distance_m, t.elapsed_time_s, t.moving_time_s,
+                t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
+                t.avg_hr, t.max_hr, t.point_count, t.file_hash,
+                ST_AsGeoJSON(t.path) AS geojson,
+                t.created_at, t.updated_at
+         FROM tracks t
+         WHERE t.user_id = $1
+         ORDER BY t.started_at ASC`,
+        [USER_ID]
+      ),
     ]);
+
+    const tracks = tracksResult.rows.map((row: any) => {
+      let geometry: [number, number][] | null = null;
+      try {
+        const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
+        if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
+          geometry = gj.coordinates;
+        }
+      } catch {
+        // leave null
+      }
+      return {
+        id: row.id,
+        name: row.name,
+        timezone: row.timezone,
+        started_at: row.started_at,
+        ended_at: row.ended_at,
+        distance_m: Number(row.distance_m),
+        elapsed_time_s: Number(row.elapsed_time_s),
+        moving_time_s: Number(row.moving_time_s),
+        elevation_gain_m: Number(row.elevation_gain_m),
+        avg_speed_mps: Number(row.avg_speed_mps),
+        max_speed_mps: Number(row.max_speed_mps),
+        avg_hr: row.avg_hr == null ? null : Number(row.avg_hr),
+        max_hr: row.max_hr == null ? null : Number(row.max_hr),
+        point_count: Number(row.point_count),
+        file_hash: row.file_hash ?? null,
+        geometry,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+    });
 
     const payload: BackupV1 = {
       format: BACKUP_FORMAT,
@@ -344,6 +413,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         moodCheckins: moodCheckinsResult.rows,
         moodCheckinActivities: moodCheckinActivitiesResult.rows,
         sleepEntries: sleepEntriesResult.rows,
+        tracks,
       },
     };
 
@@ -372,6 +442,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       moodCheckins: { inserted: 0, skipped: 0 },
       moodCheckinActivities: { inserted: 0, skipped: 0 },
       sleepEntries: { inserted: 0, skipped: 0 },
+      tracks: { inserted: 0, skipped: 0 },
     };
     const errors: string[] = [];
 
@@ -721,6 +792,73 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         counts.sleepEntries.inserted += 1;
       } else {
         counts.sleepEntries.skipped += 1;
+      }
+    }
+
+    for (const track of backup.data.tracks) {
+      if (!track?.id || !track.name) {
+        counts.tracks.skipped += 1;
+        errors.push('Skipped track with missing id/name');
+        continue;
+      }
+
+      const coords = (Array.isArray(track.geometry) ? track.geometry : [])
+        .filter((c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]));
+      if (coords.length < 2) {
+        counts.tracks.skipped += 1;
+        errors.push(`Skipped track ${track.id} with insufficient geometry`);
+        continue;
+      }
+
+      const wktLineString = `LINESTRING(${coords.map(([lng, lat]) => `${lng} ${lat}`).join(', ')})`;
+
+      const result = await client.query(
+        `INSERT INTO tracks (
+           id, user_id, name, timezone, started_at, ended_at,
+           distance_m, elapsed_time_s, moving_time_s,
+           elevation_gain_m, avg_speed_mps, max_speed_mps,
+           avg_hr, max_hr, point_count, file_hash,
+           created_at, updated_at,
+           path
+         )
+         VALUES (
+           $1, $2, $3, $4,
+           COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()),
+           $7, $8, $9,
+           $10, $11, $12,
+           $13, $14, $15,
+           $16,
+           COALESCE($17::timestamptz, NOW()), COALESCE($18::timestamptz, NOW()),
+           ST_SetSRID(ST_GeomFromText($19), 4326)
+         )
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          track.id,
+          USER_ID,
+          track.name,
+          track.timezone || 'UTC',
+          track.started_at || null,
+          track.ended_at || null,
+          toNumber(track.distance_m),
+          Math.round(toNumber(track.elapsed_time_s)),
+          Math.round(toNumber(track.moving_time_s)),
+          toNumber(track.elevation_gain_m),
+          toNumber(track.avg_speed_mps),
+          toNumber(track.max_speed_mps),
+          track.avg_hr == null ? null : Math.round(toNumber(track.avg_hr)),
+          track.max_hr == null ? null : Math.round(toNumber(track.max_hr)),
+          Math.round(toNumber(track.point_count)),
+          toStringOrNull(track.file_hash),
+          track.created_at || null,
+          track.updated_at || null,
+          wktLineString,
+        ]
+      );
+
+      if (result.rowCount === 1) {
+        counts.tracks.inserted += 1;
+      } else {
+        counts.tracks.skipped += 1;
       }
     }
 
