@@ -93,21 +93,10 @@ function ExpandableFAB() {
 
       <div className={`fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end transition-all duration-200 ease-out ${expanded ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'}`} aria-hidden={!expanded}>
           <Link
-            to="/track-check-in"
-            onClick={() => setExpanded(false)}
-            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '0ms' : '100ms' }}
-            tabIndex={expanded ? 0 : -1}
-          >
-            <Route size={18} className="text-rose-500" />
-            Track
-            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">T</kbd>
-          </Link>
-          <Link
             to="/sleep-check-in"
             onClick={() => setExpanded(false)}
             className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '40ms' : '80ms' }}
+            style={{ transitionDelay: expanded ? '0ms' : '100ms' }}
             tabIndex={expanded ? 0 : -1}
           >
             <Moon size={18} className="text-indigo-500" />
@@ -115,26 +104,37 @@ function ExpandableFAB() {
             <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">S</kbd>
           </Link>
           <Link
-            to="/mood-check-in"
+            to="/track-check-in"
             onClick={() => setExpanded(false)}
             className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '40ms' : '40ms' }}
+            style={{ transitionDelay: expanded ? '40ms' : '80ms' }}
             tabIndex={expanded ? 0 : -1}
           >
-            <Smile size={18} className="text-green-500" />
-            Mood
-            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">M</kbd>
+            <Route size={18} className="text-rose-500" />
+            Track
+            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">T</kbd>
           </Link>
           <Link
             to="/check-in"
             onClick={() => setExpanded(false)}
             className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '80ms' : '0ms' }}
+            style={{ transitionDelay: expanded ? '40ms' : '40ms' }}
             tabIndex={expanded ? 0 : -1}
           >
             <MapPin size={18} className="text-primary-500" />
             Location
             <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">L</kbd>
+          </Link>
+          <Link
+            to="/mood-check-in"
+            onClick={() => setExpanded(false)}
+            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+            style={{ transitionDelay: expanded ? '80ms' : '0ms' }}
+            tabIndex={expanded ? 0 : -1}
+          >
+            <Smile size={18} className="text-green-500" />
+            Mood
+            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">M</kbd>
           </Link>
       </div>
 
