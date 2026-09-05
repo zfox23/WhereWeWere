@@ -144,7 +144,7 @@ function TrackMap({
         center={center}
         zoom={13}
         scrollWheelZoom={true}
-        attributionControl={true}
+        attributionControl={false}
         className="w-full h-full"
         style={{ minHeight: '360px', height: '100%' }}
       >

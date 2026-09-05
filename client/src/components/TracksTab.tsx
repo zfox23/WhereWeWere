@@ -251,11 +251,26 @@ function TrackRankedList({
 function ActivityBreakdown({
   activities,
   distanceUnit,
+  from,
+  to,
 }: {
   activities: { type: string; count: number; distanceM: number }[];
   distanceUnit: DistanceUnit;
+  from?: string;
+  to?: string;
 }) {
   const max = Math.max(...activities.map((a) => a.count), 1);
+
+  const openOnHome = (type: string) => {
+    const params = new URLSearchParams();
+    params.set('type', 'track');
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    // "Other" is the bucket for tracks without an activity type, which the
+    // track_activity filter (ILIKE) cannot match, so omit it for that row.
+    if (type !== 'Other') params.set('track_activity', type);
+    window.open(`/?${params.toString()}`, '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
@@ -266,9 +281,18 @@ function ActivityBreakdown({
         <div className="space-y-2">
           {activities.map((activity) => (
             <div key={activity.type} className="flex items-center gap-2">
-              <span className="text-xs text-gray-600 dark:text-gray-300 w-24 truncate" title={activity.type}>
+              <button
+                type="button"
+                onClick={() => openOnHome(activity.type)}
+                title={
+                  activity.type === 'Other'
+                    ? 'View all tracks in this period on Home'
+                    : `View ${activity.type} tracks in this period on Home`
+                }
+                className="text-xs w-24 truncate text-left text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
+              >
                 {activity.type}
-              </span>
+              </button>
               <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
                 <div
                   className="h-full bg-rose-500 rounded-full"
@@ -551,7 +575,12 @@ export function TracksTab() {
           valueLabel={(track) => formatSpeed(track.avg_speed_mps, distanceUnit)}
           barValue={(track) => Number(track.avg_speed_mps) || 0}
         />
-        <ActivityBreakdown activities={summary.activities} distanceUnit={distanceUnit} />
+        <ActivityBreakdown
+          activities={summary.activities}
+          distanceUnit={distanceUnit}
+          from={visibleRange.from}
+          to={visibleRange.to}
+        />
       </div>
     </div>
   );
