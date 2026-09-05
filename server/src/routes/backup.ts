@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { pool, query } from '../db';
+import { deleteStoredTrack } from '../services/trackFiles';
 
 const router = Router();
 
@@ -118,9 +119,16 @@ interface BackupMoodCheckinActivity {
   activity_id: string;
 }
 
+interface BackupTrackPoint {
+  t: number | null;
+  ele: number | null;
+  hr: number | null;
+}
+
 interface BackupTrack {
   id: string;
   name: string;
+  activity_type: string | null;
   timezone: string;
   started_at: string;
   ended_at: string;
@@ -135,6 +143,7 @@ interface BackupTrack {
   point_count: number;
   file_hash: string | null;
   geometry: [number, number][] | null;
+  points: BackupTrackPoint[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -348,12 +357,13 @@ router.get('/export', async (_req: Request, res: Response) => {
         [USER_ID]
       ),
       query(
-        `SELECT t.id, t.name, t.timezone,
+        `SELECT t.id, t.name, t.activity_type, t.timezone,
                 t.started_at, t.ended_at,
                 t.distance_m, t.elapsed_time_s, t.moving_time_s,
                 t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
                 t.avg_hr, t.max_hr, t.point_count, t.file_hash,
                 ST_AsGeoJSON(t.path) AS geojson,
+                t.points,
                 t.created_at, t.updated_at
          FROM tracks t
          WHERE t.user_id = $1
@@ -372,9 +382,21 @@ router.get('/export', async (_req: Request, res: Response) => {
       } catch {
         // leave null
       }
+      const points = Array.isArray(row.points)
+        ? row.points
+        : row.points == null
+          ? null
+          : (() => {
+              try {
+                return JSON.parse(row.points);
+              } catch {
+                return null;
+              }
+            })();
       return {
         id: row.id,
         name: row.name,
+        activity_type: row.activity_type ?? null,
         timezone: row.timezone,
         started_at: row.started_at,
         ended_at: row.ended_at,
@@ -389,6 +411,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         point_count: Number(row.point_count),
         file_hash: row.file_hash ?? null,
         geometry,
+        points: Array.isArray(points) ? points : null,
         created_at: row.created_at,
         updated_at: row.updated_at,
       };
@@ -812,30 +835,35 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
 
       const wktLineString = `LINESTRING(${coords.map(([lng, lat]) => `${lng} ${lat}`).join(', ')})`;
 
+      const pointsJson = Array.isArray(track.points) && track.points.length > 0
+        ? JSON.stringify(track.points)
+        : null;
+
       const result = await client.query(
         `INSERT INTO tracks (
-           id, user_id, name, timezone, started_at, ended_at,
+           id, user_id, name, activity_type, timezone, started_at, ended_at,
            distance_m, elapsed_time_s, moving_time_s,
            elevation_gain_m, avg_speed_mps, max_speed_mps,
            avg_hr, max_hr, point_count, file_hash,
            created_at, updated_at,
-           path
+           path, points
          )
          VALUES (
-           $1, $2, $3, $4,
-           COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()),
-           $7, $8, $9,
-           $10, $11, $12,
-           $13, $14, $15,
-           $16,
-           COALESCE($17::timestamptz, NOW()), COALESCE($18::timestamptz, NOW()),
-           ST_SetSRID(ST_GeomFromText($19), 4326)
+           $1, $2, $3, $4, $5,
+           COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
+           $8, $9, $10,
+           $11, $12, $13,
+           $14, $15, $16, $17,
+           COALESCE($18::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()),
+           ST_SetSRID(ST_GeomFromText($20), 4326),
+           $21::jsonb
          )
          ON CONFLICT (id) DO NOTHING`,
         [
           track.id,
           USER_ID,
           track.name,
+          toStringOrNull(track.activity_type),
           track.timezone || 'UTC',
           track.started_at || null,
           track.ended_at || null,
@@ -852,6 +880,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           track.created_at || null,
           track.updated_at || null,
           wktLineString,
+          pointsJson,
         ]
       );
 
@@ -900,11 +929,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
     const deleteVenueCheckins = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
     const deleteMoodCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
     const deleteSleepEntries = deleteAllCheckins || Boolean(rawOptions.delete_sleep_entries);
+    const deleteTracks = Boolean(rawOptions.delete_tracks);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
     const resetMoodSettings = Boolean(rawOptions.reset_mood_settings);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
+    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !deleteTracks && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -934,6 +964,19 @@ router.post('/start-over', async (req: Request, res: Response) => {
     if (deleteSleepEntries) {
       const sleepEntriesResult = await client.query('DELETE FROM sleep_entries WHERE user_id = $1', [USER_ID]);
       counts.sleep_entries = sleepEntriesResult.rowCount ?? 0;
+    }
+
+    if (deleteTracks) {
+      const tracksResult = await client.query('DELETE FROM tracks WHERE user_id = $1 RETURNING id', [USER_ID]);
+      counts.tracks = tracksResult.rowCount ?? 0;
+
+      // Remove each deleted track's uploaded file from the user's folder on disk.
+      let trackFilesDeleted = 0;
+      for (const row of tracksResult.rows) {
+        deleteStoredTrack(USER_ID, String(row.id));
+        trackFilesDeleted++;
+      }
+      counts.track_files = trackFilesDeleted;
     }
 
     if (resetMoodSettings) {

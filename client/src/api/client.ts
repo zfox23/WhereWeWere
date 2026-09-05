@@ -395,6 +395,7 @@ export const backupApi = {
       delete_venue_checkins: boolean;
       delete_mood_checkins: boolean;
       delete_sleep_entries: boolean;
+      delete_tracks: boolean;
       reset_account_settings: boolean;
       reset_mood_settings: boolean;
       reset_integrations_settings: boolean;
