@@ -143,7 +143,7 @@ export default function CheckInDetail() {
       </Link>
 
       {/* Main card */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         {/* Venue name */}
         <div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -309,7 +309,7 @@ export default function CheckInDetail() {
 
       {/* Map */}
       {hasCoords && (
-        <div className="page-map-breakout bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
+        <div className="page-map-breakout bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
           <MapView
             center={[Number(checkin.venue_latitude), Number(checkin.venue_longitude)]}
             zoom={15}

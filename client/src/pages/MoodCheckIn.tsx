@@ -331,7 +331,7 @@ export default function MoodCheckInPage() {
       </div>
 
       {/* Mood selector */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 flex flex-col gap-3">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 flex flex-col gap-3">
         <div className="flex items-center justify-around">
           {[1, 2, 3, 4, 5].map((m) => (
             <button
@@ -376,7 +376,7 @@ export default function MoodCheckInPage() {
       </div>
 
       {/* Note */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
         <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Note.md</label>
         <textarea
           value={note}
@@ -395,7 +395,7 @@ export default function MoodCheckInPage() {
 
       {/* Activities */}
       <div className="space-y-0">
-        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl rounded-b-xl border border-white/40 dark:border-gray-700/40 p-4 space-y-4">
+        <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl rounded-b-xl border border-white/40 dark:border-gray-700/40 p-4 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Activities</h2>
             <Link
@@ -424,7 +424,7 @@ export default function MoodCheckInPage() {
         <div className="relative z-10 mx-auto -mt-1 flex h-7 w-28 items-center justify-center">
           <div className="flex items-center gap-2">
             <span className="h-px w-6 bg-linear-to-r from-transparent to-gray-300/80 dark:to-gray-700/80" />
-            <span className="h-3 w-3 rounded-full border border-white/60 bg-white/80 shadow-sm shadow-black/4 backdrop-blur-xl dark:border-gray-700/60 dark:bg-gray-800/85" />
+            <span className="h-3 w-3 rounded-full border border-white/60 bg-white/80 shadow-sm shadow-black/4 dark:border-gray-700/60 dark:bg-gray-800/85" />
             <span className="h-px w-6 bg-linear-to-l from-transparent to-gray-300/80 dark:to-gray-700/80" />
           </div>
         </div>
@@ -434,7 +434,7 @@ export default function MoodCheckInPage() {
             {filteredGroups.map((group, index) => (
               <div key={group.id} className="contents">
                 <div
-                  className="relative left-1/2 w-full max-w-full -translate-x-1/2 bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl rounded-b-xl border border-white/40 dark:border-gray-700/40 p-4 md:w-[calc(100vw-3rem)] md:max-w-3xl lg:max-w-5xl"
+                  className="relative left-1/2 w-full max-w-full -translate-x-1/2 bg-white/60 dark:bg-gray-900/60 rounded-2xl rounded-b-xl border border-white/40 dark:border-gray-700/40 p-4 md:w-[calc(100vw-3rem)] md:max-w-3xl lg:max-w-5xl"
                 >
                   <button
                     type="button"
@@ -512,7 +512,7 @@ export default function MoodCheckInPage() {
             ))}
           </div>
         ) : normalizedFilter ? (
-          <div className="-mt-1 bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
+          <div className="-mt-1 bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">No matching activities.</p>
           </div>
         ) : null}
@@ -520,7 +520,7 @@ export default function MoodCheckInPage() {
 
       {/* Submit — fixed at bottom of screen (above the bottom nav on mobile) */}
       <div className="fixed inset-x-0 bottom-14 z-40 md:bottom-0">
-        <div className="border-t border-white/40 bg-white/70 backdrop-blur-xl dark:border-gray-700/40 dark:bg-gray-900/70">
+        <div className="border-t border-white/40 bg-white/70 dark:border-gray-700/40 dark:bg-gray-900/70">
           <div className="mx-auto max-w-lg space-y-2 px-2 py-3 md:px-4">
             <button
               onClick={handleSubmit}

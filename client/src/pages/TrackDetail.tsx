@@ -180,7 +180,7 @@ function StatBox({
   value: string;
 }) {
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-xl border border-white/40 dark:border-gray-700/40 p-3">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-xl border border-white/40 dark:border-gray-700/40 p-3">
       <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
         <Icon size={13} className="text-rose-500" />
         {label}
@@ -370,7 +370,7 @@ export default function TrackDetail() {
       {isEditing ? (
         <form
           onSubmit={handleSave}
-          className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-indigo-200 dark:border-indigo-700/50 shadow-sm shadow-black/3 p-5 space-y-4"
+          className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-indigo-200 dark:border-indigo-700/50 shadow-sm shadow-black/3 p-5 space-y-4"
         >
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-gray-100">
@@ -483,7 +483,7 @@ export default function TrackDetail() {
           </div>
         </form>
       ) : (
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-3">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
           <Route size={20} className="text-rose-500 shrink-0" />
           <h1 className="text-xl font-bold text-rose-700 dark:text-rose-300 break-words">
@@ -576,7 +576,7 @@ export default function TrackDetail() {
       )}
 
       {/* Track map */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-3">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-3">
         <div className="flex items-center gap-2 px-1.5 pb-2">
           <Flag size={14} className="text-rose-500" />
           <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Track Route</span>
@@ -600,7 +600,7 @@ export default function TrackDetail() {
       </div>
 
       {/* Track graph */}
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-3">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-3">
         <div className="flex items-center gap-2 px-1.5 pb-1">
           <LineChart size={14} className="text-rose-500" />
           <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Track Graph</span>

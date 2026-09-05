@@ -198,7 +198,7 @@ export default function SleepCheckIn() {
         <h1 className="text-xl font-bold">{editId ? 'Edit Sleep' : 'How did you sleep?'}</h1>
       </div>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 flex flex-col gap-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 flex flex-col gap-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
             <Moon size={16} className="text-indigo-500" />
@@ -234,7 +234,7 @@ export default function SleepCheckIn() {
         )}
       </div>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 space-y-3">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 space-y-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
           <Star size={16} className="text-amber-500" />
           Sleep Rating
@@ -260,7 +260,7 @@ export default function SleepCheckIn() {
         <p className="text-xs text-gray-500 dark:text-gray-400">{renderStars(rating)}</p>
       </div>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
         <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Comment.md</label>
         <textarea
           value={comment}
@@ -285,7 +285,7 @@ export default function SleepCheckIn() {
 
       {/* Submit — fixed at bottom of screen (above the bottom nav on mobile) */}
       <div className="fixed inset-x-0 bottom-14 z-40 md:bottom-0">
-        <div className="border-t border-white/40 bg-white/70 backdrop-blur-xl dark:border-gray-700/40 dark:bg-gray-900/70">
+        <div className="border-t border-white/40 bg-white/70 dark:border-gray-700/40 dark:bg-gray-900/70">
           <div className="mx-auto max-w-lg space-y-2 px-2 py-3 md:px-4">
             <button
               onClick={handleSubmit}

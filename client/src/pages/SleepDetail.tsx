@@ -129,7 +129,7 @@ export default function SleepDetail() {
         Back
       </Link>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         <div className="flex items-center gap-2 flex-wrap">
           <Moon size={20} className="text-indigo-500 shrink-0" />
           <h1 className="text-xl font-bold text-indigo-700 dark:text-indigo-300">Slept for {duration}</h1>

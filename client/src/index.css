@@ -146,7 +146,7 @@ html[data-bg-gradient="flat"] {
 
   /* Glass card used for sections */
   .glass {
-    @apply bg-white/60 backdrop-blur-xl border border-white/40 shadow-lg shadow-black/3;
+    @apply bg-white/60 border border-white/40 shadow-lg shadow-black/3;
   }
   .glass-subtle {
     @apply bg-white/40 backdrop-blur-md border border-white/30;

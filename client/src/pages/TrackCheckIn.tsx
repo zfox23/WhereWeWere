@@ -152,7 +152,7 @@ export default function TrackCheckIn() {
         <h1 className="text-xl font-bold">Track Check In</h1>
       </div>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4 space-y-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
           <Route size={16} className="text-rose-500" />
           GPX Track Files
@@ -297,7 +297,7 @@ export default function TrackCheckIn() {
 
       {/* Submit — fixed at bottom of screen (above the bottom nav on mobile) */}
       <div className="fixed inset-x-0 bottom-14 z-40 md:bottom-0">
-        <div className="border-t border-white/40 bg-white/70 backdrop-blur-xl dark:border-gray-700/40 dark:bg-gray-900/70">
+        <div className="border-t border-white/40 bg-white/70 dark:border-gray-700/40 dark:bg-gray-900/70">
           <div className="mx-auto max-w-lg space-y-2 px-2 py-3 md:px-4">
             <button
               onClick={handleSubmit}

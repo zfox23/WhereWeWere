@@ -579,7 +579,7 @@ function MoodMonthlySection({
         </div>
       )}
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
         {/* Pie + legend for selected month */}
         <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 sm:gap-6 items-center">
           <div className="mx-auto sm:mx-0">
@@ -621,7 +621,7 @@ function MoodMonthlySection({
         </div>
       </div>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-2">
           <BarChart3 size={16} className="text-indigo-500" />
           Mood Trend
@@ -665,13 +665,13 @@ function MoodMonthlySection({
           </div>
           {monthLoading && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="h-8 w-8 rounded-full border-2 border-indigo-500/70 border-t-transparent animate-spin bg-white/40 dark:bg-gray-900/30 backdrop-blur-[1px]" />
+              <div className="h-8 w-8 rounded-full border-2 border-indigo-500/70 border-t-transparent animate-spin bg-white/40 dark:bg-gray-900/30" />
             </div>
           )}
         </div>
       </div>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-2">
           <CalendarDays size={16} className="text-amber-500" />
           Day of Week
@@ -820,7 +820,7 @@ function MoodActivityCorrelations({
   );
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       {content}
     </div>
   );
@@ -919,7 +919,7 @@ function MoodActivityCombinations({
   );
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       {content}
     </div>
   );

@@ -339,7 +339,7 @@ export default function CheckInForm({
 
       {/* Submit — fixed at bottom of screen (above the bottom nav on mobile) */}
       <div className="fixed inset-x-0 bottom-14 z-40 md:bottom-0">
-        <div className="border-t border-white/40 bg-white/70 backdrop-blur-xl dark:border-gray-700/40 dark:bg-gray-900/70">
+        <div className="border-t border-white/40 bg-white/70 dark:border-gray-700/40 dark:bg-gray-900/70">
           <div className="mx-auto max-w-5xl space-y-2 px-4 py-3">
             <button
               type="submit"

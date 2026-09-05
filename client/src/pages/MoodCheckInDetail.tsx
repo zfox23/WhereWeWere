@@ -98,7 +98,7 @@ export default function MoodCheckInDetail() {
         <ArrowLeft size={16} /> Back
       </button>
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 p-6 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-6 space-y-4">
         {/* Mood */}
         <div className="flex items-center gap-3">
           <div className={`flex items-center justify-center w-12 h-12 rounded-xl ${MOOD_BG_COLORS[mood]}`}>

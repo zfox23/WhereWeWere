@@ -191,7 +191,7 @@ function getLocalDateIso(): string {
 
 function ReflectLoadingCard({ label }: { label: string }) {
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 min-h-[220px] flex items-center justify-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 min-h-[220px] flex items-center justify-center gap-3 text-sm text-gray-500 dark:text-gray-400">
       <Loader2 className="animate-spin text-primary-600" size={20} />
       <span>{label}</span>
     </div>
@@ -252,7 +252,7 @@ function OnThisDaySection({
 }) {
   if (data.length === 0) {
     return (
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-2">
           <History size={16} className="text-purple-500" />
           On This Day
@@ -269,7 +269,7 @@ function OnThisDaySection({
   }
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <History size={16} className="text-purple-500" />
         On This Day
@@ -703,7 +703,7 @@ export function ReflectTab() {
         />
       )}
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-4">
         <div className="flex items-center justify-start gap-3">
           <CalendarDays size={16} className="text-purple-500" />
           <div className="flex items-center gap-2">
@@ -742,7 +742,7 @@ export function ReflectTab() {
               onDayClick={(date) => window.open(`/?from=${date}&to=${date}`, '_blank', 'noopener,noreferrer')}
             />
             {locationLoading && (
-              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">
+              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 pointer-events-auto cursor-wait flex items-start justify-end p-3">
                 <Loader2 className="animate-spin text-primary-600" size={16} />
               </div>
             )}
@@ -762,7 +762,7 @@ export function ReflectTab() {
               showTitleYear={false}
             />
             {moodLoading && (
-              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">
+              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 pointer-events-auto cursor-wait flex items-start justify-end p-3">
                 <Loader2 className="animate-spin text-primary-600" size={16} />
               </div>
             )}
@@ -778,7 +778,7 @@ export function ReflectTab() {
               year={selectedYear}
             />
             {sleepLoading && (
-              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 backdrop-blur-[1px] pointer-events-auto cursor-wait flex items-start justify-end p-3">
+              <div className="absolute inset-0 rounded-2xl bg-white/35 dark:bg-gray-900/35 pointer-events-auto cursor-wait flex items-start justify-end p-3">
                 <Loader2 className="animate-spin text-primary-600" size={16} />
               </div>
             )}

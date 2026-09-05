@@ -421,7 +421,7 @@ function VenuePinsMap({
 
   if (loading) {
     return (
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
         <div className="h-[500px] flex items-center justify-center">
           <Loader2 className="animate-spin text-primary-600" size={28} />
         </div>
@@ -430,7 +430,7 @@ function VenuePinsMap({
   }
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
       {data.length === 0 ? (
         <div className="h-[280px] px-6 py-10 flex items-center justify-center text-center text-sm text-gray-400">
           No venue check-ins in this time period.
@@ -465,7 +465,7 @@ function VenuePinsMap({
 function DayOfWeekChart({ data }: { data: DayOfWeekData[] }) {
   const max = Math.max(...data.map((d) => d.count), 1);
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Calendar size={16} className="text-violet-500" />
         Day of Week
@@ -491,7 +491,7 @@ function DayOfWeekChart({ data }: { data: DayOfWeekData[] }) {
 function TimeOfDayChart({ data }: { data: TimeOfDayData[] }) {
   const total = data.reduce((sum, d) => sum + d.count, 0) || 1;
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Clock size={16} className="text-sky-500" />
         Time of Day
@@ -527,7 +527,7 @@ function BusiestDays({ data }: { data: BusiestDayData[] }) {
   }
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <CalendarDays size={16} className="text-rose-500" />
         Busiest Days
@@ -558,7 +558,7 @@ function TopCities({ data }: { data: CityData[] }) {
   const max = Math.max(...data.map((d) => d.checkin_count), 1);
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Building2 size={16} className="text-teal-500" />
         Top Cities
@@ -596,7 +596,7 @@ function CountriesList({ data }: { data: CountryStats[] }) {
   if (data.length === 0) return null;
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
         <Globe size={16} className="text-blue-500" />
         Countries

@@ -879,12 +879,12 @@ export default function Home() {
             value={searchQuery}
             onChange={(e) => setFilter('q', e.target.value)}
             placeholder="Search check-ins..."
-            className="w-full pl-10 pr-4 py-3 bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/40 dark:border-gray-700/40 rounded-2xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none shadow-sm shadow-black/3 dark:text-gray-100"
+            className="w-full pl-10 pr-4 py-3 bg-white/70 dark:bg-gray-900/70 border border-white/40 dark:border-gray-700/40 rounded-2xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none shadow-sm shadow-black/3 dark:text-gray-100"
           />
         </div>
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`px-3 py-3 rounded-2xl border transition-all backdrop-blur-xl ${
+          className={`px-3 py-3 rounded-2xl border transition-all ${
             showFilters || hasActiveFilters
               ? 'bg-primary-50/70 border-primary-300/60 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
               : 'bg-white/70 dark:bg-gray-900/70 border-white/40 dark:border-gray-700/40 text-gray-600 dark:text-gray-400 hover:bg-white/90 dark:hover:bg-gray-800/90 shadow-sm shadow-black/3'
@@ -956,7 +956,7 @@ export default function Home() {
       {/* Expanded filters */}
       <div className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out ${showFilters ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}>
         <div className="min-h-0">
-        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-3">
+        <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
             {hasActiveFilters && (
@@ -1286,7 +1286,7 @@ export default function Home() {
           </button>
         </div>
       ) : visibleItems.length === 0 ? (
-        <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-8 text-center">
+        <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-8 text-center">
           <MapPin size={40} className="mx-auto text-gray-300 mb-3" />
           <p className="text-gray-500 mb-4">
             {hasActiveFilters ? 'No check-ins match your filters.' : 'No check-ins yet. Start exploring!'}

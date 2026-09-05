@@ -212,7 +212,7 @@ function TrackRankedList({
   const max = Math.max(...items.map(toBarValue), 1);
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{title}</h3>
       {items.length === 0 ? (
         <p className="text-sm text-gray-400">{emptyText}</p>
@@ -273,7 +273,7 @@ function ActivityBreakdown({
   };
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Activity Breakdown</h3>
       {activities.length === 0 ? (
         <p className="text-sm text-gray-400">No tracks in this period.</p>
@@ -549,7 +549,7 @@ export function TracksTab() {
         </div>
       )}
 
-      <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">All Tracks</h3>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Tap or click a track to see its details.</p>
         {mapTracks.some((t) => t.coordinates.length >= 2) ? (
