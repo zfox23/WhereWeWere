@@ -7,9 +7,11 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import { parseTrackFile } from '../services/gpx';
+import { getVenueTimezone } from '../services/timestampReconciliation';
 import {
   buildGpx,
   deleteStoredTrack,
+  deriveActivityTypeFromFilename,
   gpxDownloadFilename,
   storeUploadedTrack,
 } from '../services/trackFiles';
@@ -337,6 +339,30 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
 
     const stats = parseTrackFile(xml, ext, fallbackName);
 
+    // Fall back to the filename when the file itself has no activity type
+    // (or only a generic one). Garmin exports name files
+    // YYYY-MM-DD_HH-MM-SS_<name>_<Sport>.<ext>.
+    const parsedType = stats.activityType?.trim() ?? '';
+    const isGenericType =
+      parsedType.length === 0 ||
+      parsedType.toLowerCase() === 'other' ||
+      parsedType.toLowerCase() === 'unknown';
+    if (isGenericType) {
+      const fromFilename = deriveActivityTypeFromFilename(originalName);
+      if (fromFilename) {
+        stats.activityType = fromFilename;
+      }
+    }
+
+    // Derive the display/bucketing timezone from the track's start
+    // coordinates instead of the uploader's browser timezone. Falls back
+    // to the client-supplied value (or UTC) when geo lookup fails.
+    const firstCoord = stats.coordinates[0];
+    const geoTimezone = firstCoord
+      ? getVenueTimezone(firstCoord[1], firstCoord[0])
+      : null;
+    const trackTimezone = geoTimezone ?? sanitizeTimezone(req.body?.timezone);
+
     // Reject duplicate uploads without touching the database
     const existing = await query(
       'SELECT id, name FROM tracks WHERE user_id = $1 AND file_hash = $2 LIMIT 1',
@@ -371,7 +397,7 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
         USER_ID,
         stats.name,
         stats.activityType,
-        sanitizeTimezone(req.body?.timezone),
+        trackTimezone,
         stats.startedAt.toISOString(),
         stats.endedAt.toISOString(),
         stats.distanceM,
@@ -460,7 +486,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     const result = await query(
       `UPDATE tracks SET ${sets.join(', ')}, updated_at = NOW()
        WHERE id = $${paramIndex}
-       RETURNING *`,
+       RETURNING id`,
       params
     );
 
@@ -468,7 +494,39 @@ router.put('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Track not found' });
     }
 
-    res.json(trackRowToApi(result.rows[0]));
+    // Re-fetch with geometry/points so the response matches the GET /:id
+    // shape (trackRowToApi alone omits them, which would blank out the map
+    // and graph on the client after an edit).
+    const full = await query(
+      `SELECT t.id, t.user_id, t.name, t.activity_type, t.timezone,
+              t.started_at, t.ended_at,
+              t.distance_m, t.elapsed_time_s, t.moving_time_s,
+              t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
+              t.avg_hr, t.max_hr, t.point_count,
+              t.created_at, t.updated_at,
+              t.points,
+              ST_AsGeoJSON(t.path) AS geojson
+       FROM tracks t
+       WHERE t.id = $1`,
+      [id]
+    );
+
+    const row = full.rows[0];
+    const api: any = trackRowToApi(row);
+    let coordinates: [number, number][] = [];
+    try {
+      const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
+      if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
+        coordinates = gj.coordinates;
+      }
+    } catch {
+      // leave empty
+    }
+    api.geometry = coordinates;
+    api.points =
+      typeof row.points === 'string' ? JSON.parse(row.points) : row.points ?? null;
+
+    res.json(api);
   } catch (err) {
     console.error('Error updating track:', err);
     res.status(500).json({ error: 'Failed to update track' });

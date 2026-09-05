@@ -4,6 +4,97 @@ import { config } from '../config';
 import type { GpxPointSeries } from './gpx';
 
 /**
+ * Garmin TCX/fit exports name files as:
+ *   YYYY-MM-DD_HH-MM-SS_<ActivityName>_<Sport>.tcx
+ * e.g. `2010-07-23_16-16-02_Afternoon Ride_MtnBiking.tcx`
+ *
+ * When the file's own <type> / @Sport is missing or a generic placeholder
+ * ("Other", "Unknown"), the sport token in the filename is usually the
+ * best available source for the activity type.
+ */
+
+const SPORT_ALIASES: Record<string, string> = {
+  mtnbiking: 'Mountain Biking',
+  mtbiking: 'Mountain Biking',
+  mountainbiking: 'Mountain Biking',
+  downhillskiing: 'Downhill Skiing',
+  crosscountryskiing: 'Cross-Country Skiing',
+  alpineskiing: 'Alpine Skiing',
+  backcountryskiing: 'Backcountry Skiing',
+  horsebackriding: 'Horseback Riding',
+  motorizedbiking: 'Motorized Biking',
+  rockclimbing: 'Rock Climbing',
+  virtualrun: 'Virtual Run',
+  virtualbike: 'Virtual Bike',
+  virtualwalk: 'Virtual Walk',
+  stepmill: 'Step Mill',
+  snowshoeing: 'Snowshoeing',
+  kitesurfing: 'Kitesurfing',
+  surfing: 'Surfing',
+  snowboarding: 'Snowboarding',
+  racquetball: 'Racquetball',
+  fishing: 'Fishing',
+  kayaking: 'Kayaking',
+  motorcycling: 'Motorcycling',
+  biking: 'Cycling',
+  cycling: 'Cycling',
+  running: 'Running',
+  walking: 'Walking',
+  swimming: 'Swimming',
+  hiking: 'Hiking',
+  elliptical: 'Elliptical',
+  rowing: 'Rowing',
+  skating: 'Skating',
+  sailing: 'Sailing',
+  stroller: 'Stroller',
+  yoga: 'Yoga',
+  zumba: 'Zumba',
+  pilates: 'Pilates',
+  tennis: 'Tennis',
+  golf: 'Golf',
+  fitness: 'Fitness',
+  skiing: 'Skiing',
+};
+
+function formatSportToken(raw: string): string {
+  const cleaned = raw.trim();
+  if (!cleaned) return '';
+  const aliasKey = cleaned.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const alias = SPORT_ALIASES[aliasKey];
+  if (alias) return alias;
+  // Split CamelCase boundaries ("DownhillSkiing" → "Downhill Skiing") and
+  // normalize any internal hyphens/underscores to spaces, then title-case.
+  const spaced = cleaned
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!spaced) return '';
+  return spaced
+    .split(' ')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
+ * Attempt to derive a display-friendly activity type from a Garmin-style
+ * track filename. Returns null when the filename does not match the expected
+ * `YYYY-MM-DD_HH-MM-SS_<name>_<sport>.<ext>` pattern.
+ */
+export function deriveActivityTypeFromFilename(originalname: string): string | null {
+  if (!originalname) return null;
+  const base = originalname.replace(/\.(gpx|tcx)$/i, '');
+  const parts = base.split('_');
+  if (parts.length < 4) return null;
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const timeRe = /^\d{2}-\d{2}-\d{2}$/;
+  if (!dateRe.test(parts[0]) || !timeRe.test(parts[1])) return null;
+  const sportToken = parts[parts.length - 1].trim();
+  if (!sportToken) return null;
+  return formatSportToken(sportToken) || null;
+}
+
+/**
  * Directory where the original uploaded track files are kept, per user:
  * <dataDir>/<userId>/uploads/gps_tracks/
  */

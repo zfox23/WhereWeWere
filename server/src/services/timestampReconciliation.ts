@@ -160,7 +160,7 @@ function buildReconciledTimestamp(originalTimestamp: string, originalTimezone: s
   return wallTimeToUtcIso(localParts, suggestedTimezone);
 }
 
-function getVenueTimezone(latitude: number | string | null, longitude: number | string | null): string | null {
+export function getVenueTimezone(latitude: number | string | null, longitude: number | string | null): string | null {
   if (latitude == null || longitude == null) {
     return null;
   }

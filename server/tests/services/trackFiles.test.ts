@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildGpx, gpxDownloadFilename } from '../../src/services/trackFiles';
+import { buildGpx, gpxDownloadFilename, deriveActivityTypeFromFilename } from '../../src/services/trackFiles';
 import { parseGpx } from '../../src/services/gpx';
 
 describe('buildGpx', () => {
@@ -58,6 +58,31 @@ describe('buildGpx', () => {
     });
     const parsed = parseGpx(gpx, 'Fallback');
     expect(parsed.pointCount).toBe(3);
+  });
+});
+
+describe('deriveActivityTypeFromFilename', () => {
+  it('extracts the sport token from Garmin-style TCX filenames', () => {
+    expect(deriveActivityTypeFromFilename('2010-07-23_16-16-02_Afternoon Ride_MtnBiking.tcx')).toBe('Mountain Biking');
+    expect(deriveActivityTypeFromFilename('2010-05-21_17-03-38_Afternoon Ride_Cycling.tcx')).toBe('Cycling');
+    expect(deriveActivityTypeFromFilename('2011-05-30_13-02-33_Mt. Flagg with Emily_Hiking.tcx')).toBe('Hiking');
+    expect(deriveActivityTypeFromFilename('2020-01-12_09-04-23_Day 2 2019-2020 - Heavenly_DownhillSkiing.tcx')).toBe('Downhill Skiing');
+    expect(deriveActivityTypeFromFilename('2023-04-21_13-14-36_well. I am on the ferry now_Walking.tcx')).toBe('Walking');
+  });
+
+  it('handles case-insensitive sport tokens and GPX extensions', () => {
+    expect(deriveActivityTypeFromFilename('2024-06-01_08-00-00_Ride_RUNNING.gpx')).toBe('Running');
+    expect(deriveActivityTypeFromFilename('2024-06-01_08-00-00_Ride_biking.tcx')).toBe('Cycling');
+  });
+
+  it('title-cases multi-word tokens without a known alias', () => {
+    expect(deriveActivityTypeFromFilename('2024-06-01_08-00-00_Ride_Powerwalking.tcx')).toBe('Powerwalking');
+  });
+
+  it('returns null for filenames that do not match the Garmin pattern', () => {
+    expect(deriveActivityTypeFromFilename('my ride.gpx')).toBeNull();
+    expect(deriveActivityTypeFromFilename('2024-06-01_Ride_Cycling.tcx')).toBeNull();
+    expect(deriveActivityTypeFromFilename('')).toBeNull();
   });
 });
 

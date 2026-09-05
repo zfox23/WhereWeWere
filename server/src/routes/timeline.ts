@@ -36,6 +36,7 @@ router.get('/', async (req: Request, res: Response) => {
     const hasMoodTypeFilter = Boolean(req.query.mood || req.query.activity);
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
     const hasSleepTypeFilter = Boolean(req.query.sleep_duration);
+    const hasTrackTypeFilter = Boolean(req.query.track_activity);
     const fromDate = extractDateString(from);
     const toDate = extractDateString(to);
 
@@ -117,6 +118,12 @@ router.get('/', async (req: Request, res: Response) => {
       } else if (durationFilter === 'gte8') {
         sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) >= 28800`);
       }
+    }
+
+    if (req.query.track_activity) {
+      trackConditions.push(`t.activity_type ILIKE $${paramIndex}`);
+      params.push(req.query.track_activity);
+      paramIndex++;
     }
 
     if (req.query.q) {
@@ -278,6 +285,12 @@ router.get('/', async (req: Request, res: Response) => {
     } else if (hasSleepTypeFilter) {
       sql = `
         ${sleepSelect}
+        ORDER BY checked_in_at DESC
+        LIMIT ${limitParam} OFFSET ${offsetParam}
+      `;
+    } else if (hasTrackTypeFilter) {
+      sql = `
+        ${trackSelect}
         ORDER BY checked_in_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}
       `;

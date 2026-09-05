@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon, Route } from 'lucide-react';
-import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats } from '../api/client';
+import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats, tracks } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
@@ -169,6 +169,7 @@ export default function Home() {
   const [includeTrack, setIncludeTrack] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'sleep');
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
+  const [trackActivityOptions, setTrackActivityOptions] = useState<string[]>([]);
   const [activityOptions, setActivityOptions] = useState<{ id: string; name: string; groupName: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -219,10 +220,12 @@ export default function Home() {
   const mood = searchParams.get('mood') || '';
   const activity = searchParams.get('activity') || '';
   const sleepDuration = searchParams.get('sleep_duration') || '';
+  const trackActivity = searchParams.get('track_activity') || '';
   const [fromDateInput, setFromDateInput] = useState(fromDate);
   const [toDateInput, setToDateInput] = useState(toDate);
   const [categoryInput, setCategoryInput] = useState(category);
   const [countryInput, setCountryInput] = useState(country);
+  const [trackActivityInput, setTrackActivityInput] = useState(trackActivity);
 
   const findExactOption = useCallback((value: string, options: string[]) => {
     const normalized = value.trim().toLowerCase();
@@ -242,21 +245,29 @@ export default function Home() {
     return countryOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
   }, [countryInput, countryOptions]);
 
+  const filteredTrackActivityOptions = useMemo(() => {
+    const needle = trackActivityInput.trim().toLowerCase();
+    if (!needle) return trackActivityOptions.slice(0, 30);
+    return trackActivityOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
+  }, [trackActivityInput, trackActivityOptions]);
+
   const [showFilters, setShowFilters] = useState(false);
   const hasMoodTypeFilter = Boolean(mood || activity);
   const hasLocationTypeFilter = Boolean(venueId || category || country);
   const hasSleepTypeFilter = Boolean(sleepDuration);
-  const moodFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter;
-  const locationFiltersDisabled = hasMoodTypeFilter || hasSleepTypeFilter;
-  const sleepFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter;
+  const hasTrackTypeFilter = Boolean(trackActivity);
+  const moodFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
+  const locationFiltersDisabled = hasMoodTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
+  const sleepFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasTrackTypeFilter;
   const trackFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter;
-  const moodTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter;
-  const locationTypeToggleDisabled = hasMoodTypeFilter || hasSleepTypeFilter;
-  const sleepTypeToggleDisabled = hasMoodTypeFilter || hasLocationTypeFilter;
+  const moodTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
+  const locationTypeToggleDisabled = hasMoodTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
+  const sleepTypeToggleDisabled = hasMoodTypeFilter || hasLocationTypeFilter || hasTrackTypeFilter;
   const trackTypeToggleDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter;
   const moodSectionDisabled = moodFiltersDisabled || !includeMood;
   const locationSectionDisabled = locationFiltersDisabled || !includeLocation;
   const sleepSectionDisabled = sleepFiltersDisabled;
+  const trackSectionDisabled = trackFiltersDisabled || !includeTrack;
 
   useEffect(() => {
     if (hasMoodTypeFilter) {
@@ -286,7 +297,16 @@ export default function Home() {
   }, [hasSleepTypeFilter]);
 
   useEffect(() => {
-    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter) return;
+    if (hasTrackTypeFilter) {
+      setIncludeLocation(false);
+      setIncludeMood(false);
+      setIncludeSleep(false);
+      setIncludeTrack(true);
+    }
+  }, [hasTrackTypeFilter]);
+
+  useEffect(() => {
+    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter) return;
     if (timelineType === 'location') {
       setIncludeLocation(true);
       setIncludeMood(false);
@@ -319,10 +339,10 @@ export default function Home() {
     setIncludeMood(true);
     setIncludeSleep(true);
     setIncludeTrack(true);
-  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, timelineType]);
+  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, hasTrackTypeFilter, timelineType]);
 
   useEffect(() => {
-    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter) return;
+    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter) return;
     const allOn = includeLocation && includeMood && includeSleep && includeTrack;
     const nextType = allOn
       ? ''
@@ -346,14 +366,14 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
-  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, includeLocation, includeMood, includeSleep, includeTrack, setSearchParams, timelineType]);
+  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, hasTrackTypeFilter, includeLocation, includeMood, includeSleep, includeTrack, setSearchParams, timelineType]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
-    if (fromDate || toDate || venueId || category || country || mood || activity || sleepDuration) {
+    if (fromDate || toDate || venueId || category || country || mood || activity || sleepDuration || trackActivity) {
       setShowFilters(true);
     }
-  }, [fromDate, toDate, venueId, category, country, mood, activity, sleepDuration]);
+  }, [fromDate, toDate, venueId, category, country, mood, activity, sleepDuration, trackActivity]);
 
   useEffect(() => {
     setFromDateInput(fromDate);
@@ -370,6 +390,18 @@ export default function Home() {
   useEffect(() => {
     setCountryInput(country);
   }, [country]);
+
+  useEffect(() => {
+    setTrackActivityInput(trackActivity);
+  }, [trackActivity]);
+
+  // Load distinct track activity types for the Track filter
+  useEffect(() => {
+    tracks
+      .activityTypes()
+      .then((types) => setTrackActivityOptions((types || []).sort((a, b) => a.localeCompare(b))))
+      .catch(() => setTrackActivityOptions([]));
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -441,6 +473,7 @@ export default function Home() {
       next.delete('category');
       next.delete('country');
       next.delete('sleep_duration');
+      next.delete('track_activity');
       next.delete('type');
       if (value) {
         next.set(key, value);
@@ -464,6 +497,7 @@ export default function Home() {
       next.delete('mood');
       next.delete('activity');
       next.delete('sleep_duration');
+      next.delete('track_activity');
       next.delete('type');
       if (value) {
         next.set(key, value);
@@ -489,6 +523,7 @@ export default function Home() {
       next.delete('country');
       next.delete('mood');
       next.delete('activity');
+      next.delete('track_activity');
       next.delete('type');
       if (value) {
         next.set('sleep_duration', value);
@@ -503,6 +538,32 @@ export default function Home() {
       setIncludeMood(true);
       setIncludeSleep(true);
       setIncludeTrack(true);
+    }
+  }, [setSearchParams]);
+
+  const setTrackTypeFilter = useCallback((value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('venue_id');
+      next.delete('category');
+      next.delete('country');
+      next.delete('mood');
+      next.delete('activity');
+      next.delete('sleep_duration');
+      next.delete('type');
+      if (value) {
+        next.set('track_activity', value);
+      } else {
+        next.delete('track_activity');
+      }
+      return next;
+    }, { replace: true });
+
+    if (value) {
+      setIncludeTrack(true);
+      setIncludeLocation(false);
+      setIncludeMood(false);
+      setIncludeSleep(false);
     }
   }, [setSearchParams]);
 
@@ -593,6 +654,7 @@ export default function Home() {
           if (mood) params.mood = mood;
           if (activity) params.activity = activity;
           if (sleepDuration) params.sleep_duration = sleepDuration;
+          if (trackActivity) params.track_activity = trackActivity;
 
         const data = await timelineApi.list(params);
         if (append) {
@@ -604,13 +666,13 @@ export default function Home() {
         offsetRef.current = offset + data.length;
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load check-ins');
-      } finally {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    },
-    [searchQuery, fromDate, toDate, venueId, category, country, mood, activity, sleepDuration]
-  );
+        } finally {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      },
+      [searchQuery, fromDate, toDate, venueId, category, country, mood, activity, sleepDuration, trackActivity]
+    );
 
   // Initial load + reload on filter changes
   useEffect(() => {
@@ -789,6 +851,7 @@ export default function Home() {
     filterPills.push({ label: `Mood: ${moodNum >= 1 && moodNum <= 5 ? MOOD_LABELS[moodNum] : mood}`, key: 'mood' });
   }
   if (activity) filterPills.push({ label: `Activity: ${activity}`, key: 'activity' });
+  if (trackActivity) filterPills.push({ label: `Track activity: ${trackActivity}`, key: 'track_activity' });
   if (sleepDuration === 'lte6') filterPills.push({ label: 'Sleep: <=6h', key: 'sleep_duration' });
   if (sleepDuration === '6to8') filterPills.push({ label: 'Sleep: 6h-8h', key: 'sleep_duration' });
   if (sleepDuration === 'gte8') filterPills.push({ label: 'Sleep: >=8h', key: 'sleep_duration' });
@@ -867,6 +930,8 @@ export default function Home() {
                     setIncludeSleep(true);
                   } else if (pill.key === 'sleep_duration') {
                     setSleepTypeFilter('');
+                  } else if (pill.key === 'track_activity') {
+                    setTrackTypeFilter('');
                   } else {
                     setFilter(pill.key, '');
                   }
@@ -1151,15 +1216,45 @@ export default function Home() {
                   <span>Track</span>
                 </label>
               </div>
-              {trackFiltersDisabled ? (
+              {trackFiltersDisabled && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Clear other type filters to enable track filtering.
                 </p>
-              ) : (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  GPX track uploads (rides, runs, etc.)
-                </p>
               )}
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Activity type</label>
+                <input
+                  type="text"
+                  list="track-activity-options"
+                  value={trackActivityInput}
+                  disabled={trackSectionDisabled}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setTrackActivityInput(next);
+                    const match = findExactOption(next, trackActivityOptions);
+                    if (match && trackActivity !== match) setTrackTypeFilter(match);
+                    if (!match && trackActivity) setTrackTypeFilter('');
+                  }}
+                  onBlur={() => {
+                    if (!trackActivityInput.trim()) return;
+                    const match = findExactOption(trackActivityInput, trackActivityOptions);
+                    if (match) {
+                      setTrackActivityInput(match);
+                      if (trackActivity !== match) setTrackTypeFilter(match);
+                    } else {
+                      setTrackActivityInput('');
+                      if (trackActivity) setTrackTypeFilter('');
+                    }
+                  }}
+                  className="input disabled:cursor-not-allowed disabled:opacity-60"
+                  placeholder="Cycling, Running..."
+                />
+                <datalist id="track-activity-options">
+                  {filteredTrackActivityOptions.map((opt) => (
+                    <option key={opt} value={opt} />
+                  ))}
+                </datalist>
+              </div>
             </div>
           </div>
         </div>
