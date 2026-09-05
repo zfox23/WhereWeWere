@@ -221,6 +221,64 @@ function maxSpeedInSpan(
   return max;
 }
 
+export interface TrackSegmentTotals {
+  distanceM: number;
+  movingTimeS: number;
+  elevationGainM: number;
+}
+
+/**
+ * Sum segment distance, moving time, and elevation gain over an ordered list
+ * of points.
+ *
+ * GPS lock jumps (e.g. the position teleporting hundreds of meters after the
+ * receiver loses signal) inflate distanceM and can make the average speed
+ * exceed the windowed max speed, which is impossible. Such segments are
+ * skipped from the distance and moving-time sums, mirroring the treatment in
+ * computeMaxSpeedMps (the same dtS/distance plausibility test).
+ *
+ * Shared by the GPX/TCX parsers and the track stats backfill so both use
+ * identical logic.
+ */
+export function computeTrackSegmentTotals(
+  points: GpxPoint[]
+): TrackSegmentTotals {
+  let distanceM = 0;
+  let movingTimeS = 0;
+  let elevationGainM = 0;
+
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const segDist = haversineM(prev, curr);
+
+    let dtS = 0;
+    if (prev.time && curr.time) {
+      dtS = (curr.time.getTime() - prev.time.getTime()) / 1000;
+    }
+
+    const plausible = !(dtS > 0 && segDist / dtS > MAX_PLAUSIBLE_SEGMENT_SPEED_MPS);
+
+    if (plausible) {
+      distanceM += segDist;
+    }
+
+    if (prev.ele != null && curr.ele != null) {
+      const dEle = curr.ele - prev.ele;
+      if (dEle > 0) elevationGainM += dEle;
+    }
+
+    if (plausible && dtS > 0) {
+      const speed = segDist / dtS;
+      if (speed >= MOVING_SPEED_THRESHOLD_MPS) {
+        movingTimeS += dtS;
+      }
+    }
+  }
+
+  return { distanceM, movingTimeS, elevationGainM };
+}
+
 /**
  * Compute track stats from an ordered list of points. Shared by the GPX
  * and TCX parsers.
@@ -235,31 +293,9 @@ function computeTrackStats(
   }
 
   // --- Distances / times / speeds ---
-  let distanceM = 0;
-  let movingTimeS = 0;
-  let elevationGainM = 0;
-
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1];
-    const curr = points[i];
-    const segDist = haversineM(prev, curr);
-    distanceM += segDist;
-
-    if (prev.ele != null && curr.ele != null) {
-      const dEle = curr.ele - prev.ele;
-      if (dEle > 0) elevationGainM += dEle;
-    }
-
-    if (prev.time && curr.time) {
-      const dtS = (curr.time.getTime() - prev.time.getTime()) / 1000;
-      if (dtS > 0) {
-        const speed = segDist / dtS;
-        if (speed >= MOVING_SPEED_THRESHOLD_MPS) {
-          movingTimeS += dtS;
-        }
-      }
-    }
-  }
+  const { distanceM, movingTimeS: rawMovingTimeS, elevationGainM } =
+    computeTrackSegmentTotals(points);
+  let movingTimeS = rawMovingTimeS;
 
   const timedPoints = points.filter(
     (p): p is GpxPoint & { time: Date } => p.time != null
