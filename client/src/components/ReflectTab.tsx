@@ -262,9 +262,10 @@ function OnThisDaySection({
     );
   }
 
-  function handleYearClick(items: ReflectionItem[]) {
-    if (items.length === 0) return;
-    const date = items[0].checked_in_at.slice(0, 10);
+  function handleYearClick(year: ReflectionYear) {
+    if (year.items.length === 0) return;
+    const today = getLocalDateIso();
+    const date = `${year.year}-${today.slice(5)}`;
     window.open(`/?from=${date}&to=${date}`, '_blank', 'noopener,noreferrer');
   }
 
@@ -290,7 +291,7 @@ function OnThisDaySection({
           <div key={year.year}>
             <div className="flex items-center gap-2 mb-2">
               <button
-                onClick={() => handleYearClick(year.items)}
+                onClick={() => handleYearClick(year)}
                 className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
               >
                 {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago

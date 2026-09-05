@@ -93,16 +93,6 @@ export default function Profile() {
           Sleep
         </button>
         <button
-          onClick={() => setActiveTab('reflect')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'reflect'
-            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
-            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-            }`}
-        >
-          <Brain size={14} />
-          Reflect
-        </button>
-        <button
           onClick={() => setActiveTab('tracks')}
           className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'tracks'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
@@ -111,6 +101,16 @@ export default function Profile() {
         >
           <Route size={14} />
           Tracks
+        </button>
+        <button
+          onClick={() => setActiveTab('reflect')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'reflect'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+        >
+          <Brain size={14} />
+          Reflect
         </button>
       </div>
 

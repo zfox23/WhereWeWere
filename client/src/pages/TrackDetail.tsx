@@ -288,7 +288,7 @@ export default function TrackDetail() {
           setDistanceUnit(s.distance_unit);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -483,96 +483,96 @@ export default function TrackDetail() {
           </div>
         </form>
       ) : (
-      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Route size={20} className="text-rose-500 shrink-0" />
-          <h1 className="text-xl font-bold text-rose-700 dark:text-rose-300 break-words">
-            {track.name}
-          </h1>
-          {track.activity_type && (
-            <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
-              {track.activity_type}
-            </span>
-          )}
-          <button
-            onClick={startEditing}
-            aria-label="Edit track"
-            title="Edit track"
-            className="ml-auto inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-          >
-            <Edit2 size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-2 text-sm text-gray-500 dark:text-gray-400">
-          <div className="flex items-center gap-2">
-            <CalendarDays size={14} />
-            <span>Recorded: {formatDateTime(track.started_at, track.timezone)}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Clock size={14} />
-            <span>
-              Start: {formatTime(track.started_at, track.timezone)} — End:{' '}
-              {formatTime(track.ended_at, track.timezone)}
-            </span>
-            <Link
-              to={dayTimelinePath}
-              aria-label="View this day on Home"
-              title="View this day on Home"
-              className="inline-flex items-center justify-center rounded-md p-1 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+        <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Route size={20} className="text-rose-500 shrink-0" />
+            <h1 className="text-xl font-bold text-rose-700 dark:text-rose-300 break-words">
+              {track.name}
+            </h1>
+            {track.activity_type && (
+              <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+                {track.activity_type}
+              </span>
+            )}
+            <button
+              onClick={startEditing}
+              aria-label="Edit track"
+              title="Edit track"
+              className="ml-auto inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
+              <Edit2 size={16} />
+            </button>
+          </div>
+
+          <div className="space-y-2 text-sm text-gray-500 dark:text-gray-400">
+            <div className="flex items-center gap-2">
               <CalendarDays size={14} />
-            </Link>
+              <span>Recorded: {formatDateTime(track.started_at, track.timezone)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Clock size={14} />
+              <span>
+                Start: {formatTime(track.started_at, track.timezone)} — End:{' '}
+                {formatTime(track.ended_at, track.timezone)}
+              </span>
+              <Link
+                to={dayTimelinePath}
+                aria-label="View this day on Home"
+                title="View this day on Home"
+                className="inline-flex items-center justify-center rounded-md p-1 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              >
+                <CalendarDays size={14} />
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            <StatBox
+              icon={Route}
+              label="Distance"
+              value={formatDistance(track.distance_m, distanceUnit)}
+            />
+            <StatBox
+              icon={Clock}
+              label="Moving Time"
+              value={formatDuration(track.moving_time_s)}
+            />
+            <StatBox
+              icon={Clock}
+              label="Elapsed Time"
+              value={formatDuration(track.elapsed_time_s)}
+            />
+            <StatBox
+              icon={Mountain}
+              label="Elevation Gain"
+              value={formatDistance(track.elevation_gain_m, distanceUnit)}
+            />
+            <StatBox
+              icon={Route}
+              label="Avg Speed"
+              value={formatSpeed(track.avg_speed_mps, distanceUnit)}
+            />
+            <StatBox
+              icon={Route}
+              label="Max Speed"
+              value={formatSpeed(track.max_speed_mps, distanceUnit)}
+            />
+            {track.avg_hr != null && (
+              <StatBox
+                icon={Heart}
+                label="Avg Heart Rate"
+                value={`${Math.round(track.avg_hr)} bpm`}
+              />
+            )}
+            {track.max_hr != null && (
+              <StatBox
+                icon={Heart}
+                label="Max Heart Rate"
+                value={`${track.max_hr} bpm`}
+              />
+            )}
           </div>
         </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-          <StatBox
-            icon={Route}
-            label="Distance"
-            value={formatDistance(track.distance_m, distanceUnit)}
-          />
-          <StatBox
-            icon={Clock}
-            label="Moving Time"
-            value={formatDuration(track.moving_time_s)}
-          />
-          <StatBox
-            icon={Clock}
-            label="Elapsed Time"
-            value={formatDuration(track.elapsed_time_s)}
-          />
-          <StatBox
-            icon={Mountain}
-            label="Elevation Gain"
-            value={formatDistance(track.elevation_gain_m, distanceUnit)}
-          />
-          <StatBox
-            icon={Route}
-            label="Avg Speed"
-            value={formatSpeed(track.avg_speed_mps, distanceUnit)}
-          />
-          <StatBox
-            icon={Route}
-            label="Max Speed"
-            value={formatSpeed(track.max_speed_mps, distanceUnit)}
-          />
-          {track.avg_hr != null && (
-            <StatBox
-              icon={Heart}
-              label="Avg Heart Rate"
-              value={`${Math.round(track.avg_hr)} bpm`}
-            />
-          )}
-          {track.max_hr != null && (
-            <StatBox
-              icon={Heart}
-              label="Max Heart Rate"
-              value={`${track.max_hr} bpm`}
-            />
-          )}
-        </div>
-      </div>
       )}
 
       {/* Track map */}
@@ -601,10 +601,6 @@ export default function TrackDetail() {
 
       {/* Track graph */}
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-3">
-        <div className="flex items-center gap-2 px-1.5 pb-1">
-          <LineChart size={14} className="text-rose-500" />
-          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Track Graph</span>
-        </div>
         {track.points && track.geometry && track.points.length === track.geometry.length ? (
           <TrackGraph
             coordinates={track.geometry}
