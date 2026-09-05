@@ -15,7 +15,8 @@
     "test:integration": "npm run test:integration --workspace=server"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "tailwindcss": "^4.3.3"
