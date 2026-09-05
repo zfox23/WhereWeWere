@@ -44,6 +44,13 @@ export interface TrackStats {
 const EARTH_RADIUS_M = 6371000;
 /** Segments slower than this (~5 km/h) are treated as stopped, not "moving". */
 const MOVING_SPEED_THRESHOLD_MPS = 1.4;
+/** Minimum window length (seconds) for max-speed computation. */
+const MAX_SPEED_WINDOW_S = 5;
+/**
+ * Segments faster than this (~108 km/h, far beyond any human-powered
+ * activity) are treated as GPS lock jumps rather than real speed.
+ */
+const MAX_PLAUSIBLE_SEGMENT_SPEED_MPS = 30;
 
 function toNumberArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
@@ -140,6 +147,81 @@ function parseTcxPoint(tp: any): GpxPoint | null {
 }
 
 /**
+ * Max speed over a rolling window of at least MAX_SPEED_WINDOW_S, measured as
+ * net displacement between the window's endpoints divided by its duration.
+ * Raw per-segment speed (distance between two consecutive GPS fixes divided by
+ * the time between them) is dominated by GPS position jitter: with fixes
+ * roughly once per second and several meters of horizontal error, even a
+ * stationary receiver can produce single-segment "speeds" of 10+ m/s. Measuring
+ * net displacement over a short window makes the jitter cancel out.
+ *
+ * Segments faster than MAX_PLAUSIBLE_SEGMENT_SPEED_MPS are treated as GPS lock
+ * jumps (e.g. the position teleporting hundreds of meters after the receiver
+ * loses signal) and excluded: the track is split into spans of contiguous
+ * plausible segments and the max is taken within each span.
+ */
+export function computeMaxSpeedMps(
+  timed: (GpxPoint & { time: Date })[]
+): number {
+  if (timed.length < 2) return 0;
+
+  let max = 0;
+  let spanStart = 0;
+  for (let i = 1; i <= timed.length; i++) {
+    const implausible =
+      i === timed.length || isImplausibleSegment(timed[i - 1], timed[i]);
+    if (!implausible) continue;
+    max = Math.max(max, maxSpeedInSpan(timed, spanStart, i));
+    spanStart = i;
+  }
+
+  return max;
+}
+
+function isImplausibleSegment(
+  a: GpxPoint & { time: Date },
+  b: GpxPoint & { time: Date }
+): boolean {
+  const dtS = (b.time.getTime() - a.time.getTime()) / 1000;
+  if (dtS <= 0) return true;
+  return haversineM(a, b) / dtS > MAX_PLAUSIBLE_SEGMENT_SPEED_MPS;
+}
+
+function maxSpeedInSpan(
+  timed: (GpxPoint & { time: Date })[],
+  from: number,
+  to: number
+): number {
+  // Points from..to-1 form a span where every segment is plausible.
+  let max = 0;
+  let start = from;
+  for (let end = from; end < to; end++) {
+    while (end > start) {
+      const winTimeS =
+        (timed[end].time.getTime() - timed[start].time.getTime()) / 1000;
+      if (winTimeS < MAX_SPEED_WINDOW_S) break;
+      const speed = haversineM(timed[start], timed[end]) / winTimeS;
+      if (speed > max) max = speed;
+      start++;
+    }
+  }
+
+  // Spans shorter than the window: fall back to the span's average speed so
+  // we still report a sensible non-zero speed when there was movement.
+  const spanTimeS =
+    (timed[to - 1].time.getTime() - timed[from].time.getTime()) / 1000;
+  if (spanTimeS > 0 && spanTimeS < MAX_SPEED_WINDOW_S) {
+    let spanDist = 0;
+    for (let i = from + 1; i < to; i++) {
+      spanDist += haversineM(timed[i - 1], timed[i]);
+    }
+    max = Math.max(max, spanDist / spanTimeS);
+  }
+
+  return max;
+}
+
+/**
  * Compute track stats from an ordered list of points. Shared by the GPX
  * and TCX parsers.
  */
@@ -155,13 +237,13 @@ function computeTrackStats(
   // --- Distances / times / speeds ---
   let distanceM = 0;
   let movingTimeS = 0;
-  let maxSpeedMps = 0;
   let elevationGainM = 0;
 
   for (let i = 1; i < points.length; i++) {
     const prev = points[i - 1];
     const curr = points[i];
-    distanceM += haversineM(prev, curr);
+    const segDist = haversineM(prev, curr);
+    distanceM += segDist;
 
     if (prev.ele != null && curr.ele != null) {
       const dEle = curr.ele - prev.ele;
@@ -171,29 +253,31 @@ function computeTrackStats(
     if (prev.time && curr.time) {
       const dtS = (curr.time.getTime() - prev.time.getTime()) / 1000;
       if (dtS > 0) {
-        const segDist = haversineM(prev, curr);
         const speed = segDist / dtS;
         if (speed >= MOVING_SPEED_THRESHOLD_MPS) {
           movingTimeS += dtS;
-          if (speed > maxSpeedMps) maxSpeedMps = speed;
         }
       }
     }
   }
 
+  const timedPoints = points.filter(
+    (p): p is GpxPoint & { time: Date } => p.time != null
+  );
+  const maxSpeedMps = computeMaxSpeedMps(timedPoints);
+
   // --- Timestamps ---
-  const timed = points.filter((p) => p.time) as (GpxPoint & { time: Date })[];
-  if (timed.length === 0) {
+  if (timedPoints.length === 0) {
     throw new Error('Invalid GPX file: no timestamps found in track');
   }
   let startedAt: Date;
   let endedAt: Date;
-  if (timed.length >= 2) {
-    startedAt = timed.reduce<Date>((min, p) => (p.time < min ? p.time : min), timed[0].time);
-    endedAt = timed.reduce<Date>((max, p) => (p.time > max ? p.time : max), timed[0].time);
+  if (timedPoints.length >= 2) {
+    startedAt = timedPoints.reduce<Date>((min, p) => (p.time < min ? p.time : min), timedPoints[0].time);
+    endedAt = timedPoints.reduce<Date>((max, p) => (p.time > max ? p.time : max), timedPoints[0].time);
   } else {
-    startedAt = timed[0].time;
-    endedAt = timed[0].time;
+    startedAt = timedPoints[0].time;
+    endedAt = timedPoints[0].time;
   }
 
   const elapsedMs = endedAt.getTime() - startedAt.getTime();

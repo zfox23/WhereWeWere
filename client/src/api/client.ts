@@ -1,4 +1,4 @@
-import type { TimestampReconciliationScanResult, TrackMapEntry } from '../types';
+import type { TimestampReconciliationScanResult, TrackEntry, TrackMapEntry } from '../types';
 
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
@@ -294,6 +294,9 @@ export const tracks = {
   mapData: (params?: Record<string, string>) =>
     request<TrackMapEntry[]>(`/tracks/map-data?${new URLSearchParams(params)}`),
   get: (id: string) => request<any>(`/tracks/${id}`),
+  update: (id: string, data: { name?: string; activity_type?: string | null }) =>
+    request<TrackEntry>(`/tracks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  activityTypes: () => request<string[]>('/tracks/activity-types'),
   delete: (id: string) =>
     request<{ message: string; id: string }>(`/tracks/${id}`, { method: 'DELETE' }),
   download: async (id: string): Promise<{ blob: Blob; filename: string }> => {

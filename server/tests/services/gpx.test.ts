@@ -48,3 +48,56 @@ describe('parseGpx points series', () => {
     expect(stats.points[2].hr).toBe(120);
   });
 });
+
+// 1 degree of latitude is ~111,195 m, so this is ~10 m per 0.00008993 degrees.
+const DEGREES_PER_10M = 10 / 111194.9;
+
+function buildGpx(lats: number[], startEpochMs = Date.UTC(2024, 0, 1, 10)): string {
+  const pts = lats
+    .map((lat, i) => {
+      const t = new Date(startEpochMs + i * 1000).toISOString();
+      return `<trkpt lat="${lat.toFixed(8)}" lon="0"><time>${t}</time></trkpt>`;
+    })
+    .join('');
+  return `<?xml version="1.0"?>
+<gpx version="1.1" creator="test">
+  <trk>
+    <name>Generated</name>
+    <trkseg>${pts}</trkseg>
+  </trk>
+</gpx>`;
+}
+
+describe('parseGpx max speed', () => {
+  it('reports steady speed close to the true speed', () => {
+    // 12 fixes, 1/s, each 10 m further north -> ~10 m/s the whole way
+    const lats = Array.from({ length: 12 }, (_, i) => i * DEGREES_PER_10M);
+    const stats = parseGpx(buildGpx(lats), 'Fallback');
+    expect(stats.maxSpeedMps).toBeCloseTo(10, 0);
+  });
+
+  it('ignores GPS jitter spikes from a stationary receiver', () => {
+    // Stationary, but the position jumps ~11 m back and forth every second.
+    // Raw per-segment speeds would be ~11 m/s (40 km/h); the windowed max
+    // speed must stay far below that.
+    const lats = Array.from({ length: 21 }, (_, i) => (i % 2 === 0 ? 0 : 0.0001));
+    const stats = parseGpx(buildGpx(lats), 'Fallback');
+    expect(stats.maxSpeedMps).toBeLessThan(3);
+  });
+
+  it('falls back to the whole-track average when the track is shorter than the window', () => {
+    // 3 fixes, 1/s, 10 m each -> ~10 m/s, but only 2 s long (window is 5 s)
+    const lats = [0, DEGREES_PER_10M, 2 * DEGREES_PER_10M];
+    const stats = parseGpx(buildGpx(lats), 'Fallback');
+    expect(stats.maxSpeedMps).toBeCloseTo(10, 0);
+  });
+
+  it('ignores GPS lock jumps where the position teleports', () => {
+    // Steady ~10 m/s the whole way, except one fix that jumps 2 km ahead
+    // (simulating a bad fix after the receiver lost signal).
+    const lats = Array.from({ length: 12 }, (_, i) => i * DEGREES_PER_10M);
+    lats[6] = 0.02; // ~2.2 km teleport between seconds 5 and 6
+    const stats = parseGpx(buildGpx(lats), 'Fallback');
+    expect(stats.maxSpeedMps).toBeLessThan(15);
+  });
+});

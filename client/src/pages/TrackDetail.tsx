@@ -6,13 +6,17 @@ import {
   CalendarDays,
   Clock,
   Download,
+  Edit2,
   Flag,
   Heart,
   LineChart,
   Loader2,
   Mountain,
+  Plus,
   Route,
+  Save,
   Trash2,
+  X,
 } from 'lucide-react';
 import { MapContainer, Polyline, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -197,6 +201,83 @@ export default function TrackDetail() {
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
+  // ── Edit mode ───────────────────────────────────────────────────────────
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editActivityType, setEditActivityType] = useState('');
+  const [activityTypes, setActivityTypes] = useState<string[]>([]);
+  const [typeSuggestOpen, setTypeSuggestOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const startEditing = () => {
+    if (!track) return;
+    setEditName(track.name);
+    setEditActivityType(track.activity_type ?? '');
+    setSaveError(null);
+    setIsEditing(true);
+    tracks
+      .activityTypes()
+      .then(setActivityTypes)
+      .catch(() => setActivityTypes([]));
+  };
+
+  const cancelEditing = () => {
+    setIsEditing(false);
+    setTypeSuggestOpen(false);
+    setSaveError(null);
+  };
+
+  const trimmedType = editActivityType.trim();
+  const isNewType =
+    trimmedType.length > 0 &&
+    !activityTypes.some((t) => t.toLowerCase() === trimmedType.toLowerCase());
+
+  const typeSuggestions = useMemo(() => {
+    const q = trimmedType.toLowerCase();
+    return activityTypes
+      .filter((t) => (q ? t.toLowerCase().includes(q) : true))
+      .filter((t) => t.toLowerCase() !== q)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .slice(0, 8);
+  }, [activityTypes, trimmedType]);
+
+  const selectActivityType = (type: string) => {
+    setEditActivityType(type);
+    setTypeSuggestOpen(false);
+  };
+
+  const handleTypeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setTypeSuggestOpen(false);
+    } else if (e.key === 'Enter' && typeSuggestOpen && (typeSuggestions.length > 0 || isNewType)) {
+      e.preventDefault();
+      if (typeSuggestions.length > 0) selectActivityType(typeSuggestions[0]);
+      else if (isNewType) selectActivityType(trimmedType);
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || !track) return;
+    const name = editName.trim();
+    if (!name) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await tracks.update(id, {
+        name,
+        activity_type: trimmedType || null,
+      });
+      setTrack(updated);
+      setIsEditing(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   usePageTitle(track ? `Track: ${track.name}` : 'Track');
 
   useEffect(() => {
@@ -286,6 +367,122 @@ export default function TrackDetail() {
         Back
       </Link>
 
+      {isEditing ? (
+        <form
+          onSubmit={handleSave}
+          className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-indigo-200 dark:border-indigo-700/50 shadow-sm shadow-black/3 p-5 space-y-4"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-gray-100">
+              <Edit2 size={16} className="text-indigo-500" />
+              Edit track
+            </h2>
+            <button
+              type="button"
+              onClick={cancelEditing}
+              aria-label="Cancel editing"
+              className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div>
+            <label htmlFor="track-edit-name" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+              Name
+            </label>
+            <input
+              id="track-edit-name"
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              maxLength={200}
+              required
+              autoFocus
+              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div className="relative">
+            <label htmlFor="track-edit-activity-type" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+              Activity type
+            </label>
+            <input
+              id="track-edit-activity-type"
+              type="text"
+              value={editActivityType}
+              onChange={(e) => {
+                setEditActivityType(e.target.value);
+                setTypeSuggestOpen(true);
+              }}
+              onFocus={() => setTypeSuggestOpen(true)}
+              onBlur={() => setTypeSuggestOpen(false)}
+              onKeyDown={handleTypeKeyDown}
+              maxLength={100}
+              placeholder="e.g. Cycling — or type a new type"
+              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            {typeSuggestOpen && (typeSuggestions.length > 0 || isNewType) && (
+              <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg divide-y divide-gray-100 dark:divide-gray-800">
+                {isNewType && (
+                  <li>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        selectActivityType(trimmedType);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                    >
+                      <Plus size={13} className="shrink-0" />
+                      Add “{trimmedType}” as a new activity type
+                    </button>
+                  </li>
+                )}
+                {typeSuggestions.map((type) => (
+                  <li key={type}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        selectActivityType(type);
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-gray-800 dark:text-gray-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                    >
+                      {type}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {saveError && (
+            <p className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
+              <AlertCircle size={13} className="shrink-0" />
+              {saveError}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={saving || !editName.trim()}
+              className="btn-primary flex items-center gap-2 text-sm"
+            >
+              {saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={cancelEditing}
+              className="btn-secondary flex items-center gap-2 text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
           <Route size={20} className="text-rose-500 shrink-0" />
@@ -297,6 +494,14 @@ export default function TrackDetail() {
               {track.activity_type}
             </span>
           )}
+          <button
+            onClick={startEditing}
+            aria-label="Edit track"
+            title="Edit track"
+            className="ml-auto inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <Edit2 size={16} />
+          </button>
         </div>
 
         <div className="space-y-2 text-sm text-gray-500 dark:text-gray-400">
@@ -368,6 +573,7 @@ export default function TrackDetail() {
           )}
         </div>
       </div>
+      )}
 
       {/* Track map */}
       <div className="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-3">

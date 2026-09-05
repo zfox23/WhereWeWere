@@ -243,6 +243,36 @@ router.get('/map-data', async (req: Request, res: Response) => {
   }
 });
 
+// GET /activity-types - distinct activity types used across tracks, for autocomplete
+router.get('/activity-types', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    const params: unknown[] = [];
+    const conditions: string[] = ['activity_type IS NOT NULL'];
+    let paramIndex = 1;
+
+    if (user_id) {
+      conditions.push(`user_id = $${paramIndex}`);
+      params.push(user_id);
+      paramIndex++;
+    }
+
+    const result = await query(
+      `SELECT activity_type FROM tracks
+       WHERE ${conditions.join(' AND ')}
+       GROUP BY activity_type
+       ORDER BY LOWER(activity_type)`,
+      params
+    );
+
+    res.json(result.rows.map((r: any) => r.activity_type));
+  } catch (err) {
+    console.error('Error listing activity types:', err);
+    res.status(500).json({ error: 'Failed to list activity types' });
+  }
+});
+
 // GET /:id - get single track with geometry (GeoJSON coordinates)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -386,6 +416,62 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
     if (tempFilePath) {
       fs.unlink(tempFilePath, () => {});
     }
+  }
+});
+
+// PUT /:id - update editable track fields (name, activity_type)
+router.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, activity_type } = req.body ?? {};
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (name !== undefined) {
+      const trimmed = String(name ?? '').trim();
+      if (!trimmed) {
+        return res.status(400).json({ error: 'Name cannot be empty' });
+      }
+      if (trimmed.length > 200) {
+        return res.status(400).json({ error: 'Name is too long (max 200 characters)' });
+      }
+      sets.push(`name = $${paramIndex}`);
+      params.push(trimmed);
+      paramIndex++;
+    }
+
+    if (activity_type !== undefined) {
+      const trimmed = String(activity_type ?? '').trim();
+      if (trimmed.length > 100) {
+        return res.status(400).json({ error: 'Activity type is too long (max 100 characters)' });
+      }
+      sets.push(`activity_type = $${paramIndex}`);
+      params.push(trimmed || null);
+      paramIndex++;
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    params.push(id);
+    const result = await query(
+      `UPDATE tracks SET ${sets.join(', ')}, updated_at = NOW()
+       WHERE id = $${paramIndex}
+       RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Track not found' });
+    }
+
+    res.json(trackRowToApi(result.rows[0]));
+  } catch (err) {
+    console.error('Error updating track:', err);
+    res.status(500).json({ error: 'Failed to update track' });
   }
 });
 
