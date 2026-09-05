@@ -1,4 +1,4 @@
-import type { TimestampReconciliationScanResult } from '../types';
+import type { TimestampReconciliationScanResult, TrackMapEntry } from '../types';
 
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
@@ -145,7 +145,7 @@ export const stats = {
   additionalStats: (userId: string) =>
     request<any>(`/stats/additional-stats?user_id=${userId}`),
   earliestDates: (userId: string) =>
-    request<{ checkins: string | null; mood: string | null; sleep: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
+    request<{ checkins: string | null; mood: string | null; sleep: string | null; tracks: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
   moodDaily: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
     if (from && to) { qp.set('from', from); qp.set('to', to); }
@@ -291,6 +291,8 @@ export const sleepEntries = {
 export const tracks = {
   list: (params?: Record<string, string>) =>
     request<any[]>(`/tracks?${new URLSearchParams(params)}`),
+  mapData: (params?: Record<string, string>) =>
+    request<TrackMapEntry[]>(`/tracks/map-data?${new URLSearchParams(params)}`),
   get: (id: string) => request<any>(`/tracks/${id}`),
   delete: (id: string) =>
     request<{ message: string; id: string }>(`/tracks/${id}`, { method: 'DELETE' }),

@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Brain, MapPin, Moon, SmilePlus } from 'lucide-react';
+import { Brain, MapPin, Moon, Route, SmilePlus } from 'lucide-react';
 import { MoodsTab } from '../components/MoodStats';
 import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
 import { SleepTab } from '../components/SleepTab';
+import { TracksTab } from '../components/TracksTab';
 import { usePageTitle } from '../utils/pageTitle';
 
 export default function Profile() {
-  type ProfileTab = 'places' | 'reflect' | 'moods' | 'sleep';
+  type ProfileTab = 'places' | 'reflect' | 'moods' | 'sleep' | 'tracks';
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
-    return value === 'places' || value === 'reflect' || value === 'moods' || value === 'sleep';
+    return (
+      value === 'places' || value === 'reflect' || value === 'moods' || value === 'sleep' || value === 'tracks'
+    );
   };
 
   const getTabFromLocation = (): ProfileTab => {
@@ -24,6 +27,7 @@ export default function Profile() {
     places: 'Profile: Places',
     moods: 'Profile: Moods',
     sleep: 'Profile: Sleep',
+    tracks: 'Profile: Tracks',
     reflect: 'Profile: Reflect',
   };
   usePageTitle(tabTitleMap[activeTab]);
@@ -57,10 +61,10 @@ export default function Profile() {
     <div className="space-y-6">
       
       {/* Tab bar */}
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit max-w-full overflow-x-auto">
         <button
           onClick={() => setActiveTab('places')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'places'
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'places'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
@@ -70,7 +74,7 @@ export default function Profile() {
         </button>
         <button
           onClick={() => setActiveTab('moods')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'moods'
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'moods'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
@@ -80,7 +84,7 @@ export default function Profile() {
         </button>
         <button
           onClick={() => setActiveTab('sleep')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'sleep'
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'sleep'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
@@ -90,13 +94,23 @@ export default function Profile() {
         </button>
         <button
           onClick={() => setActiveTab('reflect')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'reflect'
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'reflect'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
         >
           <Brain size={14} />
           Reflect
+        </button>
+        <button
+          onClick={() => setActiveTab('tracks')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'tracks'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+        >
+          <Route size={14} />
+          Tracks
         </button>
       </div>
 
@@ -106,7 +120,9 @@ export default function Profile() {
           ? <ReflectTab />
           : activeTab === 'sleep'
             ? <SleepTab />
-            : <MoodsTab />}
+            : activeTab === 'tracks'
+              ? <TracksTab />
+              : <MoodsTab />}
     </div>
   );
 }

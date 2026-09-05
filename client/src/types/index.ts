@@ -232,6 +232,28 @@ export interface TrackEntry {
   points?: TrackPoint[] | null;
 }
 
+export interface TrackMapEntry {
+  id: string;
+  name: string;
+  activity_type: string | null;
+  timezone: string;
+  started_at: string;
+  distance_m: number;
+  elapsed_time_s: number;
+  moving_time_s: number;
+  elevation_gain_m: number;
+  avg_speed_mps: number;
+  max_speed_mps: number;
+  /** [lng, lat] per point */
+  coordinates: [number, number][];
+  bounds: {
+    minLng: number;
+    minLat: number;
+    maxLng: number;
+    maxLat: number;
+  } | null;
+}
+
 export interface SleepSummaryStats {
   total_sleeps: number;
   avg_duration_minutes: number | null;

@@ -158,6 +158,91 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// GET /map-data - lightweight track list with geometry for map views
+router.get('/map-data', async (req: Request, res: Response) => {
+  try {
+    const { user_id, from, to } = req.query;
+
+    const params: unknown[] = [];
+    const conditions: string[] = [];
+    let paramIndex = 1;
+
+    if (user_id) {
+      conditions.push(`t.user_id = $${paramIndex}`);
+      params.push(user_id);
+      paramIndex++;
+    }
+
+    if (from) {
+      conditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= $${paramIndex}::date`);
+      params.push(from);
+      paramIndex++;
+    }
+
+    if (to) {
+      conditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date <= $${paramIndex}::date`);
+      params.push(to);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await query(
+      `SELECT t.id, t.name, t.activity_type, t.timezone, t.started_at,
+              t.distance_m, t.elapsed_time_s, t.moving_time_s, t.elevation_gain_m,
+              t.avg_speed_mps, t.max_speed_mps,
+              ST_XMin(t.path) AS min_lng, ST_YMin(t.path) AS min_lat,
+              ST_XMax(t.path) AS max_lng, ST_YMax(t.path) AS max_lat,
+              ST_AsGeoJSON(t.path) AS geojson
+       FROM tracks t
+       ${whereClause}
+       ORDER BY t.started_at ASC`,
+      params
+    );
+
+    const data = result.rows.map((row: any) => {
+      let coordinates: [number, number][] = [];
+      try {
+        const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
+        if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
+          coordinates = gj.coordinates;
+        }
+      } catch {
+        // leave empty
+      }
+
+      return {
+        id: row.id,
+        name: row.name,
+        activity_type: row.activity_type ?? null,
+        timezone: row.timezone,
+        started_at: row.started_at,
+        distance_m: Number(row.distance_m),
+        elapsed_time_s: Number(row.elapsed_time_s),
+        moving_time_s: Number(row.moving_time_s),
+        elevation_gain_m: Number(row.elevation_gain_m),
+        avg_speed_mps: Number(row.avg_speed_mps),
+        max_speed_mps: Number(row.max_speed_mps),
+        coordinates,
+        bounds:
+          coordinates.length > 0
+            ? {
+                minLng: Number(row.min_lng),
+                minLat: Number(row.min_lat),
+                maxLng: Number(row.max_lng),
+                maxLat: Number(row.max_lat),
+              }
+            : null,
+      };
+    });
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error getting track map data:', err);
+    res.status(500).json({ error: 'Failed to get track map data' });
+  }
+});
+
 // GET /:id - get single track with geometry (GeoJSON coordinates)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
