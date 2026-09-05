@@ -212,6 +212,7 @@ export interface TrackEntry {
   id: string;
   user_id: string;
   name: string;
+  activity_type: string | null;
   timezone: string;
   started_at: string;
   ended_at: string;

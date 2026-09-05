@@ -24,4 +24,7 @@ export const config = {
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
   apiAccessToken: process.env.API_ACCESS_TOKEN || '',
   trustProxy: parseBoolean(process.env.TRUST_PROXY, false),
+  dataDir: process.env.DATA_DIR
+    ? path.resolve(process.env.DATA_DIR)
+    : path.join(process.cwd(), 'data'),
 };

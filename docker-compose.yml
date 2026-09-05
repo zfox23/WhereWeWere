@@ -33,8 +33,11 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
+      DATA_DIR: /app/data
     ports:
       - "${SERVER_PORT:-3001}:3001"
+    volumes:
+      - ./data/server:/app/data
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3001/healthz || exit 1"]
       interval: 10s

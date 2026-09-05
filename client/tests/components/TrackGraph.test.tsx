@@ -136,4 +136,30 @@ describe('TrackGraph', () => {
     overlay.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }));
     expect(onHoverPoint).toHaveBeenLastCalledWith(null);
   });
+
+  it('maps the pointer position relative to the svg, not the overlay rect', () => {
+    const onHoverPoint = vi.fn();
+    const { container } = renderGraph(onHoverPoint);
+    const svg = container.querySelector('svg[aria-label="Track graph"]') as SVGSVGElement;
+    const overlay = container.querySelector('[data-testid="chart-overlay"]') as SVGRectElement;
+
+    // In a real browser the overlay rect's box starts at the left margin,
+    // while the svg's box starts at 0. jsdom returns zeros for both.
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 640, bottom: 240, width: 640, height: 240,
+      x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    vi.spyOn(overlay, 'getBoundingClientRect').mockReturnValue({
+      left: 48, top: 12, right: 630, bottom: 218, width: 582, height: 206,
+      x: 48, y: 12, toJSON: () => ({}),
+    } as DOMRect);
+
+    // clientX 200 is ~26% into the plot area: nearest of the three points
+    // (0m / ~111m / ~222m) is the middle one. Measuring against the overlay
+    // rect instead would land on the first point.
+    overlay.dispatchEvent(
+      new PointerEvent('pointermove', { clientX: 200, clientY: 100, bubbles: true })
+    );
+    expect(onHoverPoint).toHaveBeenCalledWith(1);
+  });
 });

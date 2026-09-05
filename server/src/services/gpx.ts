@@ -20,6 +20,8 @@ export interface GpxPoint {
 
 export interface TrackStats {
   name: string;
+  /** Activity type from the GPX <type> element or TCX Activity @Sport, or null */
+  activityType: string | null;
   startedAt: Date;
   endedAt: Date;
   distanceM: number;
@@ -95,44 +97,59 @@ export function haversineM(a: GpxPoint, b: GpxPoint): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-export function parseGpx(
-  xml: string,
-  fallbackName: string
-): TrackStats {
-  const parser = new XMLParser({
+function makeParser() {
+  return new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
     removeNSPrefix: true,
     trimValues: true,
   });
+}
 
-  let doc: any;
-  try {
-    doc = parser.parse(xml);
-  } catch (err) {
-    throw new Error('Invalid GPX file: could not parse XML');
-  }
+function parseTcxPoint(tp: any): GpxPoint | null {
+  const pos = tp?.Position;
+  const lat = Number(pos?.LatitudeDegrees);
+  const lon = Number(pos?.LongitudeDegrees);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
-  const trk = doc?.gpx?.trk ?? doc?.trk;
-  if (!trk) {
-    throw new Error('Invalid GPX file: no <trk> element found');
-  }
+  const eleRaw = tp?.AltitudeMeters;
+  const ele = eleRaw != null && eleRaw !== '' ? Number(eleRaw) : NaN;
 
-  const trkNameRaw = trk.name;
-  const name =
-    (typeof trkNameRaw === 'string' && trkNameRaw.trim()) || fallbackName;
+  const timeRaw = tp?.Time;
+  const time = timeRaw ? new Date(String(timeRaw)) : null;
 
-  const segments = toNumberArray(trk.trkseg);
-  const points: GpxPoint[] = [];
-  for (const seg of segments) {
-    for (const trkpt of toNumberArray((seg as any)?.trkpt)) {
-      const p = parsePoint(trkpt);
-      if (p) points.push(p);
+  let hr: number | null = null;
+  const ext = tp?.extensions;
+  if (ext) {
+    const extObj = ext['tpx:Extension'] || ext['Extension'] || ext;
+    const hrRaw =
+      extObj?.HeartRateBpm?.Value ?? extObj?.['tpx:HeartRateBpm']?.['tpx:Value'];
+    if (hrRaw != null && hrRaw !== '') {
+      const parsed = Number(hrRaw);
+      if (Number.isFinite(parsed) && parsed > 0) hr = parsed;
     }
   }
 
+  return {
+    lat,
+    lon,
+    ele: Number.isFinite(ele) ? ele : null,
+    time: time && !Number.isNaN(time.getTime()) ? time : null,
+    hr,
+  };
+}
+
+/**
+ * Compute track stats from an ordered list of points. Shared by the GPX
+ * and TCX parsers.
+ */
+function computeTrackStats(
+  points: GpxPoint[],
+  name: string,
+  activityType: string | null
+): TrackStats {
   if (points.length < 2) {
-    throw new Error('Invalid GPX file: track has fewer than 2 points');
+    throw new Error('Track has fewer than 2 points');
   }
 
   // --- Distances / times / speeds ---
@@ -208,6 +225,7 @@ export function parseGpx(
 
   return {
     name,
+    activityType,
     startedAt,
     endedAt,
     distanceM: Math.round(distanceM),
@@ -223,4 +241,104 @@ export function parseGpx(
     coordinates,
     points: pointsSeries,
   };
+}
+
+export function parseGpx(
+  xml: string,
+  fallbackName: string
+): TrackStats {
+  const parser = makeParser();
+
+  let doc: any;
+  try {
+    doc = parser.parse(xml);
+  } catch {
+    throw new Error('Invalid GPX file: could not parse XML');
+  }
+
+  const trk = doc?.gpx?.trk ?? doc?.trk;
+  if (!trk) {
+    throw new Error('Invalid GPX file: no <trk> element found');
+  }
+
+  const trkNameRaw = trk.name;
+  const name =
+    (typeof trkNameRaw === 'string' && trkNameRaw.trim()) || fallbackName;
+
+  const trkTypeRaw = trk.type;
+  const activityType =
+    typeof trkTypeRaw === 'string' && trkTypeRaw.trim() ? trkTypeRaw.trim() : null;
+
+  const segments = toNumberArray(trk.trkseg);
+  const points: GpxPoint[] = [];
+  for (const seg of segments) {
+    for (const trkpt of toNumberArray((seg as any)?.trkpt)) {
+      const p = parsePoint(trkpt);
+      if (p) points.push(p);
+    }
+  }
+
+  if (points.length < 2) {
+    throw new Error('Invalid GPX file: track has fewer than 2 points');
+  }
+
+  return computeTrackStats(points, name, activityType);
+}
+
+/** Parse a Garmin TCX (TrainingCenterDatabase) file. */
+export function parseTcx(
+  xml: string,
+  fallbackName: string
+): TrackStats {
+  const parser = makeParser();
+
+  let doc: any;
+  try {
+    doc = parser.parse(xml);
+  } catch {
+    throw new Error('Invalid TCX file: could not parse XML');
+  }
+
+  const db = doc?.TrainingCenterDatabase ?? doc;
+  const activities = toNumberArray(db?.Activities?.Activity);
+  if (activities.length === 0) {
+    throw new Error('Invalid TCX file: no <Activity> element found');
+  }
+
+  const activity: any = activities[0];
+  const sportRaw = activity?.['@_Sport'];
+  const activityType =
+    typeof sportRaw === 'string' && sportRaw.trim() ? sportRaw.trim() : null;
+
+  // Optional <Name> inside a tpx extension (not always present)
+  const extName =
+    activity?.tpx_Extension?.Name ?? activity?.Extension?.Name;
+  const name =
+    (typeof extName === 'string' && extName.trim()) || fallbackName;
+
+  const points: GpxPoint[] = [];
+  for (const lap of toNumberArray(activity?.Lap)) {
+    for (const tp of toNumberArray((lap as any)?.Track?.Trackpoint)) {
+      const p = parseTcxPoint(tp);
+      if (p) points.push(p);
+    }
+  }
+
+  if (points.length < 2) {
+    throw new Error('Invalid TCX file: track has fewer than 2 points');
+  }
+
+  return computeTrackStats(points, name, activityType);
+}
+
+/** Parse a GPX or TCX file based on its extension. */
+export function parseTrackFile(
+  xml: string,
+  ext: string,
+  fallbackName: string
+): TrackStats {
+  if (ext.toLowerCase() === '.tcx') {
+    return parseTcx(xml, fallbackName);
+  }
+  return parseGpx(xml, fallbackName);
 }

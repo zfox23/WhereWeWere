@@ -294,7 +294,11 @@ export default function TrackGraph({
 
   const handlePointerMove = (e: React.PointerEvent<SVGRectElement>) => {
     if (!geometry || !data) return;
-    const rect = e.currentTarget.getBoundingClientRect();
+    // Measure against the <svg> (not the overlay rect, whose box already
+    // starts at geometry.left) so px includes the left margin.
+    const svg = e.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const frac = Math.min(1, Math.max(0, (px - geometry.left) / geometry.innerW));
     const targetX = frac * geometry.xMax;
@@ -341,73 +345,6 @@ export default function TrackGraph({
 
   return (
     <div>
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-2">
-        <div
-          role="group"
-          aria-label="X axis"
-          className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-xs"
-        >
-          {(['distance', 'time'] as TrackGraphXAxis[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setXAxis(mode)}
-              aria-pressed={xAxis === mode}
-              className={`px-3 py-1.5 capitalize transition-colors ${
-                xAxis === mode
-                  ? 'bg-rose-500 text-white'
-                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
-
-        <div
-          role="group"
-          aria-label="Data series"
-          className="flex items-center gap-1.5 flex-wrap"
-        >
-          {SERIES_ORDER.map((key) => {
-            const meta = SERIES_META[key];
-            const active = selected.includes(key);
-            const disabled = !data.hasData[key];
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => toggleSeries(key)}
-                disabled={disabled}
-                aria-pressed={active}
-                title={
-                  disabled
-                    ? `${meta.label} data not available for this track`
-                    : `Toggle ${meta.label.toLowerCase()}`
-                }
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  disabled
-                    ? 'opacity-40 cursor-not-allowed border-gray-200 dark:border-gray-700 text-gray-400'
-                    : active
-                      ? 'border-transparent text-white'
-                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-                }`}
-                style={active ? { backgroundColor: meta.color } : undefined}
-              >
-                <meta.icon size={13} />
-                {meta.label}
-              </button>
-            );
-          })}
-          {selected.length < 2 && (
-            <span className="text-[11px] text-gray-400 dark:text-gray-500">
-              Select up to two series (left + right axis)
-            </span>
-          )}
-        </div>
-      </div>
-
       {/* Chart */}
       <div ref={containerRef} className="relative select-none">
         <svg
@@ -571,6 +508,66 @@ export default function TrackGraph({
             })}
           </div>
         )}
+      </div>
+
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-2">
+        <div
+          role="group"
+          aria-label="X axis"
+          className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-xs"
+        >
+          {(['distance', 'time'] as TrackGraphXAxis[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setXAxis(mode)}
+              aria-pressed={xAxis === mode}
+              className={`px-3 py-1.5 capitalize transition-colors ${
+                xAxis === mode
+                  ? 'bg-rose-500 text-white'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+
+        <div
+          role="group"
+          aria-label="Data series"
+          className="flex items-center gap-1.5 flex-wrap"
+        >
+          {SERIES_ORDER.filter((key) => data.hasData[key]).map((key) => {
+            const meta = SERIES_META[key];
+            const active = selected.includes(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggleSeries(key)}
+                aria-pressed={active}
+                title={`Toggle ${meta.label.toLowerCase()}`}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  active
+                    ? 'border-transparent text-white'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+                style={active ? { backgroundColor: meta.color } : undefined}
+              >
+                <meta.icon size={13} />
+                {meta.label}
+              </button>
+            );
+          })}
+          {SERIES_ORDER.filter((key) => data.hasData[key]).length > 1 &&
+            selected.length < 2 && (
+              <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                Select up to two series (left + right axis)
+              </span>
+            )}
+        </div>
       </div>
     </div>
   );

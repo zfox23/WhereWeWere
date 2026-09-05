@@ -294,6 +294,29 @@ export const tracks = {
   get: (id: string) => request<any>(`/tracks/${id}`),
   delete: (id: string) =>
     request<{ message: string; id: string }>(`/tracks/${id}`, { method: 'DELETE' }),
+  download: async (id: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`${API_BASE}/tracks/${id}/download`, {
+      headers: withAuthHeader(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({} as Record<string, unknown>));
+      throw new Error(
+        (error.message as string) || (error.error as string) || `Track download failed: ${res.status}`
+      );
+    }
+    let filename = `track-${id}.gpx`;
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match =
+      disposition.match(/filename="([^"]+)"/) || disposition.match(/filename=([^;]+)/);
+    if (match) {
+      try {
+        filename = decodeURIComponent(match[1].trim());
+      } catch {
+        // keep fallback
+      }
+    }
+    return { blob: await res.blob(), filename };
+  },
   upload: async (file: File, timezone?: string) => {
     const form = new FormData();
     form.append('file', file);

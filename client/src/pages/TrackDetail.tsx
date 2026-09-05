@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CalendarDays,
   Clock,
+  Download,
   Flag,
   Heart,
   LineChart,
@@ -192,6 +193,7 @@ export default function TrackDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
@@ -217,6 +219,26 @@ export default function TrackDetail() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load track'))
       .finally(() => setLoading(false));
   }, [id]);
+
+  const handleDownload = async () => {
+    if (!id) return;
+    setDownloading(true);
+    try {
+      const { blob, filename } = await tracks.download(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download track');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!id) return;
@@ -270,6 +292,11 @@ export default function TrackDetail() {
           <h1 className="text-xl font-bold text-rose-700 dark:text-rose-300 break-words">
             {track.name}
           </h1>
+          {track.activity_type && (
+            <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+              {track.activity_type}
+            </span>
+          )}
         </div>
 
         <div className="space-y-2 text-sm text-gray-500 dark:text-gray-400">
@@ -387,6 +414,14 @@ export default function TrackDetail() {
       </div>
 
       <div className="flex items-center gap-2 pb-20">
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="btn-primary flex items-center gap-2 text-sm"
+        >
+          {downloading ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />}
+          Download GPX
+        </button>
         <button
           onClick={handleDelete}
           disabled={deleting}
