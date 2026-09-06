@@ -32,7 +32,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Must satisfy jsdom@30's engines (^22.22.2 || ^24.15.0 || >=26.0.0) and
+          # its undici@8 dependency (>=22.19.0); Node 20 cannot load them.
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
