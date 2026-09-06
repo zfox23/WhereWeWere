@@ -105,15 +105,12 @@ export default function SleepCard({ item }: SleepCardProps) {
           <div className="flex items-center gap-2 flex-wrap">
             <Moon size={16} className="text-indigo-500 shrink-0" />
             <span className="text-base font-semibold text-indigo-700 dark:text-indigo-300">Slept for {formatDuration(startedAt, endedAt)}</span>
+            {rating > 0 && (
+              <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                {renderStars(rating)}
+              </div>
+            )}
           </div>
-
-          {rating > 0 && (
-            <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
-              <Star size={12} className="fill-current" />
-              {renderStars(rating)}
-              <span className="text-[11px] text-amber-600/80 dark:text-amber-300/80">({rating.toFixed(1)})</span>
-            </div>
-          )}
 
           {item.sleep_comment && (
             <p className="mt-2 text-xs italic text-gray-500 dark:text-gray-400">

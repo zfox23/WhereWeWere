@@ -7,12 +7,12 @@ import CheckInCard from '../components/CheckInCard';
 import MoodCheckInCard from '../components/MoodCheckInCard';
 import SleepCard from '../components/SleepCard';
 import TrackCard from '../components/TrackCard';
-import { MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
+import Filters from '../components/filters/Filters';
+import { MOOD_LABELS } from '../components/MoodIcons';
 import { usePageTitle } from '../utils/pageTitle';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
-const COMPLETE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function formatDateHeader(dateStr: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -221,36 +221,6 @@ export default function Home() {
   const activity = searchParams.get('activity') || '';
   const sleepDuration = searchParams.get('sleep_duration') || '';
   const trackActivity = searchParams.get('track_activity') || '';
-  const [fromDateInput, setFromDateInput] = useState(fromDate);
-  const [toDateInput, setToDateInput] = useState(toDate);
-  const [categoryInput, setCategoryInput] = useState(category);
-  const [countryInput, setCountryInput] = useState(country);
-  const [trackActivityInput, setTrackActivityInput] = useState(trackActivity);
-
-  const findExactOption = useCallback((value: string, options: string[]) => {
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return null;
-    return options.find((opt) => opt.toLowerCase() === normalized) || null;
-  }, []);
-
-  const filteredCategoryOptions = useMemo(() => {
-    const needle = categoryInput.trim().toLowerCase();
-    if (!needle) return categoryOptions.slice(0, 30);
-    return categoryOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
-  }, [categoryInput, categoryOptions]);
-
-  const filteredCountryOptions = useMemo(() => {
-    const needle = countryInput.trim().toLowerCase();
-    if (!needle) return countryOptions.slice(0, 30);
-    return countryOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
-  }, [countryInput, countryOptions]);
-
-  const filteredTrackActivityOptions = useMemo(() => {
-    const needle = trackActivityInput.trim().toLowerCase();
-    if (!needle) return trackActivityOptions.slice(0, 30);
-    return trackActivityOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
-  }, [trackActivityInput, trackActivityOptions]);
-
   const [showFilters, setShowFilters] = useState(false);
   const hasMoodTypeFilter = Boolean(mood || activity);
   const hasLocationTypeFilter = Boolean(venueId || category || country);
@@ -374,26 +344,6 @@ export default function Home() {
       setShowFilters(true);
     }
   }, [fromDate, toDate, venueId, category, country, mood, activity, sleepDuration, trackActivity]);
-
-  useEffect(() => {
-    setFromDateInput(fromDate);
-  }, [fromDate]);
-
-  useEffect(() => {
-    setToDateInput(toDate);
-  }, [toDate]);
-
-  useEffect(() => {
-    setCategoryInput(category);
-  }, [category]);
-
-  useEffect(() => {
-    setCountryInput(country);
-  }, [country]);
-
-  useEffect(() => {
-    setTrackActivityInput(trackActivity);
-  }, [trackActivity]);
 
   // Load distinct track activity types for the Track filter
   useEffect(() => {
@@ -598,37 +548,6 @@ export default function Home() {
       return !prev;
     });
   }, [includeLocation, includeMood, includeSleep, trackTypeToggleDisabled]);
-
-  const handleDateInputChange = useCallback((key: 'from' | 'to', value: string) => {
-    if (key === 'from') {
-      setFromDateInput(value);
-    } else {
-      setToDateInput(value);
-    }
-
-    if (!value) {
-      setFilter(key, '');
-    }
-  }, [setFilter]);
-
-  const commitDateInput = useCallback((key: 'from' | 'to') => {
-    const value = key === 'from' ? fromDateInput : toDateInput;
-    if (!value) {
-      setFilter(key, '');
-      return;
-    }
-
-    if (COMPLETE_DATE_PATTERN.test(value)) {
-      setFilter(key, value);
-      return;
-    }
-
-    if (key === 'from') {
-      setFromDateInput(fromDate);
-    } else {
-      setToDateInput(toDate);
-    }
-  }, [fromDate, fromDateInput, setFilter, toDate, toDateInput]);
 
   const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
@@ -956,308 +875,47 @@ export default function Home() {
       {/* Expanded filters */}
       <div className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out ${showFilters ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}>
         <div className="min-h-0">
-        <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
-              >
-                <X size={12} />
-                Clear all
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">After</label>
-              <input
-                type="date"
-                value={fromDateInput}
-                onChange={(e) => handleDateInputChange('from', e.target.value)}
-                onBlur={() => commitDateInput('from')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    commitDateInput('from');
-                  }
-                }}
-                className="input"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Before</label>
-              <input
-                type="date"
-                value={toDateInput}
-                onChange={(e) => handleDateInputChange('to', e.target.value)}
-                onBlur={() => commitDateInput('to')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    commitDateInput('to');
-                  }
-                }}
-                className="input"
-              />
-            </div>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-3">
-            <div className={`rounded-xl border p-3 space-y-3 ${locationFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-sky-200 dark:border-sky-800/60 bg-sky-50/50 dark:bg-sky-950/20'}`}>
-              <div>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={includeLocation}
-                    disabled={locationTypeToggleDisabled}
-                    onChange={toggleLocationType}
-                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
-                  />
-                  <span>Location</span>
-                </label>
-              </div>
-              {locationFiltersDisabled && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Clear mood/sleep filters to enable location filtering.
-                </p>
-              )}
-              <div className="grid grid-cols-1 gap-3">
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Category</label>
-                  <input
-                    type="text"
-                    list="category-options"
-                    value={categoryInput}
-                    disabled={locationSectionDisabled}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setCategoryInput(next);
-                      const match = findExactOption(next, categoryOptions);
-                      if (match && category !== match) setLocationTypeFilter('category', match);
-                      if (!match && category) setLocationTypeFilter('category', '');
-                    }}
-                    onBlur={() => {
-                      if (!categoryInput.trim()) return;
-                      const match = findExactOption(categoryInput, categoryOptions);
-                      if (match) {
-                        setCategoryInput(match);
-                        if (category !== match) setLocationTypeFilter('category', match);
-                      } else {
-                        setCategoryInput('');
-                        if (category) setLocationTypeFilter('category', '');
-                      }
-                    }}
-                    className="input disabled:cursor-not-allowed disabled:opacity-60"
-                    placeholder="Restaurant, Home..."
-                  />
-                  <datalist id="category-options">
-                    {filteredCategoryOptions.map((opt) => (
-                      <option key={opt} value={opt} />
-                    ))}
-                  </datalist>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Country</label>
-                  <input
-                    type="text"
-                    list="country-options"
-                    value={countryInput}
-                    disabled={locationSectionDisabled}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setCountryInput(next);
-                      const match = findExactOption(next, countryOptions);
-                      if (match && country !== match) setLocationTypeFilter('country', match);
-                      if (!match && country) setLocationTypeFilter('country', '');
-                    }}
-                    onBlur={() => {
-                      if (!countryInput.trim()) return;
-                      const match = findExactOption(countryInput, countryOptions);
-                      if (match) {
-                        setCountryInput(match);
-                        if (country !== match) setLocationTypeFilter('country', match);
-                      } else {
-                        setCountryInput('');
-                        if (country) setLocationTypeFilter('country', '');
-                      }
-                    }}
-                    className="input disabled:cursor-not-allowed disabled:opacity-60"
-                    placeholder="United States, Espana..."
-                  />
-                  <datalist id="country-options">
-                    {filteredCountryOptions.map((opt) => (
-                      <option key={opt} value={opt} />
-                    ))}
-                  </datalist>
-                </div>
-              </div>
-            </div>
-
-            <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${moodFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-950/20'}`}>
-              <div>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={includeMood}
-                    disabled={moodTypeToggleDisabled}
-                    onChange={toggleMoodType}
-                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
-                  />
-                  <span>Mood</span>
-                </label>
-              </div>
-              {moodFiltersDisabled && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Clear location/sleep filters to enable mood filtering.
-                </p>
-              )}
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Mood</label>
-                <div className="flex gap-1.5 flex-wrap">
-                  {([1, 2, 3, 4, 5] as const).map((m) => {
-                    const isActive = mood === String(m);
-                    return (
-                      <button
-                        key={m}
-                        disabled={moodSectionDisabled}
-                        onClick={() => setMoodTypeFilter('mood', isActive ? '' : String(m))}
-                        className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
-                          isActive
-                            ? 'bg-indigo-500 text-white border-indigo-500'
-                            : 'bg-white/70 dark:bg-gray-800/70 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-indigo-300 dark:hover:border-indigo-600'
-                        }`}
-                      >
-                        <span className={isActive ? '' : MOOD_COLORS[m]}>{MOOD_LABELS[m]}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Activity</label>
-                <select
-                  value={activity}
-                  disabled={moodSectionDisabled}
-                  onChange={(e) => setMoodTypeFilter('activity', e.target.value)}
-                  className="input disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <option value="">All activities</option>
-                  {activity && !activityOptions.some((o) => o.name === activity) && (
-                    <option value={activity}>{activity} (current)</option>
-                  )}
-                  {Array.from(new Set(activityOptions.map((o) => o.groupName))).map((groupName) => (
-                    <optgroup key={groupName} label={groupName}>
-                      {activityOptions
-                        .filter((o) => o.groupName === groupName)
-                        .map((o) => (
-                          <option key={o.id} value={o.name}>{o.name}</option>
-                        ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${sleepFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20'}`}>
-              <div>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={includeSleep}
-                    disabled={sleepTypeToggleDisabled}
-                    onChange={toggleSleepType}
-                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
-                  />
-                  <span>Sleep</span>
-                </label>
-              </div>
-              {sleepFiltersDisabled && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Clear location/mood filters to enable sleep filtering.
-                </p>
-              )}
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Duration</label>
-                <div className="flex gap-1.5 flex-wrap">
-                  {[
-                    { value: 'lte6', label: '<=6h' },
-                    { value: '6to8', label: '6h-8h' },
-                    { value: 'gte8', label: '>=8h' },
-                  ].map((bucket) => {
-                    const isActive = sleepDuration === bucket.value;
-                    return (
-                      <button
-                        key={bucket.value}
-                        disabled={sleepSectionDisabled}
-                        onClick={() => setSleepTypeFilter(isActive ? '' : bucket.value)}
-                        className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
-                          isActive
-                            ? 'bg-amber-500 text-white border-amber-500'
-                            : 'bg-white/70 dark:bg-gray-800/70 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-300 dark:hover:border-amber-600'
-                        }`}
-                      >
-                        {bucket.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${trackFiltersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-rose-200 dark:border-rose-800/60 bg-rose-50/50 dark:bg-rose-950/20'}`}>
-              <div>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={includeTrack}
-                    disabled={trackTypeToggleDisabled}
-                    onChange={toggleTrackType}
-                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
-                  />
-                  <span>Track</span>
-                </label>
-              </div>
-              {trackFiltersDisabled && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Clear other type filters to enable track filtering.
-                </p>
-              )}
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Activity type</label>
-                <input
-                  type="text"
-                  list="track-activity-options"
-                  value={trackActivityInput}
-                  disabled={trackSectionDisabled}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    setTrackActivityInput(next);
-                    const match = findExactOption(next, trackActivityOptions);
-                    if (match && trackActivity !== match) setTrackTypeFilter(match);
-                    if (!match && trackActivity) setTrackTypeFilter('');
-                  }}
-                  onBlur={() => {
-                    if (!trackActivityInput.trim()) return;
-                    const match = findExactOption(trackActivityInput, trackActivityOptions);
-                    if (match) {
-                      setTrackActivityInput(match);
-                      if (trackActivity !== match) setTrackTypeFilter(match);
-                    } else {
-                      setTrackActivityInput('');
-                      if (trackActivity) setTrackTypeFilter('');
-                    }
-                  }}
-                  className="input disabled:cursor-not-allowed disabled:opacity-60"
-                  placeholder="Cycling, Running..."
-                />
-                <datalist id="track-activity-options">
-                  {filteredTrackActivityOptions.map((opt) => (
-                    <option key={opt} value={opt} />
-                  ))}
-                </datalist>
-              </div>
-            </div>
-          </div>
-        </div>
+          <Filters
+            hasActiveFilters={Boolean(hasActiveFilters)}
+            fromDate={fromDate}
+            toDate={toDate}
+            category={category}
+            country={country}
+            mood={mood}
+            activity={activity}
+            sleepDuration={sleepDuration}
+            trackActivity={trackActivity}
+            includeLocation={includeLocation}
+            includeMood={includeMood}
+            includeSleep={includeSleep}
+            includeTrack={includeTrack}
+            categoryOptions={categoryOptions}
+            countryOptions={countryOptions}
+            activityOptions={activityOptions}
+            trackActivityOptions={trackActivityOptions}
+            moodTypeToggleDisabled={moodTypeToggleDisabled}
+            locationTypeToggleDisabled={locationTypeToggleDisabled}
+            sleepTypeToggleDisabled={sleepTypeToggleDisabled}
+            trackTypeToggleDisabled={trackTypeToggleDisabled}
+            moodFiltersDisabled={moodFiltersDisabled}
+            locationFiltersDisabled={locationFiltersDisabled}
+            sleepFiltersDisabled={sleepFiltersDisabled}
+            trackFiltersDisabled={trackFiltersDisabled}
+            moodSectionDisabled={moodSectionDisabled}
+            locationSectionDisabled={locationSectionDisabled}
+            sleepSectionDisabled={sleepSectionDisabled}
+            trackSectionDisabled={trackSectionDisabled}
+            onSetDateFilter={setFilter}
+            onToggleLocationType={toggleLocationType}
+            onToggleMoodType={toggleMoodType}
+            onToggleSleepType={toggleSleepType}
+            onToggleTrackType={toggleTrackType}
+            onSetMoodFilter={setMoodTypeFilter}
+            onSetLocationFilter={setLocationTypeFilter}
+            onSetSleepFilter={setSleepTypeFilter}
+            onSetTrackFilter={setTrackTypeFilter}
+            onClearAll={clearFilters}
+          />
         </div>
       </div>
 
