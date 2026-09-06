@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Sparkles, Loader2, Lock, LockOpen, Shuffle, AlertCircle, Image, ImageOff } from 'lucide-react';
+import { Sparkles, Loader2, Lock, LockOpen, Shuffle, AlertCircle, Image, ImageOff, Copy, Check } from 'lucide-react';
 import { llm as llmApi, immich as immichApi } from '../api/client';
 
 interface CandidateImage {
@@ -77,6 +77,15 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
   const [result, setResult] = useState<LifeSummaryResult | null>(null);
   // Photos are opt-in: text data is always prioritized over images.
   const [includeImages, setIncludeImages] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyMarkdown = () => {
+    if (!result) return;
+    navigator.clipboard.writeText(result.summary).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const rangeValid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
   const rangeKey = `${from}|${to}`;
@@ -196,12 +205,22 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
           Life Summary
         </h3>
         {result && (
-          <button
-            onClick={() => setResult(null)}
-            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-          >
-            Clear
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleCopyMarkdown}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              title="Copy the summary as markdown"
+            >
+              {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+              {copied ? 'Copied' : 'Copy as markdown'}
+            </button>
+            <button
+              onClick={() => setResult(null)}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
         )}
       </div>
 
