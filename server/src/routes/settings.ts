@@ -21,6 +21,8 @@ router.get('/', async (_req: Request, res: Response) => {
               us.dawarich_url, us.dawarich_api_key,
               us.immich_url, us.immich_api_key,
               us.maloja_url,
+              us.llm_api_url, us.llm_model, us.llm_reasoning_level,
+              us.llm_context_window, us.llm_image_support,
               COALESCE(us.theme, 'system') AS theme,
                     COALESCE(us.system_light_theme, $2) AS system_light_theme,
                     COALESCE(us.system_dark_theme, $3) AS system_dark_theme,
@@ -61,15 +63,29 @@ router.put('/', async (req: Request, res: Response) => {
       theme, system_light_theme, system_dark_theme,
       mood_icon_pack,
       distance_unit,
+      llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support,
     } = req.body;
 
     if (typeof distance_unit !== 'undefined' && !DISTANCE_UNITS.has(distance_unit)) {
       return res.status(400).json({ error: 'distance_unit must be either "metric" or "imperial"' });
     }
 
+    if (typeof llm_context_window !== 'undefined' && llm_context_window !== null) {
+      const parsed = Number(llm_context_window);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return res.status(400).json({ error: 'llm_context_window must be a positive integer' });
+      }
+    }
+
+    if (typeof llm_image_support !== 'undefined' && llm_image_support !== null && typeof llm_image_support !== 'boolean') {
+      return res.status(400).json({ error: 'llm_image_support must be a boolean' });
+    }
+
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, system_light_theme, system_dark_theme, mood_icon_pack, distance_unit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, $12), COALESCE($9, $13), $10, $11)
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, system_light_theme, system_dark_theme, mood_icon_pack, distance_unit,
+                                  llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, $17), COALESCE($9, $18), $10, $11,
+               $12, $13, $14, $15, $16)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
@@ -77,10 +93,15 @@ router.put('/', async (req: Request, res: Response) => {
          immich_api_key = COALESCE($5, user_settings.immich_api_key),
          maloja_url = COALESCE($6, user_settings.maloja_url),
          theme = COALESCE($7, user_settings.theme),
-         system_light_theme = COALESCE($8, user_settings.system_light_theme, $12),
-         system_dark_theme = COALESCE($9, user_settings.system_dark_theme, $13),
+         system_light_theme = COALESCE($8, user_settings.system_light_theme, $17),
+         system_dark_theme = COALESCE($9, user_settings.system_dark_theme, $18),
          mood_icon_pack = COALESCE($10, user_settings.mood_icon_pack),
          distance_unit = COALESCE($11, user_settings.distance_unit),
+         llm_api_url = COALESCE($12, user_settings.llm_api_url),
+         llm_model = COALESCE($13, user_settings.llm_model),
+         llm_reasoning_level = COALESCE($14, user_settings.llm_reasoning_level),
+         llm_context_window = COALESCE($15, user_settings.llm_context_window),
+         llm_image_support = COALESCE($16, user_settings.llm_image_support),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -92,9 +113,14 @@ router.put('/', async (req: Request, res: Response) => {
         system_light_theme ?? null,
         system_dark_theme ?? null,
         mood_icon_pack ?? null,
+        distance_unit ?? null,
+        llm_api_url ?? null,
+        llm_model ?? null,
+        llm_reasoning_level ?? null,
+        llm_context_window ?? null,
+        llm_image_support ?? null,
         DEFAULT_SYSTEM_LIGHT_THEME,
         DEFAULT_SYSTEM_DARK_THEME,
-        distance_unit ?? null,
       ]
     );
 

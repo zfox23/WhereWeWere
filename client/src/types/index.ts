@@ -342,6 +342,11 @@ export interface UserSettings {
   immich_url: string | null;
   immich_api_key: string | null;
   maloja_url: string | null;
+  llm_api_url: string | null;
+  llm_model: string | null;
+  llm_reasoning_level: string | null;
+  llm_context_window: number | null;
+  llm_image_support: boolean | null;
   theme: StoredThemePreference;
   system_light_theme: AppThemeId;
   system_dark_theme: AppThemeId;

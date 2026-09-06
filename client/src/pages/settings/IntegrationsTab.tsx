@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link2, Moon, Check, AlertCircle, Loader2, Copy } from 'lucide-react';
+import { Link2, Moon, Sparkles, Check, AlertCircle, Loader2, Copy } from 'lucide-react';
 import { settings, sleepWebhook } from '../../api/client';
 
 interface IntegrationsTabProps {
@@ -8,6 +8,11 @@ interface IntegrationsTabProps {
   initialImmichUrl: string;
   initialImmichApiKey: string;
   initialMalojaUrl: string;
+  initialLlmApiUrl: string;
+  initialLlmModel: string;
+  initialLlmReasoningLevel: string;
+  initialLlmContextWindow: string;
+  initialLlmImageSupport: boolean;
 }
 
 export function IntegrationsTab({
@@ -16,12 +21,22 @@ export function IntegrationsTab({
   initialImmichUrl,
   initialImmichApiKey,
   initialMalojaUrl,
+  initialLlmApiUrl,
+  initialLlmModel,
+  initialLlmReasoningLevel,
+  initialLlmContextWindow,
+  initialLlmImageSupport,
 }: IntegrationsTabProps) {
   const [dawarichUrl, setDawarichUrl] = useState(initialDawarichUrl);
   const [dawarichApiKey, setDawarichApiKey] = useState(initialDawarichApiKey);
   const [immichUrl, setImmichUrl] = useState(initialImmichUrl);
   const [immichApiKey, setImmichApiKey] = useState(initialImmichApiKey);
   const [malojaUrl, setMalojaUrl] = useState(initialMalojaUrl);
+  const [llmApiUrl, setLlmApiUrl] = useState(initialLlmApiUrl);
+  const [llmModel, setLlmModel] = useState(initialLlmModel);
+  const [llmReasoningLevel, setLlmReasoningLevel] = useState(initialLlmReasoningLevel);
+  const [llmContextWindow, setLlmContextWindow] = useState(initialLlmContextWindow);
+  const [llmImageSupport, setLlmImageSupport] = useState(initialLlmImageSupport);
   const [integrationSaving, setIntegrationSaving] = useState(false);
   const [integrationMsg, setIntegrationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -46,12 +61,18 @@ export function IntegrationsTab({
     setIntegrationSaving(true);
     setIntegrationMsg(null);
     try {
+      const contextWindowNum = parseInt(llmContextWindow, 10);
       await settings.update({
         dawarich_url: dawarichUrl || null,
         dawarich_api_key: dawarichApiKey || null,
         immich_url: immichUrl || null,
         immich_api_key: immichApiKey || null,
         maloja_url: malojaUrl || null,
+        llm_api_url: llmApiUrl || null,
+        llm_model: llmModel || null,
+        llm_reasoning_level: llmReasoningLevel || null,
+        llm_context_window: Number.isFinite(contextWindowNum) && contextWindowNum > 0 ? contextWindowNum : null,
+        llm_image_support: llmImageSupport,
       });
       setIntegrationMsg({ type: 'success', text: 'Integration settings saved.' });
     } catch (err) {
@@ -135,6 +156,71 @@ export function IntegrationsTab({
               className="input"
               placeholder="https://maloja.example.com"
             />
+          </div>
+        </div>
+
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1.5">
+            <Sparkles size={14} className="text-purple-500" />
+            Life Summary (LLM)
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            Connect to an OpenAI-compatible LLM (e.g. a local vLLM instance) to generate AI summaries of a period of your life.
+          </p>
+          <div className="space-y-2">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">OpenAI-Compatible API URL</label>
+              <input
+                type="url"
+                value={llmApiUrl}
+                onChange={(e) => setLlmApiUrl(e.target.value)}
+                className="input"
+                placeholder="http://vllm.example.com:8000/v1"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Model Name</label>
+              <input
+                type="text"
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+                className="input"
+                placeholder="meta-llama/Llama-3.1-70B-Instruct"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Reasoning Level</label>
+                <input
+                  type="text"
+                  value={llmReasoningLevel}
+                  onChange={(e) => setLlmReasoningLevel(e.target.value)}
+                  className="input"
+                  placeholder="medium"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Context Window (tokens)</label>
+                <input
+                  type="number"
+                  value={llmContextWindow}
+                  onChange={(e) => setLlmContextWindow(e.target.value)}
+                  className="input"
+                  min={1000}
+                  step={1000}
+                  placeholder="262144"
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={llmImageSupport}
+                onChange={(e) => setLlmImageSupport(e.target.checked)}
+                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              Image support (send Immich photos from the selected period to the LLM)
+            </label>
           </div>
         </div>
 

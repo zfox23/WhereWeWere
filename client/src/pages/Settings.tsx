@@ -120,6 +120,11 @@ export default function Settings() {
           initialImmichUrl={data.immich_url || ''}
           initialImmichApiKey={data.immich_api_key || ''}
           initialMalojaUrl={data.maloja_url || ''}
+          initialLlmApiUrl={data.llm_api_url || ''}
+          initialLlmModel={data.llm_model || ''}
+          initialLlmReasoningLevel={data.llm_reasoning_level || 'medium'}
+          initialLlmContextWindow={data.llm_context_window ? String(data.llm_context_window) : '262144'}
+          initialLlmImageSupport={data.llm_image_support !== false}
         />
       )}
 

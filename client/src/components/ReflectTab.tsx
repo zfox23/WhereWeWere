@@ -5,6 +5,7 @@ import { immich as immichApi, settings, stats, scrobbles } from '../api/client';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
 import { MoodYearInPixels } from './MoodStats';
 import { PhotoStrip } from './PhotoStrip';
+import { LifeSummarySection } from './LifeSummarySection';
 import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
@@ -412,6 +413,8 @@ export function ReflectTab() {
   const [photosByYear, setPhotosByYear] = useState<Record<number, ImmichAsset[]>>({});
   const [scrobblesByDate, setScrobblesByDate] = useState<Record<string, Scrobble[]>>({});
   const [moodIconPack, setMoodIconPack] = useState<UserSettings['mood_icon_pack']>('emoji');
+  const [llmConfigured, setLlmConfigured] = useState(false);
+  const [llmImageSupport, setLlmImageSupport] = useState(true);
   const [reflectionsLoading, setReflectionsLoading] = useState(true);
   const [locationLoading, setLocationLoading] = useState(true);
   const [moodLoading, setMoodLoading] = useState(true);
@@ -448,6 +451,8 @@ export function ReflectTab() {
         if (userSettings?.mood_icon_pack) {
           setMoodIconPack(userSettings.mood_icon_pack);
         }
+        setLlmConfigured(Boolean(userSettings?.llm_api_url && userSettings?.llm_model));
+        setLlmImageSupport(userSettings?.llm_image_support !== false);
       })
       .catch((err) => {
         console.error('Failed to load reflect data:', err);
@@ -703,6 +708,13 @@ export function ReflectTab() {
           dawarichUrl={dawarichUrl}
         />
       )}
+
+      <LifeSummarySection
+        llmConfig={{
+          configured: llmConfigured,
+          imageSupport: llmImageSupport,
+        }}
+      />
 
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-4">
         <div className="flex items-center justify-start gap-3">

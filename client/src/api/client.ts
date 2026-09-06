@@ -500,3 +500,21 @@ export const settings = {
       body: JSON.stringify({ updates }),
     }),
 };
+
+// LLM (Life Summary)
+export const llm = {
+  candidateImages: (from: string, to: string) =>
+    request<{ assets: { id: string; thumbhash: string | null; originalFileName: string; localDateTime: string }[] }>(
+      `/llm/candidate-images?${new URLSearchParams({ from, to })}`
+    ),
+  summarize: (from: string, to: string, imageAssetIds: string[]) =>
+    request<{
+      summary: string;
+      images_included: number;
+      images_skipped: number;
+      skipped: { type: string; total: number; included: number }[];
+    }>('/llm/summarize', {
+      method: 'POST',
+      body: JSON.stringify({ from, to, image_asset_ids: imageAssetIds }),
+    }),
+};
