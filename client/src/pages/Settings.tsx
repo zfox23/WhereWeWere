@@ -120,6 +120,9 @@ export default function Settings() {
           initialImmichUrl={data.immich_url || ''}
           initialImmichApiKey={data.immich_api_key || ''}
           initialMalojaUrl={data.maloja_url || ''}
+          initialTmdbApiKey={data.tmdb_api_key || ''}
+          initialTgdbApiKey={data.tgdb_api_key || ''}
+          initialHardcoverApiKey={data.hardcover_api_key || ''}
           initialLlmApiUrl={data.llm_api_url || ''}
           initialLlmModel={data.llm_model || ''}
           initialLlmReasoningLevel={data.llm_reasoning_level || 'medium'}

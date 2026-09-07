@@ -32,11 +32,13 @@ router.get('/', async (req: Request, res: Response) => {
     const moodConditions: string[] = [];
     const sleepConditions: string[] = [];
     const trackConditions: string[] = [];
+    const mediaConditions: string[] = [];
     let paramIndex = 1;
     const hasMoodTypeFilter = Boolean(req.query.mood || req.query.activity);
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
     const hasSleepTypeFilter = Boolean(req.query.sleep_duration);
     const hasTrackTypeFilter = Boolean(req.query.track_activity);
+    const hasMediaTypeFilter = Boolean(req.query.media_subtype);
     const fromDate = extractDateString(from);
     const toDate = extractDateString(to);
 
@@ -45,6 +47,7 @@ router.get('/', async (req: Request, res: Response) => {
       moodConditions.push(`mc.user_id = $${paramIndex}`);
       sleepConditions.push(`se.user_id = $${paramIndex}`);
       trackConditions.push(`t.user_id = $${paramIndex}`);
+      mediaConditions.push(`mmc.user_id = $${paramIndex}`);
       params.push(user_id);
       paramIndex++;
     }
@@ -54,6 +57,7 @@ router.get('/', async (req: Request, res: Response) => {
       moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date >= $${paramIndex}::date`);
       sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= $${paramIndex}::date`);
       trackConditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= $${paramIndex}::date`);
+      mediaConditions.push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date >= $${paramIndex}::date`);
       params.push(fromDate);
       paramIndex++;
     }
@@ -63,6 +67,7 @@ router.get('/', async (req: Request, res: Response) => {
       moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date <= $${paramIndex}::date`);
       sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date <= $${paramIndex}::date`);
       trackConditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date <= $${paramIndex}::date`);
+      mediaConditions.push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date <= $${paramIndex}::date`);
       params.push(toDate);
       paramIndex++;
     }
@@ -126,6 +131,18 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
+    if (req.query.media_subtype) {
+      const subtypes = String(req.query.media_subtype)
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => ['movie', 'tv_show', 'game', 'book', 'board_game'].includes(s));
+      if (subtypes.length > 0) {
+        mediaConditions.push(`mi.media_type = ANY($${paramIndex}::text[])`);
+        params.push(subtypes);
+        paramIndex++;
+      }
+    }
+
     if (req.query.q) {
       const searchQuery = req.query.q as string;
       locationConditions.push(
@@ -140,6 +157,9 @@ router.get('/', async (req: Request, res: Response) => {
       );
       trackConditions.push(
         `t.name ILIKE '%' || $${paramIndex} || '%'`
+      );
+      mediaConditions.push(
+        `(mi.title ILIKE '%' || $${paramIndex} || '%' OR mmc.notes ILIKE '%' || $${paramIndex} || '%')`
       );
       params.push(searchQuery);
       paramIndex++;
@@ -156,6 +176,9 @@ router.get('/', async (req: Request, res: Response) => {
       : '';
     const trackWhere = trackConditions.length > 0
       ? `WHERE ${trackConditions.join(' AND ')}`
+      : '';
+    const mediaWhere = mediaConditions.length > 0
+      ? `WHERE ${mediaConditions.join(' AND ')}`
       : '';
 
     params.push(parseInt(limit as string, 10));
@@ -184,7 +207,19 @@ router.get('/', async (req: Request, res: Response) => {
         NULL::text AS track_timezone,
         NULL::timestamptz AS track_started_at,
         NULL::timestamptz AS track_ended_at,
-        NULL::bigint AS track_elapsed_time_s
+        NULL::bigint AS track_elapsed_time_s,
+        NULL::text AS media_type,
+        NULL::uuid AS media_item_id,
+        NULL::text AS media_title,
+        NULL::text AS media_image_url,
+        NULL::text AS media_author,
+        NULL::smallint AS media_rating,
+        NULL::text AS media_checkin_type,
+        NULL::int AS media_season_number,
+        NULL::int AS media_episode_number,
+        NULL::text AS media_episode_title,
+        NULL::text AS media_slug,
+        NULL::text AS media_timezone
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
@@ -221,9 +256,21 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::text AS track_timezone,
              NULL::timestamptz AS track_started_at,
              NULL::timestamptz AS track_ended_at,
-             NULL::bigint AS track_elapsed_time_s
-     FROM mood_checkins mc
-     ${moodWhere}
+             NULL::bigint AS track_elapsed_time_s,
+             NULL::text AS media_type,
+             NULL::uuid AS media_item_id,
+             NULL::text AS media_title,
+             NULL::text AS media_image_url,
+             NULL::text AS media_author,
+             NULL::smallint AS media_rating,
+             NULL::text AS media_checkin_type,
+             NULL::int AS media_season_number,
+             NULL::int AS media_episode_number,
+             NULL::text AS media_episode_title,
+             NULL::text AS media_slug,
+             NULL::text AS media_timezone
+            FROM mood_checkins mc
+            ${moodWhere}
    `;
 
     const sleepSelect = `
@@ -242,9 +289,21 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::text AS track_timezone,
              NULL::timestamptz AS track_started_at,
              NULL::timestamptz AS track_ended_at,
-             NULL::bigint AS track_elapsed_time_s
-      FROM sleep_entries se
-      ${sleepWhere}
+             NULL::bigint AS track_elapsed_time_s,
+              NULL::text AS media_type,
+              NULL::uuid AS media_item_id,
+              NULL::text AS media_title,
+              NULL::text AS media_image_url,
+              NULL::text AS media_author,
+              NULL::smallint AS media_rating,
+              NULL::text AS media_checkin_type,
+              NULL::int AS media_season_number,
+              NULL::int AS media_episode_number,
+              NULL::text AS media_episode_title,
+              NULL::text AS media_slug,
+              NULL::text AS media_timezone
+              FROM sleep_entries se
+              ${sleepWhere}
     `;
 
     const trackSelect = `
@@ -263,10 +322,59 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::text AS sleep_comment,
              t.name AS track_name, t.distance_m AS track_distance_m, t.timezone AS track_timezone,
              t.started_at AS track_started_at, t.ended_at AS track_ended_at,
-             t.elapsed_time_s AS track_elapsed_time_s
-      FROM tracks t
-      ${trackWhere}
-    `;
+             t.elapsed_time_s AS track_elapsed_time_s,
+             NULL::text AS media_type,
+             NULL::uuid AS media_item_id,
+             NULL::text AS media_title,
+             NULL::text AS media_image_url,
+             NULL::text AS media_author,
+             NULL::smallint AS media_rating,
+             NULL::text AS media_checkin_type,
+             NULL::int AS media_season_number,
+             NULL::int AS media_episode_number,
+             NULL::text AS media_episode_title,
+             NULL::text AS media_slug,
+             NULL::text AS media_timezone
+             FROM tracks t
+             ${trackWhere}
+           `;
+      
+          const mediaSelect = `
+            SELECT 'media' AS type, mmc.id, mmc.user_id, NULL AS venue_id, mmc.notes,
+                   mmc.checked_in_at, mmc.created_at,
+                   NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
+                   NULL::text AS venue_timezone,
+                   NULL AS venue_category,
+                   NULL AS parent_venue_id, NULL AS parent_venue_name,
+                   NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
+                   NULL::bigint AS sleep_as_android_id,
+                   NULL::timestamptz AS sleep_started_at,
+                   NULL::timestamptz AS sleep_ended_at,
+                   NULL::text AS sleep_timezone,
+                   NULL::numeric AS sleep_rating,
+                   NULL::text AS sleep_comment,
+                   NULL::text AS track_name,
+                   NULL::numeric AS track_distance_m,
+                   NULL::text AS track_timezone,
+                   NULL::timestamptz AS track_started_at,
+                   NULL::timestamptz AS track_ended_at,
+                   NULL::bigint AS track_elapsed_time_s,
+                   mi.media_type,
+                   mi.id AS media_item_id,
+                   mi.title AS media_title,
+                   mi.image_url AS media_image_url,
+                   mi.author AS media_author,
+                   mmc.rating AS media_rating,
+                   mmc.checkin_type AS media_checkin_type,
+                   mmc.season_number AS media_season_number,
+                   mmc.episode_number AS media_episode_number,
+                   mmc.episode_title AS media_episode_title,
+                   LOWER(mi.title) AS media_slug,
+                   mmc.checkin_timezone AS media_timezone
+             FROM media_checkins mmc
+             JOIN media_items mi ON mmc.media_item_id = mi.id
+             ${mediaWhere}
+          `;
 
     let sql: string;
 
@@ -294,6 +402,12 @@ router.get('/', async (req: Request, res: Response) => {
         ORDER BY checked_in_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}
       `;
+    } else if (hasMediaTypeFilter) {
+      sql = `
+        ${mediaSelect}
+        ORDER BY checked_in_at DESC
+        LIMIT ${limitParam} OFFSET ${offsetParam}
+      `;
     } else {
       sql = `
         (
@@ -310,6 +424,10 @@ router.get('/', async (req: Request, res: Response) => {
         UNION ALL
         (
           ${trackSelect}
+        )
+        UNION ALL
+        (
+          ${mediaSelect}
         )
         ORDER BY checked_in_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}

@@ -4,6 +4,7 @@ import LocationFilter from './LocationFilter';
 import MoodFilter, { ActivityOption } from './MoodFilter';
 import SleepFilter from './SleepFilter';
 import TrackFilter from './TrackFilter';
+import MediaFilter from './MediaFilter';
 
 const COMPLETE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -17,10 +18,12 @@ export interface FiltersProps {
   activity: string;
   sleepDuration: string;
   trackActivity: string;
+  mediaSubtypes: string;
   includeLocation: boolean;
   includeMood: boolean;
   includeSleep: boolean;
   includeTrack: boolean;
+  includeMedia: boolean;
   categoryOptions: string[];
   countryOptions: string[];
   activityOptions: ActivityOption[];
@@ -29,23 +32,28 @@ export interface FiltersProps {
   locationTypeToggleDisabled: boolean;
   sleepTypeToggleDisabled: boolean;
   trackTypeToggleDisabled: boolean;
+  mediaTypeToggleDisabled: boolean;
   moodFiltersDisabled: boolean;
   locationFiltersDisabled: boolean;
   sleepFiltersDisabled: boolean;
   trackFiltersDisabled: boolean;
+  mediaFiltersDisabled: boolean;
   moodSectionDisabled: boolean;
   locationSectionDisabled: boolean;
   sleepSectionDisabled: boolean;
   trackSectionDisabled: boolean;
+  mediaSectionDisabled: boolean;
   onSetDateFilter: (key: 'from' | 'to', value: string) => void;
   onToggleLocationType: () => void;
   onToggleMoodType: () => void;
   onToggleSleepType: () => void;
   onToggleTrackType: () => void;
+  onToggleMediaType: () => void;
   onSetMoodFilter: (key: 'mood' | 'activity', value: string) => void;
   onSetLocationFilter: (key: 'venue_id' | 'category' | 'country', value: string) => void;
   onSetSleepFilter: (value: string) => void;
   onSetTrackFilter: (value: string) => void;
+  onSetMediaFilter: (value: string) => void;
   onClearAll: () => void;
 }
 
@@ -64,6 +72,8 @@ export default function Filters(props: FiltersProps) {
     includeMood,
     includeSleep,
     includeTrack,
+    includeMedia,
+    mediaSubtypes,
     categoryOptions,
     countryOptions,
     activityOptions,
@@ -72,23 +82,28 @@ export default function Filters(props: FiltersProps) {
     locationTypeToggleDisabled,
     sleepTypeToggleDisabled,
     trackTypeToggleDisabled,
+    mediaTypeToggleDisabled,
     moodFiltersDisabled,
     locationFiltersDisabled,
     sleepFiltersDisabled,
     trackFiltersDisabled,
+    mediaFiltersDisabled,
     moodSectionDisabled,
     locationSectionDisabled,
     sleepSectionDisabled,
     trackSectionDisabled,
+    mediaSectionDisabled,
     onSetDateFilter,
     onToggleLocationType,
     onToggleMoodType,
     onToggleSleepType,
     onToggleTrackType,
+    onToggleMediaType,
     onSetMoodFilter,
     onSetLocationFilter,
     onSetSleepFilter,
     onSetTrackFilter,
+    onSetMediaFilter,
     onClearAll,
   } = props;
 
@@ -227,6 +242,16 @@ export default function Filters(props: FiltersProps) {
           trackActivityOptions={trackActivityOptions}
           onToggleIncluded={onToggleTrackType}
           onSetTrackActivity={onSetTrackFilter}
+        />
+
+        <MediaFilter
+          included={includeMedia}
+          filtersDisabled={mediaFiltersDisabled}
+          sectionDisabled={mediaSectionDisabled}
+          typeToggleDisabled={mediaTypeToggleDisabled}
+          mediaSubtypes={mediaSubtypes}
+          onToggleIncluded={onToggleMediaType}
+          onSetMediaSubtypes={onSetMediaFilter}
         />
       </div>
     </div>

@@ -1,4 +1,17 @@
-import type { TimestampReconciliationScanResult, TrackEntry, TrackMapEntry } from '../types';
+import type {
+  TimestampReconciliationScanResult,
+  TrackEntry,
+  TrackMapEntry,
+  MediaSearchHit,
+  MediaItem,
+  MediaCheckIn,
+  MediaList,
+  MediaStats,
+  MediaTvSeason,
+  YamtrackPreview,
+  YamtrackImportResult,
+  MediaSubtype,
+} from '../types';
 
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
@@ -396,6 +409,7 @@ export const backupApi = {
       delete_mood_checkins: boolean;
       delete_sleep_entries: boolean;
       delete_tracks: boolean;
+      delete_media_checkins: boolean;
       reset_account_settings: boolean;
       reset_mood_settings: boolean;
       reset_integrations_settings: boolean;
@@ -499,6 +513,84 @@ export const settings = {
       method: 'POST',
       body: JSON.stringify({ updates }),
     }),
+};
+
+// Media check-ins
+export const media = {
+  search: (type: MediaSubtype, q: string) =>
+    request<{ results: MediaSearchHit[]; degraded: boolean }>(
+      `/media/search?${new URLSearchParams({ type, q })}`
+    ),
+  createItem: (data: {
+    media_type: MediaSubtype;
+    external_source?: string | null;
+    external_id?: string | null;
+    title: string;
+    author?: string | null;
+    release_year?: number | null;
+    image_url?: string | null;
+    external_url?: string | null;
+  }) => request<MediaItem>('/media/items', { method: 'POST', body: JSON.stringify(data) }),
+  getItem: (id: string) => request<MediaItem>(`/media/items/${id}`),
+  listCheckins: (itemId: string) => request<MediaCheckIn[]>(`/media/items/${itemId}/checkins`),
+  createCheckin: (itemId: string, data: {
+    season_number?: number | null;
+    episode_number?: number | null;
+    episode_title?: string | null;
+    checkin_type: 'completed' | 'in_progress' | 'dropped';
+    rating?: number | null;
+    raw_score?: number | null;
+    notes?: string | null;
+    checked_in_at?: string | null;
+    timezone: string;
+  }) => request<MediaCheckIn>(`/media/items/${itemId}/checkins`, { method: 'POST', body: JSON.stringify(data) }),
+  updateCheckin: (id: string, data: Partial<{
+    checkin_type: string;
+    rating: number | null;
+    raw_score: number | null;
+    notes: string | null;
+    checked_in_at: string | null;
+    timezone: string;
+  }>) => request<MediaCheckIn>(`/media/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCheckin: (id: string) =>
+    request<{ message: string; id: string }>(`/media/checkins/${id}`, { method: 'DELETE' }),
+  tvSeasons: (itemId: string) =>
+    request<{ seasons: MediaTvSeason[]; cached: boolean }>(`/media/tv/${itemId}/seasons`),
+  stats: (from?: string, to?: string) => {
+    const qp = new URLSearchParams();
+    if (from) qp.set('from', from);
+    if (to) qp.set('to', to);
+    return request<MediaStats>(`/media/stats?${qp.toString()}`);
+  },
+  lists: () => request<MediaList[]>('/media/lists'),
+  createList: (name: string) =>
+    request<MediaList>('/media/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameList: (id: string, name: string) =>
+    request<MediaList>(`/media/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+  deleteList: (id: string) =>
+    request<{ message: string; id: string }>(`/media/lists/${id}`, { method: 'DELETE' }),
+  addItemToList: (listId: string, mediaItemId: string) =>
+    request<{ message: string }>(`/media/lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: mediaItemId }) }),
+  removeItemFromList: (listId: string, mediaItemId: string) =>
+    request<{ message: string }>(`/media/lists/${listId}/items/${mediaItemId}`, { method: 'DELETE' }),
+};
+
+// Yamtrack import
+export const yamtrackImport = {
+  preview: async (file: File) => {
+    const csv = await file.text();
+    return request<YamtrackPreview>('/import/yamtrack/preview', {
+      method: 'POST',
+      body: JSON.stringify({ csv }),
+    });
+  },
+  import: async (file: File) => {
+    const csv = await file.text();
+    return request<YamtrackImportResult>('/import/yamtrack/import', {
+      method: 'POST',
+      body: JSON.stringify({ csv }),
+    });
+  },
 };
 
 // LLM (Life Summary)

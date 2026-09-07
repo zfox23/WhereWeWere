@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Brain, MapPin, Moon, Route, SmilePlus } from 'lucide-react';
+import { Brain, Clapperboard, MapPin, Moon, Route, SmilePlus } from 'lucide-react';
 import { MoodsTab } from '../components/MoodStats';
+import { MediaTab } from '../components/MediaTab';
 import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
 import { SleepTab } from '../components/SleepTab';
@@ -8,11 +9,11 @@ import { TracksTab } from '../components/TracksTab';
 import { usePageTitle } from '../utils/pageTitle';
 
 export default function Profile() {
-  type ProfileTab = 'places' | 'reflect' | 'moods' | 'sleep' | 'tracks';
+  type ProfileTab = 'places' | 'reflect' | 'moods' | 'sleep' | 'tracks' | 'media';
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
     return (
-      value === 'places' || value === 'reflect' || value === 'moods' || value === 'sleep' || value === 'tracks'
+      value === 'places' || value === 'reflect' || value === 'moods' || value === 'sleep' || value === 'tracks' || value === 'media'
     );
   };
 
@@ -28,6 +29,7 @@ export default function Profile() {
     moods: 'Profile: Moods',
     sleep: 'Profile: Sleep',
     tracks: 'Profile: Tracks',
+    media: 'Profile: Media',
     reflect: 'Profile: Reflect',
   };
   usePageTitle(tabTitleMap[activeTab]);
@@ -103,6 +105,16 @@ export default function Profile() {
           Tracks
         </button>
         <button
+          onClick={() => setActiveTab('media')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'media'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+        >
+          <Clapperboard size={14} />
+          Media
+        </button>
+        <button
           onClick={() => setActiveTab('reflect')}
           className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${activeTab === 'reflect'
             ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
@@ -122,7 +134,9 @@ export default function Profile() {
             ? <SleepTab />
             : activeTab === 'tracks'
               ? <TracksTab />
-              : <MoodsTab />}
+              : activeTab === 'media'
+                ? <MediaTab />
+                : <MoodsTab />}
     </div>
   );
 }

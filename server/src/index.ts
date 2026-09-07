@@ -21,6 +21,8 @@ import { backupRouter } from './routes/backup';
 import { sleepEntriesRouter } from './routes/sleep-entries';
 import { tracksRouter } from './routes/tracks';
 import { llmRouter } from './routes/llm';
+import { mediaRouter } from './routes/media';
+import { importYamtrackRouter } from './routes/import-yamtrack';
 import { runMigrations } from './db/runMigrations';
 
 export function createApp() {
@@ -88,6 +90,8 @@ export function createApp() {
   app.use('/api/v1/tracks', tracksRouter);
   app.use('/api/v1/backup', backupRouter);
   app.use('/api/v1/llm', llmRouter);
+  app.use('/api/v1/media', mediaRouter);
+  app.use('/api/v1/import/yamtrack', importYamtrackRouter);
 
   return app;
 }
