@@ -28,6 +28,12 @@ const searchBody = {
         '432': [{ id: 2, type: 'screenshot', side: null, filename: 'screenshots/432-1.jpg' }],
       },
     },
+    platform: {
+      data: {
+        '18': { id: 18, name: 'Sega Genesis', alias: 'sega-genesis' },
+        '19': { id: 19, name: 'Sega Saturn', alias: 'sega-saturn' },
+      },
+    },
   },
 };
 
@@ -58,7 +64,8 @@ describe('tgdb.searchGames', () => {
     expect(parsed.pathname).toBe('/v1.1/Games/ByGameName');
     expect(parsed.searchParams.get('apikey')).toBe('KEY');
     expect(parsed.searchParams.get('name')).toBe('ssx');
-    expect(parsed.searchParams.get('include')).toBe('boxart');
+    expect(parsed.searchParams.get('fields')).toBe('platform');
+    expect(parsed.searchParams.get('include')).toBe('boxart,platform');
   });
 
   it('maps rows, dedupes by game id, and picks front boxart', async () => {
@@ -70,6 +77,7 @@ describe('tgdb.searchGames', () => {
         releaseYear: 1991,
         imageUrl: 'https://cdn.thegamesdb.net/images/medium/boxart/front/53-1.jpg',
         externalUrl: 'https://www.thegamesdb.net/game/53',
+        platform: 'Sega Genesis',
       },
       {
         externalId: '432',
@@ -77,6 +85,39 @@ describe('tgdb.searchGames', () => {
         releaseYear: 1992,
         imageUrl: null,
         externalUrl: 'https://www.thegamesdb.net/game/432',
+        platform: 'Sega Genesis',
+      },
+    ]);
+  });
+
+  it('leaves platform null when the game has no platform or the platform list omits it', async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({
+        data: {
+          games: [
+            { id: 9, game_title: 'SSX Tricky', release_date: '2001-10-09' },
+            { id: 10, game_title: 'Mystery', release_date: '2001-10-09', platform: 7 },
+          ],
+        },
+      })
+    );
+    const results = await tgdb.searchGames('KEY', 'ssx-platform');
+    expect(results).toEqual([
+      {
+        externalId: '9',
+        title: 'SSX Tricky',
+        releaseYear: 2001,
+        imageUrl: null,
+        externalUrl: 'https://www.thegamesdb.net/game/9',
+        platform: null,
+      },
+      {
+        externalId: '10',
+        title: 'Mystery',
+        releaseYear: 2001,
+        imageUrl: null,
+        externalUrl: 'https://www.thegamesdb.net/game/10',
+        platform: null,
       },
     ]);
   });

@@ -530,6 +530,7 @@ export const media = {
     release_year?: number | null;
     image_url?: string | null;
     external_url?: string | null;
+    platform?: string | null;
   }) => request<MediaItem>('/media/items', { method: 'POST', body: JSON.stringify(data) }),
   getItem: (id: string) => request<MediaItem>(`/media/items/${id}`),
   listCheckins: (itemId: string) => request<MediaCheckIn[]>(`/media/items/${itemId}/checkins`),
@@ -591,6 +592,10 @@ export const yamtrackImport = {
       body: JSON.stringify({ csv }),
     });
   },
+  wipeMedia: () =>
+    request<{ counts: Record<string, number> }>('/import/yamtrack/wipe-media', {
+      method: 'POST',
+    }),
 };
 
 // LLM (Life Summary)

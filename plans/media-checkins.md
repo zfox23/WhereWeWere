@@ -10,7 +10,7 @@ can be added to named lists, and include a Yamtrack CSV import.
 Confirmed product decisions:
 - TV row click → intermediate **episode picker** (season dropdown + episode list with TMDB-fetched titles) before navigating to the episode check-in page.
 - Media Lists are managed in a **Lists section under the Media Profile tab**.
-- Yamtrack import: **import everything** — `tv`/`season` rows create TV show entities (no check-in); `episode` rows become Completed episode check-ins timed at `end_date` (falling back to `start_date`; tz=UTC). Episode rows are duplicates only when `media_id`, season, episode, **and** `end_date` all match — the same episode with a different `end_date` is a rewatch and stays; movies/games/books with Completed/In progress/Dropped become check-ins; Planning/Paused rows create the media entity only. Every row's disposition is shown in the import table.
+- Yamtrack import: **import everything** — `tv`/`season` rows create TV show entities (no check-in); `episode` rows become Completed episode check-ins timed at `end_date` (tz=UTC). Episode rows are duplicates only when `media_id`, season, episode, **and** `end_date` all match — the same episode with a different `end_date` is a rewatch and stays; movies/games/books with Completed/In progress/Dropped become check-ins timed at `end_date`; Planning/Paused rows create the media entity only. **`start_date` is ignored entirely for check-in time.** Every row's disposition is shown in the import table.
 - Yamtrack 0-10 scores stored as-is in `raw_score`; 0-4 star `rating` derived: `10 → 4`, `7.5–9.99 → 3`, `5–7.49 → 2`, `2.5–4.99 → 1`, else `0`.
 
 ## 2. Data Model (migration `033_media_checkins.sql`)
@@ -137,8 +137,8 @@ Design notes:
 | Row shape | Disposition |
 |---|---|
 | `media_type = tv` or `season` | Upsert `tv_show` media_item (tmdb, `media_id`). No check-in. |
-| `media_type = episode` | Duplicate only when `(media_id, source, season, episode, end_date)` all match (first occurrence wins). Insert Completed episode check-in, `checked_in_at = end_date` (fall back to `start_date`), `checkin_timezone='UTC'`. `external_event_id = sha1(media_id|source|episode|s|e|checked_in_at)`. Rows with neither date create the TV show entity only. |
-| `movie/game/book` + status Completed / In progress / Dropped | Upsert media_item; insert check-in with mapped type, `start_date` as `checked_in_at` (tz=UTC), notes, score mapping. `external_event_id = sha1(media_id|source|type|start_date)`. Rows with no `start_date` → entity only. |
+| `media_type = episode` | Duplicate only when `(media_id, source, season, episode, end_date)` all match (first occurrence wins). Insert Completed episode check-in, `checked_in_at = end_date`, `checkin_timezone='UTC'`. `external_event_id = sha1(media_id|source|episode|s|e|checked_in_at)`. Rows without `end_date` create the TV show entity only. |
+| `movie/game/book` + status Completed / In progress / Dropped | Upsert media_item; insert check-in with mapped type, `end_date` as `checked_in_at` (tz=UTC), notes, score mapping. `external_event_id = sha1(media_id|source|type|end_date)`. Rows with no `end_date` → entity only. `start_date` is ignored. |
 | `movie/game/book` + status Planning / Paused | Upsert media_item only. |
 | Game rows from Yamtrack use `source = igdb` in the CSV but are stored with `external_source = 'tgdb'` (per spec, games are TGDB-sourced; `media_id` is kept as `external_id` for dedupe). | |
 

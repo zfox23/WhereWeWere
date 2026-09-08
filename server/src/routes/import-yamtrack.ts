@@ -156,6 +156,48 @@ async function upsertMediaItemWithClient(
   return inserted.rows[0].id as string;
 }
 
+// POST /wipe-media - delete all locally stored media data for the user.
+// Used by the Yamtrack import "Start Over" checkbox so a fresh export can be
+// re-imported from scratch. Child rows are deleted first (list items, cached
+// episodes, check-ins) before their parents. Runs in a transaction.
+router.post('/wipe-media', async (_req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const counts: Record<string, number> = {};
+
+    const listItemsResult = await client.query(
+      'DELETE FROM media_list_items WHERE list_id IN (SELECT id FROM media_lists WHERE user_id = $1)',
+      [USER_ID]
+    );
+    counts.media_list_items = listItemsResult.rowCount ?? 0;
+
+    const episodesResult = await client.query(
+      'DELETE FROM media_tv_episodes WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1)',
+      [USER_ID]
+    );
+    counts.media_tv_episodes = episodesResult.rowCount ?? 0;
+
+    const checkinsResult = await client.query('DELETE FROM media_checkins WHERE user_id = $1', [USER_ID]);
+    counts.media_checkins = checkinsResult.rowCount ?? 0;
+
+    const itemsResult = await client.query('DELETE FROM media_items WHERE user_id = $1', [USER_ID]);
+    counts.media_items = itemsResult.rowCount ?? 0;
+
+    const listsResult = await client.query('DELETE FROM media_lists WHERE user_id = $1', [USER_ID]);
+    counts.media_lists = listsResult.rowCount ?? 0;
+
+    await client.query('COMMIT');
+    res.json({ counts });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error wiping media data:', err);
+    res.status(500).json({ error: 'Failed to delete media data' });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /preview - parse + classify the CSV without writing anything
 router.post('/preview', async (req: Request, res: Response) => {
   try {

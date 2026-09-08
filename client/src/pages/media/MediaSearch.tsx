@@ -58,6 +58,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
           release_year: hit.release_year,
           image_url: hit.image_url,
           external_url: hit.external_url,
+          platform: hit.platform,
         });
         id = item.id;
       } catch (err) {
@@ -148,6 +149,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
                 <th className="px-4 py-2.5 font-medium"></th>
                 <th className="px-4 py-2.5 font-medium">Title</th>
                 {subtype === 'book' && <th className="px-4 py-2.5 font-medium hidden md:table-cell">Author</th>}
+                {subtype === 'game' && <th className="px-4 py-2.5 font-medium hidden md:table-cell">Platform</th>}
                 <th className="px-4 py-2.5 font-medium hidden sm:table-cell">Year</th>
                 {config.apiName && <th className="px-4 py-2.5 font-medium hidden lg:table-cell">Source</th>}
                 <th className="px-4 py-2.5 font-medium hidden md:table-cell">Last Watched</th>
@@ -190,6 +192,9 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
                   </td>
                   {subtype === 'book' && (
                     <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 hidden md:table-cell">{hit.author || '—'}</td>
+                  )}
+                  {subtype === 'game' && (
+                    <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 hidden md:table-cell">{hit.platform || '—'}</td>
                   )}
                   <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 hidden sm:table-cell">
                     {hit.release_year ?? '—'}

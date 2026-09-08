@@ -15,6 +15,7 @@ export interface TgdbGameResult {
   releaseYear: number | null;
   imageUrl: string | null;
   externalUrl: string;
+  platform: string | null;
 }
 
 interface TgdbGameRow {
@@ -44,6 +45,12 @@ interface TgdbBoxartInclude {
   data?: Record<string, TgdbBoxartImage[]>;
 }
 
+interface TgdbPlatformSkinny {
+  id: number;
+  name: string;
+  alias?: string;
+}
+
 interface TgdbSearchResponse {
   data?: {
     count?: number;
@@ -51,6 +58,9 @@ interface TgdbSearchResponse {
   };
   include?: {
     boxart?: TgdbBoxartInclude;
+    platform?: {
+      data?: Record<string, TgdbPlatformSkinny>;
+    };
   };
 }
 
@@ -99,13 +109,14 @@ export const tgdb = {
 
   async searchGames(apiKey: string | null, query: string): Promise<TgdbGameResult[] | null> {
     if (!apiKey) return null;
-    const url = `${TGDB_BASE}/v1.1/Games/ByGameName?apikey=${encodeURIComponent(apiKey)}&name=${encodeURIComponent(query)}&include=boxart`;
+    const url = `${TGDB_BASE}/v1.1/Games/ByGameName?apikey=${encodeURIComponent(apiKey)}&name=${encodeURIComponent(query)}&fields=platform&include=boxart,platform`;
     return withDegradation(
       async () => {
         const data = await cache.get<TgdbSearchResponse>(`tgdb:search:${query.toLowerCase()}`, async () => {
           const json = await externalFetchJson<TgdbSearchResponse>(url);
           return json;
         });
+        const platforms = data.include?.platform?.data || {};
         return dedupeByGameId(data.data?.games || [])
           .filter((r) => r.game_title)
           .map((row) => ({
@@ -114,6 +125,7 @@ export const tgdb = {
             releaseYear: yearFromDate(row.release_date),
             imageUrl: imageUrlFor(String(row.id), data.include?.boxart),
             externalUrl: `https://www.thegamesdb.net/game/${row.id}`,
+            platform: row.platform != null ? platforms[String(row.platform)]?.name || null : null,
           }));
       },
       null,

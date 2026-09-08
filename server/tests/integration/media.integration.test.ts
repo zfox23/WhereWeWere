@@ -302,7 +302,7 @@ describe('Media check-in API', () => {
       '"100088","tmdb","episode","Pilot","img","1","1","10","Completed","","","2023-04-04 01:50:00+00:00","0","",""',
       // Rewatch of the same episode with a different end_date: distinct check-in.
       '"100088","tmdb","episode","Pilot","img","1","1","9","Completed","","","2023-06-01 01:50:00+00:00","0","",""',
-      '"550","tmdb","movie","Dune","img","","","","Completed","","2023-04-05 01:50:00+00:00","","0","",""',
+      '"550","tmdb","movie","Dune","img","","","","Completed","","","2023-04-05 01:50:00+00:00","0","",""',
       '"880","hardcover","book","Dune Book","img","","","","Planning","","","","0","",""',
     ].join('\n');
 
@@ -352,6 +352,7 @@ describe('Media check-in API', () => {
 
       const movie = checkins.rows.find((r: any) => r.title === 'Dune');
       expect(movie.checkin_type).toBe('completed');
+      expect(movie.checked_in_at.toISOString()).toBe('2023-04-05T01:50:00.000Z');
 
       const planningBook = checkins.rows.find((r: any) => r.title === 'Dune Book');
       expect(planningBook).toBeUndefined();
@@ -374,6 +375,25 @@ describe('Media check-in API', () => {
     it('requires a csv string', async () => {
       const response = await request(app).post('/api/v1/import/yamtrack/import').send({});
       expect(response.status).toBe(400);
+    });
+
+    it('wipe-media deletes all locally stored media data and allows a fresh import', async () => {
+      await request(app).post('/api/v1/import/yamtrack/import').send({ csv });
+
+      const wipe = await request(app).post('/api/v1/import/yamtrack/wipe-media');
+      expect(wipe.status).toBe(200);
+      expect(wipe.body.counts.media_items).toBe(3);
+      expect(wipe.body.counts.media_checkins).toBe(3);
+
+      const items = await query('SELECT COUNT(*)::int AS n FROM media_items');
+      const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins');
+      expect(items.rows[0].n).toBe(0);
+      expect(checkins.rows[0].n).toBe(0);
+
+      // A fresh import after the wipe recreates everything.
+      const reimport = await request(app).post('/api/v1/import/yamtrack/import').send({ csv });
+      expect(reimport.status).toBe(200);
+      expect(reimport.body.counts.imported_checkins).toBe(3);
     });
   });
 });

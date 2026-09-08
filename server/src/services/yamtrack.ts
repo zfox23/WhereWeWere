@@ -10,10 +10,10 @@ import { parse } from 'csv-parse/sync';
 // Row dispositions (per product decision):
 //   - tv / season rows       -> upsert a tv_show media_item, no check-in
 //   - episode rows           -> Completed episode check-in timed at end_date
-//                               (falling back to start_date, timezone UTC).
-//                               Rows are duplicates only when media_id, season,
-//                               episode, AND end_date all match.
+//                               (timezone UTC). Rows are duplicates only when
+//                               media_id, season, episode, AND end_date match.
 //   - movie/game/book + Completed/In progress/Dropped -> media_item + check-in
+//     timed at end_date (start_date is ignored for check-in time entirely)
 //   - movie/game/book + Planning/Paused               -> media_item only
 // ============================================================================
 
@@ -167,10 +167,11 @@ export function yamtrackExternalEventId(row: YamtrackRow, dedupeKey: string): st
 /**
  * Classify every row into a plan. Deterministic and side-effect free.
  *
+ * Check-in time is end_date for every media type (start_date is ignored).
  * Dedupe within the file: episode rows are duplicates only when media_id,
  * source, season, episode, and end_date all match (first occurrence wins);
  * the same episode with different end_dates is a rewatch and stays.
- * Media rows dedupe on (media_id, source, media_type, start_date).
+ * Media rows dedupe on (media_id, source, media_type, end_date).
  */
 export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
   const plans: YamtrackPlanItem[] = [];
@@ -244,9 +245,8 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         });
         continue;
       }
-      // Yamtrack stores the watch time in end_date for episode rows
-      // (start_date is typically blank); fall back to start_date.
-      const checkedAt = row.end_date ?? row.start_date ?? null;
+      // Check-in time is the row's end_date (start_date is ignored).
+      const checkedAt = row.end_date;
       const dedupeKey = `${row.media_id}|${row.source}|episode|${s}|${e}|${checkedAt ?? ''}`;
       const existingIdx = episodeByKey.get(dedupeKey);
       if (existingIdx != null) {
@@ -274,7 +274,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         disposition: checkedAt ? 'create_episode_checkin' : 'create_tv_show',
         reason: checkedAt
           ? 'Episode entry creates a Completed episode check-in (end_date, UTC)'
-          : 'Episode row without end_date or start_date creates the TV show entity only',
+          : 'Episode row without end_date creates the TV show entity only',
         media_type: 'tv_show',
         external_source: externalSource,
         external_id: row.media_id || null,
@@ -316,11 +316,11 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
       continue;
     }
 
-    if (!row.start_date) {
+    if (!row.end_date) {
       plans.push({
         row,
         disposition: 'create_media_item',
-        reason: `Status "${statusText}" but no start_date; creates the media entity only`,
+        reason: `Status "${statusText}" but no end_date; creates the media entity only`,
         media_type: mediaType,
         external_source: externalSource,
         external_id: row.media_id || null,
@@ -336,11 +336,11 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
       continue;
     }
 
-    const dedupeKey = `${row.media_id}|${row.source}|${row.media_type}|${row.start_date}`;
+    const dedupeKey = `${row.media_id}|${row.source}|${row.media_type}|${row.end_date}`;
     plans.push({
       row,
       disposition: 'create_checkin',
-      reason: `Status "${statusText}" with start_date creates a ${checkinType} check-in (UTC)`,
+      reason: `Status "${statusText}" with end_date creates a ${checkinType} check-in (UTC)`,
       media_type: mediaType,
       external_source: externalSource,
       external_id: row.media_id || null,
@@ -349,7 +349,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
       episode_number: null,
       rating: scoreToRating(row.score),
       raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
-      checked_in_at: row.start_date,
+      checked_in_at: row.end_date,
       external_event_id: yamtrackExternalEventId(row, dedupeKey),
       duplicate_of_line: null,
     });

@@ -39,6 +39,7 @@ export interface MediaItemInput {
   release_year?: number | null;
   image_url?: string | null;
   external_url?: string | null;
+  platform?: string | null;
 }
 
 /**
@@ -65,21 +66,22 @@ export async function upsertMediaItem(input: MediaItemInput): Promise<string> {
              release_year = COALESCE($4, release_year),
              image_url = COALESCE($5, image_url),
              external_url = COALESCE($6, external_url),
+             platform = COALESCE($7, platform),
              updated_at = NOW()
          WHERE id = $1`,
-        [existing.rows[0].id, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null]
+        [existing.rows[0].id, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null]
       );
       return existing.rows[0].id as string;
     }
   }
 
   const inserted = await query(
-    `INSERT INTO media_items (user_id, media_type, external_source, external_id, title, author, release_year, image_url, external_url)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO media_items (user_id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (user_id, media_type, external_source, external_id) WHERE external_source IS NOT NULL AND external_id IS NOT NULL
      DO UPDATE SET updated_at = media_items.updated_at
      RETURNING id`,
-    [USER_ID, input.media_type, input.external_source || null, input.external_id || null, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null]
+    [USER_ID, input.media_type, input.external_source || null, input.external_id || null, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null]
   );
   return inserted.rows[0].id as string;
 }
@@ -93,6 +95,7 @@ interface SearchHit {
   release_year: number | null;
   image_url: string | null;
   external_url: string | null;
+  platform: string | null;
   local_id: string | null;
   last_checkin_at: string | null;
   last_checkin_type: string | null;
@@ -108,7 +111,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
   const keys = await getApiKeys();
   const localRows = await query(
     `SELECT mi.id, mi.title, mi.author, mi.release_year, mi.image_url, mi.external_url,
-            mi.external_source, mi.external_id,
+            mi.external_source, mi.external_id, mi.platform,
             mc_latest.last_checkin_at, mc_latest.last_checkin_type, mc_latest.my_rating
      FROM media_items mi
      LEFT JOIN LATERAL (
@@ -140,6 +143,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     release_year: r.release_year,
     image_url: r.image_url,
     external_url: r.external_url,
+    platform: r.platform || null,
     local_id: r.id,
     last_checkin_at: r.last_checkin_at,
     last_checkin_type: r.last_checkin_type,
@@ -147,7 +151,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
   }));
 
   let degraded = false;
-  let external: { external_source: string; rows: { externalId: string; title: string; releaseYear: number | null; imageUrl: string | null; externalUrl: string; author?: string | null }[] } | null = null;
+  let external: { external_source: string; rows: { externalId: string; title: string; releaseYear: number | null; imageUrl: string | null; externalUrl: string; author?: string | null; platform?: string | null }[] } | null = null;
 
   if (type === 'movie' || type === 'tv_show') {
     const found = type === 'movie'
@@ -166,7 +170,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     if (!found) {
       degraded = true;
     } else {
-      external = { external_source: 'tgdb', rows: found.map((f) => ({ externalId: f.externalId, title: f.title, releaseYear: f.releaseYear, imageUrl: f.imageUrl, externalUrl: f.externalUrl })) };
+      external = { external_source: 'tgdb', rows: found.map((f) => ({ externalId: f.externalId, title: f.title, releaseYear: f.releaseYear, imageUrl: f.imageUrl, externalUrl: f.externalUrl, platform: f.platform })) };
     }
   } else if (type === 'book') {
     const found = await hardcover.searchBooks(keys.hardcover_api_key, q);
@@ -189,6 +193,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
         release_year: row.releaseYear,
         image_url: row.imageUrl,
         external_url: row.externalUrl,
+        platform: row.platform || null,
         local_id: null,
         last_checkin_at: null,
         last_checkin_type: null,
@@ -219,7 +224,7 @@ router.get('/search', async (req: Request, res: Response) => {
 // POST /items - create a custom (local) media item, or upsert an API-sourced one
 router.post('/items', async (req: Request, res: Response) => {
   try {
-    const { media_type, external_source, external_id, title, author, release_year, image_url, external_url } = req.body;
+    const { media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform } = req.body;
     if (!title || !media_type) {
       return res.status(400).json({ error: 'media_type and title are required' });
     }
@@ -232,9 +237,10 @@ router.post('/items', async (req: Request, res: Response) => {
       release_year: release_year ?? null,
       image_url: image_url || null,
       external_url: external_url || null,
+      platform: platform || null,
     });
     const item = await query(
-      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, created_at FROM media_items WHERE id = $1',
+      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, created_at FROM media_items WHERE id = $1',
       [id]
     );
     res.status(201).json(item.rows[0]);
@@ -248,7 +254,7 @@ router.post('/items', async (req: Request, res: Response) => {
 router.get('/items/:id', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
-      `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, created_at
+      `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
       [req.params.id, USER_ID]
     );

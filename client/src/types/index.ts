@@ -358,6 +358,7 @@ export interface MediaItem {
   release_year: number | null;
   image_url: string | null;
   external_url: string | null;
+  platform: string | null;
   created_at: string;
   last_checkin_at?: string | null;
   checkin_count?: number;
@@ -374,6 +375,7 @@ export interface MediaSearchHit {
   release_year: number | null;
   image_url: string | null;
   external_url: string | null;
+  platform: string | null;
   local_id: string | null;
   last_checkin_at: string | null;
   last_checkin_type: string | null;

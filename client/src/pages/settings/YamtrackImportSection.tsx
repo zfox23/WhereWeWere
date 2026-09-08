@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Upload, FileText, Loader2, Check, AlertCircle, Play, X, ExternalLink } from 'lucide-react';
+import { Upload, FileText, Loader2, Check, AlertCircle, Play, X, ExternalLink, Trash2 } from 'lucide-react';
 import { yamtrackImport } from '../../api/client';
 import { MEDIA_SUBTYPES } from '../../utils/media';
 import { slugify } from '../../utils/slugify';
@@ -56,6 +56,10 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
   const [preview, setPreview] = useState<YamtrackPreview | null>(null);
   const [importResult, setImportResult] = useState<YamtrackImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [startOver, setStartOver] = useState(false);
+  const [startOverConfirm, setStartOverConfirm] = useState('');
+  const [wiping, setWiping] = useState(false);
+  const [wipeResult, setWipeResult] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] || null;
@@ -81,6 +85,24 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
     }
   };
 
+  const handleStartOver = async () => {
+    if (startOverConfirm.trim().toUpperCase() !== 'DELETE MEDIA') return;
+    setWiping(true);
+    setError(null);
+    setWipeResult(null);
+    try {
+      const data = await yamtrackImport.wipeMedia();
+      const total = Object.values(data.counts).reduce((a, b) => a + b, 0);
+      setWipeResult(`Deleted all locally stored media (${total} row${total === 1 ? '' : 's'}). You can now import a fresh Yamtrack export.`);
+      setStartOver(false);
+      setStartOverConfirm('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete media data');
+    } finally {
+      setWiping(false);
+    }
+  };
+
   const handleImport = async () => {
     if (!file) return;
     setPhase('importing');
@@ -101,6 +123,9 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
     setPreview(null);
     setImportResult(null);
     setError(null);
+    setStartOver(false);
+    setStartOverConfirm('');
+    setWipeResult(null);
     setPhase('idle');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -175,7 +200,7 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
           </div>
 
           <div className="max-h-96 overflow-auto border border-gray-200 dark:border-gray-700 rounded-xl">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs text-gray-900 dark:text-gray-100">
               <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
                 <tr className="text-left text-gray-500 dark:text-gray-400">
                   <th className="px-2 py-1.5">#</th>
@@ -207,14 +232,62 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
             </table>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button onClick={handleImport} className="btn-primary">
-              <Upload size={16} className="mr-2" />
-              Import
-            </button>
-            <button onClick={reset} className="text-sm text-gray-500 hover:text-gray-700">
-              Cancel
-            </button>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-red-200/70 dark:border-red-900/40 p-3">
+              <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={startOver}
+                  onChange={(e) => {
+                    setStartOver(e.target.checked);
+                    if (!e.target.checked) setStartOverConfirm('');
+                  }}
+                />
+                <span className="flex items-center gap-1 font-medium">
+                  <Trash2 size={14} />
+                  Start Over: delete all locally stored media items before importing
+                </span>
+              </label>
+              {startOver && (
+                <div className="mt-2 pl-6 space-y-2">
+                  <p className="text-xs text-red-700 dark:text-red-200">
+                    This permanently deletes all media items, media check-ins, cached episodes, and media lists.
+                    Type <code className="font-mono">DELETE MEDIA</code> to confirm.
+                  </p>
+                  <input
+                    type="text"
+                    value={startOverConfirm}
+                    onChange={(e) => setStartOverConfirm(e.target.value)}
+                    placeholder="DELETE MEDIA"
+                    className="input border-red-300/80"
+                  />
+                  <button
+                    onClick={handleStartOver}
+                    disabled={wiping || startOverConfirm.trim().toUpperCase() !== 'DELETE MEDIA'}
+                    className="btn-secondary disabled:opacity-50"
+                  >
+                    {wiping ? <><Loader2 size={16} className="animate-spin mr-2" />Deleting…</> : 'Delete All Media'}
+                  </button>
+                </div>
+              )}
+              {wipeResult && (
+                <p className="mt-2 pl-6 text-xs text-green-700 dark:text-green-300 flex items-center gap-1">
+                  <Check size={14} />
+                  {wipeResult}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button onClick={handleImport} className="btn-primary">
+                <Upload size={16} className="mr-2" />
+                Import
+              </button>
+              <button onClick={reset} className="text-sm text-gray-500 hover:text-gray-700">
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -227,7 +300,7 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
           </div>
 
           <div className="max-h-96 overflow-auto border border-gray-200 dark:border-gray-700 rounded-xl">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs text-gray-900 dark:text-gray-100">
               <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
                 <tr className="text-left text-gray-500 dark:text-gray-400">
                   <th className="px-2 py-1.5">#</th>
