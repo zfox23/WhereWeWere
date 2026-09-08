@@ -9,8 +9,10 @@ import { parse } from 'csv-parse/sync';
 //
 // Row dispositions (per product decision):
 //   - tv / season rows       -> upsert a tv_show media_item, no check-in
-//   - episode rows           -> Completed episode check-in (latest of duplicate
-//                               start_dates, timezone UTC)
+//   - episode rows           -> Completed episode check-in timed at end_date
+//                               (falling back to start_date, timezone UTC).
+//                               Rows are duplicates only when media_id, season,
+//                               episode, AND end_date all match.
 //   - movie/game/book + Completed/In progress/Dropped -> media_item + check-in
 //   - movie/game/book + Planning/Paused               -> media_item only
 // ============================================================================
@@ -158,12 +160,6 @@ function cleanStr(value: unknown): string | null {
   return str === '' ? null : str;
 }
 
-function parseDate(value: string | null): Date | null {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
 export function yamtrackExternalEventId(row: YamtrackRow, dedupeKey: string): string {
   return crypto.createHash('sha1').update(dedupeKey).digest('hex');
 }
@@ -171,15 +167,15 @@ export function yamtrackExternalEventId(row: YamtrackRow, dedupeKey: string): st
 /**
  * Classify every row into a plan. Deterministic and side-effect free.
  *
- * Dedupe within the file: episode rows with identical (media_id, source,
- * season, episode) keep the one with the LATEST start_date (Yamtrack exports
- * often contain the same episode twice with timezone-variant dates).
+ * Dedupe within the file: episode rows are duplicates only when media_id,
+ * source, season, episode, and end_date all match (first occurrence wins);
+ * the same episode with different end_dates is a rewatch and stays.
  * Media rows dedupe on (media_id, source, media_type, start_date).
  */
 export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
   const plans: YamtrackPlanItem[] = [];
 
-  // Index episode rows for dedupe: key -> plan index with the latest start_date.
+  // Index episode rows for dedupe: (media_id, source, s, e, checked_at) -> first plan index.
   const episodeByKey = new Map<string, number>();
 
   for (const row of rows) {
@@ -248,77 +244,47 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         });
         continue;
       }
-      const dedupeKey = `${row.media_id}|${row.source}|episode|${s}|${e}`;
+      // Yamtrack stores the watch time in end_date for episode rows
+      // (start_date is typically blank); fall back to start_date.
+      const checkedAt = row.end_date ?? row.start_date ?? null;
+      const dedupeKey = `${row.media_id}|${row.source}|episode|${s}|${e}|${checkedAt ?? ''}`;
       const existingIdx = episodeByKey.get(dedupeKey);
       if (existingIdx != null) {
-        const existingRow = rows[existingIdx];
-        const existingDate = parseDate(existingRow.start_date);
-        const thisDate = parseDate(row.start_date);
-        // Keep the latest start_date; mark the other as duplicate.
-        if (thisDate && existingDate && thisDate.getTime() > existingDate.getTime()) {
-          plans[existingIdx].disposition = 'duplicate';
-          plans[existingIdx].reason = `Duplicate episode row (older start_date); superseded by line ${row.line}`;
-          plans[existingIdx].duplicate_of_line = row.line;
-          plans[existingIdx].checkin_type = null;
-          plans[existingIdx].external_event_id = null;
-          plans[existingIdx].checked_in_at = null;
-          plans[existingIdx].rating = null;
-          plans[existingIdx].raw_score = null;
-          plans[existingIdx].disposition = 'duplicate';
-          // current row takes over
-          const plan: YamtrackPlanItem = {
-            row,
-            disposition: 'create_episode_checkin',
-            reason: 'Episode entry (latest of duplicate start_dates)',
-            media_type: 'tv_show',
-            external_source: externalSource,
-            external_id: row.media_id || null,
-            checkin_type: 'completed',
-            season_number: s,
-            episode_number: e,
-            rating: null,
-            raw_score: null,
-            checked_in_at: row.start_date,
-            external_event_id: yamtrackExternalEventId(row, `${dedupeKey}|${row.start_date}`),
-            duplicate_of_line: null,
-          };
-          plans.push(plan);
-          episodeByKey.set(dedupeKey, plans.length - 1);
-        } else {
-          plans.push({
-            row,
-            disposition: 'duplicate',
-            reason: `Duplicate episode row (start_date not newer than line ${existingRow.line})`,
-            media_type: 'tv_show',
-            external_source: externalSource,
-            external_id: row.media_id || null,
-            checkin_type: null,
-            season_number: s,
-            episode_number: e,
-            rating: null,
-            raw_score: null,
-            checked_in_at: null,
-            external_event_id: null,
-            duplicate_of_line: existingRow.line,
-          });
-        }
+        plans.push({
+          row,
+          disposition: 'duplicate',
+          reason: `Duplicate episode row (same media, season, episode, and end_date as line ${rows[existingIdx].line})`,
+          media_type: 'tv_show',
+          external_source: externalSource,
+          external_id: row.media_id || null,
+          checkin_type: null,
+          season_number: s,
+          episode_number: e,
+          rating: null,
+          raw_score: null,
+          checked_in_at: null,
+          external_event_id: null,
+          duplicate_of_line: rows[existingIdx].line,
+        });
         continue;
       }
 
       const plan: YamtrackPlanItem = {
         row,
-        disposition: row.start_date ? 'create_episode_checkin' : 'create_tv_show',
-        reason: row.start_date ? 'Episode entry creates a Completed episode check-in (UTC)' : 'Episode row without start_date creates the TV show entity only',
+        disposition: checkedAt ? 'create_episode_checkin' : 'create_tv_show',
+        reason: checkedAt
+          ? 'Episode entry creates a Completed episode check-in (end_date, UTC)'
+          : 'Episode row without end_date or start_date creates the TV show entity only',
         media_type: 'tv_show',
         external_source: externalSource,
         external_id: row.media_id || null,
-        checkin_type: row.start_date ? 'completed' : null,
+        checkin_type: checkedAt ? 'completed' : null,
         season_number: s,
         episode_number: e,
         rating: scoreToRating(row.score),
         raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
-        checked_in_at: row.start_date,
-        external_event_id: row.start_date ? yamtrackExternalEventId(row, `${dedupeKey}|${row.start_date}`) : null,
+        checked_in_at: checkedAt,
+        external_event_id: checkedAt ? yamtrackExternalEventId(row, dedupeKey) : null,
         duplicate_of_line: null,
       };
       plans.push(plan);

@@ -204,9 +204,11 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
                           onClick={(e) => e.stopPropagation()}
                           className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline"
                         >
-                          <span className="uppercase">{hit.external_source}</span>
+                          <span className="uppercase">{hit.external_source || config.apiName}</span>
                           <ExternalLink size={11} />
                         </a>
+                      ) : hit.external_source ? (
+                        <span className="text-xs uppercase text-gray-400">{hit.external_source}</span>
                       ) : '—'}
                     </td>
                   )}

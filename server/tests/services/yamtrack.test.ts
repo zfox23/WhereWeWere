@@ -102,16 +102,42 @@ describe('planYamtrackImport', () => {
     expect(plans[0].external_id).toBe('10');
   });
 
-  it('classifies episode rows with start_date as completed episode check-ins', () => {
+  it('classifies episode rows with end_date as completed episode check-ins timed at end_date', () => {
     const plans = planYamtrackImport([
-      row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '2', start_date: '2023-04-04 01:50:00+00:00', score: '10' }),
+      row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '2', end_date: '2023-04-04 01:50:00+00:00', score: '10' }),
     ]);
     expect(plans[0].disposition).toBe('create_episode_checkin');
     expect(plans[0].checkin_type).toBe('completed');
     expect(plans[0].season_number).toBe(1);
     expect(plans[0].episode_number).toBe(2);
     expect(plans[0].rating).toBe(4);
+    expect(plans[0].checked_in_at).toBe('2023-04-04 01:50:00+00:00');
     expect(plans[0].external_event_id).toBeTruthy();
+  });
+
+  it('prefers end_date over start_date as the check-in time', () => {
+    const plans = planYamtrackImport([
+      row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '2', start_date: '2023-04-04 01:00:00+00:00', end_date: '2023-04-04 02:10:00+00:00' }),
+    ]);
+    expect(plans[0].disposition).toBe('create_episode_checkin');
+    expect(plans[0].checked_in_at).toBe('2023-04-04 02:10:00+00:00');
+  });
+
+  it('falls back to start_date when end_date is empty', () => {
+    const plans = planYamtrackImport([
+      row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '2', start_date: '2023-04-04 01:50:00+00:00' }),
+    ]);
+    expect(plans[0].disposition).toBe('create_episode_checkin');
+    expect(plans[0].checked_in_at).toBe('2023-04-04 01:50:00+00:00');
+  });
+
+  it('creates only the TV show entity when both end_date and start_date are empty', () => {
+    const plans = planYamtrackImport([
+      row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '2' }),
+    ]);
+    expect(plans[0].disposition).toBe('create_tv_show');
+    expect(plans[0].checked_in_at).toBeNull();
+    expect(plans[0].external_event_id).toBeNull();
   });
 
   it('skips episode rows missing season/episode numbers', () => {
@@ -121,18 +147,37 @@ describe('planYamtrackImport', () => {
     expect(plans[0].disposition).toBe('skipped');
   });
 
-  it('dedupes duplicate episode rows, keeping the latest start_date', () => {
+  it('dedupes episode rows only when media_id, season, episode, and end_date all match', () => {
+    const plans = planYamtrackImport([
+      row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '1', end_date: '2023-04-04 03:00:00+00:00' }),
+      row({ line: 3, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '1', end_date: '2023-04-04 03:00:00+00:00' }),
+      row({ line: 4, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '1', end_date: '2023-04-04 05:00:00+00:00' }),
+    ]);
+    const byLine = new Map(plans.map((p) => [p.row.line, p]));
+    // Same end_date -> duplicate of the first occurrence.
+    expect(byLine.get(2)?.disposition).toBe('create_episode_checkin');
+    expect(byLine.get(3)?.disposition).toBe('duplicate');
+    expect(byLine.get(3)?.duplicate_of_line).toBe(2);
+    // Different end_date -> a distinct rewatch check-in.
+    expect(byLine.get(4)?.disposition).toBe('create_episode_checkin');
+    expect(byLine.get(4)?.checked_in_at).toBe('2023-04-04 05:00:00+00:00');
+  });
+
+  it('treats the same episode with different start_dates but no end_date as distinct check-ins', () => {
     const plans = planYamtrackImport([
       row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '1', start_date: '2023-04-04 01:00:00+00:00' }),
       row({ line: 3, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '1', start_date: '2023-04-04 03:00:00+00:00' }),
-      row({ line: 4, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '1', start_date: '2023-04-04 02:00:00+00:00' }),
     ]);
-    const byLine = new Map(plans.map((p) => [p.row.line, p]));
-    expect(byLine.get(2)?.disposition).toBe('duplicate');
-    expect(byLine.get(3)?.disposition).toBe('create_episode_checkin');
-    expect(byLine.get(4)?.disposition).toBe('duplicate');
-    expect(byLine.get(4)?.duplicate_of_line).toBe(3);
-    expect(byLine.get(3)?.checked_in_at).toBe('2023-04-04 03:00:00+00:00');
+    expect(plans.every((p) => p.disposition === 'create_episode_checkin')).toBe(true);
+  });
+
+  it('does not dedupe different episodes of the same show', () => {
+    const plans = planYamtrackImport([
+      row({ line: 2, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '1', end_date: '2023-04-04 03:00:00+00:00' }),
+      row({ line: 3, media_type: 'episode', title: 'Show', media_id: '10', season_number: '1', episode_number: '2', end_date: '2023-04-04 03:00:00+00:00' }),
+      row({ line: 4, media_type: 'episode', title: 'Show', media_id: '10', season_number: '2', episode_number: '1', end_date: '2023-04-04 03:00:00+00:00' }),
+    ]);
+    expect(plans.every((p) => p.disposition === 'create_episode_checkin')).toBe(true);
   });
 
   it('classifies movie/game/book with a completed status and date as check-ins', () => {

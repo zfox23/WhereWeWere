@@ -61,7 +61,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
           : plan.external_source === 'tgdb'
             ? `https://www.thegamesdb.net/game/${plan.external_id}`
             : plan.external_source === 'hardcover'
-              ? `https://hardcover.app/book/${plan.external_id}`
+              ? `https://hardcover.app/books/${plan.external_id}`
               : null,
       });
       plan.media_item_id = mediaItemId;
@@ -183,6 +183,8 @@ router.post('/preview', async (req: Request, res: Response) => {
         status: p.row.status,
         score: p.row.score,
         start_date: p.row.start_date,
+        end_date: p.row.end_date,
+        checked_in_at: p.checked_in_at,
         disposition: p.disposition,
         reason: p.reason,
         checkin_type: p.checkin_type,
@@ -226,6 +228,8 @@ router.post('/import', async (req: Request, res: Response) => {
         status: p.row.status,
         score: p.row.score,
         start_date: p.row.start_date,
+        end_date: p.row.end_date,
+        checked_in_at: p.checked_in_at,
         disposition: p.disposition,
         reason: p.reason,
         checkin_type: p.checkin_type,

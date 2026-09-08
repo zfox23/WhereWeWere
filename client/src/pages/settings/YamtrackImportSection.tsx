@@ -195,7 +195,9 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
                     </td>
                     <td className="px-2 py-1.5 text-gray-500">{row.media_type}</td>
                     <td className="px-2 py-1.5"><DispositionBadge disposition={dispositionOf(row)} /></td>
-                    <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">{row.start_date || '—'}</td>
+                    <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap" title={row.checked_in_at ?? undefined}>
+                      {row.checked_in_at || row.start_date || '—'}
+                    </td>
                     <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">
                       {row.rating != null ? `${row.rating}★` : row.raw_score != null ? String(row.raw_score) : '—'}
                     </td>

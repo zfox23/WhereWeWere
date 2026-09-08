@@ -98,3 +98,30 @@ export async function externalFetchJson<T = unknown>(url: string, headers: Recor
     clearTimeout(timeout);
   }
 }
+
+/**
+ * Perform an external API POST with a JSON body and parse the JSON response.
+ * Throws on network failure or non-2xx status (caller decides on fallback).
+ */
+export async function externalFetchPostJson<T = unknown>(
+  url: string,
+  body: unknown,
+  headers: Record<string, string> = {}
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new MediaApiError(`External API returned ${res.status}`);
+    }
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timeout);
+  }
+}

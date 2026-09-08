@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import type { TimelineItem } from '../types';
 import Stars from './Stars';
 import { MarkdownNote } from './checkin-card/MarkdownNote';
+import { TimestampLink } from './checkin-card/TimestampLink';
 import { MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS } from '../utils/media';
 import { slugify } from '../utils/slugify';
 
@@ -80,6 +81,12 @@ export default function MediaCard({ item }: MediaCardProps) {
           )}
         </div>
       </div>
+      <TimestampLink
+        to={detailHref}
+        checkedInAt={item.checked_in_at}
+        timezone={item.media_timezone}
+        mode="time"
+      />
     </div>
   );
 }

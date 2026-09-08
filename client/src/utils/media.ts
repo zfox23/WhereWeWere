@@ -1,4 +1,5 @@
 import type { MediaSubtype } from '../types';
+import { normalizeTimezoneForDisplay } from './checkin';
 
 export interface MediaSubtypeConfig {
   subtype: MediaSubtype;
@@ -96,6 +97,7 @@ export const CHECKIN_TYPE_LABELS: Record<string, string> = {
 
 export function formatCheckinDate(iso: string, timezone?: string | null): string {
   const d = new Date(iso);
+  const displayTimeZone = normalizeTimezoneForDisplay(timezone);
   try {
     return d.toLocaleString('en-US', {
       year: 'numeric',
@@ -103,7 +105,8 @@ export function formatCheckinDate(iso: string, timezone?: string | null): string
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
-      ...(timezone ? { timeZone: timezone } : {}),
+      timeZoneName: 'short',
+      ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
     });
   } catch {
     return d.toLocaleString('en-US');

@@ -298,7 +298,10 @@ describe('Media check-in API', () => {
     const csv = [
       CSV_HEADER,
       '"100088","tmdb","tv","The Last of Us","img","","","","Completed","","2023-04-04 01:49:00+00:00","2025-05-26 01:50:00+00:00","16","",""',
-      '"100088","tmdb","episode","Pilot","img","1","1","10","Completed","","2023-04-04 01:50:00+00:00","","0","",""',
+      // Episode rows store the watch time in end_date (start_date blank).
+      '"100088","tmdb","episode","Pilot","img","1","1","10","Completed","","","2023-04-04 01:50:00+00:00","0","",""',
+      // Rewatch of the same episode with a different end_date: distinct check-in.
+      '"100088","tmdb","episode","Pilot","img","1","1","9","Completed","","","2023-06-01 01:50:00+00:00","0","",""',
       '"550","tmdb","movie","Dune","img","","","","Completed","","2023-04-05 01:50:00+00:00","","0","",""',
       '"880","hardcover","book","Dune Book","img","","","","Planning","","","","0","",""',
     ].join('\n');
@@ -307,9 +310,9 @@ describe('Media check-in API', () => {
       const response = await request(app).post('/api/v1/import/yamtrack/preview').send({ csv });
 
       expect(response.status).toBe(200);
-      expect(response.body.counts.total).toBe(4);
+      expect(response.body.counts.total).toBe(5);
       expect(response.body.counts.create_tv_show).toBe(1);
-      expect(response.body.counts.create_episode_checkin).toBe(1);
+      expect(response.body.counts.create_episode_checkin).toBe(2);
       expect(response.body.counts.create_checkin).toBe(1);
       expect(response.body.counts.create_media_item).toBe(1);
 
@@ -323,7 +326,7 @@ describe('Media check-in API', () => {
       const response = await request(app).post('/api/v1/import/yamtrack/import').send({ csv });
 
       expect(response.status).toBe(200);
-      expect(response.body.counts.imported_checkins).toBe(2);
+      expect(response.body.counts.imported_checkins).toBe(3);
 
       const items = await query('SELECT COUNT(*)::int AS n FROM media_items');
       expect(items.rows[0].n).toBe(3);
@@ -331,15 +334,21 @@ describe('Media check-in API', () => {
       const checkins = await query(
         `SELECT mc.*, mi.title FROM media_checkins mc JOIN media_items mi ON mi.id = mc.media_item_id ORDER BY mi.title`
       );
-      expect(checkins.rows).toHaveLength(2);
-      expect(checkins.rows.map((r: any) => r.title).sort()).toEqual(['Dune', 'The Last of Us']);
+      expect(checkins.rows).toHaveLength(3);
+      expect(checkins.rows.map((r: any) => r.title).sort()).toEqual(['Dune', 'The Last of Us', 'The Last of Us']);
 
-      const episode = checkins.rows.find((r: any) => r.title === 'The Last of Us');
-      expect(Number(episode.season_number)).toBe(1);
-      expect(Number(episode.episode_number)).toBe(1);
-      expect(Number(episode.rating)).toBe(4);
-      expect(episode.checkin_timezone).toBe('UTC');
-      expect(episode.external_event_id).toBeTruthy();
+      // Both episode rows imported, each timed at its end_date.
+      const episodes = checkins.rows
+        .filter((r: any) => r.title === 'The Last of Us')
+        .sort((a: any, b: any) => new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime());
+      expect(Number(episodes[0].season_number)).toBe(1);
+      expect(Number(episodes[0].episode_number)).toBe(1);
+      expect(Number(episodes[0].rating)).toBe(4);
+      expect(episodes[0].checkin_timezone).toBe('UTC');
+      expect(episodes[0].external_event_id).toBeTruthy();
+      expect(episodes[0].checked_in_at.toISOString()).toBe('2023-04-04T01:50:00.000Z');
+      expect(episodes[1].checked_in_at.toISOString()).toBe('2023-06-01T01:50:00.000Z');
+      expect(episodes[1].external_event_id).not.toBe(episodes[0].external_event_id);
 
       const movie = checkins.rows.find((r: any) => r.title === 'Dune');
       expect(movie.checkin_type).toBe('completed');
@@ -359,7 +368,7 @@ describe('Media check-in API', () => {
       const items = await query('SELECT COUNT(*)::int AS n FROM media_items');
       const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins');
       expect(items.rows[0].n).toBe(3);
-      expect(checkins.rows[0].n).toBe(2);
+      expect(checkins.rows[0].n).toBe(3);
     });
 
     it('requires a csv string', async () => {

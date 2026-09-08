@@ -28,10 +28,10 @@ const previewFixture = {
     skipped: 0,
   },
   plans: [
-    { line: 2, media_id: '1', source: 'tmdb', media_type: 'tv', title: 'Show', season_number: null, episode_number: null, status: 'Completed', score: null, start_date: '2023-04-04', disposition: 'create_tv_show', reason: '', checkin_type: null, rating: null, raw_score: null, duplicate_of_line: null },
-    { line: 3, media_id: '1', source: 'tmdb', media_type: 'episode', title: 'Pilot', season_number: '1', episode_number: '1', status: 'Completed', score: '10', start_date: '2023-04-04', disposition: 'create_episode_checkin', reason: '', checkin_type: 'completed', rating: 4, raw_score: 10, duplicate_of_line: null },
-    { line: 4, media_id: '2', source: 'tmdb', media_type: 'movie', title: 'Film', season_number: null, episode_number: null, status: 'Completed', score: null, start_date: '2023-04-05', disposition: 'create_checkin', reason: '', checkin_type: 'completed', rating: null, raw_score: null, duplicate_of_line: null },
-    { line: 5, media_id: '3', source: 'hardcover', media_type: 'book', title: 'Book', season_number: null, episode_number: null, status: 'Planning', score: null, start_date: null, disposition: 'create_media_item', reason: '', checkin_type: null, rating: null, raw_score: null, duplicate_of_line: null },
+    { line: 2, media_id: '1', source: 'tmdb', media_type: 'tv', title: 'Show', season_number: null, episode_number: null, status: 'Completed', score: null, start_date: '2023-04-04', end_date: '2025-05-26', checked_in_at: null, disposition: 'create_tv_show', reason: '', checkin_type: null, rating: null, raw_score: null, duplicate_of_line: null },
+    { line: 3, media_id: '1', source: 'tmdb', media_type: 'episode', title: 'Pilot', season_number: '1', episode_number: '1', status: 'Completed', score: '10', start_date: null, end_date: '2023-04-04 01:50:00+00:00', checked_in_at: '2023-04-04 01:50:00+00:00', disposition: 'create_episode_checkin', reason: '', checkin_type: 'completed', rating: 4, raw_score: 10, duplicate_of_line: null },
+    { line: 4, media_id: '2', source: 'tmdb', media_type: 'movie', title: 'Film', season_number: null, episode_number: null, status: 'Completed', score: null, start_date: '2023-04-05', end_date: null, checked_in_at: '2023-04-05', disposition: 'create_checkin', reason: '', checkin_type: 'completed', rating: null, raw_score: null, duplicate_of_line: null },
+    { line: 5, media_id: '3', source: 'hardcover', media_type: 'book', title: 'Book', season_number: null, episode_number: null, status: 'Planning', score: null, start_date: null, end_date: null, checked_in_at: null, disposition: 'create_media_item', reason: '', checkin_type: null, rating: null, raw_score: null, duplicate_of_line: null },
   ],
 } as any;
 

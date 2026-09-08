@@ -454,6 +454,9 @@ export interface YamtrackPlanRow {
   status: string | null;
   score: string | null;
   start_date: string | null;
+  end_date: string | null;
+  /** The date the check-in will be stored at (end_date for episodes, start_date otherwise). */
+  checked_in_at: string | null;
   disposition: YamtrackDisposition;
   reason: string;
   checkin_type: 'completed' | 'in_progress' | 'dropped' | null;

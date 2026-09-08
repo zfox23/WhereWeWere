@@ -108,6 +108,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
   const keys = await getApiKeys();
   const localRows = await query(
     `SELECT mi.id, mi.title, mi.author, mi.release_year, mi.image_url, mi.external_url,
+            mi.external_source, mi.external_id,
             mc_latest.last_checkin_at, mc_latest.last_checkin_type, mc_latest.my_rating
      FROM media_items mi
      LEFT JOIN LATERAL (
@@ -130,8 +131,10 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
 
   const results: SearchHit[] = localRows.rows.map((r) => ({
     source: 'local',
-    external_source: null,
-    external_id: null,
+    // Local rows still expose their external identity when they were
+    // originally created from an API (e.g. "hardcover" in the search table).
+    external_source: r.external_source || null,
+    external_id: r.external_id || null,
     title: r.title,
     author: r.author,
     release_year: r.release_year,
