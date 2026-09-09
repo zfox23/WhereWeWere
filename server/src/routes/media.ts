@@ -30,6 +30,15 @@ async function getApiKeys(): Promise<SettingsKeys> {
   };
 }
 
+function toIntOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value);
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Math.round(n);
+  }
+  return null;
+}
+
 export interface MediaItemInput {
   media_type: string;
   external_source?: string | null;
@@ -40,6 +49,14 @@ export interface MediaItemInput {
   image_url?: string | null;
   external_url?: string | null;
   platform?: string | null;
+  /** Book: page count of the default physical edition. */
+  page_count?: number | null;
+  /** Book: series name, if applicable. */
+  series_name?: string | null;
+  /** Book: this book's position within its series. */
+  series_position?: number | null;
+  /** Book: total number of books in its series. */
+  series_count?: number | null;
 }
 
 /**
@@ -59,6 +76,7 @@ export async function upsertMediaItem(input: MediaItemInput): Promise<string> {
     );
     if (existing.rows.length > 0) {
       // Refresh mutable metadata in case the API returned newer info.
+      // Page count/series columns backfill from null but never clobber existing values.
       await query(
         `UPDATE media_items
          SET title = $2,
@@ -67,21 +85,25 @@ export async function upsertMediaItem(input: MediaItemInput): Promise<string> {
              image_url = COALESCE($5, image_url),
              external_url = COALESCE($6, external_url),
              platform = COALESCE($7, platform),
+             page_count = COALESCE($8, page_count),
+             series_name = COALESCE($9, series_name),
+             series_position = COALESCE($10, series_position),
+             series_count = COALESCE($11, series_count),
              updated_at = NOW()
          WHERE id = $1`,
-        [existing.rows[0].id, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null]
+        [existing.rows[0].id, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null, input.page_count ?? null, input.series_name || null, input.series_position ?? null, input.series_count ?? null]
       );
       return existing.rows[0].id as string;
     }
   }
 
   const inserted = await query(
-    `INSERT INTO media_items (user_id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO media_items (user_id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT (user_id, media_type, external_source, external_id) WHERE external_source IS NOT NULL AND external_id IS NOT NULL
      DO UPDATE SET updated_at = media_items.updated_at
      RETURNING id`,
-    [USER_ID, input.media_type, input.external_source || null, input.external_id || null, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null]
+    [USER_ID, input.media_type, input.external_source || null, input.external_id || null, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null, input.page_count ?? null, input.series_name || null, input.series_position ?? null, input.series_count ?? null]
   );
   return inserted.rows[0].id as string;
 }
@@ -96,10 +118,44 @@ interface SearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
+  page_count: number | null;
+  series_name: string | null;
+  series_position: number | null;
+  series_count: number | null;
   local_id: string | null;
   last_checkin_at: string | null;
   last_checkin_type: string | null;
   my_rating: number | null;
+}
+
+/**
+ * Backfill page count / series info on existing local hardcover rows when the
+ * fresh external results carry values the local row is missing.
+ */
+async function backfillBookMetadata(
+  localRows: { id: string; external_id: string | null; page_count: number | null; series_name: string | null; series_position: number | null; series_count: number | null }[],
+  fresh: { externalId: string; pageCount: number | null; seriesName: string | null; seriesPosition: number | null; seriesCount: number | null }[]
+): Promise<void> {
+  const byExternalId = new Map(localRows.map((r) => [r.external_id as string, r]));
+  for (const row of fresh) {
+    const local = byExternalId.get(row.externalId);
+    if (!local) continue;
+    const page_count = local.page_count != null ? null : row.pageCount;
+    const series_name = local.series_name != null ? null : row.seriesName;
+    const series_position = local.series_position != null ? null : row.seriesPosition;
+    const series_count = local.series_count != null ? null : row.seriesCount;
+    if (page_count == null && series_name == null && series_position == null && series_count == null) continue;
+    await query(
+      `UPDATE media_items
+       SET page_count = COALESCE($2, page_count),
+           series_name = COALESCE($3, series_name),
+           series_position = COALESCE($4, series_position),
+           series_count = COALESCE($5, series_count),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [local.id, page_count, series_name, series_position, series_count]
+    );
+  }
 }
 
 /**
@@ -112,6 +168,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
   const localRows = await query(
     `SELECT mi.id, mi.title, mi.author, mi.release_year, mi.image_url, mi.external_url,
             mi.external_source, mi.external_id, mi.platform,
+            mi.page_count, mi.series_name, mi.series_position, mi.series_count,
             mc_latest.last_checkin_at, mc_latest.last_checkin_type, mc_latest.my_rating
      FROM media_items mi
      LEFT JOIN LATERAL (
@@ -144,6 +201,10 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     image_url: r.image_url,
     external_url: r.external_url,
     platform: r.platform || null,
+    page_count: r.page_count ?? null,
+    series_name: r.series_name || null,
+    series_position: r.series_position ?? null,
+    series_count: r.series_count ?? null,
     local_id: r.id,
     last_checkin_at: r.last_checkin_at,
     last_checkin_type: r.last_checkin_type,
@@ -151,7 +212,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
   }));
 
   let degraded = false;
-  let external: { external_source: string; rows: { externalId: string; title: string; releaseYear: number | null; imageUrl: string | null; externalUrl: string; author?: string | null; platform?: string | null }[] } | null = null;
+  let external: { external_source: string; rows: { externalId: string; title: string; releaseYear: number | null; imageUrl: string | null; externalUrl: string; author?: string | null; platform?: string | null; pageCount?: number | null; seriesName?: string | null; seriesPosition?: number | null; seriesCount?: number | null }[] } | null = null;
 
   if (type === 'movie' || type === 'tv_show') {
     const found = type === 'movie'
@@ -177,7 +238,27 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     if (!found) {
       degraded = true;
     } else {
-      external = { external_source: 'hardcover', rows: found.map((f) => ({ externalId: f.externalId, title: f.title, releaseYear: f.releaseYear, imageUrl: f.imageUrl, externalUrl: f.externalUrl, author: f.author })) };
+      external = {
+        external_source: 'hardcover',
+        rows: found.map((f) => ({
+          externalId: f.externalId,
+          title: f.title,
+          releaseYear: f.releaseYear,
+          imageUrl: f.imageUrl,
+          externalUrl: f.externalUrl,
+          author: f.author,
+          pageCount: f.pageCount,
+          seriesName: f.seriesName,
+          seriesPosition: f.seriesPosition,
+          seriesCount: f.seriesCount,
+        })),
+      };
+      // Backfill page count / series info on books already saved locally so
+      // the detail page picks it up without a new check-in.
+      await backfillBookMetadata(
+        localRows.rows.filter((r) => r.external_source === 'hardcover'),
+        found
+      );
     }
   }
 
@@ -194,6 +275,10 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
         image_url: row.imageUrl,
         external_url: row.externalUrl,
         platform: row.platform || null,
+        page_count: row.pageCount ?? null,
+        series_name: row.seriesName || null,
+        series_position: row.seriesPosition ?? null,
+        series_count: row.seriesCount ?? null,
         local_id: null,
         last_checkin_at: null,
         last_checkin_type: null,
@@ -224,7 +309,7 @@ router.get('/search', async (req: Request, res: Response) => {
 // POST /items - create a custom (local) media item, or upsert an API-sourced one
 router.post('/items', async (req: Request, res: Response) => {
   try {
-    const { media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform } = req.body;
+    const { media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count } = req.body;
     if (!title || !media_type) {
       return res.status(400).json({ error: 'media_type and title are required' });
     }
@@ -238,9 +323,13 @@ router.post('/items', async (req: Request, res: Response) => {
       image_url: image_url || null,
       external_url: external_url || null,
       platform: platform || null,
+      page_count: toIntOrNull(page_count),
+      series_name: series_name || null,
+      series_position: toIntOrNull(series_position),
+      series_count: toIntOrNull(series_count),
     });
     const item = await query(
-      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, created_at FROM media_items WHERE id = $1',
+      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count, created_at FROM media_items WHERE id = $1',
       [id]
     );
     res.status(201).json(item.rows[0]);
@@ -254,7 +343,8 @@ router.post('/items', async (req: Request, res: Response) => {
 router.get('/items/:id', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
-      `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, created_at
+      `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
+              page_count, series_name, series_position, series_count, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
       [req.params.id, USER_ID]
     );

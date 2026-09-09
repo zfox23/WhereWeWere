@@ -18,6 +18,14 @@ export interface HardcoverBookResult {
   releaseYear: number | null;
   imageUrl: string | null;
   externalUrl: string;
+  /** Page count of the default physical edition. */
+  pageCount: number | null;
+  /** Primary series name, if the book belongs to one. */
+  seriesName: string | null;
+  /** This book's number in its featured series. */
+  seriesPosition: number | null;
+  /** Total number of books in the featured series. */
+  seriesCount: number | null;
 }
 
 /** A single search hit from the raw Typesense payload (fields are loose). */
@@ -34,6 +42,10 @@ interface RawBookHit {
   cached_image?: Record<string, unknown> | string | null;
   image?: { url?: string | null } | Record<string, unknown> | string | null;
   cover?: { url?: string | null } | string | null;
+  pages?: number | string | null;
+  series_names?: string | string[] | null;
+  featured_series?: { name?: string | null; books_count?: number | string | null } | null;
+  featured_series_position?: number | string | null;
 }
 
 interface GraphQlSearchResponse {
@@ -89,6 +101,24 @@ function extractAuthor(hit: RawBookHit): string | null {
   return null;
 }
 
+function extractPageCount(hit: RawBookHit): number | null {
+  return toNumber(hit.pages);
+}
+
+function extractSeriesName(hit: RawBookHit): string | null {
+  const featured = hit.featured_series;
+  if (featured && typeof featured === 'object' && typeof featured.name === 'string' && featured.name.trim()) {
+    return featured.name.trim();
+  }
+  if (Array.isArray(hit.series_names) && hit.series_names.length > 0) {
+    return String(hit.series_names[0]).trim() || null;
+  }
+  if (typeof hit.series_names === 'string' && hit.series_names.trim()) {
+    return hit.series_names.trim();
+  }
+  return null;
+}
+
 function imageFieldToUrl(v: unknown): string | null {
   if (typeof v === 'string' && v.trim()) return v;
   if (v && typeof v === 'object') {
@@ -111,6 +141,7 @@ function hitToResult(hit: RawBookHit): HardcoverBookResult | null {
   const id = hit.id != null ? String(hit.id) : null;
   const title = hit.title?.trim() || hit.name?.trim() || null;
   if (!id || !title) return null;
+  const featured = hit.featured_series && typeof hit.featured_series === 'object' ? hit.featured_series : null;
   return {
     externalId: id,
     title,
@@ -121,6 +152,10 @@ function hitToResult(hit: RawBookHit): HardcoverBookResult | null {
     // both 404. Slug is always present in search results; fall back to the
     // numeric id if it's ever missing.
     externalUrl: hit.slug ? `https://hardcover.app/books/${hit.slug}` : `https://hardcover.app/books/${id}`,
+    pageCount: extractPageCount(hit),
+    seriesName: extractSeriesName(hit),
+    seriesPosition: toNumber(hit.featured_series_position),
+    seriesCount: featured ? toNumber(featured.books_count) : null,
   };
 }
 

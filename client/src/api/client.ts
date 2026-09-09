@@ -531,6 +531,14 @@ export const media = {
     image_url?: string | null;
     external_url?: string | null;
     platform?: string | null;
+    /** Book: page count of the default physical edition. */
+    page_count?: number | null;
+    /** Book: series name, if applicable. */
+    series_name?: string | null;
+    /** Book: this book's number within its series. */
+    series_position?: number | null;
+    /** Book: total number of books in its series. */
+    series_count?: number | null;
   }) => request<MediaItem>('/media/items', { method: 'POST', body: JSON.stringify(data) }),
   getItem: (id: string) => request<MediaItem>(`/media/items/${id}`),
   listCheckins: (itemId: string) => request<MediaCheckIn[]>(`/media/items/${itemId}/checkins`),

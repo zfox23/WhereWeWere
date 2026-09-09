@@ -59,6 +59,10 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
           image_url: hit.image_url,
           external_url: hit.external_url,
           platform: hit.platform,
+          page_count: hit.page_count,
+          series_name: hit.series_name,
+          series_position: hit.series_position,
+          series_count: hit.series_count,
         });
         id = item.id;
       } catch (err) {

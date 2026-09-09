@@ -66,6 +66,75 @@ describe('hardcover.searchBooks', () => {
         releaseYear: 1965,
         imageUrl: 'https://covers.example/dune.jpg',
         externalUrl: 'https://hardcover.app/books/dune',
+        pageCount: null,
+        seriesName: null,
+        seriesPosition: null,
+        seriesCount: null,
+      },
+    ]);
+  });
+
+  it('extracts page count and featured series info', async () => {
+    mockFetchOnce(
+      graphQlResponse([
+        {
+          id: 101,
+          title: 'Terra Ignota: The Crying Stone',
+          author_names: 'Adrian Tchaikovsky',
+          release_year: 2019,
+          slug: 'terra-ignota-the-crying-stone',
+          pages: 736,
+          series_names: ['Terra Ignota'],
+          featured_series: { name: 'Terra Ignota', books_count: 4 },
+          featured_series_position: 2,
+        },
+      ])
+    );
+
+    const result = await hardcover.searchBooks('key-123', 'terra ignota');
+    expect(result).toEqual([
+      {
+        externalId: '101',
+        title: 'Terra Ignota: The Crying Stone',
+        author: 'Adrian Tchaikovsky',
+        releaseYear: 2019,
+        imageUrl: null,
+        externalUrl: 'https://hardcover.app/books/terra-ignota-the-crying-stone',
+        pageCount: 736,
+        seriesName: 'Terra Ignota',
+        seriesPosition: 2,
+        seriesCount: 4,
+      },
+    ]);
+  });
+
+  it('falls back to series_names when featured_series has no name', async () => {
+    mockFetchOnce(
+      graphQlResponse([
+        {
+          id: 102,
+          title: 'Half a Life',
+          slug: 'half-a-life',
+          series_names: ['A Darker Shade of Magic'],
+          featured_series: { books_count: 5 },
+          featured_series_position: '1',
+        },
+      ])
+    );
+
+    const result = await hardcover.searchBooks('key-123', 'half a life');
+    expect(result).toEqual([
+      {
+        externalId: '102',
+        title: 'Half a Life',
+        author: null,
+        releaseYear: null,
+        imageUrl: null,
+        externalUrl: 'https://hardcover.app/books/half-a-life',
+        pageCount: null,
+        seriesName: 'A Darker Shade of Magic',
+        seriesPosition: 1,
+        seriesCount: 5,
       },
     ]);
   });
@@ -96,6 +165,10 @@ describe('hardcover.searchBooks', () => {
         releaseYear: 1984,
         imageUrl: null,
         externalUrl: 'https://hardcover.app/books/neuromancer',
+        pageCount: null,
+        seriesName: null,
+        seriesPosition: null,
+        seriesCount: null,
       },
     ]);
   });

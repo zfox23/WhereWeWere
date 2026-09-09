@@ -169,8 +169,17 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
         <div className="min-w-0 flex flex-col">
           <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h1>
           {item.author && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{item.author}</p>}
+          {subtype === 'book' && item.series_name && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {item.series_position != null && <span>#{item.series_position}{item.series_count != null ? ` of ${item.series_count}` : ''} in </span>}
+              <span className="italic">{item.series_name}</span>
+            </p>
+          )}
           <div className="flex items-center gap-4 mt-1.5 flex-wrap">
             {item.release_year && <span className="text-sm text-gray-500">{item.release_year}</span>}
+            {subtype === 'book' && item.page_count != null && (
+              <span className="text-sm text-gray-500">{item.page_count} pages</span>
+            )}
             {subtype === 'game' && item.total_time_played_minutes != null && (
               <span className="text-sm text-gray-500">
                 {formatTimePlayed(item.total_time_played_minutes)} played

@@ -369,6 +369,14 @@ export interface MediaItem {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
+  /** Book: page count of the default physical edition. */
+  page_count: number | null;
+  /** Book: series name, if applicable. */
+  series_name: string | null;
+  /** Book: this book's number within its series. */
+  series_position: number | null;
+  /** Book: total number of books in its series. */
+  series_count: number | null;
   created_at: string;
   last_checkin_at?: string | null;
   checkin_count?: number;
@@ -388,6 +396,14 @@ export interface MediaSearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
+  /** Book: page count of the default physical edition. */
+  page_count: number | null;
+  /** Book: series name, if applicable. */
+  series_name: string | null;
+  /** Book: this book's number within its series. */
+  series_position: number | null;
+  /** Book: total number of books in its series. */
+  series_count: number | null;
   local_id: string | null;
   last_checkin_at: string | null;
   last_checkin_type: string | null;

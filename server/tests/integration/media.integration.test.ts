@@ -71,6 +71,42 @@ describe('Media check-in API', () => {
       const count = await query('SELECT COUNT(*)::int AS n FROM media_items');
       expect(count.rows[0].n).toBe(1);
     });
+
+    it('persists and backfills book page count / series metadata', async () => {
+      const body = {
+        media_type: 'book',
+        external_source: 'hardcover',
+        external_id: '9297',
+        title: 'Dune',
+        author: 'Frank Herbert',
+        release_year: 2020,
+        image_url: 'https://covers.example/dune.jpg',
+        external_url: 'https://hardcover.app/books/dune',
+      };
+      const first = await request(app).post('/api/v1/media/items').send(body);
+      expect(first.status).toBe(201);
+      expect(first.body.page_count).toBeNull();
+      expect(first.body.series_name).toBeNull();
+
+      // Second upsert carries the previously-missing metadata (backfill).
+      const second = await request(app)
+        .post('/api/v1/media/items')
+        .send({ ...body, page_count: 412, series_name: 'Dune', series_position: 1, series_count: 6 });
+      expect(second.status).toBe(201);
+      expect(second.body.id).toBe(first.body.id);
+      expect(second.body.page_count).toBe(412);
+      expect(second.body.series_name).toBe('Dune');
+      expect(second.body.series_position).toBe(1);
+      expect(second.body.series_count).toBe(6);
+
+      // GET exposes the stored metadata.
+      const item = await request(app).get(`/api/v1/media/items/${first.body.id}`);
+      expect(item.status).toBe(200);
+      expect(item.body.page_count).toBe(412);
+      expect(item.body.series_name).toBe('Dune');
+      expect(item.body.series_position).toBe(1);
+      expect(item.body.series_count).toBe(6);
+    });
   });
 
   describe('media check-ins', () => {
