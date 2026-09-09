@@ -106,6 +106,48 @@ describe('API integration', () => {
     );
     const uninferableMoodCheckinId = uninferableMoodCheckinResult.rows[0].id as string;
 
+    const mediaItemResult = await query(
+      `INSERT INTO media_items (user_id, media_type, title)
+       VALUES ($1, 'movie', 'Test Film')
+       RETURNING id`,
+      [DEFAULT_USER_ID]
+    );
+    const mediaItemId = mediaItemResult.rows[0].id as string;
+
+    const mediaCheckinResult = await query(
+      `INSERT INTO media_checkins (user_id, media_item_id, checkin_type, checked_in_at, checkin_timezone)
+       VALUES ($1, $2, 'completed', '2026-01-01T15:00:00Z', 'UTC')
+       RETURNING id`,
+      [DEFAULT_USER_ID, mediaItemId]
+    );
+    const mediaCheckinId = mediaCheckinResult.rows[0].id as string;
+
+    const uninferableMediaCheckinResult = await query(
+      `INSERT INTO media_checkins (user_id, media_item_id, checkin_type, checked_in_at, checkin_timezone)
+       VALUES ($1, $2, 'completed', '2026-03-01T12:00:00Z', 'UTC')
+       RETURNING id`,
+      [DEFAULT_USER_ID, mediaItemId]
+    );
+    const uninferableMediaCheckinId = uninferableMediaCheckinResult.rows[0].id as string;
+
+    // Fallback anchor: no venue is near 2026-02-10, so the mood check-in below
+    // should fall back to the nearest non-venue check-in (this sleep entry).
+    const sleepEntryResult = await query(
+      `INSERT INTO sleep_entries (user_id, sleep_as_android_id, sleep_timezone, started_at, ended_at)
+       VALUES ($1, 1, 'America/Chicago', '2026-02-10T05:00:00Z', '2026-02-10T11:00:00Z')
+       RETURNING id`,
+      [DEFAULT_USER_ID]
+    );
+    expect(sleepEntryResult.rows[0].id).toBeTruthy();
+
+    const fallbackMoodCheckinResult = await query(
+      `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone)
+       VALUES ($1, 4, 'near sleep entry', '2026-02-10T06:00:00Z', NULL)
+       RETURNING id`,
+      [DEFAULT_USER_ID]
+    );
+    const fallbackMoodCheckinId = fallbackMoodCheckinResult.rows[0].id as string;
+
     const previewResponse = await request(app).get('/api/v1/settings/timestamp-reconciliation');
 
     expect(previewResponse.status).toBe(200);
@@ -121,13 +163,37 @@ describe('API integration', () => {
           type: 'mood',
           suggested_timezone: 'Europe/Lisbon',
         }),
+        expect.objectContaining({
+          id: mediaCheckinId,
+          type: 'media',
+          suggested_timezone: 'Europe/Lisbon',
+        }),
+        expect.objectContaining({
+          id: fallbackMoodCheckinId,
+          type: 'mood',
+          suggested_timezone: 'America/Chicago',
+        }),
       ])
     );
+
+    const fallbackSuggestion = previewResponse.body.suggestions.find(
+      (s: { id: string }) => s.id === fallbackMoodCheckinId
+    );
+    expect(fallbackSuggestion.reason).toContain('sleep entry');
+    expect(fallbackSuggestion.reason).toContain('No venue check-in within 24 hours');
     expect(previewResponse.body.uninferable_mood_checkins).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: uninferableMoodCheckinId,
           type: 'mood',
+        }),
+      ])
+    );
+    expect(previewResponse.body.uninferable_media_checkins).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: uninferableMediaCheckinId,
+          type: 'media',
         }),
       ])
     );
@@ -138,11 +204,13 @@ describe('API integration', () => {
         updates: [
           { id: venueCheckinId, type: 'venue', suggested_timezone: 'Europe/Lisbon' },
           { id: moodCheckinId, type: 'mood', suggested_timezone: 'Europe/Lisbon' },
+          { id: mediaCheckinId, type: 'media', suggested_timezone: 'Europe/Lisbon' },
+          { id: fallbackMoodCheckinId, type: 'mood', suggested_timezone: 'America/Chicago' },
         ],
       });
 
     expect(applyResponse.status).toBe(200);
-    expect(applyResponse.body).toEqual({ updated: 2 });
+    expect(applyResponse.body).toEqual({ updated: 4 });
 
     const updatedVenueCheckin = await query(
       `SELECT checked_in_at, checkin_timezone
@@ -161,5 +229,25 @@ describe('API integration', () => {
     );
     expect(updatedMoodCheckin.rows[0].mood_timezone).toBe('Europe/Lisbon');
     expect(new Date(updatedMoodCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-01-01T14:30:00.000Z');
+
+    const updatedFallbackMoodCheckin = await query(
+      `SELECT checked_in_at, mood_timezone
+       FROM mood_checkins
+       WHERE id = $1`,
+      [fallbackMoodCheckinId]
+    );
+    expect(updatedFallbackMoodCheckin.rows[0].mood_timezone).toBe('America/Chicago');
+    // 06:00 wall time reinterpreted in America/Chicago (CST, UTC-6 in February) = 12:00Z.
+    expect(new Date(updatedFallbackMoodCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-02-10T12:00:00.000Z');
+
+    const updatedMediaCheckin = await query(
+      `SELECT checked_in_at, checkin_timezone
+       FROM media_checkins
+       WHERE id = $1`,
+      [mediaCheckinId]
+    );
+    expect(updatedMediaCheckin.rows[0].checkin_timezone).toBe('Europe/Lisbon');
+    // 15:00 wall time is reinterpreted in Europe/Lisbon, which is UTC+0 in January.
+    expect(new Date(updatedMediaCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-01-01T15:00:00.000Z');
   });
 });

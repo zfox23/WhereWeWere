@@ -1172,12 +1172,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
     const deleteMoodCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
     const deleteSleepEntries = deleteAllCheckins || Boolean(rawOptions.delete_sleep_entries);
     const deleteTracks = Boolean(rawOptions.delete_tracks);
-    const deleteMediaCheckins = Boolean(rawOptions.delete_media_checkins);
+    const deleteMediaItems = Boolean(rawOptions.delete_media_items);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
     const resetMoodSettings = Boolean(rawOptions.reset_mood_settings);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !deleteTracks && !deleteMediaCheckins && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
+    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !deleteTracks && !deleteMediaItems && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -1222,9 +1222,27 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.track_files = trackFilesDeleted;
     }
 
-    if (deleteMediaCheckins) {
+    if (deleteMediaItems) {
+      // Delete all locally stored media: check-ins, list items, cached episodes, items, and lists.
       const mediaCheckinsResult = await client.query('DELETE FROM media_checkins WHERE user_id = $1', [USER_ID]);
       counts.media_checkins = mediaCheckinsResult.rowCount ?? 0;
+      const listItemsResult = await client.query(
+        'DELETE FROM media_list_items WHERE list_id IN (SELECT id FROM media_lists WHERE user_id = $1)',
+        [USER_ID]
+      );
+      counts.media_list_items = listItemsResult.rowCount ?? 0;
+
+      const episodesResult = await client.query(
+        'DELETE FROM media_tv_episodes WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1)',
+        [USER_ID]
+      );
+      counts.media_tv_episodes = episodesResult.rowCount ?? 0;
+
+      const itemsResult = await client.query('DELETE FROM media_items WHERE user_id = $1', [USER_ID]);
+      counts.media_items = itemsResult.rowCount ?? 0;
+
+      const listsResult = await client.query('DELETE FROM media_lists WHERE user_id = $1', [USER_ID]);
+      counts.media_lists = listsResult.rowCount ?? 0;
     }
 
     if (resetMoodSettings) {

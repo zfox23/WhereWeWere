@@ -409,7 +409,7 @@ export const backupApi = {
       delete_mood_checkins: boolean;
       delete_sleep_entries: boolean;
       delete_tracks: boolean;
-      delete_media_checkins: boolean;
+      delete_media_items: boolean;
       reset_account_settings: boolean;
       reset_mood_settings: boolean;
       reset_integrations_settings: boolean;
@@ -544,6 +544,8 @@ export const media = {
     notes?: string | null;
     checked_in_at?: string | null;
     timezone: string;
+    /** Total time played in minutes (games only). */
+    time_played_minutes?: number | null;
   }) => request<MediaCheckIn>(`/media/items/${itemId}/checkins`, { method: 'POST', body: JSON.stringify(data) }),
   updateCheckin: (id: string, data: Partial<{
     checkin_type: string;
@@ -552,6 +554,7 @@ export const media = {
     notes: string | null;
     checked_in_at: string | null;
     timezone: string;
+    time_played_minutes: number | null;
   }>) => request<MediaCheckIn>(`/media/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCheckin: (id: string) =>
     request<{ message: string; id: string }>(`/media/checkins/${id}`, { method: 'DELETE' }),
@@ -592,10 +595,6 @@ export const yamtrackImport = {
       body: JSON.stringify({ csv }),
     });
   },
-  wipeMedia: () =>
-    request<{ counts: Record<string, number> }>('/import/yamtrack/wipe-media', {
-      method: 'POST',
-    }),
 };
 
 // LLM (Life Summary)

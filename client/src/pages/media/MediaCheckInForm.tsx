@@ -32,6 +32,9 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
   const [checkinType, setCheckinType] = useState<'completed' | 'in_progress' | 'dropped'>('completed');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [timeHours, setTimeHours] = useState('');
+  const [timeMinutes, setTimeMinutes] = useState('');
+  const [timeInitialized, setTimeInitialized] = useState(false);
 
   usePageTitle(`${config.label} Check-In${item ? `: ${item.title}` : ''}`);
 
@@ -44,6 +47,12 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
         if (!cancelled) {
           setItem(data);
           if (data.my_rating != null) setScore(data.my_rating);
+          // Prefill Total Time Played with the game's current total so the
+          // user can bump it forward (values replace, never accumulate).
+          if (!timeInitialized && data.total_time_played_minutes != null) {
+            setTimeHours(String(Math.floor(data.total_time_played_minutes / 60)));
+            setTimeMinutes(String(Math.round(data.total_time_played_minutes % 60)));
+          }
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load item');
@@ -52,7 +61,13 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
       }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (timeInitialized) return;
+    if (timeHours !== '' || timeMinutes !== '') setTimeInitialized(true);
+  }, [timeInitialized, timeHours, timeMinutes]);
 
   const handleBack = () => {
     if (episodeMode) {
@@ -67,6 +82,14 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
     if (!id || submitting) return;
     setSubmitting(true);
     try {
+      const totalMinutes = subtype === 'game'
+        ? (() => {
+            const h = parseInt(timeHours, 10);
+            const m = parseInt(timeMinutes, 10);
+            const total = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+            return total > 0 ? total : null;
+          })()
+        : null;
       await media.createCheckin(id, {
         season_number: episodeMode?.seasonNumber ?? null,
         episode_number: episodeMode?.episodeNumber ?? null,
@@ -76,6 +99,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
         notes: notes.trim() || null,
         checked_in_at: localDatetimeToIso(dateTime),
         timezone: deviceTimezone(),
+        time_played_minutes: totalMinutes,
       });
       navigate(detailPath(subtype, id, slugify(item?.title || '')));
     } catch (err) {
@@ -181,6 +205,40 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
               <option value="dropped">{CHECKIN_TYPE_LABELS.dropped}</option>
             </select>
           </div>
+          {subtype === 'game' && (
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                Total Time Played <span className="font-normal text-gray-400">(optional)</span>
+              </label>
+              <div className="flex items-center gap-2 w-fit">
+                <input
+                  type="number"
+                  min="0"
+                  max="23"
+                  value={timeHours}
+                  onChange={(e) => setTimeHours(e.target.value)}
+                  placeholder="0"
+                  inputMode="numeric"
+                  className="input w-24"
+                />
+                <span className="text-sm text-gray-500 dark:text-gray-400">hours</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  value={timeMinutes}
+                  onChange={(e) => setTimeMinutes(e.target.value)}
+                  placeholder="0"
+                  inputMode="numeric"
+                  className="input w-24"
+                />
+                <span className="text-sm text-gray-500 dark:text-gray-400">minutes</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">
+                The running total for this game — new check-ins update the total, they don’t add to it.
+              </p>
+            </div>
+          )}
         </div>
 
         <div>

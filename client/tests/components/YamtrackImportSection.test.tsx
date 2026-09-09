@@ -6,14 +6,12 @@ import { YamtrackImportSection } from '../../src/pages/settings/YamtrackImportSe
 const apiMocks = vi.hoisted(() => ({
   preview: vi.fn(),
   import: vi.fn(),
-  wipeMedia: vi.fn(),
 }));
 
 vi.mock('../../src/api/client', () => ({
   yamtrackImport: {
     preview: apiMocks.preview,
     import: apiMocks.import,
-    wipeMedia: apiMocks.wipeMedia,
   },
 }));
 
@@ -54,7 +52,6 @@ afterEach(() => {
 beforeEach(() => {
   apiMocks.preview.mockReset();
   apiMocks.import.mockReset();
-  apiMocks.wipeMedia.mockReset();
 });
 
 async function selectFile(user: ReturnType<typeof userEvent.setup>, file: File) {
@@ -123,47 +120,5 @@ describe('YamtrackImportSection', () => {
   it('requires a file before previewing', async () => {
     render(<YamtrackImportSection />);
     expect(screen.queryByRole('button', { name: /preview/i })).toBeNull();
-  });
-
-  it('start over deletes all media after typed confirmation', async () => {
-    apiMocks.preview.mockResolvedValue(previewFixture);
-    apiMocks.wipeMedia.mockResolvedValue({ counts: { media_items: 3, media_checkins: 3 } });
-
-    render(<YamtrackImportSection />);
-    const user = userEvent.setup();
-    await selectFile(user, csvFile);
-    await user.click(screen.getByRole('button', { name: /preview/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText('TV shows')).toBeTruthy();
-    });
-
-    // Start Over checkbox is shown in the preview; the delete button is hidden until checked.
-    expect(screen.queryByRole('button', { name: /delete all media/i })).toBeNull();
-    const startOverCheckbox = screen.getByRole('checkbox', { name: /start over/i });
-    expect((startOverCheckbox as HTMLInputElement).checked).toBe(false);
-    await user.click(startOverCheckbox);
-
-    const deleteButton = screen.getByRole('button', { name: /delete all media/i });
-    expect(deleteButton.hasAttribute('disabled')).toBe(true);
-
-    // Typing the wrong confirmation does not enable the button.
-    await user.type(screen.getByPlaceholderText('DELETE MEDIA'), 'nope');
-    expect(deleteButton.hasAttribute('disabled')).toBe(true);
-
-    // The exact phrase (case-insensitive) enables it.
-    await user.clear(screen.getByPlaceholderText('DELETE MEDIA'));
-    await user.type(screen.getByPlaceholderText('DELETE MEDIA'), 'delete media');
-    expect(deleteButton.hasAttribute('disabled')).toBe(false);
-
-    await user.click(deleteButton);
-    await waitFor(() => {
-      expect(apiMocks.wipeMedia).toHaveBeenCalledTimes(1);
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/deleted all locally stored media \(6 rows\)/i)).toBeTruthy();
-    });
-    // The checkbox unchecks itself after a successful wipe.
-    expect((screen.getByRole('checkbox', { name: /start over/i }) as HTMLInputElement).checked).toBe(false);
   });
 });

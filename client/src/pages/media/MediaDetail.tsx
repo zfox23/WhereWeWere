@@ -8,7 +8,7 @@ import type { MediaCheckIn, MediaItem, MediaList, MediaSubtype } from '../../typ
 import Stars from '../../components/Stars';
 import { MarkdownNote } from '../../components/checkin-card/MarkdownNote';
 import {
-  MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, dateInTimezone, formatCheckinDate,
+  MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, dateInTimezone, formatCheckinDate, formatTimePlayed,
 } from '../../utils/media';
 import { slugify } from '../../utils/slugify';
 import { usePageTitle } from '../../utils/pageTitle';
@@ -171,6 +171,11 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
           {item.author && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{item.author}</p>}
           <div className="flex items-center gap-4 mt-1.5 flex-wrap">
             {item.release_year && <span className="text-sm text-gray-500">{item.release_year}</span>}
+            {subtype === 'game' && item.total_time_played_minutes != null && (
+              <span className="text-sm text-gray-500">
+                {formatTimePlayed(item.total_time_played_minutes)} played
+              </span>
+            )}
             {item.my_rating != null && item.my_rating > 0 && (
               <span className="flex items-center gap-1.5">
                 <Stars value={item.my_rating} />
@@ -224,6 +229,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                 {subtype === 'tv_show' && <th className="px-4 py-2 font-medium hidden sm:table-cell">Episode</th>}
                 <th className="px-4 py-2 font-medium">Type</th>
                 <th className="px-4 py-2 font-medium">Score</th>
+                {subtype === 'game' && <th className="px-4 py-2 font-medium">Time Played</th>}
                 <th className="px-4 py-2 font-medium hidden md:table-cell">Notes</th>
                 <th className="px-2 py-2"></th>
               </tr>
@@ -264,6 +270,11 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                   <td className="px-4 py-2.5">
                     {c.rating != null && c.rating > 0 ? <Stars value={c.rating} /> : <span className="text-gray-300 dark:text-gray-600">—</span>}
                   </td>
+                  {subtype === 'game' && (
+                    <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                      {formatTimePlayed(c.time_played_minutes) ?? '—'}
+                    </td>
+                  )}
                   <td className="px-4 py-2.5 hidden md:table-cell max-w-[320px]">
                     {c.notes ? (
                       <div className="text-xs">

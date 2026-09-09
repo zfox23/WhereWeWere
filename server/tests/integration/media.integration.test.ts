@@ -377,20 +377,26 @@ describe('Media check-in API', () => {
       expect(response.status).toBe(400);
     });
 
-    it('wipe-media deletes all locally stored media data and allows a fresh import', async () => {
+    it('start-over delete_media_items clears all locally stored media and allows a fresh import', async () => {
       await request(app).post('/api/v1/import/yamtrack/import').send({ csv });
 
-      const wipe = await request(app).post('/api/v1/import/yamtrack/wipe-media');
-      expect(wipe.status).toBe(200);
-      expect(wipe.body.counts.media_items).toBe(3);
-      expect(wipe.body.counts.media_checkins).toBe(3);
+      const startOver = await request(app)
+        .post('/api/v1/backup/start-over')
+        .send({
+          first_confirmation: 'DELETE MY DATA',
+          second_confirmation: 'START OVER',
+          options: { delete_media_items: true },
+        });
+      expect(startOver.status).toBe(200);
+      expect(startOver.body.counts.media_items).toBe(3);
+      expect(startOver.body.counts.media_checkins).toBe(3);
 
       const items = await query('SELECT COUNT(*)::int AS n FROM media_items');
       const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins');
       expect(items.rows[0].n).toBe(0);
       expect(checkins.rows[0].n).toBe(0);
 
-      // A fresh import after the wipe recreates everything.
+      // A fresh import after the reset recreates everything.
       const reimport = await request(app).post('/api/v1/import/yamtrack/import').send({ csv });
       expect(reimport.status).toBe(200);
       expect(reimport.body.counts.imported_checkins).toBe(3);

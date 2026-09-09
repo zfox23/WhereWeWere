@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   countPlans,
   mapYamtrackSource,
+  parseProgressMinutes,
   parseYamtrackCsv,
   planYamtrackImport,
   scoreToRating,
@@ -39,6 +40,21 @@ describe('mapYamtrackSource', () => {
     expect(mapYamtrackSource('tgdb')).toBe('tgdb');
     expect(mapYamtrackSource('hardcover')).toBe('hardcover');
     expect(mapYamtrackSource('unknown')).toBeNull();
+  });
+});
+
+describe('parseProgressMinutes', () => {
+  it('parses hours and minutes', () => {
+    expect(parseProgressMinutes('5h 26min')).toBe(326);
+    expect(parseProgressMinutes('3h')).toBe(180);
+    expect(parseProgressMinutes('45min')).toBe(45);
+    expect(parseProgressMinutes('0min')).toBe(0);
+  });
+
+  it('returns null for empty or unparseable values', () => {
+    expect(parseProgressMinutes(null)).toBeNull();
+    expect(parseProgressMinutes('')).toBeNull();
+    expect(parseProgressMinutes('n/a')).toBeNull();
   });
 });
 
@@ -211,6 +227,51 @@ describe('planYamtrackImport', () => {
     ]);
     expect(plans.every((p) => p.disposition === 'create_media_item')).toBe(true);
     expect(plans.every((p) => p.checkin_type === null)).toBe(true);
+  });
+
+  it('creates an in-progress check-in at progressed_at for any game with progress > 0min', () => {
+    const plans = planYamtrackImport([
+      // Paused status + progress + progressed_at: the time rule wins over the status rule.
+      row({
+        line: 2, media_type: 'game', source: 'igdb', title: 'Game A', media_id: '60',
+        status: 'Paused', progress: '5h 26min',
+        progressed_at: '2026-01-19 18:34:58+00:00',
+      }),
+      // In-progress status without progress: falls back to the status rule.
+      row({
+        line: 3, media_type: 'game', source: 'igdb', title: 'Game B', media_id: '61',
+        status: 'In progress', end_date: '2023-01-02',
+      }),
+      // Progress of 0min: no time check-in, status rule applies (media-only when no end_date).
+      row({
+        line: 4, media_type: 'game', source: 'igdb', title: 'Game C', media_id: '62',
+        status: 'Planning', progress: '0min', progressed_at: '2026-01-19 18:34:58+00:00',
+      }),
+      // Progress but no progressed_at: falls back to the status rule.
+      row({
+        line: 5, media_type: 'game', source: 'igdb', title: 'Game D', media_id: '63',
+        status: 'In progress', progress: '2h', end_date: '2023-02-01',
+      }),
+    ]);
+    const a = plans[0];
+    expect(a.disposition).toBe('create_checkin');
+    expect(a.checkin_type).toBe('in_progress');
+    expect(a.checked_in_at).toBe('2026-01-19 18:34:58+00:00');
+    expect(a.time_played_minutes).toBe(326);
+
+    const b = plans[1];
+    expect(b.disposition).toBe('create_checkin');
+    expect(b.checkin_type).toBe('in_progress');
+    expect(b.checked_in_at).toBe('2023-01-02');
+    expect(b.time_played_minutes).toBeNull();
+
+    expect(plans[2].disposition).toBe('create_media_item');
+    expect(plans[2].time_played_minutes).toBeNull();
+
+    const d = plans[3];
+    expect(d.disposition).toBe('create_checkin');
+    expect(d.checked_in_at).toBe('2023-02-01');
+    expect(d.time_played_minutes).toBeNull();
   });
 
   it('skips unrecognized media types and missing titles', () => {

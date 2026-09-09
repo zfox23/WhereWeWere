@@ -4,6 +4,7 @@ import { settings } from '../../api/client';
 import type {
   TimestampReconciliationSuggestion,
   TimestampReconciliationUninferableMoodCheckin,
+  TimestampReconciliationUninferableMediaCheckin,
   TimestampReconciliationUpdate,
 } from '../../types';
 
@@ -38,14 +39,14 @@ interface TimestampSuggestionTimezoneGroup {
 }
 
 interface TimestampSuggestionTypeGroup {
-  key: 'venue' | 'mood';
+  key: 'venue' | 'mood' | 'media';
   label: string;
   suggestions: TimestampReconciliationSuggestion[];
   timezoneGroups: TimestampSuggestionTimezoneGroup[];
 }
 
 function buildTimestampSuggestionGroups(suggestions: TimestampReconciliationSuggestion[]): TimestampSuggestionTypeGroup[] {
-  return (['venue', 'mood'] as const)
+  return (['venue', 'mood', 'media'] as const)
     .map((type) => {
       const typeSuggestions = suggestions.filter((suggestion) => suggestion.type === type);
       const timezoneMap = new Map<string, TimestampReconciliationSuggestion[]>();
@@ -71,23 +72,101 @@ function buildTimestampSuggestionGroups(suggestions: TimestampReconciliationSugg
 
       return {
         key: type,
-        label: type === 'venue' ? 'Venue Checkins' : 'Mood Checkins',
+        label: type === 'venue' ? 'Venue Checkins' : type === 'mood' ? 'Mood Checkins' : 'Media Checkins',
         suggestions: typeSuggestions,
         timezoneGroups,
       };
     });
 }
 
+interface UninferableCheckin {
+  id: string;
+  detail_path: string;
+  original_timestamp: string;
+  original_timezone: string | null;
+  reason: string;
+}
+
+type UninferableCheckinList =
+  | TimestampReconciliationUninferableMoodCheckin[]
+  | TimestampReconciliationUninferableMediaCheckin[];
+
+function UninferableCheckinGroup({
+  title,
+  checkins,
+  isCollapsed,
+  onToggleCollapsed,
+}: {
+  title: string;
+  checkins: UninferableCheckinList;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-amber-200/80 dark:border-amber-900/50 overflow-hidden">
+      <div className="flex items-center justify-between gap-3 bg-amber-50/70 dark:bg-amber-900/20 px-3 py-3">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="inline-flex items-center gap-2 text-left min-w-0"
+        >
+          {isCollapsed ? <ChevronRight size={16} className="shrink-0 text-amber-700 dark:text-amber-400" /> : <ChevronDown size={16} className="shrink-0 text-amber-700 dark:text-amber-400" />}
+          <span className="font-medium text-amber-800 dark:text-amber-300">{title}</span>
+          <span className="text-xs text-amber-700/80 dark:text-amber-400/80">{checkins.length}</span>
+        </button>
+      </div>
+
+      {!isCollapsed && (
+        <div className="overflow-x-auto bg-white/50 dark:bg-gray-900/40">
+          <table className="min-w-full text-sm">
+            <thead className="bg-amber-50/80 dark:bg-amber-900/20 text-left text-amber-900 dark:text-amber-300">
+              <tr>
+                <th className="px-3 py-2.5 font-medium">Original timestamp</th>
+                <th className="px-3 py-2.5 font-medium">Original timezone</th>
+                <th className="px-3 py-2.5 font-medium">Reason</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 bg-white/40 dark:bg-gray-900/30">
+              {checkins.map((checkin) => (
+                <tr key={checkin.id} className="align-top">
+                  <td className="px-3 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                    <a
+                      href={checkin.detail_path}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-primary-700 dark:text-primary-400 hover:text-primary-600 dark:hover:text-primary-300"
+                    >
+                      {formatOriginalTimestamp(checkin.original_timestamp, checkin.original_timezone)}
+                    </a>
+                  </td>
+                  <td className="px-3 py-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                    {checkin.original_timezone || 'Missing'}
+                  </td>
+                  <td className="px-3 py-3 text-gray-600 dark:text-gray-300 min-w-[20rem]">
+                    {checkin.reason}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TimestampReconciliationSection() {
   const [suggestions, setSuggestions] = useState<TimestampReconciliationSuggestion[]>([]);
   const [uninferableMoodCheckins, setUninferableMoodCheckins] = useState<TimestampReconciliationUninferableMoodCheckin[]>([]);
+  const [uninferableMediaCheckins, setUninferableMediaCheckins] = useState<TimestampReconciliationUninferableMediaCheckin[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   const [collapsedTypeGroups, setCollapsedTypeGroups] = useState<Set<string>>(new Set());
   const [collapsedTimezoneGroups, setCollapsedTimezoneGroups] = useState<Set<string>>(new Set());
-  const [isUninferableGroupCollapsed, setIsUninferableGroupCollapsed] = useState(false);
+  const [isUninferableMoodGroupCollapsed, setIsUninferableMoodGroupCollapsed] = useState(false);
+  const [isUninferableMediaGroupCollapsed, setIsUninferableMediaGroupCollapsed] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const allSelected = suggestions.length > 0 && selectedKeys.size === suggestions.length;
   const groupedSuggestions = buildTimestampSuggestionGroups(suggestions);
@@ -133,12 +212,15 @@ export function TimestampReconciliationSection() {
       const data = await settings.timestampReconciliationPreview();
       const nextSuggestions = data.suggestions as TimestampReconciliationSuggestion[];
       const nextUninferableMoodCheckins = data.uninferable_mood_checkins as TimestampReconciliationUninferableMoodCheckin[];
+      const nextUninferableMediaCheckins = data.uninferable_media_checkins as TimestampReconciliationUninferableMediaCheckin[];
       setSuggestions(nextSuggestions);
       setUninferableMoodCheckins(nextUninferableMoodCheckins);
+      setUninferableMediaCheckins(nextUninferableMediaCheckins);
       setSelectedKeys(new Set(nextSuggestions.map((suggestion) => keyForSuggestion(suggestion))));
       setCollapsedTypeGroups(new Set());
       setCollapsedTimezoneGroups(new Set());
-      setIsUninferableGroupCollapsed(false);
+      setIsUninferableMoodGroupCollapsed(false);
+      setIsUninferableMediaGroupCollapsed(false);
       setHasScanned(true);
     } catch (err) {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to scan timestamp suggestions.' });
@@ -197,7 +279,7 @@ export function TimestampReconciliationSection() {
             Timestamp Reconciliation
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Maintenance tool for legacy timezone mismatches. Mood suggestions use the nearest venue check-in within 24 hours.
+            Maintenance tool for legacy timezone mismatches. Mood and media suggestions use the nearest venue check-in within 24 hours; when no venue is close enough they fall back to other check-in types (mood, media, tracks, sleep), extending the window up to 72 hours. Media check-ins are only scanned when stored without a timezone or with a UTC timezone. Clear a group's checkbox to skip its updates entirely.
           </p>
         </div>
         <button
@@ -218,7 +300,7 @@ export function TimestampReconciliationSection() {
         </div>
       )}
 
-      {(suggestions.length > 0 || uninferableMoodCheckins.length > 0) && (
+      {(suggestions.length > 0 || uninferableMoodCheckins.length > 0 || uninferableMediaCheckins.length > 0) && (
         <>
           {suggestions.length > 0 && (
             <div className="flex items-center justify-between gap-3">
@@ -375,55 +457,21 @@ export function TimestampReconciliationSection() {
             })}
 
             {uninferableMoodCheckins.length > 0 && (
-              <div className="rounded-xl border border-amber-200/80 dark:border-amber-900/50 overflow-hidden">
-                <div className="flex items-center justify-between gap-3 bg-amber-50/70 dark:bg-amber-900/20 px-3 py-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsUninferableGroupCollapsed((previous) => !previous)}
-                    className="inline-flex items-center gap-2 text-left min-w-0"
-                  >
-                    {isUninferableGroupCollapsed ? <ChevronRight size={16} className="shrink-0 text-amber-700 dark:text-amber-400" /> : <ChevronDown size={16} className="shrink-0 text-amber-700 dark:text-amber-400" />}
-                    <span className="font-medium text-amber-800 dark:text-amber-300">Mood Checkins (Cannot Infer Timezone)</span>
-                    <span className="text-xs text-amber-700/80 dark:text-amber-400/80">{uninferableMoodCheckins.length}</span>
-                  </button>
-                </div>
+              <UninferableCheckinGroup
+                title="Mood Checkins (Cannot Infer Timezone)"
+                checkins={uninferableMoodCheckins}
+                isCollapsed={isUninferableMoodGroupCollapsed}
+                onToggleCollapsed={() => setIsUninferableMoodGroupCollapsed((previous) => !previous)}
+              />
+            )}
 
-                {!isUninferableGroupCollapsed && (
-                  <div className="overflow-x-auto bg-white/50 dark:bg-gray-900/40">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-amber-50/80 dark:bg-amber-900/20 text-left text-amber-900 dark:text-amber-300">
-                        <tr>
-                          <th className="px-3 py-2.5 font-medium">Original timestamp</th>
-                          <th className="px-3 py-2.5 font-medium">Original timezone</th>
-                          <th className="px-3 py-2.5 font-medium">Reason</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800 bg-white/40 dark:bg-gray-900/30">
-                        {uninferableMoodCheckins.map((checkin) => (
-                          <tr key={checkin.id} className="align-top">
-                            <td className="px-3 py-3 text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                              <a
-                                href={checkin.detail_path}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-medium text-primary-700 dark:text-primary-400 hover:text-primary-600 dark:hover:text-primary-300"
-                              >
-                                {formatOriginalTimestamp(checkin.original_timestamp, checkin.original_timezone)}
-                              </a>
-                            </td>
-                            <td className="px-3 py-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">
-                              {checkin.original_timezone || 'Missing'}
-                            </td>
-                            <td className="px-3 py-3 text-gray-600 dark:text-gray-300 min-w-[20rem]">
-                              {checkin.reason}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+            {uninferableMediaCheckins.length > 0 && (
+              <UninferableCheckinGroup
+                title="Media Checkins (Cannot Infer Timezone)"
+                checkins={uninferableMediaCheckins}
+                isCollapsed={isUninferableMediaGroupCollapsed}
+                onToggleCollapsed={() => setIsUninferableMediaGroupCollapsed((previous) => !previous)}
+              />
             )}
           </div>
 
@@ -445,13 +493,13 @@ export function TimestampReconciliationSection() {
 
       {!loading && suggestions.length === 0 && !hasScanned && (
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Run a scan to find venue and mood check-ins whose stored timezone should be updated.
+          Run a scan to find venue, mood, and media check-ins whose stored timezone should be updated.
         </p>
       )}
 
-      {!loading && suggestions.length === 0 && uninferableMoodCheckins.length === 0 && hasScanned && !message?.text && (
+      {!loading && suggestions.length === 0 && uninferableMoodCheckins.length === 0 && uninferableMediaCheckins.length === 0 && hasScanned && !message?.text && (
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          No timezone changes were suggested for your current venue and mood check-ins.
+          No timezone changes were suggested for your current venue, mood, and media check-ins.
         </p>
       )}
     </div>

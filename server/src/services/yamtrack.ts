@@ -12,6 +12,9 @@ import { parse } from 'csv-parse/sync';
 //   - episode rows           -> Completed episode check-in timed at end_date
 //                               (timezone UTC). Rows are duplicates only when
 //                               media_id, season, episode, AND end_date match.
+//   - game + progress > 0min -> In-Progress check-in timed at progressed_at,
+//     carrying the parsed time played (the importer stores the max of the
+//     existing total and this value; times are never summed).
 //   - movie/game/book + Completed/In progress/Dropped -> media_item + check-in
 //     timed at end_date (start_date is ignored for check-in time entirely)
 //   - movie/game/book + Planning/Paused               -> media_item only
@@ -59,6 +62,8 @@ export interface YamtrackPlanItem {
   episode_number: number | null;
   rating: number | null;
   raw_score: number | null;
+  /** Total time played in minutes (games only, from the progress column). */
+  time_played_minutes: number | null;
   checked_in_at: string | null;
   external_event_id: string | null;
   /** For duplicate rows: the line number of the row that will be imported. */
@@ -114,6 +119,33 @@ export function scoreToRating(score: string | null | undefined): number | null {
   if (value >= 5) return 2;
   if (value >= 2.5) return 1;
   return 0;
+}
+
+/**
+ * Parse a Yamtrack progress string (e.g. "5h 26min", "3h", "45min", "0min")
+ * into total minutes. Returns null when absent or unparseable; "0min" is 0.
+ */
+export function parseProgressMinutes(progress: string | null | undefined): number | null {
+  if (!progress) return null;
+  const text = progress.trim().toLowerCase();
+  if (text === '') return null;
+  let total = 0;
+  let matched = false;
+  const hourMatch = text.match(/(\d+(?:\.\d+)?)\s*h/);
+  const minMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:min|mins|m)\b/);
+  if (hourMatch) {
+    total += Math.round(parseFloat(hourMatch[1]) * 60);
+    matched = true;
+  }
+  if (minMatch) {
+    total += Math.round(parseFloat(minMatch[1]));
+    matched = true;
+  }
+  // A bare number is treated as minutes.
+  if (!matched && /^\d+(?:\.\d+)?$/.test(text)) {
+    return Math.round(parseFloat(text));
+  }
+  return matched ? total : null;
 }
 
 export function mapYamtrackStatus(status: string | null): YamtrackPlanItem['checkin_type'] {
@@ -196,6 +228,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         episode_number: null,
         rating: null,
         raw_score: null,
+        time_played_minutes: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -216,6 +249,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         episode_number: null,
         rating: null,
         raw_score: null,
+        time_played_minutes: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -239,6 +273,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           episode_number: null,
           rating: null,
           raw_score: null,
+          time_played_minutes: null,
           checked_in_at: null,
           external_event_id: null,
           duplicate_of_line: null,
@@ -262,6 +297,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           episode_number: e,
           rating: null,
           raw_score: null,
+          time_played_minutes: null,
           checked_in_at: null,
           external_event_id: null,
           duplicate_of_line: rows[existingIdx].line,
@@ -283,6 +319,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         episode_number: e,
         rating: scoreToRating(row.score),
         raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
+        time_played_minutes: null,
         checked_in_at: checkedAt,
         external_event_id: checkedAt ? yamtrackExternalEventId(row, dedupeKey) : null,
         duplicate_of_line: null,
@@ -293,6 +330,36 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
     }
 
     // movie / game / book
+
+    // Game time-tracking rule: any game with progress > 0min gets an
+    // In-Progress check-in timed at progressed_at, carrying the parsed time
+    // played (the importer stores the max of existing and imported values).
+    // Takes precedence over the status-based rule for games.
+    if (mediaType === 'game') {
+      const played = parseProgressMinutes(row.progress);
+      if (played != null && played > 0 && row.progressed_at) {
+        const playtimeKey = `${row.media_id}|${row.source}|game-playtime|${row.progressed_at}`;
+        plans.push({
+          row,
+          disposition: 'create_checkin',
+          reason: `Progress "${row.progress}" creates an In-Progress check-in (progressed_at, UTC) with time played`,
+          media_type: 'game',
+          external_source: externalSource,
+          external_id: row.media_id || null,
+          checkin_type: 'in_progress',
+          season_number: null,
+          episode_number: null,
+          rating: scoreToRating(row.score),
+          raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
+          time_played_minutes: played,
+          checked_in_at: row.progressed_at,
+          external_event_id: yamtrackExternalEventId(row, playtimeKey),
+          duplicate_of_line: null,
+        });
+        continue;
+      }
+    }
+
     const checkinType = mapYamtrackStatus(row.status);
     const statusText = row.status || 'no status';
 
@@ -309,6 +376,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         episode_number: null,
         rating: null,
         raw_score: null,
+        time_played_minutes: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -329,6 +397,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         episode_number: null,
         rating: null,
         raw_score: null,
+        time_played_minutes: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -349,6 +418,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
       episode_number: null,
       rating: scoreToRating(row.score),
       raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
+      time_played_minutes: null,
       checked_in_at: row.end_date,
       external_event_id: yamtrackExternalEventId(row, dedupeKey),
       duplicate_of_line: null,

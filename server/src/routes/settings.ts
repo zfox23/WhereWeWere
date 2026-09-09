@@ -154,7 +154,7 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
     let updated = 0;
 
     for (const update of updates) {
-      if (!update?.id || (update.type !== 'venue' && update.type !== 'mood') || !update.suggested_timezone) {
+      if (!update?.id || (update.type !== 'venue' && update.type !== 'mood' && update.type !== 'media') || !update.suggested_timezone) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Each update must include id, type, and suggested_timezone' });
       }
@@ -168,6 +168,15 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
       if (update.type === 'venue') {
         await client.query(
           `UPDATE checkins
+           SET checked_in_at = $2::timestamptz,
+               checkin_timezone = $3,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [update.id, applied.checkedInAt, applied.timeZone]
+        );
+      } else if (update.type === 'media') {
+        await client.query(
+          `UPDATE media_checkins
            SET checked_in_at = $2::timestamptz,
                checkin_timezone = $3,
                updated_at = NOW()

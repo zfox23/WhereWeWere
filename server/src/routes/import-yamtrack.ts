@@ -69,13 +69,25 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
 
       // Insert the check-in if the plan calls for one.
       if ((plan.disposition === 'create_checkin' || plan.disposition === 'create_episode_checkin') && plan.checked_in_at) {
+        // Capture the current total *before* inserting so the new row does
+        // not mask the prior value in the max computation.
+        const totalBefore = plan.time_played_minutes != null
+          ? await currentTotalPlayed(client, mediaItemId)
+          : null;
         const ins = await client.query(
           `INSERT INTO media_checkins
              (user_id, media_item_id, season_number, episode_number,
-              checkin_type, rating, raw_score, notes, checked_in_at, checkin_timezone, external_event_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, 'UTC', $10)
+              checkin_type, rating, raw_score, notes, checked_in_at, checkin_timezone, external_event_id,
+              time_played_minutes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, 'UTC', $10, $11)
            ON CONFLICT (user_id, external_event_id) WHERE external_event_id IS NOT NULL
-           DO UPDATE SET updated_at = media_checkins.updated_at
+           DO UPDATE SET
+             time_played_minutes = CASE
+               WHEN $11 IS NULL THEN media_checkins.time_played_minutes
+               WHEN media_checkins.time_played_minutes IS NULL THEN $11
+               ELSE GREATEST(media_checkins.time_played_minutes, $11)
+             END,
+             updated_at = media_checkins.updated_at
            RETURNING id, checked_in_at, (xmax = 0) AS inserted`,
           [
             USER_ID,
@@ -88,6 +100,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
             row.notes || null,
             plan.checked_in_at,
             plan.external_event_id,
+            plan.time_played_minutes,
           ]
         );
         const insertedRow = ins.rows.find((r: any) => r.inserted === true);
@@ -103,6 +116,12 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
           plan.reason = 'Check-in already exists (same external event id)';
           duplicatesSkipped += 1;
         }
+
+        // Time-played rule: the stored total is the max of the pre-import
+        // total and the imported value — times are never summed.
+        if (plan.time_played_minutes != null && plan.imported_checkin_id) {
+          await applyMaxTimePlayed(client, mediaItemId, plan.time_played_minutes, totalBefore);
+        }
       }
     }
 
@@ -115,6 +134,54 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
   }
 
   return { results, imported_checkins: importedCheckins, created_media_items: createdMediaItems, duplicates_skipped: duplicatesSkipped };
+}
+
+/** Latest non-null time_played_minutes for a media item (the stored total). */
+async function currentTotalPlayed(
+  client: import('pg').PoolClient,
+  mediaItemId: string
+): Promise<number | null> {
+  const res = await client.query(
+    `SELECT time_played_minutes FROM media_checkins
+     WHERE media_item_id = $1 AND time_played_minutes IS NOT NULL
+     ORDER BY checked_in_at DESC, id DESC
+     LIMIT 1`,
+    [mediaItemId]
+  );
+  return res.rows[0]?.time_played_minutes != null ? Number(res.rows[0].time_played_minutes) : null;
+}
+
+/**
+ * Apply the "never decrease the total" rule to time played. `currentTotal`
+ * must be the total read *before* the imported check-in was inserted.
+ * The effective total max(current, imported) is written to the most recent
+ * check-in (the row the UI reads as the current total), which is the
+ * imported row in both the inserted and conflict cases.
+ */
+async function applyMaxTimePlayed(
+  client: import('pg').PoolClient,
+  mediaItemId: string,
+  importedMinutes: number,
+  currentTotal: number | null
+): Promise<void> {
+  const effective = Math.max(currentTotal ?? 0, importedMinutes);
+  if (effective === (currentTotal ?? 0) && currentTotal != null) return;
+
+  await client.query(
+    `WITH ranked AS (
+       SELECT id, time_played_minutes,
+              ROW_NUMBER() OVER (ORDER BY checked_in_at DESC, id DESC) AS rn
+       FROM media_checkins
+       WHERE media_item_id = $1
+     )
+     UPDATE media_checkins mc
+     SET time_played_minutes = $2, updated_at = NOW()
+     FROM ranked
+     WHERE mc.id = ranked.id
+       AND ranked.rn = 1
+       AND (mc.time_played_minutes IS NULL OR mc.time_played_minutes < $2)`,
+    [mediaItemId, effective]
+  );
 }
 
 /**
@@ -155,48 +222,6 @@ async function upsertMediaItemWithClient(
   );
   return inserted.rows[0].id as string;
 }
-
-// POST /wipe-media - delete all locally stored media data for the user.
-// Used by the Yamtrack import "Start Over" checkbox so a fresh export can be
-// re-imported from scratch. Child rows are deleted first (list items, cached
-// episodes, check-ins) before their parents. Runs in a transaction.
-router.post('/wipe-media', async (_req: Request, res: Response) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const counts: Record<string, number> = {};
-
-    const listItemsResult = await client.query(
-      'DELETE FROM media_list_items WHERE list_id IN (SELECT id FROM media_lists WHERE user_id = $1)',
-      [USER_ID]
-    );
-    counts.media_list_items = listItemsResult.rowCount ?? 0;
-
-    const episodesResult = await client.query(
-      'DELETE FROM media_tv_episodes WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1)',
-      [USER_ID]
-    );
-    counts.media_tv_episodes = episodesResult.rowCount ?? 0;
-
-    const checkinsResult = await client.query('DELETE FROM media_checkins WHERE user_id = $1', [USER_ID]);
-    counts.media_checkins = checkinsResult.rowCount ?? 0;
-
-    const itemsResult = await client.query('DELETE FROM media_items WHERE user_id = $1', [USER_ID]);
-    counts.media_items = itemsResult.rowCount ?? 0;
-
-    const listsResult = await client.query('DELETE FROM media_lists WHERE user_id = $1', [USER_ID]);
-    counts.media_lists = listsResult.rowCount ?? 0;
-
-    await client.query('COMMIT');
-    res.json({ counts });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error wiping media data:', err);
-    res.status(500).json({ error: 'Failed to delete media data' });
-  } finally {
-    client.release();
-  }
-});
 
 // POST /preview - parse + classify the CSV without writing anything
 router.post('/preview', async (req: Request, res: Response) => {
@@ -277,6 +302,7 @@ router.post('/import', async (req: Request, res: Response) => {
         checkin_type: p.checkin_type,
         rating: p.rating,
         raw_score: p.raw_score,
+        time_played_minutes: p.time_played_minutes,
         duplicate_of_line: p.duplicate_of_line,
         media_item_id: p.media_item_id,
         imported_checkin_id: p.imported_checkin_id,

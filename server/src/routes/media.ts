@@ -266,7 +266,9 @@ router.get('/items/:id', async (req: Request, res: Response) => {
       `SELECT MAX(checked_in_at) AS last_checkin_at,
               COUNT(*) AS checkin_count,
               (ARRAY_AGG(rating ORDER BY checked_in_at DESC) FILTER (WHERE rating IS NOT NULL))[1] AS my_rating,
-              COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count
+              COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count,
+              (ARRAY_AGG(time_played_minutes ORDER BY checked_in_at DESC, id DESC)
+                 FILTER (WHERE time_played_minutes IS NOT NULL))[1] AS total_time_played_minutes
        FROM media_checkins WHERE media_item_id = $1`,
       [req.params.id]
     );
@@ -278,6 +280,7 @@ router.get('/items/:id', async (req: Request, res: Response) => {
       checkin_count: Number(s.checkin_count),
       my_rating: s.my_rating != null ? Number(s.my_rating) : null,
       completed_count: Number(s.completed_count),
+      total_time_played_minutes: s.total_time_played_minutes != null ? Number(s.total_time_played_minutes) : null,
     });
   } catch (err) {
     console.error('Error getting media item:', err);
@@ -291,7 +294,7 @@ router.get('/items/:id/checkins', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT mc.id, mc.season_number, mc.episode_number, mc.episode_title, mc.checkin_type,
               mc.rating, mc.raw_score, mc.notes, mc.checked_in_at, mc.checkin_timezone,
-              mc.created_at, mc.updated_at
+              mc.time_played_minutes, mc.created_at, mc.updated_at
        FROM media_checkins mc
        WHERE mc.media_item_id = $1 AND mc.user_id = $2
        ORDER BY mc.checked_in_at DESC`,
@@ -310,6 +313,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
     const {
       season_number, episode_number, episode_title,
       checkin_type, rating, raw_score, notes, checked_in_at, timezone,
+      time_played_minutes,
     } = req.body;
 
     if (!checkin_type || !CHECKIN_TYPES.has(checkin_type)) {
@@ -331,8 +335,8 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
     const result = await query(
       `INSERT INTO media_checkins
          (user_id, media_item_id, season_number, episode_number, episode_title,
-          checkin_type, rating, raw_score, notes, checked_in_at, checkin_timezone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), $11)
+          checkin_type, rating, raw_score, notes, checked_in_at, checkin_timezone, time_played_minutes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), $11, $12)
        RETURNING *`,
       [
         USER_ID, req.params.id,
@@ -343,6 +347,9 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
         notes || null,
         checked_in_at || null,
         checkinTimezone,
+        typeof time_played_minutes === 'number' && Number.isFinite(time_played_minutes) && time_played_minutes >= 0
+          ? Math.round(time_played_minutes)
+          : null,
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -355,7 +362,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
 // PUT /checkins/:id - update a media check-in
 router.put('/checkins/:id', async (req: Request, res: Response) => {
   try {
-    const { checkin_type, rating, raw_score, notes, checked_in_at, timezone } = req.body;
+    const { checkin_type, rating, raw_score, notes, checked_in_at, timezone, time_played_minutes } = req.body;
 
     const result = await query(
       `UPDATE media_checkins
@@ -365,6 +372,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
            notes = COALESCE($5, notes),
            checked_in_at = COALESCE($6::timestamptz, checked_in_at),
            checkin_timezone = COALESCE($7, checkin_timezone),
+           time_played_minutes = COALESCE($9, time_played_minutes),
            updated_at = NOW()
        WHERE id = $1 AND user_id = $8
        RETURNING *`,
@@ -377,6 +385,11 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
         checked_in_at || null,
         typeof timezone === 'string' && timezone ? timezone : null,
         USER_ID,
+        time_played_minutes !== undefined
+          ? (typeof time_played_minutes === 'number' && Number.isFinite(time_played_minutes) && time_played_minutes >= 0
+              ? Math.round(time_played_minutes)
+              : null)
+          : null,
       ]
     );
     if (result.rows.length === 0) {

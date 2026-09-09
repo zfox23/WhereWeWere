@@ -130,7 +130,7 @@ export interface BackupImportResult {
 
 export interface TimestampReconciliationSuggestion {
   id: string;
-  type: 'venue' | 'mood';
+  type: 'venue' | 'mood' | 'media';
   detail_path: string;
   original_timestamp: string;
   original_timezone: string | null;
@@ -148,14 +148,24 @@ export interface TimestampReconciliationUninferableMoodCheckin {
   reason: string;
 }
 
+export interface TimestampReconciliationUninferableMediaCheckin {
+  id: string;
+  type: 'media';
+  detail_path: string;
+  original_timestamp: string;
+  original_timezone: string | null;
+  reason: string;
+}
+
 export interface TimestampReconciliationScanResult {
   suggestions: TimestampReconciliationSuggestion[];
   uninferable_mood_checkins: TimestampReconciliationUninferableMoodCheckin[];
+  uninferable_media_checkins: TimestampReconciliationUninferableMediaCheckin[];
 }
 
 export interface TimestampReconciliationUpdate {
   id: string;
-  type: 'venue' | 'mood';
+  type: 'venue' | 'mood' | 'media';
   suggested_timezone: string;
 }
 
@@ -364,6 +374,8 @@ export interface MediaItem {
   checkin_count?: number;
   my_rating?: number | null;
   completed_count?: number;
+  /** Latest total time played (minutes) for games; null when not tracked. */
+  total_time_played_minutes?: number | null;
 }
 
 export interface MediaSearchHit {
@@ -396,6 +408,8 @@ export interface MediaCheckIn {
   checked_in_at: string;
   checkin_timezone: string;
   external_event_id: string | null;
+  /** Cumulative total time played at this check-in (minutes); games only. */
+  time_played_minutes: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -464,6 +478,7 @@ export interface YamtrackPlanRow {
   checkin_type: 'completed' | 'in_progress' | 'dropped' | null;
   rating: number | null;
   raw_score: number | null;
+  time_played_minutes?: number | null;
   duplicate_of_line: number | null;
   media_item_id?: string | null;
   imported_checkin_id?: string | null;
