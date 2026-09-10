@@ -351,7 +351,6 @@ export interface TimelineItem {
   media_season_number?: number | null;
   media_episode_number?: number | null;
   media_episode_title?: string | null;
-  media_slug?: string;
   media_timezone?: string | null;
 }
 

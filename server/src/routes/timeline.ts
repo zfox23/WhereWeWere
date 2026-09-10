@@ -218,7 +218,6 @@ router.get('/', async (req: Request, res: Response) => {
         NULL::int AS media_season_number,
         NULL::int AS media_episode_number,
         NULL::text AS media_episode_title,
-        NULL::text AS media_slug,
         NULL::text AS media_timezone
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
@@ -267,7 +266,6 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::int AS media_season_number,
              NULL::int AS media_episode_number,
              NULL::text AS media_episode_title,
-             NULL::text AS media_slug,
              NULL::text AS media_timezone
             FROM mood_checkins mc
             ${moodWhere}
@@ -300,7 +298,6 @@ router.get('/', async (req: Request, res: Response) => {
               NULL::int AS media_season_number,
               NULL::int AS media_episode_number,
               NULL::text AS media_episode_title,
-              NULL::text AS media_slug,
               NULL::text AS media_timezone
               FROM sleep_entries se
               ${sleepWhere}
@@ -333,7 +330,6 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::int AS media_season_number,
              NULL::int AS media_episode_number,
              NULL::text AS media_episode_title,
-             NULL::text AS media_slug,
              NULL::text AS media_timezone
              FROM tracks t
              ${trackWhere}
@@ -369,7 +365,6 @@ router.get('/', async (req: Request, res: Response) => {
                    mmc.season_number AS media_season_number,
                    mmc.episode_number AS media_episode_number,
                    mmc.episode_title AS media_episode_title,
-                   LOWER(mi.title) AS media_slug,
                    mmc.checkin_timezone AS media_timezone
              FROM media_checkins mmc
              JOIN media_items mi ON mmc.media_item_id = mi.id

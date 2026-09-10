@@ -18,8 +18,9 @@ export default function MediaCard({ item }: MediaCardProps) {
     ? `S${item.media_season_number}E${item.media_episode_number ?? '?'}${item.media_episode_title ? ` · ${item.media_episode_title}` : ''}`
     : null;
 
+  // Slug is derived client-side (single source of truth: slugify).
   const detailHref = item.media_item_id
-    ? `${config.detailBase}/${item.media_item_id}/${item.media_slug || slugify(item.media_title || '')}`
+    ? `${config.detailBase}/${item.media_item_id}/${slugify(item.media_title || '')}`
     : config.searchPath;
 
   const badge =
