@@ -468,6 +468,12 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
 });
 
 // PUT /checkins/:id - update a media check-in
+//
+// Semantics: partial, COALESCE-based update. Every field is only written when
+// it is present in the body (with a valid value), so omitted fields keep their
+// stored value. Setting a field back to null is intentionally unsupported via
+// this endpoint (passing null/empty is treated the same as omitting it); edit
+// UI that needs to clear fields will have to extend this contract.
 router.put('/checkins/:id', async (req: Request, res: Response) => {
   try {
     const { checkin_type, rating, raw_score, notes, checked_in_at, timezone, time_played_minutes } = req.body;

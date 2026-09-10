@@ -148,6 +148,50 @@ describe('Media check-in API', () => {
       expect(after.body).toHaveLength(0);
     });
 
+    it('partially updates a check-in, leaving omitted fields unchanged (COALESCE)', async () => {
+      const item = (
+        await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })
+      ).body;
+      const created = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({
+          checkin_type: 'in_progress',
+          rating: 2,
+          raw_score: 7,
+          notes: 'original',
+          time_played_minutes: 90,
+          checked_in_at: '2023-01-02T20:00:00Z',
+          timezone: 'UTC',
+        });
+      expect(created.status).toBe(201);
+
+      // Update only the rating: everything else must be preserved.
+      const updated = await request(app)
+        .put(`/api/v1/media/checkins/${created.body.id}`)
+        .send({ rating: 4 });
+      expect(updated.status).toBe(200);
+      expect(Number(updated.body.rating)).toBe(4);
+      expect(updated.body.checkin_type).toBe('in_progress');
+      expect(Number(updated.body.raw_score)).toBe(7);
+      expect(updated.body.notes).toBe('original');
+      expect(Number(updated.body.time_played_minutes)).toBe(90);
+
+      // Null/empty values are treated as omitted (null-out is intentionally
+      // unsupported through this endpoint).
+      const nullOut = await request(app)
+        .put(`/api/v1/media/checkins/${created.body.id}`)
+        .send({ notes: null, rating: null });
+      expect(nullOut.status).toBe(200);
+      expect(nullOut.body.notes).toBe('original');
+      expect(Number(nullOut.body.rating)).toBe(4);
+
+      // 404 for an unknown check-in.
+      const missing = await request(app)
+        .put('/api/v1/media/checkins/11111111-1111-1111-1111-111111111111')
+        .send({ rating: 3 });
+      expect(missing.status).toBe(404);
+    });
+
     it('rejects invalid checkin_type', async () => {
       const item = (
         await request(app).post('/api/v1/media/items').send({ media_type: 'book', title: '1984' })
