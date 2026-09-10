@@ -33,16 +33,6 @@ interface MediaCheckinRow {
 
 type FallbackKind = 'mood' | 'media' | 'track' | 'sleep';
 
-interface LocalDateParts {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  second: number;
-  millisecond: number;
-}
-
 export interface TimestampReconciliationSuggestion {
   id: string;
   type: CheckinKind;
@@ -50,7 +40,6 @@ export interface TimestampReconciliationSuggestion {
   original_timestamp: string;
   original_timezone: string | null;
   suggested_timezone: string;
-  reconciled_timestamp: string;
   reason: string;
 }
 
@@ -151,87 +140,6 @@ const MEDIA_ROUTE_SEGMENTS: Record<string, string> = {
   board_game: 'board-game',
 };
 
-function getLocalDateParts(date: Date, timeZone: string): LocalDateParts {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-
-  const parts = formatter.formatToParts(date);
-  const getPart = (type: Intl.DateTimeFormatPartTypes): number => {
-    const value = parts.find((part) => part.type === type)?.value;
-    return value ? parseInt(value, 10) : 0;
-  };
-
-  return {
-    year: getPart('year'),
-    month: getPart('month'),
-    day: getPart('day'),
-    hour: getPart('hour'),
-    minute: getPart('minute'),
-    second: getPart('second'),
-    millisecond: date.getUTCMilliseconds(),
-  };
-}
-
-function getUtcDateParts(date: Date): LocalDateParts {
-  return {
-    year: date.getUTCFullYear(),
-    month: date.getUTCMonth() + 1,
-    day: date.getUTCDate(),
-    hour: date.getUTCHours(),
-    minute: date.getUTCMinutes(),
-    second: date.getUTCSeconds(),
-    millisecond: date.getUTCMilliseconds(),
-  };
-}
-
-function toComparableUtc(parts: LocalDateParts): number {
-  return Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    parts.hour,
-    parts.minute,
-    parts.second,
-    parts.millisecond
-  );
-}
-
-function wallTimeToUtcIso(parts: LocalDateParts, timeZone: string): string {
-  let guess = toComparableUtc(parts);
-  const desiredComparable = toComparableUtc(parts);
-
-  for (let index = 0; index < 6; index += 1) {
-    const actual = getLocalDateParts(new Date(guess), timeZone);
-    const actualComparable = toComparableUtc(actual);
-    const diff = desiredComparable - actualComparable;
-
-    if (diff === 0) {
-      return new Date(guess).toISOString();
-    }
-
-    guess += diff;
-  }
-
-  return new Date(guess).toISOString();
-}
-
-function buildReconciledTimestamp(originalTimestamp: string, originalTimezone: string | null, suggestedTimezone: string): string {
-  const originalDate = new Date(originalTimestamp);
-  const localParts = originalTimezone
-    ? getLocalDateParts(originalDate, originalTimezone)
-    : getUtcDateParts(originalDate);
-
-  return wallTimeToUtcIso(localParts, suggestedTimezone);
-}
-
 export function getVenueTimezone(latitude: number | string | null, longitude: number | string | null): string | null {
   if (latitude == null || longitude == null) {
     return null;
@@ -316,7 +224,6 @@ function buildVenueSuggestion(row: VenueCheckinRow): TimestampReconciliationSugg
     original_timestamp: row.checked_in_at,
     original_timezone: row.original_timezone,
     suggested_timezone: suggestedTimezone,
-    reconciled_timestamp: buildReconciledTimestamp(row.checked_in_at, row.original_timezone, suggestedTimezone),
     reason: row.original_timezone
       ? `Venue location for ${row.venue_name} resolves to ${suggestedTimezone}, not ${row.original_timezone}.`
       : `Venue location for ${row.venue_name} resolves to ${suggestedTimezone}.`,
@@ -490,7 +397,6 @@ function buildMoodSuggestion(
       original_timestamp: row.checked_in_at,
       original_timezone: row.original_timezone,
       suggested_timezone: resolved.anchor.timezone,
-      reconciled_timestamp: buildReconciledTimestamp(row.checked_in_at, row.original_timezone, resolved.anchor.timezone),
       reason: buildAnchorReason(resolved),
     },
     uninferable: null,
@@ -566,7 +472,6 @@ function buildMediaSuggestion(
       original_timestamp: row.checked_in_at,
       original_timezone: row.original_timezone,
       suggested_timezone: resolved.anchor.timezone,
-      reconciled_timestamp: buildReconciledTimestamp(row.checked_in_at, row.original_timezone, resolved.anchor.timezone),
       reason: prefix + buildAnchorReason(resolved),
     },
     uninferable: null,
@@ -716,19 +621,22 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
   };
 }
 
-export async function computeAppliedReconciliation(update: TimestampReconciliationUpdate): Promise<{ checkedInAt: string; timeZone: string } | null> {
+/**
+ * Reconciliation is label-only: the stored instant is the true moment the
+ * event happened, so applying a suggestion only replaces the stored timezone
+ * label. This validates the target timezone and that the row exists, and
+ * returns the timezone to persist.
+ */
+export async function computeAppliedReconciliation(update: TimestampReconciliationUpdate): Promise<{ timeZone: string } | null> {
   if (!isValidTimeZone(update.suggested_timezone)) {
     return null;
   }
 
   const table =
     update.type === 'venue' ? 'checkins' : update.type === 'mood' ? 'mood_checkins' : 'media_checkins';
-  const timezoneColumn = update.type === 'mood' ? 'mood_timezone' : 'checkin_timezone';
 
   const result = await query(
-    `SELECT checked_in_at, ${timezoneColumn} AS original_timezone
-     FROM ${table}
-     WHERE id = $1`,
+    `SELECT id FROM ${table} WHERE id = $1`,
     [update.id]
   );
 
@@ -736,9 +644,5 @@ export async function computeAppliedReconciliation(update: TimestampReconciliati
     return null;
   }
 
-  const row = result.rows[0] as { checked_in_at: string; original_timezone: string | null };
-  return {
-    checkedInAt: buildReconciledTimestamp(row.checked_in_at, row.original_timezone, update.suggested_timezone),
-    timeZone: update.suggested_timezone,
-  };
+  return { timeZone: update.suggested_timezone };
 }

@@ -135,7 +135,6 @@ export interface TimestampReconciliationSuggestion {
   original_timestamp: string;
   original_timezone: string | null;
   suggested_timezone: string;
-  reconciled_timestamp: string;
   reason: string;
 }
 
@@ -460,6 +459,20 @@ export interface MediaStats {
     rating: number;
     completed_count: number;
   }[];
+}
+
+/** One row of the Profile > Media library view (per media item). */
+export interface MediaLibraryItem {
+  id: string;
+  media_type: MediaSubtype;
+  title: string;
+  author: string | null;
+  image_url: string | null;
+  /** Most recent non-null rating, or null when never rated. */
+  latest_rating: number | null;
+  last_checkin_at: string;
+  last_checkin_timezone: string;
+  last_checkin_type: 'completed' | 'in_progress' | 'dropped';
 }
 
 export interface MediaTvSeason {

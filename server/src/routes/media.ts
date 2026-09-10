@@ -631,6 +631,63 @@ async function refreshEpisodesFromTmdb(
   }
 }
 
+// GET /library?from=YYYY-MM-DD&to=YYYY-MM-DD&types=movie,tv_show
+// Media library view: one row per media item with at least one check-in in range,
+// including the latest rating, most recent check-in timestamp, and its type.
+router.get('/library', async (req: Request, res: Response) => {
+  try {
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const typesParam = req.query.types as string | undefined;
+
+    const requestedTypes = (typesParam ? typesParam.split(',') : [])
+      .map((t) => t.trim())
+      .filter((t) => MEDIA_TYPES.has(t));
+    const mediaTypes = requestedTypes.length > 0 ? requestedTypes : [...MEDIA_TYPES];
+
+    const params: unknown[] = [USER_ID, mediaTypes];
+    const dateConditions: string[] = [];
+    if (from) {
+      dateConditions.push(`(mc.checked_in_at AT TIME ZONE mc.checkin_timezone)::date >= $${params.length + 1}::date`);
+      params.push(from);
+    }
+    if (to) {
+      dateConditions.push(`(mc.checked_in_at AT TIME ZONE mc.checkin_timezone)::date <= $${params.length + 1}::date`);
+      params.push(to);
+    }
+    const where = `WHERE mc.user_id = $1 AND mi.media_type = ANY($2) ${dateConditions.length ? `AND ${dateConditions.join(' AND ')}` : ''}`;
+
+    const result = await query(
+      `SELECT mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
+              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_rating,
+              (ARRAY_AGG(mc.checked_in_at ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_at,
+              (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_timezone,
+              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_type
+       FROM media_checkins mc
+       JOIN media_items mi ON mc.media_item_id = mi.id
+       ${where}
+       GROUP BY mi.id, mi.media_type, mi.title, mi.author, mi.image_url
+       ORDER BY last_checkin_at DESC`,
+      params
+    );
+
+    res.json(result.rows.map((r) => ({
+      id: r.id,
+      media_type: r.media_type,
+      title: r.title,
+      author: r.author,
+      image_url: r.image_url,
+      latest_rating: r.latest_rating != null ? Number(r.latest_rating) : null,
+      last_checkin_at: r.last_checkin_at,
+      last_checkin_timezone: r.last_checkin_timezone,
+      last_checkin_type: r.last_checkin_type,
+    })));
+  } catch (err) {
+    console.error('Error getting media library:', err);
+    res.status(500).json({ error: 'Failed to get media library' });
+  }
+});
+
 // GET /stats?from=YYYY-MM-DD&to=YYYY-MM-DD - Profile Media stats
 router.get('/stats', async (req: Request, res: Response) => {
   try {

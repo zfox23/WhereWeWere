@@ -212,6 +212,8 @@ describe('API integration', () => {
     expect(applyResponse.status).toBe(200);
     expect(applyResponse.body).toEqual({ updated: 4 });
 
+    // Reconciliation is label-only: the stored instant (the true moment the
+    // event happened) must never change; only the timezone label does.
     const updatedVenueCheckin = await query(
       `SELECT checked_in_at, checkin_timezone
        FROM checkins
@@ -219,7 +221,8 @@ describe('API integration', () => {
       [venueCheckinId]
     );
     expect(updatedVenueCheckin.rows[0].checkin_timezone).toBe('Europe/Lisbon');
-    expect(new Date(updatedVenueCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-01-01T09:00:00.000Z');
+    // 2026-01-01T09:00:00-05:00 = 14:00Z, unchanged.
+    expect(new Date(updatedVenueCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-01-01T14:00:00.000Z');
 
     const updatedMoodCheckin = await query(
       `SELECT checked_in_at, mood_timezone
@@ -237,8 +240,7 @@ describe('API integration', () => {
       [fallbackMoodCheckinId]
     );
     expect(updatedFallbackMoodCheckin.rows[0].mood_timezone).toBe('America/Chicago');
-    // 06:00 wall time reinterpreted in America/Chicago (CST, UTC-6 in February) = 12:00Z.
-    expect(new Date(updatedFallbackMoodCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-02-10T12:00:00.000Z');
+    expect(new Date(updatedFallbackMoodCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-02-10T06:00:00.000Z');
 
     const updatedMediaCheckin = await query(
       `SELECT checked_in_at, checkin_timezone
@@ -247,7 +249,6 @@ describe('API integration', () => {
       [mediaCheckinId]
     );
     expect(updatedMediaCheckin.rows[0].checkin_timezone).toBe('Europe/Lisbon');
-    // 15:00 wall time is reinterpreted in Europe/Lisbon, which is UTC+0 in January.
     expect(new Date(updatedMediaCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-01-01T15:00:00.000Z');
   });
 });

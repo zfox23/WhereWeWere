@@ -5,6 +5,7 @@ import type {
   MediaSearchHit,
   MediaItem,
   MediaCheckIn,
+  MediaLibraryItem,
   MediaList,
   MediaStats,
   MediaTvSeason,
@@ -573,6 +574,14 @@ export const media = {
     if (from) qp.set('from', from);
     if (to) qp.set('to', to);
     return request<MediaStats>(`/media/stats?${qp.toString()}`);
+  },
+  library: (from?: string, to?: string, types?: MediaSubtype[]) => {
+    const qp = new URLSearchParams();
+    if (from) qp.set('from', from);
+    if (to) qp.set('to', to);
+    if (types && types.length > 0) qp.set('types', types.join(','));
+    const qs = qp.toString();
+    return request<MediaLibraryItem[]>(`/media/library${qs ? `?${qs}` : ''}`);
   },
   lists: () => request<MediaList[]>('/media/lists'),
   createList: (name: string) =>

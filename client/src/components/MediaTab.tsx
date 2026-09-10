@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { media } from '../api/client';
 import { PeriodRangeSelector } from './PeriodRangeSelector';
 import { StatCard } from './Stats';
+import { MediaLibrarySection } from './MediaLibrarySection';
 import Stars from './Stars';
 import {
   PeriodMode,
@@ -361,6 +362,8 @@ export function MediaTab() {
         <StatCard icon={Gamepad2} label="Games" value={statsData?.games_completed ?? 0} />
         <StatCard icon={Dices} label="Board Games" value={statsData?.board_games_completed ?? 0} />
       </div>
+
+      <MediaLibrarySection from={visibleRange.from} to={visibleRange.to} />
 
       <div className="grid md:grid-cols-2 gap-4">
         <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">

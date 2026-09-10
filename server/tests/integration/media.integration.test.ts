@@ -246,6 +246,91 @@ describe('Media check-in API', () => {
     });
   });
 
+  describe('media library', () => {
+    it('groups check-ins per item with latest rating, last check-in, and its type', async () => {
+      const tv = (await request(app).post('/api/v1/media/items').send({ media_type: 'tv_show', title: 'Severance' })).body;
+      const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;
+
+      await request(app).post(`/api/v1/media/items/${tv.id}/checkins`).send({
+        checkin_type: 'in_progress', checked_in_at: '2023-01-02T20:00:00Z', timezone: 'UTC',
+      });
+      await request(app).post(`/api/v1/media/items/${tv.id}/checkins`).send({
+        checkin_type: 'completed', rating: 4, checked_in_at: '2023-01-05T20:00:00Z', timezone: 'UTC',
+      });
+      await request(app).post(`/api/v1/media/items/${movie.id}/checkins`).send({
+        checkin_type: 'completed', rating: 2, checked_in_at: '2023-01-04T20:00:00Z', timezone: 'UTC',
+      });
+
+      const response = await request(app).get('/api/v1/media/library');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveLength(2);
+
+      // Most recent check-in first.
+      expect(response.body[0].title).toBe('Severance');
+      expect(response.body[0].media_type).toBe('tv_show');
+      expect(response.body[0].latest_rating).toBe(4);
+      expect(response.body[0].last_checkin_type).toBe('completed');
+      expect(response.body[0].last_checkin_at).toBe('2023-01-05T20:00:00.000Z');
+
+      expect(response.body[1].title).toBe('Dune');
+      expect(response.body[1].latest_rating).toBe(2);
+      expect(response.body[1].last_checkin_type).toBe('completed');
+    });
+
+    it('filters by date range and media types', async () => {
+      const tv = (await request(app).post('/api/v1/media/items').send({ media_type: 'tv_show', title: 'Severance' })).body;
+      const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;
+
+      await request(app).post(`/api/v1/media/items/${tv.id}/checkins`).send({
+        checkin_type: 'completed', checked_in_at: '2023-01-02T20:00:00Z', timezone: 'UTC',
+      });
+      await request(app).post(`/api/v1/media/items/${movie.id}/checkins`).send({
+        checkin_type: 'completed', checked_in_at: '2023-01-04T20:00:00Z', timezone: 'UTC',
+      });
+
+      // Range containing only the movie check-in.
+      const byRange = await request(app)
+        .get('/api/v1/media/library')
+        .query({ from: '2023-01-04', to: '2023-01-04' });
+      expect(byRange.body).toHaveLength(1);
+      expect(byRange.body[0].title).toBe('Dune');
+
+      // Type filter excluding movies.
+      const byType = await request(app)
+        .get('/api/v1/media/library')
+        .query({ types: 'tv_show' });
+      expect(byType.body).toHaveLength(1);
+      expect(byType.body[0].title).toBe('Severance');
+
+      // Combined: type filter excludes the only item in the range.
+      const neither = await request(app)
+        .get('/api/v1/media/library')
+        .query({ from: '2023-01-04', to: '2023-01-04', types: 'tv_show' });
+      expect(neither.body).toHaveLength(0);
+    });
+
+    it('respects item timezone when matching the date range', async () => {
+      const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;
+      // 02:00 UTC on Jan 5 is Jan 4 (21:00) in New York.
+      await request(app).post(`/api/v1/media/items/${movie.id}/checkins`).send({
+        checkin_type: 'completed', checked_in_at: '2023-01-05T02:00:00Z', timezone: 'America/New_York',
+      });
+
+      // Matches when the range uses the item's local date (Jan 4)…
+      const byLocalDate = await request(app)
+        .get('/api/v1/media/library')
+        .query({ from: '2023-01-04', to: '2023-01-04' });
+      expect(byLocalDate.body).toHaveLength(1);
+      expect(byLocalDate.body[0].last_checkin_timezone).toBe('America/New_York');
+
+      // …and does not match the UTC date (Jan 5).
+      const byUtcDate = await request(app)
+        .get('/api/v1/media/library')
+        .query({ from: '2023-01-05', to: '2023-01-05' });
+      expect(byUtcDate.body).toHaveLength(0);
+    });
+  });
+
   describe('timeline media branch', () => {
     it('includes media check-ins in the timeline with media fields', async () => {
       const item = (

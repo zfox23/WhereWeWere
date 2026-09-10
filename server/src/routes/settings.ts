@@ -165,32 +165,31 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
         return res.status(400).json({ error: `Unable to reconcile ${update.type} check-in ${update.id}` });
       }
 
+      // Label-only: the stored instant is the true moment the event happened;
+      // reconciliation only corrects the stored timezone label.
       if (update.type === 'venue') {
         await client.query(
           `UPDATE checkins
-           SET checked_in_at = $2::timestamptz,
-               checkin_timezone = $3,
+           SET checkin_timezone = $2,
                updated_at = NOW()
            WHERE id = $1`,
-          [update.id, applied.checkedInAt, applied.timeZone]
+          [update.id, applied.timeZone]
         );
       } else if (update.type === 'media') {
         await client.query(
           `UPDATE media_checkins
-           SET checked_in_at = $2::timestamptz,
-               checkin_timezone = $3,
+           SET checkin_timezone = $2,
                updated_at = NOW()
            WHERE id = $1`,
-          [update.id, applied.checkedInAt, applied.timeZone]
+          [update.id, applied.timeZone]
         );
       } else {
         await client.query(
           `UPDATE mood_checkins
-           SET checked_in_at = $2::timestamptz,
-               mood_timezone = $3,
+           SET mood_timezone = $2,
                updated_at = NOW()
            WHERE id = $1`,
-          [update.id, applied.checkedInAt, applied.timeZone]
+          [update.id, applied.timeZone]
         );
       }
 
