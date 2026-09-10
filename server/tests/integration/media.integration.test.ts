@@ -177,6 +177,72 @@ describe('Media check-in API', () => {
       expect(Number(created.body.episode_number)).toBe(2);
       expect(created.body.episode_title).toBe('Good Orientation');
     });
+
+    it('never decreases the game total time played (server clamp)', async () => {
+      const item = (
+        await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Hades' })
+      ).body;
+
+      // Initial total: 120 minutes.
+      const first = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({
+          checkin_type: 'in_progress',
+          time_played_minutes: 120,
+          checked_in_at: '2023-01-01T20:00:00Z',
+          timezone: 'UTC',
+        });
+      expect(first.status).toBe(201);
+      expect(Number(first.body.time_played_minutes)).toBe(120);
+
+      let detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(detail.body.total_time_played_minutes).toBe(120);
+
+      // A lower value must not decrease the total.
+      const lower = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({
+          checkin_type: 'in_progress',
+          time_played_minutes: 60,
+          checked_in_at: '2023-01-02T20:00:00Z',
+          timezone: 'UTC',
+        });
+      expect(lower.status).toBe(201);
+      // The stored value is clamped up to the existing total.
+      expect(Number(lower.body.time_played_minutes)).toBe(120);
+
+      detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(detail.body.total_time_played_minutes).toBe(120);
+
+      // A higher value raises the total.
+      const higher = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({
+          checkin_type: 'in_progress',
+          time_played_minutes: 300,
+          checked_in_at: '2023-01-03T20:00:00Z',
+          timezone: 'UTC',
+        });
+      expect(higher.status).toBe(201);
+      expect(Number(higher.body.time_played_minutes)).toBe(300);
+
+      detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(detail.body.total_time_played_minutes).toBe(300);
+
+      // Omitting time_played_minutes leaves the total unchanged.
+      const omitted = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({
+          checkin_type: 'completed',
+          checked_in_at: '2023-01-04T20:00:00Z',
+          timezone: 'UTC',
+        });
+      expect(omitted.status).toBe(201);
+      expect(omitted.body.time_played_minutes).toBeNull();
+
+      detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(detail.body.total_time_played_minutes).toBe(300);
+    });
   });
 
   describe('media search', () => {

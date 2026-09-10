@@ -422,6 +422,26 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Media item not found' });
     }
 
+    // "Total time played" is a running total for games: new check-ins update
+    // the total, they never lower it. Clamp the submitted value to the current
+    // total (same rule the yamtrack importer applies via applyMaxTimePlayed).
+    const submittedTime =
+      typeof time_played_minutes === 'number' && Number.isFinite(time_played_minutes) && time_played_minutes >= 0
+        ? Math.round(time_played_minutes)
+        : null;
+
+    let storedTime = submittedTime;
+    if (submittedTime != null) {
+      const latest = await query(
+        `SELECT time_played_minutes FROM media_checkins
+         WHERE media_item_id = $1 AND time_played_minutes IS NOT NULL
+         ORDER BY checked_in_at DESC, id DESC LIMIT 1`,
+        [req.params.id]
+      );
+      const existing = latest.rows[0]?.time_played_minutes;
+      storedTime = Math.max(existing != null ? Number(existing) : 0, submittedTime);
+    }
+
     const result = await query(
       `INSERT INTO media_checkins
          (user_id, media_item_id, season_number, episode_number, episode_title,
@@ -437,9 +457,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
         notes || null,
         checked_in_at || null,
         checkinTimezone,
-        typeof time_played_minutes === 'number' && Number.isFinite(time_played_minutes) && time_played_minutes >= 0
-          ? Math.round(time_played_minutes)
-          : null,
+        storedTime,
       ]
     );
     res.status(201).json(result.rows[0]);

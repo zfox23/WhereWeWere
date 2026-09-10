@@ -69,6 +69,20 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
     if (timeHours !== '' || timeMinutes !== '') setTimeInitialized(true);
   }, [timeInitialized, timeHours, timeMinutes]);
 
+  // Non-blocking guard: warn when the entered total is below the current total.
+  // The server clamp is the source of truth (see POST /media checkins in media.ts).
+  const enteredTotalMinutes = (() => {
+    const h = parseInt(timeHours, 10);
+    const m = parseInt(timeMinutes, 10);
+    const total = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+    return total > 0 ? total : null;
+  })();
+  const timeBelowCurrent =
+    subtype === 'game' &&
+    item?.total_time_played_minutes != null &&
+    enteredTotalMinutes != null &&
+    enteredTotalMinutes < (item?.total_time_played_minutes as number);
+
   const handleBack = () => {
     if (episodeMode) {
       navigate(`/media-check-in/tv/${id}/${slugify(item?.title || '')}`);
@@ -237,6 +251,14 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
               <p className="text-[11px] text-gray-400 mt-1">
                 The running total for this game — new check-ins update the total, they don’t add to it.
               </p>
+
+                {timeBelowCurrent && item.total_time_played_minutes != null && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                    Total time played can’t decrease below the current total (
+                    {Math.floor(item.total_time_played_minutes / 60)}h {item.total_time_played_minutes % 60}m
+                    ) — the latest value will be kept.
+                  </p>
+                )}
             </div>
           )}
         </div>
