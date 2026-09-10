@@ -569,7 +569,7 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
           ? await tmdb.getShowSeasons(keys.tmdb_api_key, item.external_id)
           : null;
         if (fresh && fresh.length > 0) {
-          await refreshEpisodesFromTmdb(client, item, keys);
+          await refreshEpisodesFromTmdb(client, item, keys, fresh);
           const epRows = await client.query(
             'SELECT season_number, episode_number, episode_title FROM media_tv_episodes WHERE media_item_id = $1 ORDER BY season_number, episode_number',
             [item.id]
@@ -634,25 +634,38 @@ function buildSeasonList(rows: { season_number: number; episode_number?: number;
 async function refreshEpisodesFromTmdb(
   client: import('pg').PoolClient,
   item: { id: string; external_source: string | null; external_id: string | null },
-  keys: SettingsKeys
+  keys: SettingsKeys,
+  prefetchedSeasons?: import('../services/tmdb').TmdbSeasonInfo[] | null
 ): Promise<void> {
   if (item.external_source !== 'tmdb' || !item.external_id || !keys.tmdb_api_key) return;
 
-  const seasons = await tmdb.getShowSeasons(keys.tmdb_api_key, item.external_id);
+  // Use the caller's already-fetched seasons when available to avoid a
+  // duplicate getShowSeasons round-trip (the stale path fetches them first
+  // to decide whether a refresh is worth doing).
+  const seasons = prefetchedSeasons ?? (await tmdb.getShowSeasons(keys.tmdb_api_key, item.external_id));
   if (!seasons) return;
 
-  for (const season of seasons) {
-    const episodes = await tmdb.getShowEpisodes(keys.tmdb_api_key, item.external_id, season.seasonNumber);
-    if (!episodes) continue;
-    for (const ep of episodes) {
-      await client.query(
-        `INSERT INTO media_tv_episodes (media_item_id, season_number, episode_number, episode_title, cached_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT (media_item_id, season_number, episode_number)
-         DO UPDATE SET episode_title = COALESCE($4, media_tv_episodes.episode_title), cached_at = NOW()`,
-        [item.id, season.seasonNumber, ep.episodeNumber, ep.episodeTitle]
-      );
+  // Wrap the per-episode upserts in a transaction so a mid-refresh failure
+  // cannot leave the cache with partial season data.
+  await client.query('BEGIN');
+  try {
+    for (const season of seasons) {
+      const episodes = await tmdb.getShowEpisodes(keys.tmdb_api_key, item.external_id, season.seasonNumber);
+      if (!episodes) continue;
+      for (const ep of episodes) {
+        await client.query(
+          `INSERT INTO media_tv_episodes (media_item_id, season_number, episode_number, episode_title, cached_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (media_item_id, season_number, episode_number)
+           DO UPDATE SET episode_title = COALESCE($4, media_tv_episodes.episode_title), cached_at = NOW()`,
+          [item.id, season.seasonNumber, ep.episodeNumber, ep.episodeTitle]
+        );
+      }
     }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
   }
 }
 
