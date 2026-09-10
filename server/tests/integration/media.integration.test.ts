@@ -669,6 +669,30 @@ describe('Media check-in API', () => {
       expect(checkins.rows[0].n).toBe(3);
     });
 
+    it('keeps the existing total when the imported game time is lower (max rule)', async () => {
+      const first = [
+        CSV_HEADER,
+        '"321","tgdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","5h","","2023-02-01 00:00:00+00:00"',
+      ].join('\n');
+      const import1 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: first });
+      expect(import1.status).toBe(200);
+      expect(import1.body.counts.imported_checkins).toBe(1);
+
+      // A later export of the same game with lower progress at the same
+      // progressed_at: the stored total must not decrease (imported < existing).
+      const lower = [
+        CSV_HEADER,
+        '"321","tgdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","1h 30min","","2023-02-01 00:00:00+00:00"',
+      ].join('\n');
+      const import2 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: lower });
+      expect(import2.status).toBe(200);
+      expect(import2.body.counts.imported_checkins).toBe(0);
+
+      const rows = await query('SELECT time_played_minutes FROM media_checkins');
+      expect(rows.rows).toHaveLength(1);
+      expect(Number(rows.rows[0].time_played_minutes)).toBe(300);
+    });
+
     it('requires a csv string', async () => {
       const response = await request(app).post('/api/v1/import/yamtrack/import').send({});
       expect(response.status).toBe(400);
