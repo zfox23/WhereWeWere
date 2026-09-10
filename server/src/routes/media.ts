@@ -576,7 +576,14 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
           );
           seasons = buildSeasonList(epRows.rows);
         } else {
-          seasons = buildSeasonList(cachedRows.rows.map((r) => ({ season_number: r.season_number, episode_number: 0, episode_title: null })));
+          // TMDB unavailable (or nothing fresh returned): serve the cached
+          // episode rows as-is instead of zeroed placeholders, which
+          // buildSeasonList would drop entirely (F3).
+          const epRows = await client.query(
+            'SELECT season_number, episode_number, episode_title FROM media_tv_episodes WHERE media_item_id = $1 ORDER BY season_number, episode_number',
+            [item.id]
+          );
+          seasons = buildSeasonList(epRows.rows);
         }
       }
     } else {

@@ -245,6 +245,72 @@ describe('Media check-in API', () => {
     });
   });
 
+  describe('tv seasons', () => {
+    async function seedShow(overrides: Record<string, unknown> = {}) {
+      const res = await request(app)
+        .post('/api/v1/media/items')
+        .send({ media_type: 'tv_show', title: 'Severance', external_source: 'tmdb', external_id: '91887', ...overrides });
+      expect(res.status).toBe(201);
+      return res.body;
+    }
+
+    async function cacheEpisodes(itemId: string, cachedAtSql: string) {
+      await query(
+        `INSERT INTO media_tv_episodes (media_item_id, season_number, episode_number, episode_title, cached_at) VALUES
+         ($1, 1, 1, 'Pilot', ${cachedAtSql}),
+         ($1, 1, 2, 'Good Orientation', ${cachedAtSql}),
+         ($1, 2, 1, 'Bury the Key', ${cachedAtSql})`,
+        [itemId]
+      );
+    }
+
+    it('returns cached episodes with cached: true when the cache is fresh', async () => {
+      const show = await seedShow();
+      await cacheEpisodes(show.id, 'NOW()');
+
+      const response = await request(app).get(`/api/v1/media/tv/${show.id}/seasons`);
+      expect(response.status).toBe(200);
+      expect(response.body.cached).toBe(true);
+      expect(response.body.seasons).toHaveLength(2);
+      expect(response.body.seasons[0].season_number).toBe(1);
+      expect(response.body.seasons[0].episodes.map((e: any) => e.episode_number)).toEqual([1, 2]);
+      expect(response.body.seasons[0].episodes[0].episode_title).toBe('Pilot');
+      expect(response.body.seasons[1].season_number).toBe(2);
+      expect(response.body.seasons[1].episodes[0].episode_title).toBe('Bury the Key');
+    });
+
+    it('serves cached episodes when the cache is stale and TMDB is unavailable', async () => {
+      const show = await seedShow();
+      // ~45 days old: past the 30-day max age, but TMDB has no key, so the
+      // stale fallback must serve the cached rows (regression for F3).
+      await cacheEpisodes(show.id, "NOW() - INTERVAL '45 days'");
+
+      const response = await request(app).get(`/api/v1/media/tv/${show.id}/seasons`);
+      expect(response.status).toBe(200);
+      expect(response.body.cached).toBe(true);
+      expect(response.body.seasons).toHaveLength(2);
+      expect(response.body.seasons[0].season_number).toBe(1);
+      expect(response.body.seasons[0].episodes.map((e: any) => e.episode_number)).toEqual([1, 2]);
+      expect(response.body.seasons[0].episodes.map((e: any) => e.episode_title)).toEqual(['Pilot', 'Good Orientation']);
+      expect(response.body.seasons[1].season_number).toBe(2);
+      expect(response.body.seasons[1].episodes).toHaveLength(1);
+    });
+
+    it('returns empty seasons with cached: false when there is no cache and no TMDB key', async () => {
+      const show = await seedShow();
+
+      const response = await request(app).get(`/api/v1/media/tv/${show.id}/seasons`);
+      expect(response.status).toBe(200);
+      expect(response.body.cached).toBe(false);
+      expect(response.body.seasons).toEqual([]);
+    });
+
+    it('returns 404 for an unknown tv show', async () => {
+      const response = await request(app).get('/api/v1/media/tv/11111111-1111-1111-1111-111111111111/seasons');
+      expect(response.status).toBe(404);
+    });
+  });
+
   describe('media search', () => {
     it('returns local results and degrades gracefully without API keys', async () => {
       await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' });
