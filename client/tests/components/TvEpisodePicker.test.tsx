@@ -118,6 +118,27 @@ describe('TvEpisodePicker', () => {
     });
   });
 
+  it('labels season 0 as Specials in the dropdown', async () => {
+    apiMocks.tvSeasons.mockResolvedValue({
+      seasons: [
+        { season_number: 0, episodes: [{ episode_number: 1, episode_title: 'Pilot Special' }] },
+      ],
+      cached: true,
+    });
+    renderPicker();
+
+    const select = await waitFor(() => {
+      const el = document.querySelector('select') as HTMLSelectElement | null;
+      if (!el) throw new Error('select not ready');
+      return el;
+    });
+    const options = Array.from(select.options).map((o) => o.textContent);
+    expect(options).toContain('Specials');
+    expect(options).not.toContain('Season 0');
+    expect(select.value).toBe('0');
+    expect(screen.getByText('Pilot Special')).toBeTruthy();
+  });
+
   it('shows an error state when loading fails', async () => {
     apiMocks.getItem.mockRejectedValue(new Error('boom'));
     renderPicker();

@@ -132,13 +132,15 @@ export const tmdb = {
     const url = `${TMDB_BASE}/tv/${encodeURIComponent(tmdbId)}?api_key=${encodeURIComponent(apiKey)}&language=en-US`;
     return withDegradation(
       async () => {
-        const data = await cache.get<{ seasons?: TmdbSeasonRow[] }>(`tmdb:seasons:${tmdbId}`, async () => {
+        // Cache key is versioned (v2) so results cached before season 0 was
+        // included (filtered out as "specials") don't linger.
+        const data = await cache.get<{ seasons?: TmdbSeasonRow[] }>(`tmdb:seasons:v2:${tmdbId}`, async () => {
           const json = await externalFetchJson<{ seasons?: TmdbSeasonRow[] }>(url);
           return json;
         });
-        // season_number 0 is usually specials; skip it.
+        // season_number 0 holds specials and is kept: it makes the picker
+        // usable for shows whose only content is specials.
         return (data.seasons || [])
-          .filter((s) => s.season_number > 0)
           .map((s) => ({ seasonNumber: s.season_number, episodeCount: s.episode_count }));
       },
       null,

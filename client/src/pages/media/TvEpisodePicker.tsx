@@ -109,7 +109,7 @@ export default function TvEpisodePicker() {
             >
               {seasons.map((s) => (
                 <option key={s.season_number} value={s.season_number}>
-                  Season {s.season_number}
+                  {s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`}
                 </option>
               ))}
             </select>
