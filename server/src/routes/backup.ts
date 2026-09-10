@@ -171,6 +171,11 @@ interface BackupMediaItem {
   release_year: number | null;
   image_url: string | null;
   external_url: string | null;
+  platform?: string | null;
+  page_count?: number | null;
+  series_name?: string | null;
+  series_position?: number | null;
+  series_count?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -185,6 +190,7 @@ interface BackupMediaCheckin {
   rating: number | null;
   raw_score: number | string | null;
   notes: string | null;
+  time_played_minutes?: number | null;
   checked_in_at: string;
   checkin_timezone: string;
   external_event_id: string | null;
@@ -240,6 +246,18 @@ function toNumber(value: unknown, fallback = 0): number {
 
 function toStringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * Coerce a value to a non-negative integer, or null when missing / non-finite / negative.
+ * Used for INT columns (page_count, series_position, series_count) and for
+ * time_played_minutes, which carries CHECK (time_played_minutes IS NULL OR >= 0).
+ */
+function toIntOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n);
 }
 
 function ensureV1Backup(raw: unknown): BackupV1 {
@@ -430,6 +448,7 @@ router.get('/export', async (_req: Request, res: Response) => {
      query(
        `SELECT id, media_type, external_source, external_id,
                title, author, release_year, image_url, external_url,
+               platform, page_count, series_name, series_position, series_count,
                created_at, updated_at
         FROM media_items
         WHERE user_id = $1
@@ -438,7 +457,7 @@ router.get('/export', async (_req: Request, res: Response) => {
      ),
      query(
        `SELECT id, media_item_id, season_number, episode_number, episode_title,
-               checkin_type, rating, raw_score, notes,
+               checkin_type, rating, raw_score, notes, time_played_minutes,
                checked_in_at, checkin_timezone, external_event_id,
                created_at, updated_at
         FROM media_checkins
@@ -1004,12 +1023,14 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         `INSERT INTO media_items (
            id, user_id, media_type, external_source, external_id,
            title, author, release_year, image_url, external_url,
+           platform, page_count, series_name, series_position, series_count,
            created_at, updated_at
          )
          VALUES (
            $1, $2, $3, $4, $5,
            $6, $7, $8, $9, $10,
-           COALESCE($11::timestamptz, NOW()), COALESCE($12::timestamptz, NOW())
+           $11, $12, $13, $14, $15,
+           COALESCE($16::timestamptz, NOW()), COALESCE($17::timestamptz, NOW())
          )
          ON CONFLICT (id) DO NOTHING`,
         [
@@ -1023,6 +1044,11 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           item.release_year != null ? toNumber(item.release_year, NaN) : null,
           toStringOrNull(item.image_url),
           toStringOrNull(item.external_url),
+          toStringOrNull(item.platform),
+          toIntOrNull(item.page_count),
+          toStringOrNull(item.series_name),
+          toIntOrNull(item.series_position),
+          toIntOrNull(item.series_count),
           item.created_at || null,
           item.updated_at || null,
         ]
@@ -1046,18 +1072,18 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         `INSERT INTO media_checkins (
            id, user_id, media_item_id,
            season_number, episode_number, episode_title,
-           checkin_type, rating, raw_score, notes,
+           checkin_type, rating, raw_score, notes, time_played_minutes,
            checked_in_at, checkin_timezone, external_event_id,
            created_at, updated_at
          )
          VALUES (
            $1, $2, $3,
            $4, $5, $6,
-           $7, $8, $9, $10,
-           COALESCE($11::timestamptz, NOW()), $12,
-           $13,
-           COALESCE($14::timestamptz, NOW()),
-           COALESCE($15::timestamptz, NOW())
+           $7, $8, $9, $10, $11,
+           COALESCE($12::timestamptz, NOW()), $13,
+           $14,
+           COALESCE($15::timestamptz, NOW()),
+           COALESCE($16::timestamptz, NOW())
          )
          ON CONFLICT (id) DO NOTHING`,
         [
@@ -1071,6 +1097,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           checkin.rating != null ? toNumber(checkin.rating, NaN) : null,
           checkin.raw_score != null ? String(checkin.raw_score) : null,
           toStringOrNull(checkin.notes),
+          toIntOrNull(checkin.time_played_minutes),
           checkin.checked_in_at || null,
           toStringOrNull(checkin.checkin_timezone) || 'UTC',
           toStringOrNull(checkin.external_event_id),
