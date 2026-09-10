@@ -228,7 +228,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
                 <input
                   type="number"
                   min="0"
-                  max="23"
+                  max="10000"
                   value={timeHours}
                   onChange={(e) => setTimeHours(e.target.value)}
                   placeholder="0"
