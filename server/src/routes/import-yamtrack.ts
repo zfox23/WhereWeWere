@@ -46,7 +46,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
       if (!plan.media_type) continue;
 
       // Upsert the media item.
-      const mediaItemId = await upsertMediaItemWithClient(client, {
+      const { id: mediaItemId, created } = await upsertMediaItemWithClient(client, {
         media_type: plan.media_type,
         external_source: plan.external_source,
         external_id: plan.external_id,
@@ -65,7 +65,8 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
               : null,
       });
       plan.media_item_id = mediaItemId;
-      createdMediaItems += 1;
+      // Count only genuinely new media_items rows, not upserts of existing ones.
+      if (created) createdMediaItems += 1;
 
       // Insert the check-in if the plan calls for one.
       if ((plan.disposition === 'create_checkin' || plan.disposition === 'create_episode_checkin') && plan.checked_in_at) {
@@ -200,7 +201,7 @@ async function upsertMediaItemWithClient(
     image_url: string | null;
     external_url: string | null;
   }
-): Promise<string> {
+): Promise<{ id: string; created: boolean }> {
   if (input.external_source && input.external_id) {
     const existing = await client.query(
       `SELECT id FROM media_items
@@ -208,7 +209,7 @@ async function upsertMediaItemWithClient(
       [USER_ID, input.media_type, input.external_source, input.external_id]
     );
     if (existing.rows.length > 0) {
-      return existing.rows[0].id as string;
+      return { id: existing.rows[0].id as string, created: false };
     }
   }
 
@@ -220,7 +221,7 @@ async function upsertMediaItemWithClient(
      RETURNING id`,
     [USER_ID, input.media_type, input.external_source, input.external_id, input.title, input.author, input.release_year, input.image_url, input.external_url]
   );
-  return inserted.rows[0].id as string;
+  return { id: inserted.rows[0].id as string, created: true };
 }
 
 // POST /preview - parse + classify the CSV without writing anything

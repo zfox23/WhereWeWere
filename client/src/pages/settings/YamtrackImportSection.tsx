@@ -5,6 +5,7 @@ import { MEDIA_SUBTYPES } from '../../utils/media';
 import { slugify } from '../../utils/slugify';
 import type {
   YamtrackDisposition,
+  YamtrackImportPlanRow,
   YamtrackPlanRow,
   YamtrackPreview,
   YamtrackImportResult,
@@ -32,7 +33,7 @@ function dispositionOf(row: YamtrackPlanRow): YamtrackDisposition {
   return row.disposition;
 }
 
-function detailHrefFor(row: YamtrackPlanRow): string | null {
+function detailHrefFor(row: YamtrackImportPlanRow): string | null {
   const itemId = row.media_item_id;
   if (!itemId) return null;
   const subtype = (MEDIA_SUBTYPES as Record<string, (typeof MEDIA_SUBTYPES)[keyof typeof MEDIA_SUBTYPES]>)[row.media_type];

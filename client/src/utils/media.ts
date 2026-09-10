@@ -81,14 +81,6 @@ export function detailPath(subtype: MediaSubtype, id: string, slug: string): str
   return `${MEDIA_SUBTYPES[subtype].detailBase}/${id}/${slug}`;
 }
 
-export function checkinFormPath(subtype: MediaSubtype, id: string, slug: string): string {
-  if (subtype === 'tv_show') {
-    // TV check-in form requires season/episode: /media-check-in/tv/<id>/<slug>/<s>/<e>
-    return `${MEDIA_SUBTYPES.tv_show.searchPath.replace('/tv-episode', '/tv')}/${id}/${slug}`;
-  }
-  return `${MEDIA_SUBTYPES[subtype].searchPath}/${id}/${slug}`;
-}
-
 export const CHECKIN_TYPE_LABELS: Record<string, string> = {
   completed: 'Completed',
   in_progress: 'In-Progress',

@@ -507,10 +507,18 @@ export interface YamtrackPlanRow {
   checkin_type: 'completed' | 'in_progress' | 'dropped' | null;
   rating: number | null;
   raw_score: number | null;
-  time_played_minutes?: number | null;
   duplicate_of_line: number | null;
-  media_item_id?: string | null;
-  imported_checkin_id?: string | null;
+}
+
+/**
+ * A plan row as returned by POST /import/yamtrack/import. The stored ids and
+ * time played only exist after the import has run, so they are absent from
+ * the preview response.
+ */
+export interface YamtrackImportPlanRow extends YamtrackPlanRow {
+  time_played_minutes: number | null;
+  media_item_id: string | null;
+  imported_checkin_id: string | null;
 }
 
 export interface YamtrackPreview {
@@ -526,11 +534,12 @@ export interface YamtrackPreview {
   plans: YamtrackPlanRow[];
 }
 
-export interface YamtrackImportResult extends YamtrackPreview {
+export interface YamtrackImportResult {
   counts: YamtrackPreview['counts'] & {
     imported_checkins: number;
     duplicates_skipped: number;
   };
+  plans: YamtrackImportPlanRow[];
 }
 
 export interface UserSettings {
