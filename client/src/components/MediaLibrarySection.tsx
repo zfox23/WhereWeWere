@@ -248,7 +248,9 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                       BADGE_CLASSES[item.last_checkin_type] || BADGE_CLASSES.completed
                     }`}
                   >
-                    {CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type}
+                    {item.last_checkin_type === 'completed' && item.completed_count > 1
+                      ? `${CHECKIN_TYPE_LABELS.completed} ${item.completed_count}x`
+                      : CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type}
                   </span>
                 </div>
                 <p className="mt-2 text-xs font-semibold text-gray-800 dark:text-gray-200 leading-tight line-clamp-2 group-hover:text-primary-600 dark:group-hover:text-primary-400">

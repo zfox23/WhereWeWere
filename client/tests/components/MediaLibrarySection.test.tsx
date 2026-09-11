@@ -55,6 +55,13 @@ describe('MediaLibrarySection', () => {
     expect(screen.getByText(/Jan 4, 2023, 8:00 PM/)).toBeTruthy();
   });
 
+  it('shows the completed count in the badge when an item has been completed multiple times', async () => {
+    libraryMock.mockResolvedValueOnce([{ ...item, completed_count: 3 }]);
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+    expect(screen.getByText('Completed 3x')).toBeTruthy();
+  });
+
   it('fetches with the date range and selected types', async () => {
     renderSection({ from: '2023-01-01', to: '2023-01-31' });
     await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
