@@ -364,45 +364,7 @@ export function MediaTab() {
       </div>
 
       <MediaLibrarySection from={visibleRange.from} to={visibleRange.to} />
-
       <div className="grid md:grid-cols-2 gap-4">
-        <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Top Rated</h3>
-          {loading ? (
-            <p className="text-sm text-gray-400">Loading…</p>
-          ) : !statsData || statsData.top_media.length === 0 ? (
-            <p className="text-sm text-gray-400">No rated media in this period.</p>
-          ) : (
-            <ul className="space-y-2">
-              {statsData.top_media.map((m) => {
-                const config = MEDIA_SUBTYPES[m.media_type] || MEDIA_SUBTYPES.movie;
-                const href = `${config.detailBase}/${m.id}/${m.title ? slugify(m.title) : ''}`;
-                return (
-                  <li key={m.id}>
-                    <Link to={href} className="flex items-center gap-2.5 group">
-                      {m.image_url ? (
-                        <img src={m.image_url} alt="" className="w-9 h-12 object-cover rounded shadow-sm group-hover:ring-2 group-hover:ring-primary-400 transition-shadow" loading="lazy" />
-                      ) : (
-                        <span className="w-9 h-12 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-lg">{config.icon}</span>
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 truncate group-hover:text-primary-600 dark:group-hover:text-primary-400">
-                          {m.title}
-                        </span>
-                        <span className="block text-xs text-gray-400 truncate">
-                          {config.label}
-                          {m.author ? ` · ${m.author}` : ''}
-                        </span>
-                      </span>
-                      <Stars value={m.rating} />
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
         <MediaListsSection />
       </div>
     </div>

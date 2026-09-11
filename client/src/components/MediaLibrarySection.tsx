@@ -13,9 +13,9 @@ import { slugify } from '../utils/slugify';
 import type { MediaLibraryItem, MediaSubtype } from '../types';
 
 const BADGE_CLASSES: Record<string, string> = {
-  completed: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
-  in_progress: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-  dropped: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+  completed: 'bg-green-100 text-green-700/90 dark:bg-green-900/90 dark:text-green-300',
+  in_progress: 'bg-amber-100 text-amber-700/90 dark:bg-amber-900/90 dark:text-amber-300',
+  dropped: 'bg-red-100 text-red-700/90 dark:bg-red-900/90 dark:text-red-300',
 };
 
 function getSelectedTypesFromLocation(): MediaSubtype[] {
@@ -199,11 +199,10 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
               type="button"
               onClick={() => toggleType(type)}
               aria-pressed={active}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-                active
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${active
                   ? 'bg-primary-500 border-primary-500 text-white'
                   : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-              }`}
+                }`}
             >
               {config.plural}
             </button>
@@ -228,14 +227,14 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
               <Link
                 key={item.id}
                 to={href}
-                className="group bg-white/70 dark:bg-gray-900/70 rounded-xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-2.5 hover:ring-2 hover:ring-primary-400 transition-shadow"
+                className="group bg-white/70 dark:bg-gray-900/70 rounded-lg border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 hover:ring-2 hover:ring-primary-400 transition-shadow"
               >
                 <div className="relative">
                   {item.image_url ? (
                     <img
                       src={item.image_url}
                       alt=""
-                      className="w-full aspect-[2/3] object-cover rounded-lg shadow-sm"
+                      className="w-full aspect-[2/3] object-cover rounded-t-lg shadow-sm"
                       loading="lazy"
                     />
                   ) : (
@@ -244,31 +243,32 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                     </div>
                   )}
                   <span
-                    className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                      BADGE_CLASSES[item.last_checkin_type] || BADGE_CLASSES.completed
-                    }`}
+                    className={`absolute top-2 right-2 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${BADGE_CLASSES[item.last_checkin_type] || BADGE_CLASSES.completed
+                      }`}
                   >
                     {item.last_checkin_type === 'completed' && item.completed_count > 1
                       ? `${CHECKIN_TYPE_LABELS.completed} ${item.completed_count}x`
                       : CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type}
                   </span>
                 </div>
-                <p className="mt-2 text-xs font-semibold text-gray-800 dark:text-gray-200 leading-tight line-clamp-2 group-hover:text-primary-600 dark:group-hover:text-primary-400">
-                  {item.title}
-                </p>
-                {item.author && (
-                  <p className="text-[11px] text-gray-400 truncate">{item.author}</p>
-                )}
-                <div className="mt-1 flex items-center justify-between gap-1">
-                  {item.latest_rating != null && item.latest_rating > 0 ? (
-                    <Stars value={item.latest_rating} size={11} />
-                  ) : (
-                    <span />
+                <div className="p-2.5 flex grow flex-col items-between">
+                  <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 leading-tight line-clamp-2 group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                    {item.title}
+                  </p>
+                  {item.author && (
+                    <p className="text-[11px] text-gray-400 truncate">{item.author}</p>
                   )}
+                  <div className="mt-1 flex items-center justify-between gap-1">
+                    {item.latest_rating != null && item.latest_rating > 0 ? (
+                      <Stars value={item.latest_rating} size={11} />
+                    ) : (
+                      <span />
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11px] text-gray-400 truncate" title={formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}>
+                    {formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}
+                  </p>
                 </div>
-                <p className="mt-1 text-[11px] text-gray-400 truncate" title={formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}>
-                  {formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}
-                </p>
               </Link>
             );
           })}

@@ -92,7 +92,7 @@ function ExpandableFAB() {
   return (
     <>
       <div
-        className={`fixed inset-0 z-30 bg-black/20 backdrop-blur-sm transition-opacity duration-200 ${expanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 z-30 m-0 bg-black/20 backdrop-blur-sm transition-opacity duration-200 ${expanded ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         onClick={() => setExpanded(false)}
       />
 
