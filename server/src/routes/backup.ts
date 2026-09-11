@@ -38,6 +38,7 @@ interface BackupSettings {
   immich_url: string | null;
   immich_api_key: string | null;
   maloja_url: string | null;
+  plex_usernames: string | null;
   theme: string | null;
   system_light_theme: string | null;
   system_dark_theme: string | null;
@@ -355,6 +356,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         `SELECT dawarich_url, dawarich_api_key,
                 immich_url, immich_api_key,
                 maloja_url,
+                plex_usernames,
                 theme,
                 system_light_theme,
                 system_dark_theme,
@@ -604,17 +606,18 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       await client.query(
         `INSERT INTO user_settings (
            user_id, dawarich_url, dawarich_api_key,
-           immich_url, immich_api_key, maloja_url,
+           immich_url, immich_api_key, maloja_url, plex_usernames,
            theme, system_light_theme, system_dark_theme,
            mood_icon_pack, distance_unit
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (user_id) DO UPDATE SET
             dawarich_url = EXCLUDED.dawarich_url,
             dawarich_api_key = EXCLUDED.dawarich_api_key,
             immich_url = EXCLUDED.immich_url,
             immich_api_key = EXCLUDED.immich_api_key,
             maloja_url = EXCLUDED.maloja_url,
+            plex_usernames = EXCLUDED.plex_usernames,
             theme = COALESCE(EXCLUDED.theme, user_settings.theme),
             system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
             system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
@@ -628,6 +631,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           toStringOrNull(s.immich_url),
           toStringOrNull(s.immich_api_key),
           toStringOrNull(s.maloja_url),
+          toStringOrNull(s.plex_usernames),
           toStringOrNull(s.theme),
           toStringOrNull(s.system_light_theme),
           toStringOrNull(s.system_dark_theme),
@@ -1289,14 +1293,15 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     if (resetIntegrationsSettings) {
       const integrationSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url)
-         VALUES ($1, NULL, NULL, NULL, NULL, NULL)
+        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, plex_usernames)
+         VALUES ($1, NULL, NULL, NULL, NULL, NULL, NULL)
          ON CONFLICT (user_id) DO UPDATE SET
            dawarich_url = NULL,
            dawarich_api_key = NULL,
            immich_url = NULL,
            immich_api_key = NULL,
            maloja_url = NULL,
+           plex_usernames = NULL,
            updated_at = NOW()`,
         [USER_ID]
       );

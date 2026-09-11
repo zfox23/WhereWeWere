@@ -374,6 +374,11 @@ export const sleepWebhook = {
   stats: () => request<{ count: number }>('/webhook/sleep-as-android/stats'),
 };
 
+// Plex webhook
+export const plexWebhook = {
+  stats: () => request<{ count: number }>('/webhook/plex/stats'),
+};
+
 // Backup / Restore
 export const backupApi = {
   export: async () => {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Link2, Moon, Sparkles, Check, AlertCircle, Loader2, Copy, Film, Gamepad2, BookOpen } from 'lucide-react';
-import { settings, sleepWebhook } from '../../api/client';
+import { Link2, Moon, Sparkles, Check, AlertCircle, Loader2, Copy, Film, Gamepad2, BookOpen, Tv } from 'lucide-react';
+import { settings, sleepWebhook, plexWebhook } from '../../api/client';
 
 interface IntegrationsTabProps {
   initialDawarichUrl: string;
@@ -8,6 +8,7 @@ interface IntegrationsTabProps {
   initialImmichUrl: string;
   initialImmichApiKey: string;
   initialMalojaUrl: string;
+  initialPlexUsernames: string;
   initialTmdbApiKey: string;
   initialTgdbApiKey: string;
   initialHardcoverApiKey: string;
@@ -24,6 +25,7 @@ export function IntegrationsTab({
   initialImmichUrl,
   initialImmichApiKey,
   initialMalojaUrl,
+  initialPlexUsernames,
   initialTmdbApiKey,
   initialTgdbApiKey,
   initialHardcoverApiKey,
@@ -38,6 +40,7 @@ export function IntegrationsTab({
   const [immichUrl, setImmichUrl] = useState(initialImmichUrl);
   const [immichApiKey, setImmichApiKey] = useState(initialImmichApiKey);
   const [malojaUrl, setMalojaUrl] = useState(initialMalojaUrl);
+  const [plexUsernames, setPlexUsernames] = useState(initialPlexUsernames);
   const [tmdbApiKey, setTmdbApiKey] = useState(initialTmdbApiKey);
   const [tgdbApiKey, setTgdbApiKey] = useState(initialTgdbApiKey);
   const [hardcoverApiKey, setHardcoverApiKey] = useState(initialHardcoverApiKey);
@@ -53,16 +56,30 @@ export function IntegrationsTab({
   const [webhookCopied, setWebhookCopied] = useState(false);
   const webhookUrl = `${window.location.origin}/api/v1/webhook/sleep-as-android`;
 
+  const [plexEventCount, setPlexEventCount] = useState<number | null>(null);
+  const [plexCopied, setPlexCopied] = useState(false);
+  const plexWebhookUrl = `${window.location.origin}/api/v1/webhook/plex`;
+
   useEffect(() => {
     sleepWebhook.stats()
       .then((data) => setWebhookEventCount(data.count))
       .catch(() => setWebhookEventCount(null));
+    plexWebhook.stats()
+      .then((data) => setPlexEventCount(data.count))
+      .catch(() => setPlexEventCount(null));
   }, []);
 
   const handleWebhookCopy = () => {
     navigator.clipboard.writeText(webhookUrl).then(() => {
       setWebhookCopied(true);
       setTimeout(() => setWebhookCopied(false), 2000);
+    });
+  };
+
+  const handlePlexCopy = () => {
+    navigator.clipboard.writeText(plexWebhookUrl).then(() => {
+      setPlexCopied(true);
+      setTimeout(() => setPlexCopied(false), 2000);
     });
   };
 
@@ -77,6 +94,8 @@ export function IntegrationsTab({
         immich_url: immichUrl || null,
         immich_api_key: immichApiKey || null,
         maloja_url: malojaUrl || null,
+        // Send the raw string: an empty string clears the filter server-side.
+        plex_usernames: plexUsernames,
         tmdb_api_key: tmdbApiKey || null,
         tgdb_api_key: tgdbApiKey || null,
         hardcover_api_key: hardcoverApiKey || null,
@@ -168,6 +187,57 @@ export function IntegrationsTab({
               className="input"
               placeholder="https://maloja.example.com"
             />
+          </div>
+        </div>
+
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1.5">
+            <Tv size={14} className="text-purple-600 dark:text-purple-400" />
+            Plex
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            Automatically track movies and TV shows you watch on your Plex server via{' '}
+            <a href="https://support.plex.tv/articles/115002267687-webhooks/" target="_blank" rel="noreferrer" className="underline hover:text-gray-700 dark:hover:text-gray-200">Plex Webhooks</a>
+            {' '}(a Plex Pass feature).
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Track only these Plex users</label>
+              <input
+                type="text"
+                value={plexUsernames}
+                onChange={(e) => setPlexUsernames(e.target.value)}
+                className="input"
+                placeholder="e.g. zach, steve"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Comma-separated Plex usernames. Leave empty to track media watched by anyone.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Webhook URL — add this under{' '}
+                <a href="https://app.plex.tv/desktop/#!/settings/webhooks" target="_blank" rel="noreferrer" className="underline hover:text-gray-700 dark:hover:text-gray-200">Plex Webhooks Settings</a>
+              </label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 min-w-0 truncate rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-800 dark:text-gray-200">
+                  {plexWebhookUrl}
+                </code>
+                <button
+                  onClick={handlePlexCopy}
+                  title={plexCopied ? 'Copied!' : 'Copy URL'}
+                  className="shrink-0 flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                >
+                  {plexCopied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
+                  {plexCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {plexEventCount === null
+                  ? 'Loading webhook stats…'
+                  : `${plexEventCount} Webhook Event${plexEventCount === 1 ? '' : 's'} Received`}
+              </p>
+            </div>
           </div>
         </div>
 

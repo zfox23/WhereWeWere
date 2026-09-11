@@ -555,6 +555,7 @@ export interface UserSettings {
   immich_api_key: string | null;
   maloja_url: string | null;
   tmdb_api_key: string | null;
+  plex_usernames: string | null;
   tgdb_api_key: string | null;
   hardcover_api_key: string | null;
   llm_api_url: string | null;
