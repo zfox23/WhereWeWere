@@ -6,9 +6,15 @@ import { MediaLibrarySection } from '../../src/components/MediaLibrarySection';
 import type { MediaLibraryItem } from '../../src/types';
 
 const libraryMock = vi.fn();
+const listsMock = vi.fn();
+const removeItemFromListMock = vi.fn();
+const deleteListMock = vi.fn();
 vi.mock('../../src/api/client', () => ({
   media: {
     library: (...args: unknown[]) => libraryMock(...args),
+    lists: () => listsMock(),
+    removeItemFromList: (listId: string, itemId: string) => removeItemFromListMock(listId, itemId),
+    deleteList: (listId: string) => deleteListMock(listId),
   },
 }));
 
@@ -36,6 +42,12 @@ function renderSection(props: { from?: string; to?: string } = {}) {
 beforeEach(() => {
   libraryMock.mockReset();
   libraryMock.mockResolvedValue([item]);
+  listsMock.mockReset();
+  listsMock.mockResolvedValue([]);
+  removeItemFromListMock.mockReset();
+  removeItemFromListMock.mockResolvedValue({ message: 'removed' });
+  deleteListMock.mockReset();
+  deleteListMock.mockResolvedValue({ message: 'deleted', id: 'list-1' });
   window.history.pushState({}, '', '/profile?tab=media');
 });
 
@@ -121,5 +133,72 @@ describe('MediaLibrarySection', () => {
     // Completed count ascending (0, 1, 3).
     await user.selectOptions(select, 'completed');
     expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
+  });
+
+  it('filters the library to items on the selected list and offers per-card removal', async () => {
+    libraryMock.mockResolvedValueOnce([
+      { ...item, id: 'a', title: 'Alpha' },
+      { ...item, id: 'b', title: 'Bravo' },
+    ]);
+    listsMock.mockResolvedValueOnce([
+      {
+        id: 'list-1',
+        name: 'Watchlist',
+        created_at: '2023-01-01T00:00:00Z',
+        items: [{ id: 'a', media_type: 'movie', title: 'Alpha', image_url: null, author: null }],
+      },
+    ]);
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Bravo')).toBeTruthy());
+
+    // No list selected: both items show, no remove buttons.
+    expect(screen.getByText('Alpha')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remove from Watchlist' })).toBeNull();
+
+    // Select the list: only its items show, with a remove button.
+    const listSelect = screen.getByRole('combobox', { name: 'Filter by list' });
+    await user.selectOptions(listSelect, 'list-1');
+    await waitFor(() => expect(screen.queryByText('Bravo')).toBeNull());
+    expect(screen.getByText('Alpha')).toBeTruthy();
+
+    const removeBtn = screen.getByRole('button', { name: 'Remove from Watchlist' });
+    // Confirm the removal.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(removeBtn);
+    expect(confirmSpy).toHaveBeenCalledWith('Remove "Alpha" from "Watchlist"?');
+    expect(removeItemFromListMock).toHaveBeenCalledWith('list-1', 'a');
+    // Item disappears from the filtered view after local removal.
+    await waitFor(() => expect(screen.queryByText('Alpha')).toBeNull());
+    expect(screen.getByText(/No media from "Watchlist"/)).toBeTruthy();
+    confirmSpy.mockRestore();
+  });
+
+  it('deletes the selected list after confirmation', async () => {
+    listsMock.mockResolvedValueOnce([
+      {
+        id: 'list-1',
+        name: 'Watchlist',
+        created_at: '2023-01-01T00:00:00Z',
+        items: [{ id: 'item-1', media_type: 'movie', title: 'Dune', image_url: null, author: null }],
+      },
+    ]);
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+
+    // Select the list so the delete button appears.
+    const listSelect = screen.getByRole('combobox', { name: 'Filter by list' });
+    await user.selectOptions(listSelect, 'list-1');
+    const deleteBtn = await screen.findByRole('button', { name: 'Delete list Watchlist' });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(deleteBtn);
+    expect(confirmSpy).toHaveBeenCalledWith('Delete list "Watchlist"? Items in your library are kept.');
+    expect(deleteListMock).toHaveBeenCalledWith('list-1');
+    // Dropdown resets to "All media" after deletion.
+    await waitFor(() => expect((listSelect as HTMLSelectElement).value).toBe(''));
+    expect(screen.queryByRole('button', { name: 'Delete list Watchlist' })).toBeNull();
+    confirmSpy.mockRestore();
   });
 });

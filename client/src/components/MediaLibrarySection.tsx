@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowDown, ArrowUp, Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Loader2, Trash2, X } from 'lucide-react';
 import { media } from '../api/client';
 import Stars from './Stars';
 import {
@@ -10,7 +10,7 @@ import {
   formatCheckinDate,
 } from '../utils/media';
 import { slugify } from '../utils/slugify';
-import type { MediaLibraryItem, MediaSubtype } from '../types';
+import type { MediaLibraryItem, MediaList, MediaSubtype } from '../types';
 
 const BADGE_CLASSES: Record<string, string> = {
   completed: 'bg-green-100 text-green-700/90 dark:bg-green-900/90 dark:text-green-300',
@@ -60,6 +60,18 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>('checkin');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [lists, setLists] = useState<MediaList[]>([]);
+  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+
+  const selectedList = useMemo(
+    () => lists.find((l) => l.id === selectedListId) ?? null,
+    [lists, selectedListId]
+  );
+
+  const selectedListIds = useMemo(
+    () => (selectedList ? new Set(selectedList.items.map((i) => i.id)) : null),
+    [selectedList]
+  );
 
   const activeTypes = useMemo(
     () => MEDIA_SUBTYPE_LIST.filter((t) => selectedTypes.includes(t)),
@@ -99,8 +111,50 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   }, [selectedTypes]);
 
-  const sortedItems = useMemo(() => {
-    const sorted = [...items];
+  useEffect(() => {
+    media
+      .lists()
+      .then(setLists)
+      .catch((err) => {
+        console.error('Failed to load media lists:', err);
+        setLists([]);
+      });
+  }, []);
+
+  const handleRemoveFromList = async (item: MediaLibraryItem) => {
+    if (!selectedList) return;
+    if (!window.confirm(`Remove "${item.title}" from "${selectedList.name}"?`)) return;
+    try {
+      await media.removeItemFromList(selectedList.id, item.id);
+      setLists((prev) =>
+        prev.map((l) =>
+          l.id === selectedList.id
+            ? { ...l, items: l.items.filter((i) => i.id !== item.id) }
+            : l
+        )
+      );
+    } catch (err) {
+      console.error('Failed to remove item from list:', err);
+    }
+  };
+
+  const handleDeleteList = async () => {
+    if (!selectedList) return;
+    if (!window.confirm(`Delete list "${selectedList.name}"? Items in your library are kept.`)) return;
+    try {
+      await media.deleteList(selectedList.id);
+      setLists((prev) => prev.filter((l) => l.id !== selectedList.id));
+      setSelectedListId(null);
+    } catch (err) {
+      console.error('Failed to delete list:', err);
+    }
+  };
+
+  const visibleItems = useMemo(() => {
+    const filtered = selectedListIds
+      ? items.filter((item) => selectedListIds.has(item.id))
+      : items;
+    const sorted = [...filtered];
     sorted.sort((a, b) => {
       const va = sortValue(a, sortBy);
       const vb = sortValue(b, sortBy);
@@ -114,7 +168,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       return sortDir === 'asc' ? diff : -diff;
     });
     return sorted;
-  }, [items, sortBy, sortDir]);
+  }, [items, sortBy, sortDir, selectedListIds]);
 
   const toggleDirection = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 
@@ -162,7 +216,32 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Library</h3>
+        <div className="flex items-center gap-1">
+          <select
+            value={selectedListId ?? ''}
+            onChange={(e) => setSelectedListId(e.target.value || null)}
+            aria-label="Filter by list"
+            className="text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">Media Library</option>
+            {lists.map((list) => (
+              <option key={list.id} value={list.id}>
+                {list.name}
+              </option>
+            ))}
+          </select>
+          {selectedList && (
+            <button
+              type="button"
+              onClick={handleDeleteList}
+              aria-label={`Delete list ${selectedList.name}`}
+              title={`Delete list "${selectedList.name}"`}
+              className="p-1.5 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-1.5">
           <select
             value={sortBy}
@@ -200,8 +279,8 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
               onClick={() => toggleType(type)}
               aria-pressed={active}
               className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${active
-                  ? 'bg-primary-500 border-primary-500 text-white'
-                  : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                ? 'bg-primary-500 border-primary-500 text-white'
+                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                 }`}
             >
               {config.plural}
@@ -216,11 +295,15 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
         <div className="flex items-center justify-center py-8">
           <Loader2 className="animate-spin text-primary-600" size={24} />
         </div>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-gray-400">No media checked in during this period.</p>
+      ) : visibleItems.length === 0 ? (
+        <p className="text-sm text-gray-400">
+          {selectedList
+            ? `No media from "${selectedList.name}" checked in during this period.`
+            : 'No media checked in during this period.'}
+        </p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {sortedItems.map((item) => {
+          {visibleItems.map((item) => {
             const config = MEDIA_SUBTYPES[item.media_type] || MEDIA_SUBTYPES.movie;
             const href = `${config.detailBase}/${item.id}/${item.title ? slugify(item.title) : ''}`;
             return (
@@ -250,6 +333,21 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                       ? `${CHECKIN_TYPE_LABELS.completed} ${item.completed_count}x`
                       : CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type}
                   </span>
+                  {selectedList && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void handleRemoveFromList(item);
+                      }}
+                      aria-label={`Remove from ${selectedList.name}`}
+                      title={`Remove from "${selectedList.name}"`}
+                      className="absolute top-2 left-2 p-1 rounded-full bg-black/50 text-white hover:bg-red-600/90 transition-colors"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
                 </div>
                 <div className="p-2.5 flex grow flex-col items-between">
                   <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 leading-tight line-clamp-2 group-hover:text-primary-600 dark:group-hover:text-primary-400">
