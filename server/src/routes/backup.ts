@@ -38,6 +38,7 @@ interface BackupSettings {
   immich_url: string | null;
   immich_api_key: string | null;
   maloja_url: string | null;
+  plex_usernames: string | null;
   theme: string | null;
   system_light_theme: string | null;
   system_dark_theme: string | null;
@@ -161,6 +162,57 @@ interface BackupSleepEntry {
   updated_at: string;
 }
 
+interface BackupMediaItem {
+  id: string;
+  media_type: string;
+  external_source: string | null;
+  external_id: string | null;
+  title: string;
+  author: string | null;
+  release_year: number | null;
+  image_url: string | null;
+  external_url: string | null;
+  platform?: string | null;
+  page_count?: number | null;
+  series_name?: string | null;
+  series_position?: number | null;
+  series_count?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackupMediaCheckin {
+  id: string;
+  media_item_id: string;
+  season_number: number | null;
+  episode_number: number | null;
+  episode_title: string | null;
+  checkin_type: string;
+  rating: number | null;
+  raw_score: number | string | null;
+  notes: string | null;
+  time_played_minutes?: number | null;
+  checked_in_at: string;
+  checkin_timezone: string;
+  external_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackupMediaList {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackupMediaListItem {
+  list_id: string;
+  media_item_id: string;
+  position: number;
+  added_at: string;
+}
+
 interface BackupV1 {
   format: typeof BACKUP_FORMAT;
   schemaVersion: 1;
@@ -177,6 +229,10 @@ interface BackupV1 {
     moodCheckinActivities: BackupMoodCheckinActivity[];
     sleepEntries: BackupSleepEntry[];
     tracks: BackupTrack[];
+    mediaItems: BackupMediaItem[];
+    mediaCheckins: BackupMediaCheckin[];
+    mediaLists: BackupMediaList[];
+    mediaListItems: BackupMediaListItem[];
   };
 }
 
@@ -191,6 +247,18 @@ function toNumber(value: unknown, fallback = 0): number {
 
 function toStringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * Coerce a value to a non-negative integer, or null when missing / non-finite / negative.
+ * Used for INT columns (page_count, series_position, series_count) and for
+ * time_played_minutes, which carries CHECK (time_played_minutes IS NULL OR >= 0).
+ */
+function toIntOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n);
 }
 
 function ensureV1Backup(raw: unknown): BackupV1 {
@@ -251,6 +319,10 @@ function ensureV1Backup(raw: unknown): BackupV1 {
       moodCheckinActivities: asArray<BackupMoodCheckinActivity>(migratedData.moodCheckinActivities),
       sleepEntries: asArray<BackupSleepEntry>(migratedData.sleepEntries),
       tracks: asArray<BackupTrack>(migratedData.tracks),
+      mediaItems: asArray<BackupMediaItem>(migratedData.mediaItems),
+      mediaCheckins: asArray<BackupMediaCheckin>(migratedData.mediaCheckins),
+      mediaLists: asArray<BackupMediaList>(migratedData.mediaLists),
+      mediaListItems: asArray<BackupMediaListItem>(migratedData.mediaListItems),
     },
   };
 }
@@ -269,6 +341,10 @@ router.get('/export', async (_req: Request, res: Response) => {
       moodCheckinActivitiesResult,
       sleepEntriesResult,
       tracksResult,
+      mediaItemsResult,
+      mediaCheckinsResult,
+      mediaListsResult,
+      mediaListItemsResult,
     ] = await Promise.all([
       query(
         `SELECT id, username, email, display_name, created_at, updated_at
@@ -280,6 +356,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         `SELECT dawarich_url, dawarich_api_key,
                 immich_url, immich_api_key,
                 maloja_url,
+                plex_usernames,
                 theme,
                 system_light_theme,
                 system_dark_theme,
@@ -368,9 +445,44 @@ router.get('/export', async (_req: Request, res: Response) => {
          FROM tracks t
          WHERE t.user_id = $1
          ORDER BY t.started_at ASC`,
-        [USER_ID]
-      ),
-    ]);
+       [USER_ID]
+     ),
+     query(
+       `SELECT id, media_type, external_source, external_id,
+               title, author, release_year, image_url, external_url,
+               platform, page_count, series_name, series_position, series_count,
+               created_at, updated_at
+        FROM media_items
+        WHERE user_id = $1
+        ORDER BY created_at ASC, title ASC`,
+       [USER_ID]
+     ),
+     query(
+       `SELECT id, media_item_id, season_number, episode_number, episode_title,
+               checkin_type, rating, raw_score, notes, time_played_minutes,
+               checked_in_at, checkin_timezone, external_event_id,
+               created_at, updated_at
+        FROM media_checkins
+        WHERE user_id = $1
+        ORDER BY checked_in_at ASC`,
+       [USER_ID]
+     ),
+     query(
+       `SELECT id, name, created_at, updated_at
+        FROM media_lists
+        WHERE user_id = $1
+        ORDER BY created_at ASC`,
+       [USER_ID]
+     ),
+     query(
+       `SELECT mli.list_id, mli.media_item_id, mli.position, mli.added_at
+        FROM media_list_items mli
+        JOIN media_lists ml ON ml.id = mli.list_id
+        WHERE ml.user_id = $1
+        ORDER BY ml.created_at ASC, mli.position ASC`,
+       [USER_ID]
+     ),
+   ]);
 
     const tracks = tracksResult.rows.map((row: any) => {
       let geometry: [number, number][] | null = null;
@@ -437,6 +549,10 @@ router.get('/export', async (_req: Request, res: Response) => {
         moodCheckinActivities: moodCheckinActivitiesResult.rows,
         sleepEntries: sleepEntriesResult.rows,
         tracks,
+        mediaItems: mediaItemsResult.rows,
+        mediaCheckins: mediaCheckinsResult.rows,
+        mediaLists: mediaListsResult.rows,
+        mediaListItems: mediaListItemsResult.rows,
       },
     };
 
@@ -466,6 +582,10 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       moodCheckinActivities: { inserted: 0, skipped: 0 },
       sleepEntries: { inserted: 0, skipped: 0 },
       tracks: { inserted: 0, skipped: 0 },
+      mediaItems: { inserted: 0, skipped: 0 },
+      mediaCheckins: { inserted: 0, skipped: 0 },
+      mediaLists: { inserted: 0, skipped: 0 },
+      mediaListItems: { inserted: 0, skipped: 0 },
     };
     const errors: string[] = [];
 
@@ -486,17 +606,18 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       await client.query(
         `INSERT INTO user_settings (
            user_id, dawarich_url, dawarich_api_key,
-           immich_url, immich_api_key, maloja_url,
+           immich_url, immich_api_key, maloja_url, plex_usernames,
            theme, system_light_theme, system_dark_theme,
            mood_icon_pack, distance_unit
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (user_id) DO UPDATE SET
             dawarich_url = EXCLUDED.dawarich_url,
             dawarich_api_key = EXCLUDED.dawarich_api_key,
             immich_url = EXCLUDED.immich_url,
             immich_api_key = EXCLUDED.immich_api_key,
             maloja_url = EXCLUDED.maloja_url,
+            plex_usernames = EXCLUDED.plex_usernames,
             theme = COALESCE(EXCLUDED.theme, user_settings.theme),
             system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
             system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
@@ -510,6 +631,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           toStringOrNull(s.immich_url),
           toStringOrNull(s.immich_api_key),
           toStringOrNull(s.maloja_url),
+          toStringOrNull(s.plex_usernames),
           toStringOrNull(s.theme),
           toStringOrNull(s.system_light_theme),
           toStringOrNull(s.system_dark_theme),
@@ -891,6 +1013,157 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
+    // Media: items first (so external-source dedupe is resolved before
+    // check-ins and list items reference them), then check-ins, lists,
+    // and finally list memberships.
+    for (const item of backup.data.mediaItems) {
+      if (!item?.id || !item.media_type || !item.title) {
+        counts.mediaItems.skipped += 1;
+        errors.push('Skipped media item with missing id/media_type/title');
+        continue;
+      }
+
+      const result = await client.query(
+        `INSERT INTO media_items (
+           id, user_id, media_type, external_source, external_id,
+           title, author, release_year, image_url, external_url,
+           platform, page_count, series_name, series_position, series_count,
+           created_at, updated_at
+         )
+         VALUES (
+           $1, $2, $3, $4, $5,
+           $6, $7, $8, $9, $10,
+           $11, $12, $13, $14, $15,
+           COALESCE($16::timestamptz, NOW()), COALESCE($17::timestamptz, NOW())
+         )
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          item.id,
+          USER_ID,
+          item.media_type,
+          toStringOrNull(item.external_source),
+          toStringOrNull(item.external_id),
+          item.title,
+          toStringOrNull(item.author),
+          item.release_year != null ? toNumber(item.release_year, NaN) : null,
+          toStringOrNull(item.image_url),
+          toStringOrNull(item.external_url),
+          toStringOrNull(item.platform),
+          toIntOrNull(item.page_count),
+          toStringOrNull(item.series_name),
+          toIntOrNull(item.series_position),
+          toIntOrNull(item.series_count),
+          item.created_at || null,
+          item.updated_at || null,
+        ]
+      );
+
+      if (result.rowCount === 1) {
+        counts.mediaItems.inserted += 1;
+      } else {
+        counts.mediaItems.skipped += 1;
+      }
+    }
+
+    for (const checkin of backup.data.mediaCheckins) {
+      if (!checkin?.id || !checkin.media_item_id) {
+        counts.mediaCheckins.skipped += 1;
+        errors.push('Skipped media check-in with missing id/media_item_id');
+        continue;
+      }
+
+      const result = await client.query(
+        `INSERT INTO media_checkins (
+           id, user_id, media_item_id,
+           season_number, episode_number, episode_title,
+           checkin_type, rating, raw_score, notes, time_played_minutes,
+           checked_in_at, checkin_timezone, external_event_id,
+           created_at, updated_at
+         )
+         VALUES (
+           $1, $2, $3,
+           $4, $5, $6,
+           $7, $8, $9, $10, $11,
+           COALESCE($12::timestamptz, NOW()), $13,
+           $14,
+           COALESCE($15::timestamptz, NOW()),
+           COALESCE($16::timestamptz, NOW())
+         )
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          checkin.id,
+          USER_ID,
+          checkin.media_item_id,
+          checkin.season_number ?? null,
+          checkin.episode_number ?? null,
+          toStringOrNull(checkin.episode_title),
+          checkin.checkin_type || 'completed',
+          checkin.rating != null ? toNumber(checkin.rating, NaN) : null,
+          checkin.raw_score != null ? String(checkin.raw_score) : null,
+          toStringOrNull(checkin.notes),
+          toIntOrNull(checkin.time_played_minutes),
+          checkin.checked_in_at || null,
+          toStringOrNull(checkin.checkin_timezone) || 'UTC',
+          toStringOrNull(checkin.external_event_id),
+          checkin.created_at || null,
+          checkin.updated_at || null,
+        ]
+      );
+
+      if (result.rowCount === 1) {
+        counts.mediaCheckins.inserted += 1;
+      } else {
+        counts.mediaCheckins.skipped += 1;
+      }
+    }
+
+    for (const list of backup.data.mediaLists) {
+      if (!list?.id || !list.name) {
+        counts.mediaLists.skipped += 1;
+        errors.push('Skipped media list with missing id/name');
+        continue;
+      }
+
+      const result = await client.query(
+        `INSERT INTO media_lists (id, user_id, name, created_at, updated_at)
+         VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
+         ON CONFLICT (id) DO NOTHING`,
+        [list.id, USER_ID, list.name, list.created_at || null, list.updated_at || null]
+      );
+
+      if (result.rowCount === 1) {
+        counts.mediaLists.inserted += 1;
+      } else {
+        counts.mediaLists.skipped += 1;
+      }
+    }
+
+    for (const listItem of backup.data.mediaListItems) {
+      if (!listItem?.list_id || !listItem.media_item_id) {
+        counts.mediaListItems.skipped += 1;
+        errors.push('Skipped media list item with missing list_id/media_item_id');
+        continue;
+      }
+
+      const result = await client.query(
+        `INSERT INTO media_list_items (list_id, media_item_id, position, added_at)
+         VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
+         ON CONFLICT (list_id, media_item_id) DO NOTHING`,
+        [
+          listItem.list_id,
+          listItem.media_item_id,
+          toNumber(listItem.position, 0),
+          listItem.added_at || null,
+        ]
+      );
+
+      if (result.rowCount === 1) {
+        counts.mediaListItems.inserted += 1;
+      } else {
+        counts.mediaListItems.skipped += 1;
+      }
+    }
+
     await client.query('COMMIT');
 
     res.json({
@@ -930,11 +1203,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
     const deleteMoodCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
     const deleteSleepEntries = deleteAllCheckins || Boolean(rawOptions.delete_sleep_entries);
     const deleteTracks = Boolean(rawOptions.delete_tracks);
+    const deleteMediaItems = Boolean(rawOptions.delete_media_items);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
     const resetMoodSettings = Boolean(rawOptions.reset_mood_settings);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !deleteTracks && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
+    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !deleteTracks && !deleteMediaItems && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -979,6 +1253,29 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.track_files = trackFilesDeleted;
     }
 
+    if (deleteMediaItems) {
+      // Delete all locally stored media: check-ins, list items, cached episodes, items, and lists.
+      const mediaCheckinsResult = await client.query('DELETE FROM media_checkins WHERE user_id = $1', [USER_ID]);
+      counts.media_checkins = mediaCheckinsResult.rowCount ?? 0;
+      const listItemsResult = await client.query(
+        'DELETE FROM media_list_items WHERE list_id IN (SELECT id FROM media_lists WHERE user_id = $1)',
+        [USER_ID]
+      );
+      counts.media_list_items = listItemsResult.rowCount ?? 0;
+
+      const episodesResult = await client.query(
+        'DELETE FROM media_tv_episodes WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1)',
+        [USER_ID]
+      );
+      counts.media_tv_episodes = episodesResult.rowCount ?? 0;
+
+      const itemsResult = await client.query('DELETE FROM media_items WHERE user_id = $1', [USER_ID]);
+      counts.media_items = itemsResult.rowCount ?? 0;
+
+      const listsResult = await client.query('DELETE FROM media_lists WHERE user_id = $1', [USER_ID]);
+      counts.media_lists = listsResult.rowCount ?? 0;
+    }
+
     if (resetMoodSettings) {
       const groupResult = await client.query('DELETE FROM mood_activity_groups WHERE user_id = $1', [USER_ID]);
       counts.mood_activity_groups = groupResult.rowCount ?? 0;
@@ -996,14 +1293,15 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     if (resetIntegrationsSettings) {
       const integrationSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url)
-         VALUES ($1, NULL, NULL, NULL, NULL, NULL)
+        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, plex_usernames)
+         VALUES ($1, NULL, NULL, NULL, NULL, NULL, NULL)
          ON CONFLICT (user_id) DO UPDATE SET
            dawarich_url = NULL,
            dawarich_api_key = NULL,
            immich_url = NULL,
            immich_api_key = NULL,
            maloja_url = NULL,
+           plex_usernames = NULL,
            updated_at = NOW()`,
         [USER_ID]
       );

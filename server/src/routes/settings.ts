@@ -21,6 +21,8 @@ router.get('/', async (_req: Request, res: Response) => {
               us.dawarich_url, us.dawarich_api_key,
               us.immich_url, us.immich_api_key,
               us.maloja_url,
+              us.tmdb_api_key, us.tgdb_api_key, us.hardcover_api_key,
+              us.plex_usernames,
               us.llm_api_url, us.llm_model, us.llm_reasoning_level,
               us.llm_context_window, us.llm_image_support,
               COALESCE(us.theme, 'system') AS theme,
@@ -60,6 +62,8 @@ router.put('/', async (req: Request, res: Response) => {
   try {
     const {
       dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
+      tmdb_api_key, tgdb_api_key, hardcover_api_key,
+      plex_usernames,
       theme, system_light_theme, system_dark_theme,
       mood_icon_pack,
       distance_unit,
@@ -81,27 +85,41 @@ router.put('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'llm_image_support must be a boolean' });
     }
 
+    // An empty string explicitly clears the Plex username filter; an omitted
+    // value keeps the stored one (matching the COALESCE convention elsewhere).
+    const plexUsernamesValue = typeof plex_usernames === 'string' ? plex_usernames : null;
+
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, theme, system_light_theme, system_dark_theme, mood_icon_pack, distance_unit,
+      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
+                                  tmdb_api_key, tgdb_api_key, hardcover_api_key,
+                                  plex_usernames,
+                                  theme, system_light_theme, system_dark_theme, mood_icon_pack, distance_unit,
                                   llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, $17), COALESCE($9, $18), $10, $11,
-               $12, $13, $14, $15, $16)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+               $11, COALESCE($12, $21), COALESCE($13, $22), $14, $15,
+               $16, $17, $18, $19, $20)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
          immich_url = COALESCE($4, user_settings.immich_url),
          immich_api_key = COALESCE($5, user_settings.immich_api_key),
          maloja_url = COALESCE($6, user_settings.maloja_url),
-         theme = COALESCE($7, user_settings.theme),
-         system_light_theme = COALESCE($8, user_settings.system_light_theme, $17),
-         system_dark_theme = COALESCE($9, user_settings.system_dark_theme, $18),
-         mood_icon_pack = COALESCE($10, user_settings.mood_icon_pack),
-         distance_unit = COALESCE($11, user_settings.distance_unit),
-         llm_api_url = COALESCE($12, user_settings.llm_api_url),
-         llm_model = COALESCE($13, user_settings.llm_model),
-         llm_reasoning_level = COALESCE($14, user_settings.llm_reasoning_level),
-         llm_context_window = COALESCE($15, user_settings.llm_context_window),
-         llm_image_support = COALESCE($16, user_settings.llm_image_support),
+         tmdb_api_key = COALESCE($7, user_settings.tmdb_api_key),
+         tgdb_api_key = COALESCE($8, user_settings.tgdb_api_key),
+         hardcover_api_key = COALESCE($9, user_settings.hardcover_api_key),
+         plex_usernames = CASE WHEN $10 IS NULL THEN user_settings.plex_usernames
+                                WHEN $10 = '' THEN NULL
+                                ELSE $10 END,
+         theme = COALESCE($11, user_settings.theme),
+         system_light_theme = COALESCE($12, user_settings.system_light_theme, $21),
+         system_dark_theme = COALESCE($13, user_settings.system_dark_theme, $22),
+         mood_icon_pack = COALESCE($14, user_settings.mood_icon_pack),
+         distance_unit = COALESCE($15, user_settings.distance_unit),
+         llm_api_url = COALESCE($16, user_settings.llm_api_url),
+         llm_model = COALESCE($17, user_settings.llm_model),
+         llm_reasoning_level = COALESCE($18, user_settings.llm_reasoning_level),
+         llm_context_window = COALESCE($19, user_settings.llm_context_window),
+         llm_image_support = COALESCE($20, user_settings.llm_image_support),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -109,6 +127,8 @@ router.put('/', async (req: Request, res: Response) => {
         dawarich_url ?? null, dawarich_api_key ?? null,
         immich_url ?? null, immich_api_key ?? null,
         maloja_url ?? null,
+        tmdb_api_key ?? null, tgdb_api_key ?? null, hardcover_api_key ?? null,
+        plexUsernamesValue,
         theme ?? null,
         system_light_theme ?? null,
         system_dark_theme ?? null,
@@ -145,7 +165,7 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
     let updated = 0;
 
     for (const update of updates) {
-      if (!update?.id || (update.type !== 'venue' && update.type !== 'mood') || !update.suggested_timezone) {
+      if (!update?.id || (update.type !== 'venue' && update.type !== 'mood' && update.type !== 'media') || !update.suggested_timezone) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Each update must include id, type, and suggested_timezone' });
       }
@@ -156,23 +176,31 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
         return res.status(400).json({ error: `Unable to reconcile ${update.type} check-in ${update.id}` });
       }
 
+      // Label-only: the stored instant is the true moment the event happened;
+      // reconciliation only corrects the stored timezone label.
       if (update.type === 'venue') {
         await client.query(
           `UPDATE checkins
-           SET checked_in_at = $2::timestamptz,
-               checkin_timezone = $3,
+           SET checkin_timezone = $2,
                updated_at = NOW()
            WHERE id = $1`,
-          [update.id, applied.checkedInAt, applied.timeZone]
+          [update.id, applied.timeZone]
+        );
+      } else if (update.type === 'media') {
+        await client.query(
+          `UPDATE media_checkins
+           SET checkin_timezone = $2,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [update.id, applied.timeZone]
         );
       } else {
         await client.query(
           `UPDATE mood_checkins
-           SET checked_in_at = $2::timestamptz,
-               mood_timezone = $3,
+           SET mood_timezone = $2,
                updated_at = NOW()
            WHERE id = $1`,
-          [update.id, applied.checkedInAt, applied.timeZone]
+          [update.id, applied.timeZone]
         );
       }
 

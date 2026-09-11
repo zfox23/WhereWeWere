@@ -14,6 +14,7 @@ export function StartOverSection() {
     delete_mood_checkins: false,
     delete_sleep_entries: false,
     delete_tracks: false,
+    delete_media_items: false,
     reset_account_settings: false,
     reset_mood_settings: false,
     reset_integrations_settings: false,
@@ -110,6 +111,15 @@ export function StartOverSection() {
             onChange={() => toggleOption('delete_tracks')}
           />
           <span>All Tracks (including uploaded track files stored on the server)</span>
+        </label>
+        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={options.delete_media_items}
+            onChange={() => toggleOption('delete_media_items')}
+          />
+          <span>All Media (locally stored media items, check-ins, and lists — e.g. before re-importing a Yamtrack export)</span>
         </label>
         <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
           <input

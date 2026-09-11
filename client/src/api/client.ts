@@ -1,4 +1,18 @@
-import type { TimestampReconciliationScanResult, TrackEntry, TrackMapEntry } from '../types';
+import type {
+  TimestampReconciliationScanResult,
+  TrackEntry,
+  TrackMapEntry,
+  MediaSearchHit,
+  MediaItem,
+  MediaCheckIn,
+  MediaLibraryItem,
+  MediaList,
+  MediaStats,
+  MediaTvSeason,
+  YamtrackPreview,
+  YamtrackImportResult,
+  MediaSubtype,
+} from '../types';
 
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
@@ -8,14 +22,15 @@ function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
   return { ...headers, 'X-WhereWeWere-Token': API_ACCESS_TOKEN };
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: withAuthHeader({ 'Content-Type': 'application/json', ...options?.headers }),
     ...options,
   });
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(error.message || `Request failed: ${res.status}`);
+    // Server error bodies use { error: "..." }; fall back to `message`, then status.
+    throw new Error(error.error || error.message || `Request failed: ${res.status}`);
   }
   return res.json();
 }
@@ -359,6 +374,11 @@ export const sleepWebhook = {
   stats: () => request<{ count: number }>('/webhook/sleep-as-android/stats'),
 };
 
+// Plex webhook
+export const plexWebhook = {
+  stats: () => request<{ count: number }>('/webhook/plex/stats'),
+};
+
 // Backup / Restore
 export const backupApi = {
   export: async () => {
@@ -396,6 +416,7 @@ export const backupApi = {
       delete_mood_checkins: boolean;
       delete_sleep_entries: boolean;
       delete_tracks: boolean;
+      delete_media_items: boolean;
       reset_account_settings: boolean;
       reset_mood_settings: boolean;
       reset_integrations_settings: boolean;
@@ -499,6 +520,104 @@ export const settings = {
       method: 'POST',
       body: JSON.stringify({ updates }),
     }),
+};
+
+// Media check-ins
+export const media = {
+  search: (type: MediaSubtype, q: string) =>
+    request<{ results: MediaSearchHit[]; degraded: boolean }>(
+      `/media/search?${new URLSearchParams({ type, q })}`
+    ),
+  createItem: (data: {
+    media_type: MediaSubtype;
+    external_source?: string | null;
+    external_id?: string | null;
+    title: string;
+    author?: string | null;
+    release_year?: number | null;
+    image_url?: string | null;
+    external_url?: string | null;
+    platform?: string | null;
+    /** Book: page count of the default physical edition. */
+    page_count?: number | null;
+    /** Book: series name, if applicable. */
+    series_name?: string | null;
+    /** Book: this book's number within its series. */
+    series_position?: number | null;
+    /** Book: total number of books in its series. */
+    series_count?: number | null;
+  }) => request<MediaItem>('/media/items', { method: 'POST', body: JSON.stringify(data) }),
+  getItem: (id: string) => request<MediaItem>(`/media/items/${id}`),
+  listCheckins: (itemId: string) => request<MediaCheckIn[]>(`/media/items/${itemId}/checkins`),
+  createCheckin: (itemId: string, data: {
+    season_number?: number | null;
+    episode_number?: number | null;
+    episode_title?: string | null;
+    checkin_type: 'completed' | 'in_progress' | 'dropped';
+    rating?: number | null;
+    raw_score?: number | null;
+    notes?: string | null;
+    checked_in_at?: string | null;
+    timezone: string;
+    /** Total time played in minutes (games only). */
+    time_played_minutes?: number | null;
+  }) => request<MediaCheckIn>(`/media/items/${itemId}/checkins`, { method: 'POST', body: JSON.stringify(data) }),
+  updateCheckin: (id: string, data: Partial<{
+    checkin_type: string;
+    rating: number | null;
+    raw_score: number | null;
+    notes: string | null;
+    checked_in_at: string | null;
+    timezone: string;
+    time_played_minutes: number | null;
+  }>) => request<MediaCheckIn>(`/media/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCheckin: (id: string) =>
+    request<{ message: string; id: string }>(`/media/checkins/${id}`, { method: 'DELETE' }),
+  tvSeasons: (itemId: string) =>
+    request<{ seasons: MediaTvSeason[]; cached: boolean }>(`/media/tv/${itemId}/seasons`),
+  stats: (from?: string, to?: string) => {
+    const qp = new URLSearchParams();
+    if (from) qp.set('from', from);
+    if (to) qp.set('to', to);
+    return request<MediaStats>(`/media/stats?${qp.toString()}`);
+  },
+  library: (from?: string, to?: string, types?: MediaSubtype[]) => {
+    const qp = new URLSearchParams();
+    if (from) qp.set('from', from);
+    if (to) qp.set('to', to);
+    if (types && types.length > 0) qp.set('types', types.join(','));
+    const qs = qp.toString();
+    return request<MediaLibraryItem[]>(`/media/library${qs ? `?${qs}` : ''}`);
+  },
+  lists: () => request<MediaList[]>('/media/lists'),
+  createList: (name: string) =>
+    request<MediaList>('/media/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameList: (id: string, name: string) =>
+    request<MediaList>(`/media/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+  deleteList: (id: string) =>
+    request<{ message: string; id: string }>(`/media/lists/${id}`, { method: 'DELETE' }),
+  addItemToList: (listId: string, mediaItemId: string) =>
+    request<{ message: string }>(`/media/lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: mediaItemId }) }),
+  removeItemFromList: (listId: string, mediaItemId: string) =>
+    request<{ message: string }>(`/media/lists/${listId}/items/${mediaItemId}`, { method: 'DELETE' }),
+};
+
+// Yamtrack import
+export const yamtrackImport = {
+  preview: async (file: File) => {
+    const csv = await file.text();
+    return request<YamtrackPreview>('/import/yamtrack/preview', {
+      method: 'POST',
+      body: JSON.stringify({ csv }),
+    });
+  },
+  import: async (file: File) => {
+    const csv = await file.text();
+    return request<YamtrackImportResult>('/import/yamtrack/import', {
+      method: 'POST',
+      body: JSON.stringify({ csv }),
+    });
+  },
 };
 
 // LLM (Life Summary)

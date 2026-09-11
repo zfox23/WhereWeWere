@@ -1,5 +1,6 @@
 import { SwarmImportSection } from './SwarmImportSection';
 import { DaylioImportSection } from './DaylioImportSection';
+import { YamtrackImportSection } from './YamtrackImportSection';
 import { SleepAsAndroidImportSection } from './SleepAsAndroidImportSection';
 import { JobsSection } from './JobsSection';
 import { TimestampReconciliationSection } from './TimestampReconciliationSection';
@@ -17,6 +18,7 @@ export function DataTab({ jobRefreshKey, onImportComplete }: DataTabProps) {
       <SwarmImportSection onImportComplete={onImportComplete} />
       <DaylioImportSection />
       <SleepAsAndroidImportSection />
+      <YamtrackImportSection onImportComplete={onImportComplete} />
       <JobsSection refreshKey={jobRefreshKey} />
       <TimestampReconciliationSection />
       <BackupRestoreSection />

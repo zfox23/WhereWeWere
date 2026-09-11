@@ -17,10 +17,13 @@ import { timelineRouter } from './routes/timeline';
 import { importDaylioRouter } from './routes/import-daylio';
 import { importSleepAsAndroidRouter } from './routes/import-sleep-as-android';
 import { webhookSleepAsAndroidRouter } from './routes/webhook-sleep-as-android';
+import { webhookPlexRouter } from './routes/webhook-plex';
 import { backupRouter } from './routes/backup';
 import { sleepEntriesRouter } from './routes/sleep-entries';
 import { tracksRouter } from './routes/tracks';
 import { llmRouter } from './routes/llm';
+import { mediaRouter } from './routes/media';
+import { importYamtrackRouter } from './routes/import-yamtrack';
 import { runMigrations } from './db/runMigrations';
 
 export function createApp() {
@@ -84,10 +87,13 @@ export function createApp() {
   app.use('/api/v1/import/daylio', importDaylioRouter);
   app.use('/api/v1/import/sleep-as-android', importSleepAsAndroidRouter);
   app.use('/api/v1/webhook/sleep-as-android', webhookSleepAsAndroidRouter);
+  app.use('/api/v1/webhook/plex', webhookPlexRouter);
   app.use('/api/v1/sleep-entries', sleepEntriesRouter);
   app.use('/api/v1/tracks', tracksRouter);
   app.use('/api/v1/backup', backupRouter);
   app.use('/api/v1/llm', llmRouter);
+  app.use('/api/v1/media', mediaRouter);
+  app.use('/api/v1/import/yamtrack', importYamtrackRouter);
 
   return app;
 }
