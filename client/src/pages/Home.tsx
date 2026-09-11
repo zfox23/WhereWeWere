@@ -128,6 +128,7 @@ function ExpandableFAB() {
           >
             <Clapperboard size={18} className="text-violet-500" />
             Media
+            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">N</kbd>
           </Link>
           <Link
             to="/check-in"
@@ -439,7 +440,20 @@ export default function Home() {
         target.tagName === 'TEXTAREA' ||
         target.tagName === 'SELECT' ||
         target.isContentEditable;
-      if (isEditable || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isEditable || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+
+      const hotkeyRoutes: Record<string, string> = {
+        l: '/check-in',
+        m: '/mood-check-in',
+        s: '/sleep-check-in',
+        t: '/track-check-in',
+        n: '/media-check-in',
+      };
+      const route = hotkeyRoutes[e.key.toLowerCase()];
+      if (route) {
+        e.preventDefault();
+        navigate(route);
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);

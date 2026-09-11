@@ -33,16 +33,17 @@ interface MediaLibrarySectionProps {
   to: string;
 }
 
-type SortKey = 'rating' | 'checkin' | 'completed';
+type SortKey = 'rating' | 'checkin' | 'completed' | 'list';
 type SortDir = 'asc' | 'desc';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'rating', label: 'Rating' },
   { value: 'checkin', label: 'Last check-in' },
+  { value: 'rating', label: 'Rating' },
   { value: 'completed', label: 'Completed count' },
+  { value: 'list', label: 'Time added' },
 ];
 
-function sortValue(item: MediaLibraryItem, key: SortKey): number {
+function sortValue(item: MediaLibraryItem, key: SortKey, addedAtById?: Map<string, string>): number {
   switch (key) {
     case 'rating':
       return item.latest_rating ?? -Infinity;
@@ -50,6 +51,8 @@ function sortValue(item: MediaLibraryItem, key: SortKey): number {
       return new Date(item.last_checkin_at).getTime();
     case 'completed':
       return item.completed_count ?? 0;
+    case 'list':
+      return addedAtById?.get(item.id) ? new Date(addedAtById.get(item.id)!).getTime() : -Infinity;
   }
 }
 
@@ -72,6 +75,17 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
     () => (selectedList ? new Set(selectedList.items.map((i) => i.id)) : null),
     [selectedList]
   );
+
+  const selectedListAddedAt = useMemo(
+    () => (selectedList ? new Map(selectedList.items.map((i) => [i.id, i.added_at])) : undefined),
+    [selectedList]
+  );
+
+  // "Time added to this list" only makes sense with a list selected; fall back
+  // to the default sort if the list is cleared while that option is active.
+  useEffect(() => {
+    if (sortBy === 'list' && !selectedListId) setSortBy('checkin');
+  }, [sortBy, selectedListId]);
 
   const activeTypes = useMemo(
     () => MEDIA_SUBTYPE_LIST.filter((t) => selectedTypes.includes(t)),
@@ -156,8 +170,8 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       : items;
     const sorted = [...filtered];
     sorted.sort((a, b) => {
-      const va = sortValue(a, sortBy);
-      const vb = sortValue(b, sortBy);
+      const va = sortValue(a, sortBy, selectedListAddedAt);
+      const vb = sortValue(b, sortBy, selectedListAddedAt);
       // Both null ratings compare equal (avoid Infinity - Infinity = NaN).
       if (va === vb) {
         const ts = new Date(b.last_checkin_at).getTime() - new Date(a.last_checkin_at).getTime();
@@ -168,7 +182,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       return sortDir === 'asc' ? diff : -diff;
     });
     return sorted;
-  }, [items, sortBy, sortDir, selectedListIds]);
+  }, [items, sortBy, sortDir, selectedListIds, selectedListAddedAt]);
 
   const toggleDirection = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 
@@ -249,11 +263,13 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
             aria-label="Sort library by"
             className="text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
+            {SORT_OPTIONS.map((opt) => {
+              return (
+                <option key={opt.value} value={opt.value} disabled={opt.value === "list" && !selectedListId}>
+                  {opt.label}
+                </option>
+              )
+            })}
           </select>
           <button
             type="button"

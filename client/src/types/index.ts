@@ -434,6 +434,8 @@ export interface MediaListItemRef {
   title: string;
   image_url: string | null;
   author: string | null;
+  /** When the item was added to this list. */
+  added_at: string;
 }
 
 export interface MediaList {

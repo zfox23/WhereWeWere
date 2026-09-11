@@ -38,7 +38,7 @@ export default function MediaCard({ item }: MediaCardProps) {
             <img
               src={item.media_image_url}
               alt=""
-              className="w-12 h-16 object-cover rounded-lg shadow-sm group-hover:ring-2 group-hover:ring-primary-400 transition-shadow"
+              className="w-22 h-32 object-cover rounded-lg shadow-sm group-hover:ring-2 group-hover:ring-primary-400 transition-shadow"
               loading="lazy"
             />
           ) : (

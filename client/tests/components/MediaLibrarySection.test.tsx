@@ -135,6 +135,46 @@ describe('MediaLibrarySection', () => {
     expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
   });
 
+  it('sorts by time added to this list when a list is selected', async () => {
+    libraryMock.mockResolvedValueOnce([
+      { ...item, id: 'a', title: 'Alpha', last_checkin_at: '2023-03-01T00:00:00Z' },
+      { ...item, id: 'b', title: 'Bravo', last_checkin_at: '2023-03-02T00:00:00Z' },
+      { ...item, id: 'c', title: 'Charlie', last_checkin_at: '2023-03-03T00:00:00Z' },
+    ]);
+    listsMock.mockResolvedValueOnce([
+      {
+        id: 'list-1',
+        name: 'Watchlist',
+        created_at: '2023-01-01T00:00:00Z',
+        items: [
+          { id: 'a', media_type: 'movie', title: 'Alpha', image_url: null, author: null, added_at: '2023-05-03T00:00:00Z' },
+          { id: 'b', media_type: 'movie', title: 'Bravo', image_url: null, author: null, added_at: '2023-05-01T00:00:00Z' },
+          { id: 'c', media_type: 'movie', title: 'Charlie', image_url: null, author: null, added_at: '2023-05-02T00:00:00Z' },
+        ],
+      },
+    ]);
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+
+    const listSelect = screen.getByRole('combobox', { name: 'Filter by list' });
+    await user.selectOptions(listSelect, 'list-1');
+
+    const cardTitles = () => screen.getAllByRole('link').map((el) => el.textContent ?? '');
+    const orderOf = (...titles: string[]) =>
+      titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
+
+    // Last check-in descending (default) is independent of time added.
+    expect(orderOf('Charlie', 'Bravo', 'Alpha')).toEqual([0, 1, 2]);
+
+    const sortSelect = screen.getByRole('combobox', { name: 'Sort library by' });
+    await user.selectOptions(sortSelect, 'list');
+    // Default direction is descending: most recently added first.
+    expect(orderOf('Alpha', 'Charlie', 'Bravo')).toEqual([0, 1, 2]);
+    await user.click(screen.getByRole('button', { name: 'Sort ascending' }));
+    expect(orderOf('Bravo', 'Charlie', 'Alpha')).toEqual([0, 1, 2]);
+  });
+
   it('filters the library to items on the selected list and offers per-card removal', async () => {
     libraryMock.mockResolvedValueOnce([
       { ...item, id: 'a', title: 'Alpha' },
@@ -145,7 +185,7 @@ describe('MediaLibrarySection', () => {
         id: 'list-1',
         name: 'Watchlist',
         created_at: '2023-01-01T00:00:00Z',
-        items: [{ id: 'a', media_type: 'movie', title: 'Alpha', image_url: null, author: null }],
+        items: [{ id: 'a', media_type: 'movie', title: 'Alpha', image_url: null, author: null, added_at: '2023-05-01T00:00:00Z' }],
       },
     ]);
     renderSection();
@@ -180,7 +220,7 @@ describe('MediaLibrarySection', () => {
         id: 'list-1',
         name: 'Watchlist',
         created_at: '2023-01-01T00:00:00Z',
-        items: [{ id: 'item-1', media_type: 'movie', title: 'Dune', image_url: null, author: null }],
+        items: [{ id: 'item-1', media_type: 'movie', title: 'Dune', image_url: null, author: null, added_at: '2023-05-01T00:00:00Z' }],
       },
     ]);
     renderSection();

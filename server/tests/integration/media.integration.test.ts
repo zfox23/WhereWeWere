@@ -576,6 +576,16 @@ describe('Media check-in API', () => {
       expect(lists.body).toHaveLength(1);
       expect(lists.body[0].items).toHaveLength(1);
       expect(lists.body[0].items[0].title).toBe('Dune');
+      // Membership records when the item was added to the list.
+      expect(lists.body[0].items[0].added_at).toBeTruthy();
+      expect(Number.isNaN(Date.parse(lists.body[0].items[0].added_at))).toBe(false);
+
+      // Re-adding the same item keeps the original added_at.
+      await request(app)
+        .post(`/api/v1/media/lists/${created.body.id}/items`)
+        .send({ media_item_id: item.id });
+      const readded = await request(app).get('/api/v1/media/lists');
+      expect(readded.body[0].items[0].added_at).toBe(lists.body[0].items[0].added_at);
 
       const renamed = await request(app)
         .put(`/api/v1/media/lists/${created.body.id}`)

@@ -818,7 +818,8 @@ router.get('/lists', async (_req: Request, res: Response) => {
       `SELECT l.id AS list_id, l.name,
               json_agg(json_build_object(
                 'id', mi.id, 'media_type', mi.media_type, 'title', mi.title,
-                'image_url', mi.image_url, 'author', mi.author
+                'image_url', mi.image_url, 'author', mi.author,
+                'added_at', mli.added_at
               ) ORDER BY mli.position, mli.added_at) AS items
        FROM media_lists l
        LEFT JOIN media_list_items mli ON mli.list_id = l.id
