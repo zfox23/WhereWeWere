@@ -472,6 +472,8 @@ export interface MediaLibraryItem {
   last_checkin_at: string;
   last_checkin_timezone: string;
   last_checkin_type: 'completed' | 'in_progress' | 'dropped';
+  /** Number of completed check-ins for this item. */
+  completed_count: number;
 }
 
 export interface MediaTvSeason {

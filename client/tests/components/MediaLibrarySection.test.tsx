@@ -22,6 +22,7 @@ const item: MediaLibraryItem = {
   last_checkin_at: '2023-01-04T20:00:00Z',
   last_checkin_timezone: 'UTC',
   last_checkin_type: 'completed',
+  completed_count: 1,
 };
 
 function renderSection(props: { from?: string; to?: string } = {}) {
@@ -83,5 +84,35 @@ describe('MediaLibrarySection', () => {
     libraryMock.mockResolvedValueOnce([]);
     renderSection();
     await waitFor(() => expect(screen.getByText('No media checked in during this period.')).toBeTruthy());
+  });
+
+  it('sorts items by the selected key and direction', async () => {
+    libraryMock.mockResolvedValueOnce([
+      { ...item, id: 'a', title: 'Alpha', latest_rating: 2, last_checkin_at: '2023-01-01T00:00:00Z', completed_count: 1 },
+      { ...item, id: 'b', title: 'Bravo', latest_rating: 5, last_checkin_at: '2023-01-02T00:00:00Z', completed_count: 3 },
+      { ...item, id: 'c', title: 'Charlie', latest_rating: null, last_checkin_at: '2023-01-03T00:00:00Z', completed_count: 0 },
+    ]);
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+
+    const cardTitles = () =>
+      screen.getAllByRole('link').map((el) => el.textContent ?? '');
+    const orderOf = (...titles: string[]) =>
+      titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
+    // Default: last check-in descending.
+    expect(orderOf('Charlie', 'Bravo', 'Alpha')).toEqual([0, 1, 2]);
+
+    // Switch to rating descending first, then toggle to ascending; unrated items sort last in desc, first in asc.
+    const select = screen.getByRole('combobox', { name: 'Sort library by' });
+    await user.selectOptions(select, 'rating');
+    expect(orderOf('Bravo', 'Alpha', 'Charlie')).toEqual([0, 1, 2]);
+    // Direction starts as descending; button offers the switch to ascending.
+    await user.click(screen.getByRole('button', { name: 'Sort ascending' }));
+    expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
+
+    // Completed count ascending (0, 1, 3).
+    await user.selectOptions(select, 'completed');
+    expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
   });
 });

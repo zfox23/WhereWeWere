@@ -447,10 +447,13 @@ describe('Media check-in API', () => {
       expect(response.body[0].latest_rating).toBe(4);
       expect(response.body[0].last_checkin_type).toBe('completed');
       expect(response.body[0].last_checkin_at).toBe('2023-01-05T20:00:00.000Z');
+      // One completed check-in (the in_progress one is not counted).
+      expect(response.body[0].completed_count).toBe(1);
 
       expect(response.body[1].title).toBe('Dune');
       expect(response.body[1].latest_rating).toBe(2);
       expect(response.body[1].last_checkin_type).toBe('completed');
+      expect(response.body[1].completed_count).toBe(1);
     });
 
     it('filters by date range and media types', async () => {

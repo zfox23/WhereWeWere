@@ -706,7 +706,8 @@ router.get('/library', async (req: Request, res: Response) => {
               (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_rating,
               (ARRAY_AGG(mc.checked_in_at ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_at,
               (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_timezone,
-              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_type
+              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_type,
+              COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
        FROM media_checkins mc
        JOIN media_items mi ON mc.media_item_id = mi.id
        ${where}
@@ -725,6 +726,7 @@ router.get('/library', async (req: Request, res: Response) => {
       last_checkin_at: r.last_checkin_at,
       last_checkin_timezone: r.last_checkin_timezone,
       last_checkin_type: r.last_checkin_type,
+      completed_count: Number(r.completed_count),
     })));
   } catch (err) {
     console.error('Error getting media library:', err);

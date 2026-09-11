@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Loader2 } from 'lucide-react';
 import { media } from '../api/client';
 import Stars from './Stars';
 import {
@@ -33,11 +33,33 @@ interface MediaLibrarySectionProps {
   to: string;
 }
 
+type SortKey = 'rating' | 'checkin' | 'completed';
+type SortDir = 'asc' | 'desc';
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'rating', label: 'Rating' },
+  { value: 'checkin', label: 'Last check-in' },
+  { value: 'completed', label: 'Completed count' },
+];
+
+function sortValue(item: MediaLibraryItem, key: SortKey): number {
+  switch (key) {
+    case 'rating':
+      return item.latest_rating ?? -Infinity;
+    case 'checkin':
+      return new Date(item.last_checkin_at).getTime();
+    case 'completed':
+      return item.completed_count ?? 0;
+  }
+}
+
 export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   const [selectedTypes, setSelectedTypes] = useState<MediaSubtype[]>(getSelectedTypesFromLocation);
   const [items, setItems] = useState<MediaLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const [sortBy, setSortBy] = useState<SortKey>('checkin');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   const activeTypes = useMemo(
     () => MEDIA_SUBTYPE_LIST.filter((t) => selectedTypes.includes(t)),
@@ -76,6 +98,25 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
     }
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   }, [selectedTypes]);
+
+  const sortedItems = useMemo(() => {
+    const sorted = [...items];
+    sorted.sort((a, b) => {
+      const va = sortValue(a, sortBy);
+      const vb = sortValue(b, sortBy);
+      // Both null ratings compare equal (avoid Infinity - Infinity = NaN).
+      if (va === vb) {
+        const ts = new Date(b.last_checkin_at).getTime() - new Date(a.last_checkin_at).getTime();
+        if (ts !== 0) return ts;
+        return a.title.localeCompare(b.title);
+      }
+      const diff = va - vb;
+      return sortDir === 'asc' ? diff : -diff;
+    });
+    return sorted;
+  }, [items, sortBy, sortDir]);
+
+  const toggleDirection = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 
   useEffect(() => {
     if (activeTypes.length === 0) {
@@ -120,7 +161,32 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Library</h3>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Library</h3>
+        <div className="flex items-center gap-1.5">
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            aria-label="Sort library by"
+            className="text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={toggleDirection}
+            aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
+            title={sortDir === 'asc' ? 'Currently ascending — click for descending' : 'Currently descending — click for ascending'}
+            className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            {sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+          </button>
+        </div>
+      </div>
 
       {/* Media type filter chips */}
       <div className="flex flex-wrap gap-1.5 mb-4">
@@ -155,7 +221,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
         <p className="text-sm text-gray-400">No media checked in during this period.</p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {items.map((item) => {
+          {sortedItems.map((item) => {
             const config = MEDIA_SUBTYPES[item.media_type] || MEDIA_SUBTYPES.movie;
             const href = `${config.detailBase}/${item.id}/${item.title ? slugify(item.title) : ''}`;
             return (
