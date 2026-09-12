@@ -15,6 +15,7 @@ import {
   Plus,
   Route,
   Save,
+  Scissors,
   Trash2,
   X,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ import 'leaflet/dist/leaflet.css';
 import { tracks, settings } from '../api/client';
 import type { TrackEntry } from '../types';
 import TrackGraph from '../components/TrackGraph';
+import DualRangeSlider from '../components/DualRangeSlider';
 import { formatDistance, formatSpeed, type DistanceUnit } from '../utils/geo';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
 import { useTheme } from '../contexts/ThemeContext';
@@ -71,6 +73,69 @@ function formatTime(dateStr: string, timezone?: string | null): string {
     minute: '2-digit',
     ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
   }).format(date);
+}
+
+/** Format epoch ms as a `datetime-local` input value (YYYY-MM-DDTHH:mm) in the given timezone. */
+function formatMsAsDatetimeLocal(ms: number, timezone?: string | null): string {
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  };
+  const displayTimeZone = normalizeTimezoneForDisplay(timezone);
+  if (displayTimeZone) options.timeZone = displayTimeZone;
+  const parts = new Intl.DateTimeFormat('en-CA', options).formatToParts(new Date(ms));
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? '0';
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}`;
+}
+
+/** Parse a `datetime-local` value (a wall-clock time in the given timezone) to epoch ms. */
+function datetimeLocalToMs(value: string, timezone?: string | null): number {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return NaN;
+  const targetWallMs = Date.parse(`${value}:00Z`);
+  if (Number.isNaN(targetWallMs)) return NaN;
+  const displayTimeZone = normalizeTimezoneForDisplay(timezone);
+  if (!displayTimeZone) return targetWallMs;
+  const wallClockAt = (ms: number) => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: displayTimeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date(ms));
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '0';
+    const hour = get('hour') === '24' ? '00' : get('hour');
+    return Date.UTC(
+      Number(get('year')),
+      Number(get('month')) - 1,
+      Number(get('day')),
+      Number(hour),
+      Number(get('minute')),
+      Number(get('second'))
+    );
+  };
+  let ms = targetWallMs - (wallClockAt(targetWallMs) - targetWallMs);
+  // One correction pass to handle a DST boundary between the probe and the result.
+  ms -= wallClockAt(ms) - targetWallMs;
+  return ms;
+}
+
+/** Wall-clock window (first/last timestamped point) of a track, or null if untimed. */
+function trackWindowMs(track: TrackEntry): { startMs: number; endMs: number } | null {
+  const times = (track.points ?? []).map((p) => p.t);
+  const startMs = times.find((t) => t != null) ?? Date.parse(track.started_at);
+  const endMs = [...times].reverse().find((t) => t != null) ?? Date.parse(track.ended_at);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
+  return { startMs, endMs };
 }
 
 function getLocalDateKey(dateStr: string, timezone?: string | null): string {
@@ -209,11 +274,22 @@ export default function TrackDetail() {
   const [typeSuggestOpen, setTypeSuggestOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [trimStartText, setTrimStartText] = useState('');
+  const [trimEndText, setTrimEndText] = useState('');
 
   const startEditing = () => {
     if (!track) return;
     setEditName(track.name);
     setEditActivityType(track.activity_type ?? '');
+    const trackWin = trackWindowMs(track);
+    setTrimStart(0);
+    setTrimEnd((track.geometry?.length ?? 1) - 1);
+    if (trackWin) {
+      setTrimStartText(formatMsAsDatetimeLocal(trackWin.startMs, track.timezone));
+      setTrimEndText(formatMsAsDatetimeLocal(trackWin.endMs, track.timezone));
+    }
     setSaveError(null);
     setIsEditing(true);
     tracks
@@ -232,6 +308,95 @@ export default function TrackDetail() {
   const isNewType =
     trimmedType.length > 0 &&
     !activityTypes.some((t) => t.toLowerCase() === trimmedType.toLowerCase());
+
+  // ── Trim ────────────────────────────────────────────────────────────────
+  const trackPointCount = track?.geometry?.length ?? 0;
+  const canTrim =
+    track != null &&
+    track.geometry != null &&
+    track.points != null &&
+    track.geometry.length === track.points.length &&
+    track.geometry.length >= 2;
+  const trimChanged = canTrim && (trimStart !== 0 || trimEnd !== trackPointCount - 1);
+  const trimKeptCount = canTrim ? Math.max(0, trimEnd - trimStart + 1) : 0;
+
+  const pointTimeLabel = (index: number): string | null => {
+    if (!track?.points) return null;
+    const t = track.points[index]?.t;
+    return t != null ? formatTime(new Date(t).toISOString(), track.timezone) : null;
+  };
+
+  const trackWindow = useMemo(
+    () => (canTrim && track ? trackWindowMs(track) : null),
+    [canTrim, track]
+  );
+  const windowStartText = trackWindow
+    ? formatMsAsDatetimeLocal(trackWindow.startMs, track?.timezone)
+    : '';
+  const windowEndText = trackWindow
+    ? formatMsAsDatetimeLocal(trackWindow.endMs, track?.timezone)
+    : '';
+
+  /** `datetime-local` value of the point at `index`, or null when it has no timestamp. */
+  const pointTimeText = (index: number): string | null => {
+    const t = track?.points?.[index]?.t;
+    return t != null && track ? formatMsAsDatetimeLocal(t, track.timezone) : null;
+  };
+  // Current kept-window endpoints as wall-clock strings (for cross-constraining the pickers).
+  const startPointText = pointTimeText(trimStart) ?? windowStartText;
+  const endPointText = pointTimeText(trimEnd) ?? windowEndText;
+
+  /** Set the keep-start index (clamped to leave ≥ 2 points) and sync the picker. */
+  const setTrimStartIndex = (index: number) => {
+    const clamped = Math.min(Math.max(0, index), trimEnd - 1);
+    setTrimStart(clamped);
+    const text = pointTimeText(clamped);
+    if (text) setTrimStartText(text);
+  };
+
+  /** Set the keep-end index (clamped to leave ≥ 2 points) and sync the picker. */
+  const setTrimEndIndex = (index: number) => {
+    const clamped = Math.min(Math.max(trimStart + 1, index), trackPointCount - 1);
+    setTrimEnd(clamped);
+    const text = pointTimeText(clamped);
+    if (text) setTrimEndText(text);
+  };
+
+  const handleTrimStartPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setTrimStartText(raw);
+    const ms = datetimeLocalToMs(raw, track?.timezone);
+    if (Number.isNaN(ms) || !track?.points) return;
+    // First point at or after the picked time (clamped by setTrimStartIndex).
+    let index = track.points.findIndex((p) => p.t != null && p.t >= ms);
+    if (index === -1) index = trackPointCount - 1;
+    setTrimStartIndex(index);
+  };
+
+  const handleTrimEndPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setTrimEndText(raw);
+    const ms = datetimeLocalToMs(raw, track?.timezone);
+    if (Number.isNaN(ms) || !track?.points) return;
+    // Last point at or before the picked time (clamped by setTrimEndIndex).
+    let index = -1;
+    for (let i = trackPointCount - 1; i >= 0; i--) {
+      const t = track.points[i]?.t;
+      if (t != null && t <= ms) {
+        index = i;
+        break;
+      }
+    }
+    if (index === -1) index = 0;
+    setTrimEndIndex(index);
+  };
+
+  const resetTrim = () => {
+    setTrimStart(0);
+    setTrimEnd(trackPointCount - 1);
+    setTrimStartText(windowStartText);
+    setTrimEndText(windowEndText);
+  };
 
   const typeSuggestions = useMemo(() => {
     const q = trimmedType.toLowerCase();
@@ -265,6 +430,9 @@ export default function TrackDetail() {
     setSaving(true);
     setSaveError(null);
     try {
+      if (trimChanged) {
+        await tracks.trim(id, trimStart, trimEnd);
+      }
       const updated = await tracks.update(id, {
         name,
         activity_type: trimmedType || null,
@@ -457,6 +625,94 @@ export default function TrackDetail() {
             )}
           </div>
 
+          {canTrim && (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  <Scissors size={13} className="text-indigo-500" />
+                  Trim track
+                </span>
+                {trimChanged && (
+                  <button
+                    type="button"
+                    onClick={resetTrim}
+                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Keep a portion of the track, e.g. to drop extra recording after
+                you forgot to stop. Stats are recomputed from the remaining
+                points.
+              </p>
+              <div className="pt-1">
+                <DualRangeSlider
+                  min={0}
+                  max={trackPointCount - 1}
+                  minGap={1}
+                  lowValue={trimStart}
+                  highValue={trimEnd}
+                  onLowChange={setTrimStartIndex}
+                  onHighChange={setTrimEndIndex}
+                  lowLabel="Trim: first point to keep"
+                  highLabel="Trim: last point to keep"
+                  minLabel={
+                    trackWindow
+                      ? formatTime(new Date(trackWindow.startMs).toISOString(), track.timezone)
+                      : undefined
+                  }
+                  maxLabel={
+                    trackWindow
+                      ? formatTime(new Date(trackWindow.endMs).toISOString(), track.timezone)
+                      : undefined
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block">
+                  <span className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+                    Keep from
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={trimStartText}
+                    min={windowStartText}
+                    max={endPointText}
+                    onChange={handleTrimStartPick}
+                    aria-label="Trim: keep from time"
+                    className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+                    Keep through
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={trimEndText}
+                    min={startPointText}
+                    max={windowEndText}
+                    onChange={handleTrimEndPick}
+                    aria-label="Trim: keep through time"
+                    className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                Keeping {trimKeptCount.toLocaleString()} of{' '}
+                {trackPointCount.toLocaleString()} points
+                {(pointTimeLabel(trimStart) || pointTimeLabel(trimEnd)) && (
+                  <> · {pointTimeLabel(trimStart) ?? '—'} to {pointTimeLabel(trimEnd) ?? '—'}</>
+                )}
+                {trimChanged && (
+                  <> · drops {trimStart.toLocaleString()} from the start, {(trackPointCount - 1 - trimEnd).toLocaleString()} from the end</>
+                )}
+              </p>
+            </div>
+          )}
+
           {saveError && (
             <p className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
               <AlertCircle size={13} className="shrink-0" />
@@ -580,6 +836,11 @@ export default function TrackDetail() {
         <div className="flex items-center gap-2 px-1.5 pb-2">
           <Flag size={14} className="text-rose-500" />
           <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Track Route</span>
+          {isEditing && trimChanged && (
+            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+              Trim preview
+            </span>
+          )}
           <span className="ml-auto flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
             <span className="inline-flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-green-600 inline-block" /> Start
@@ -590,7 +851,11 @@ export default function TrackDetail() {
           </span>
         </div>
         <TrackMap
-          coordinates={track.geometry || []}
+          coordinates={
+            isEditing && trimChanged
+              ? (track.geometry || []).slice(trimStart, trimEnd + 1)
+              : track.geometry || []
+          }
           hoverPosition={
             hoverIndex != null && track.geometry?.[hoverIndex]
               ? [track.geometry[hoverIndex][1], track.geometry[hoverIndex][0]]

@@ -281,9 +281,9 @@ export function computeTrackSegmentTotals(
 
 /**
  * Compute track stats from an ordered list of points. Shared by the GPX
- * and TCX parsers.
+ * and TCX parsers and the track trim endpoint.
  */
-function computeTrackStats(
+export function computeTrackStats(
   points: GpxPoint[],
   name: string,
   activityType: string | null

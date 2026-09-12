@@ -6,7 +6,11 @@ import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
-import { parseTrackFile } from '../services/gpx';
+import {
+  computeTrackStats,
+  parseTrackFile,
+  type GpxPoint,
+} from '../services/gpx';
 import { getVenueTimezone } from '../services/timestampReconciliation';
 import {
   buildGpx,
@@ -275,45 +279,53 @@ router.get('/activity-types', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Fetch a track including its geometry and per-point series, shaped like the
+ * GET /:id response. Returns null when the track doesn't exist.
+ */
+async function fetchTrackFull(id: string | string[]): Promise<any | null> {
+  const result = await query(
+    `SELECT t.id, t.user_id, t.name, t.activity_type, t.timezone,
+            t.started_at, t.ended_at,
+            t.distance_m, t.elapsed_time_s, t.moving_time_s,
+            t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
+            t.avg_hr, t.max_hr, t.point_count,
+            t.created_at, t.updated_at,
+            t.points,
+            ST_AsGeoJSON(t.path) AS geojson
+     FROM tracks t
+     WHERE t.id = $1`,
+    [id]
+  );
+
+  if (result.rows.length === 0) return null;
+
+  const row = result.rows[0];
+  const api: any = trackRowToApi(row);
+  let coordinates: [number, number][] = [];
+  try {
+    const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
+    if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
+      coordinates = gj.coordinates;
+    }
+  } catch {
+    // leave empty
+  }
+  api.geometry = coordinates;
+  api.points =
+    typeof row.points === 'string' ? JSON.parse(row.points) : row.points ?? null;
+  return api;
+}
+
 // GET /:id - get single track with geometry (GeoJSON coordinates)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
-    const result = await query(
-      `SELECT t.id, t.user_id, t.name, t.activity_type, t.timezone,
-              t.started_at, t.ended_at,
-              t.distance_m, t.elapsed_time_s, t.moving_time_s,
-              t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
-              t.avg_hr, t.max_hr, t.point_count,
-              t.created_at, t.updated_at,
-              t.points,
-              ST_AsGeoJSON(t.path) AS geojson
-       FROM tracks t
-       WHERE t.id = $1`,
-      [id]
-    );
-
-    if (result.rows.length === 0) {
+    const track = await fetchTrackFull(id);
+    if (!track) {
       return res.status(404).json({ error: 'Track not found' });
     }
-
-    const row = result.rows[0];
-    const api: any = trackRowToApi(row);
-    let coordinates: [number, number][] = [];
-    try {
-      const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
-      if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
-        coordinates = gj.coordinates;
-      }
-    } catch {
-      // leave empty
-    }
-    api.geometry = coordinates;
-    api.points =
-      typeof row.points === 'string' ? JSON.parse(row.points) : row.points ?? null;
-
-    res.json(api);
+    res.json(track);
   } catch (err) {
     console.error('Error getting track:', err);
     res.status(500).json({ error: 'Failed to get track' });
@@ -497,39 +509,106 @@ router.put('/:id', async (req: Request, res: Response) => {
     // Re-fetch with geometry/points so the response matches the GET /:id
     // shape (trackRowToApi alone omits them, which would blank out the map
     // and graph on the client after an edit).
-    const full = await query(
-      `SELECT t.id, t.user_id, t.name, t.activity_type, t.timezone,
-              t.started_at, t.ended_at,
-              t.distance_m, t.elapsed_time_s, t.moving_time_s,
-              t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
-              t.avg_hr, t.max_hr, t.point_count,
-              t.created_at, t.updated_at,
-              t.points,
-              ST_AsGeoJSON(t.path) AS geojson
-       FROM tracks t
-       WHERE t.id = $1`,
-      [id]
-    );
-
-    const row = full.rows[0];
-    const api: any = trackRowToApi(row);
-    let coordinates: [number, number][] = [];
-    try {
-      const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
-      if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
-        coordinates = gj.coordinates;
-      }
-    } catch {
-      // leave empty
-    }
-    api.geometry = coordinates;
-    api.points =
-      typeof row.points === 'string' ? JSON.parse(row.points) : row.points ?? null;
-
-    res.json(api);
+    res.json(await fetchTrackFull(id));
   } catch (err) {
     console.error('Error updating track:', err);
     res.status(500).json({ error: 'Failed to update track' });
+  }
+});
+
+// POST /:id/trim - remove points from the start and/or end of the track and
+// recompute all derived stats from the remaining points. `start_index` and
+// `end_index` are inclusive, 0-based indices into the track's point array.
+router.post('/:id/trim', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const startIndex = Number(req.body?.start_index);
+    const endIndex = Number(req.body?.end_index);
+    if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex)) {
+      return res.status(400).json({
+        error: 'start_index and end_index must be integers',
+      });
+    }
+
+    const track = await fetchTrackFull(id);
+    if (!track) {
+      return res.status(404).json({ error: 'Track not found' });
+    }
+
+    const coordinates: [number, number][] = track.geometry ?? [];
+    const points: { t: number | null; ele: number | null; hr: number | null }[] | null =
+      track.points;
+    if (!points || points.length !== coordinates.length || coordinates.length < 2) {
+      return res.status(409).json({
+        error:
+          'This track has no per-point data, so it can\u2019t be trimmed. Re-upload the GPX file to enable trimming.',
+      });
+    }
+
+    const n = coordinates.length;
+    if (startIndex < 0 || endIndex >= n || startIndex > endIndex) {
+      return res.status(400).json({
+        error: `Invalid range: indices must satisfy 0 <= start_index <= end_index < ${n}`,
+      });
+    }
+    if (endIndex - startIndex + 1 < 2) {
+      return res.status(400).json({ error: 'A track must keep at least 2 points' });
+    }
+
+    const gpxPoints: GpxPoint[] = [];
+    for (let i = startIndex; i <= endIndex; i++) {
+      const [lon, lat] = coordinates[i];
+      const p = points[i];
+      gpxPoints.push({
+        lat,
+        lon,
+        ele: p.ele,
+        time: p.t != null ? new Date(p.t) : null,
+        hr: p.hr,
+      });
+    }
+
+    let stats;
+    try {
+      stats = computeTrackStats(gpxPoints, track.name, track.activity_type);
+    } catch (err: any) {
+      return res.status(400).json({
+        error: err?.message || 'Could not recompute track stats',
+      });
+    }
+
+    await query(
+      `UPDATE tracks SET
+         started_at = $1::timestamptz, ended_at = $2::timestamptz,
+         distance_m = $3, elapsed_time_s = $4, moving_time_s = $5,
+         elevation_gain_m = $6, avg_speed_mps = $7, max_speed_mps = $8,
+         avg_hr = $9, max_hr = $10, point_count = $11,
+         path = ST_SetSRID(ST_GeomFromText($12), 4326),
+         points = $13::jsonb,
+         updated_at = NOW()
+       WHERE id = $14`,
+      [
+        stats.startedAt.toISOString(),
+        stats.endedAt.toISOString(),
+        stats.distanceM,
+        stats.elapsedTimeS,
+        stats.movingTimeS,
+        stats.elevationGainM,
+        stats.avgSpeedMps,
+        stats.maxSpeedMps,
+        stats.avgHr,
+        stats.maxHr,
+        stats.pointCount,
+        stats.wktLineString,
+        JSON.stringify(stats.points),
+        id,
+      ]
+    );
+
+    res.json(await fetchTrackFull(id));
+  } catch (err) {
+    console.error('Error trimming track:', err);
+    res.status(500).json({ error: 'Failed to trim track' });
   }
 });
 

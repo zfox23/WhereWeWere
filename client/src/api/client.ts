@@ -311,6 +311,11 @@ export const tracks = {
   get: (id: string) => request<any>(`/tracks/${id}`),
   update: (id: string, data: { name?: string; activity_type?: string | null }) =>
     request<TrackEntry>(`/tracks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  trim: (id: string, start_index: number, end_index: number) =>
+    request<TrackEntry>(`/tracks/${id}/trim`, {
+      method: 'POST',
+      body: JSON.stringify({ start_index, end_index }),
+    }),
   activityTypes: () => request<string[]>('/tracks/activity-types'),
   delete: (id: string) =>
     request<{ message: string; id: string }>(`/tracks/${id}`, { method: 'DELETE' }),

@@ -364,3 +364,64 @@ html[data-bg-gradient="flat"] {
 }
 
 
+
+/* ── Dual-handle range slider (trim control) ──
+   Two native range inputs are stacked; the inputs are click-through and only
+   the thumbs are interactive, so both handles can be dragged independently.
+   The visual track (grey base + indigo selection) is rendered by the parent. */
+.dual-range {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.dual-range::-webkit-slider-runnable-track {
+  -webkit-appearance: none;
+  height: 100%;
+  background: transparent;
+  border: none;
+}
+.dual-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  height: 18px;
+  width: 18px;
+  margin-top: 1px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 2px solid #6366f1;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: ew-resize;
+}
+.dual-range::-moz-range-track {
+  height: 100%;
+  background: transparent;
+  border: none;
+}
+.dual-range::-moz-range-thumb {
+  pointer-events: auto;
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 2px solid #6366f1;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: ew-resize;
+}
+.dual-range:focus-visible {
+  outline: none;
+}
+.dual-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+.dual-range:focus-visible::-moz-range-thumb {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
