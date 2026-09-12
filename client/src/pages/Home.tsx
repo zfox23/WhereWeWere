@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon, Route, Clapperboard } from 'lucide-react';
+import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon, Route, Clapperboard, AlignJustify, Rows3 } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats, tracks } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import CheckInCard from '../components/CheckInCard';
@@ -197,6 +197,7 @@ export default function Home() {
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [openTimelineDotDate, setOpenTimelineDotDate] = useState<string | null>(null);
   const [iconPack, setIconPack] = useState('emoji');
+  const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
 
@@ -207,7 +208,16 @@ export default function Home() {
       if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
       if (s.dawarich_url) setDawarichUrl(s.dawarich_url.replace(/\/+$/, ''));
       if (s.mood_icon_pack) setIconPack(s.mood_icon_pack);
+      if (s.timeline_density === 'compact' || s.timeline_density === 'comfortable') setTimelineDensity(s.timeline_density);
     }).catch(() => {});
+  }, []);
+
+  const toggleTimelineDensity = useCallback(() => {
+    setTimelineDensity((prev) => {
+      const next = prev === 'compact' ? 'comfortable' : 'compact';
+      settings.update({ timeline_density: next }).catch(() => {});
+      return next;
+    });
   }, []);
 
   // Load all mood activities for Activity filter dropdown
@@ -911,6 +921,18 @@ export default function Home() {
           />
         </div>
         <button
+          onClick={toggleTimelineDensity}
+          className={`px-3 py-3 rounded-2xl border transition-all ${
+            timelineDensity === 'compact'
+              ? 'bg-primary-50/70 border-primary-300/60 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
+              : 'bg-white/70 dark:bg-gray-900/70 border-white/40 dark:border-gray-700/40 text-gray-600 dark:text-gray-400 hover:bg-white/90 dark:hover:bg-gray-800/90 shadow-sm shadow-black/3'
+          }`}
+          title={timelineDensity === 'compact' ? 'Comfortable density' : 'Compact density'}
+          aria-label={timelineDensity === 'compact' ? 'Switch to comfortable density' : 'Switch to compact density'}
+        >
+          {timelineDensity === 'compact' ? <AlignJustify size={18} /> : <Rows3 size={18} />}
+        </button>
+        <button
           onClick={() => setShowFilters(!showFilters)}
           className={`px-3 py-3 rounded-2xl border transition-all ${
             showFilters || hasActiveFilters
@@ -1155,7 +1177,7 @@ export default function Home() {
               </div>
               {/* Cards with vertical line */}
               {dateItems.length > 0 ? (
-                <div className="ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-3 pb-4 space-y-3">
+                <div className={`ml-[5px] border-l-2 border-gray-200 dark:border-gray-700 pl-3 pb-4 ${timelineDensity === 'compact' ? 'space-y-1.5' : 'space-y-3'}`}>
                   {dateItems.map((item, index) => {
                     const revealStyle: CSSProperties = {
                       transitionDelay: `${Math.min(index, 8) * 36}ms`,
@@ -1177,10 +1199,12 @@ export default function Home() {
                             photos={photosMap[item.id] ?? null}
                             scrobbles={dedupedScrobblesMap[item.id]}
                             malojaUrl={malojaUrl}
+                            compact={timelineDensity === 'compact'}
                           />
                         ) : item.type === 'sleep' ? (
                           <SleepCard
                             item={item}
+                            compact={timelineDensity === 'compact'}
                           />
                         ) : item.type === 'track' ? (
                           <TrackCard
@@ -1189,9 +1213,10 @@ export default function Home() {
                             photos={photosMap[item.id] ?? null}
                             scrobbles={dedupedScrobblesMap[item.id]}
                             malojaUrl={malojaUrl}
+                            compact={timelineDensity === 'compact'}
                           />
                         ) : item.type === 'media' ? (
-                          <MediaCard item={item} />
+                          <MediaCard item={item} compact={timelineDensity === 'compact'} />
                         ) : (
                           <CheckInCard
                             checkin={{
@@ -1214,6 +1239,7 @@ export default function Home() {
                             scrobbles={dedupedScrobblesMap[item.id]}
                             malojaUrl={malojaUrl}
                             dawarichUrl={dawarichUrl}
+                            compact={timelineDensity === 'compact'}
                           />
                         )}
                       </div>

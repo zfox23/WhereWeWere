@@ -8,9 +8,10 @@ import { slugify } from '../utils/slugify';
 
 interface MediaCardProps {
   item: TimelineItem;
+  compact?: boolean;
 }
 
-export default function MediaCard({ item }: MediaCardProps) {
+export default function MediaCard({ item, compact = false }: MediaCardProps) {
   const subtype = item.media_type || 'movie';
   const config = MEDIA_SUBTYPES[subtype] || MEDIA_SUBTYPES.movie;
   const isTv = subtype === 'tv_show';
@@ -23,6 +24,10 @@ export default function MediaCard({ item }: MediaCardProps) {
     ? `${config.detailBase}/${item.media_item_id}/${slugify(item.media_title || '')}`
     : config.searchPath;
 
+  // For media timeline items, item.id is the media_checkins row id, so we can
+  // deep-link directly to the specific check-in on the detail page.
+  const checkinHref = item.media_item_id ? `${detailHref}#checkin-${item.id}` : detailHref;
+
   const badge =
     item.media_checkin_type === 'completed'
       ? { label: CHECKIN_TYPE_LABELS.completed, cls: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' }
@@ -30,8 +35,53 @@ export default function MediaCard({ item }: MediaCardProps) {
         ? { label: CHECKIN_TYPE_LABELS.dropped, cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' }
         : { label: CHECKIN_TYPE_LABELS.in_progress, cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' };
 
-  return (
-    <div className="bg-white/70 dark:bg-gray-900/70 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+ if (compact) {
+   return (
+     <div className="bg-white/60 dark:bg-gray-900/60 rounded-xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-2.5">
+       <div className="flex items-center gap-2 min-w-0">
+         <Link to={detailHref} className="shrink-0 group">
+           {item.media_image_url ? (
+             <img
+               src={item.media_image_url}
+               alt=""
+               className="w-8 h-11 object-cover rounded-md shadow-sm group-hover:ring-2 group-hover:ring-primary-400 transition-shadow"
+               loading="lazy"
+             />
+           ) : (
+             <div className="w-8 h-11 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-sm">
+               {config.icon}
+             </div>
+           )}
+         </Link>
+         <div className="min-w-0 flex-1">
+           <Link
+             to={detailHref}
+             className="block text-sm font-semibold text-gray-900 dark:text-gray-100 truncate hover:text-primary-600 dark:hover:text-primary-400"
+           >
+             {item.media_title || 'Untitled'}
+           </Link>
+           <span className="text-[11px] text-gray-500 dark:text-gray-400">
+             {config.label}
+             {epLabel ? ` · ${epLabel}` : ''}
+           </span>
+         </div>
+         {item.media_rating != null && item.media_rating > 0 && (
+           <Stars value={item.media_rating} size={10} />
+         )}
+         <TimestampLink
+           to={checkinHref}
+           checkedInAt={item.checked_in_at}
+           timezone={item.media_timezone}
+           mode="time"
+           classNameOverride="mt-0 shrink-0"
+         />
+       </div>
+     </div>
+   );
+ }
+
+ return (
+   <div className="bg-white/70 dark:bg-gray-900/70 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <div className="flex gap-3">
         <Link to={detailHref} className="shrink-0 group">
           {item.media_image_url ? (
@@ -83,7 +133,7 @@ export default function MediaCard({ item }: MediaCardProps) {
         </div>
       </div>
       <TimestampLink
-        to={detailHref}
+        to={checkinHref}
         checkedInAt={item.checked_in_at}
         timezone={item.media_timezone}
         mode="time"

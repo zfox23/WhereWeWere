@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowDown, ArrowUp, Loader2, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Loader2, Search, Trash2, X } from 'lucide-react';
 import { media } from '../api/client';
 import Stars from './Stars';
 import {
@@ -63,6 +63,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>('checkin');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [filterQuery, setFilterQuery] = useState('');
   const [lists, setLists] = useState<MediaList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
 
@@ -165,9 +166,25 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   };
 
   const visibleItems = useMemo(() => {
-    const filtered = selectedListIds
+    let filtered = selectedListIds
       ? items.filter((item) => selectedListIds.has(item.id))
       : items;
+    const query = filterQuery.trim().toLowerCase();
+    if (query) {
+      filtered = filtered.filter((item) => {
+        const haystack = [
+          item.title,
+          item.author,
+          MEDIA_SUBTYPES[item.media_type]?.label,
+          MEDIA_SUBTYPES[item.media_type]?.plural,
+          CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(query);
+      });
+    }
     const sorted = [...filtered];
     sorted.sort((a, b) => {
       const va = sortValue(a, sortBy, selectedListAddedAt);
@@ -182,7 +199,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       return sortDir === 'asc' ? diff : -diff;
     });
     return sorted;
-  }, [items, sortBy, sortDir, selectedListIds, selectedListAddedAt]);
+  }, [items, filterQuery, sortBy, sortDir, selectedListIds, selectedListAddedAt]);
 
   const toggleDirection = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 
@@ -257,6 +274,21 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
           )}
         </div>
         <div className="flex items-center gap-1.5">
+          <div className="relative">
+            <Search
+              size={12}
+              className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+              aria-hidden
+            />
+            <input
+              type="search"
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              placeholder="Filter…"
+              aria-label="Filter media library"
+              className="w-24 sm:w-36 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-6 pr-2 py-1 text-gray-600 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
@@ -313,9 +345,11 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
         </div>
       ) : visibleItems.length === 0 ? (
         <p className="text-sm text-gray-400">
-          {selectedList
-            ? `No media from "${selectedList.name}" checked in during this period.`
-            : 'No media checked in during this period.'}
+          {items.length > 0 && filterQuery.trim()
+            ? `No media matching "${filterQuery.trim()}".`
+            : selectedList
+              ? `No media from "${selectedList.name}" checked in during this period.`
+              : 'No media checked in during this period.'}
         </p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">

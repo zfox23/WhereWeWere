@@ -10,6 +10,7 @@ const router = Router();
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const DISTANCE_UNITS = new Set(['metric', 'imperial']);
+const TIMELINE_DENSITIES = new Set(['comfortable', 'compact']);
 const DEFAULT_SYSTEM_LIGHT_THEME = 'sunrise';
 const DEFAULT_SYSTEM_DARK_THEME = 'midnight';
 
@@ -29,7 +30,8 @@ router.get('/', async (_req: Request, res: Response) => {
                     COALESCE(us.system_light_theme, $2) AS system_light_theme,
                     COALESCE(us.system_dark_theme, $3) AS system_dark_theme,
               COALESCE(us.mood_icon_pack, 'emoji') AS mood_icon_pack,
-              COALESCE(us.distance_unit, 'metric') AS distance_unit
+              COALESCE(us.distance_unit, 'metric') AS distance_unit,
+              COALESCE(us.timeline_density, 'comfortable') AS timeline_density
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.id = $1`,
@@ -67,11 +69,16 @@ router.put('/', async (req: Request, res: Response) => {
       theme, system_light_theme, system_dark_theme,
       mood_icon_pack,
       distance_unit,
+      timeline_density,
       llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support,
     } = req.body;
 
     if (typeof distance_unit !== 'undefined' && !DISTANCE_UNITS.has(distance_unit)) {
       return res.status(400).json({ error: 'distance_unit must be either "metric" or "imperial"' });
+    }
+
+    if (typeof timeline_density !== 'undefined' && !TIMELINE_DENSITIES.has(timeline_density)) {
+      return res.status(400).json({ error: 'timeline_density must be either "comfortable" or "compact"' });
     }
 
     if (typeof llm_context_window !== 'undefined' && llm_context_window !== null) {
@@ -93,10 +100,10 @@ router.put('/', async (req: Request, res: Response) => {
       `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
                                   tmdb_api_key, tgdb_api_key, hardcover_api_key,
                                   plex_usernames,
-                                  theme, system_light_theme, system_dark_theme, mood_icon_pack, distance_unit,
+                                  theme, system_light_theme, system_dark_theme, mood_icon_pack, distance_unit, timeline_density,
                                   llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-               $11, COALESCE($12, $21), COALESCE($13, $22), $14, $15,
+               $11, COALESCE($12, $21), COALESCE($13, $22), $14, $15, $23,
                $16, $17, $18, $19, $20)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
@@ -115,6 +122,7 @@ router.put('/', async (req: Request, res: Response) => {
          system_dark_theme = COALESCE($13, user_settings.system_dark_theme, $22),
          mood_icon_pack = COALESCE($14, user_settings.mood_icon_pack),
          distance_unit = COALESCE($15, user_settings.distance_unit),
+         timeline_density = COALESCE($23, user_settings.timeline_density),
          llm_api_url = COALESCE($16, user_settings.llm_api_url),
          llm_model = COALESCE($17, user_settings.llm_model),
          llm_reasoning_level = COALESCE($18, user_settings.llm_reasoning_level),
@@ -141,6 +149,7 @@ router.put('/', async (req: Request, res: Response) => {
         llm_image_support ?? null,
         DEFAULT_SYSTEM_LIGHT_THEME,
         DEFAULT_SYSTEM_DARK_THEME,
+        timeline_density ?? null,
       ]
     );
 

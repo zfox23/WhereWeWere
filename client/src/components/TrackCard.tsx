@@ -16,6 +16,7 @@ interface TrackCardProps {
   photos?: ImmichAsset[] | null;
   scrobbles?: Scrobble[];
   malojaUrl?: string | null;
+  compact?: boolean;
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -28,7 +29,7 @@ function formatDuration(totalSeconds: number): string {
   return `${hours}h ${minutes}m`;
 }
 
-export default function TrackCard({ item, immichUrl, photos, scrobbles, malojaUrl }: TrackCardProps) {
+export default function TrackCard({ item, immichUrl, photos, scrobbles, malojaUrl, compact = false }: TrackCardProps) {
   const { pathname } = useLocation();
   const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
@@ -49,6 +50,29 @@ export default function TrackCard({ item, immichUrl, photos, scrobbles, malojaUr
   const timezone = item.track_timezone || 'UTC';
   const distanceM = Number(item.track_distance_m || 0);
   const elapsedS = Number(item.track_elapsed_time_s || 0);
+
+  if (compact) {
+    return (
+      <CardShell compact>
+        <div className="flex items-center gap-2 min-w-0">
+          <Route size={14} className="text-rose-500 shrink-0" />
+          <Link
+            to={`/tracks/${item.id}`}
+            className="text-sm font-semibold text-rose-700 dark:text-rose-300 hover:text-rose-600 dark:hover:text-rose-200 transition-colors truncate"
+          >
+            {name}
+          </Link>
+          <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400 truncate">
+            · {formatDistance(distanceM, distanceUnit)}
+          </span>
+          <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 shrink-0">
+            <Clock size={12} />
+            {formatDuration(elapsedS)}
+          </span>
+        </div>
+      </CardShell>
+    );
+  }
 
   return (
     <CardShell>

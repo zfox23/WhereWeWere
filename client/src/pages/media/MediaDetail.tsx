@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Loader2, ArrowLeft, ExternalLink, PlusCircle, ListPlus, Trash2, X,
+  Loader2, ArrowLeft, ExternalLink, Link2, PlusCircle, ListPlus, Trash2, X,
 } from 'lucide-react';
 import { media } from '../../api/client';
 import type { MediaCheckIn, MediaItem, MediaList, MediaSubtype } from '../../types';
@@ -26,6 +26,9 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
   const [checkins, setCheckins] = useState<MediaCheckIn[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [highlightedCheckinId, setHighlightedCheckinId] = useState<string | null>(null);
+  const [copiedCheckinId, setCopiedCheckinId] = useState<string | null>(null);
+  const location = useLocation();
 
   const [showListModal, setShowListModal] = useState(false);
   const [lists, setLists] = useState<MediaList[]>([]);
@@ -54,6 +57,33 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     })();
     return () => { cancelled = true; };
   }, [id]);
+
+  // Deep-link support: #checkin-<id> in the URL scrolls to and highlights the
+  // matching check-in row (used by the MediaCard timestamp links on the timeline).
+  useEffect(() => {
+    const match = window.location.hash.match(/^#checkin-(.+)$/);
+    if (!match || loading || checkins.length === 0) return;
+    const checkinId = match[1];
+    if (!checkins.some((c) => c.id === checkinId)) return;
+    const el = document.getElementById(`checkin-${checkinId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    setHighlightedCheckinId(checkinId);
+    const timer = setTimeout(() => setHighlightedCheckinId(null), 4000);
+    return () => clearTimeout(timer);
+  }, [checkins, loading, location.hash]);
+
+  const handleCopyCheckinLink = async (checkinId: string) => {
+    const url = `${window.location.pathname}#checkin-${checkinId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedCheckinId(checkinId);
+      setTimeout(() => setCopiedCheckinId((prev) => (prev === checkinId ? null : prev)), 1500);
+    } catch {
+      // Clipboard unavailable (e.g. insecure context); ignore.
+    }
+  };
 
   const openListModal = async () => {
     try {
@@ -245,7 +275,15 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
             </thead>
             <tbody>
               {checkins.map((c) => (
-                <tr key={c.id} className="border-b border-gray-50 dark:border-gray-800/50 last:border-0">
+                <tr
+                  key={c.id}
+                  id={`checkin-${c.id}`}
+                  className={`border-b border-gray-50 dark:border-gray-800/50 last:border-0 transition-colors ${
+                    highlightedCheckinId === c.id
+                      ? 'bg-primary-50 dark:bg-primary-900/30'
+                      : ''
+                  }`}
+                >
                   <td className="px-4 py-2.5">
                     <a
                       href={homeDateUrl(c)}
@@ -294,13 +332,26 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                     )}
                   </td>
                   <td className="px-2 py-2.5">
-                    <button
-                      onClick={() => handleDeleteCheckin(c.id)}
-                      className="p-1.5 text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400"
-                      title="Delete check-in"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center gap-0.5 justify-end">
+                      <button
+                        onClick={() => handleCopyCheckinLink(c.id)}
+                        className="p-1.5 text-gray-300 hover:text-primary-500 dark:text-gray-600 dark:hover:text-primary-400"
+                        title="Copy link to this check-in"
+                      >
+                        {copiedCheckinId === c.id ? (
+                          <span className="text-[10px] text-green-600 dark:text-green-400">copied</span>
+                        ) : (
+                          <Link2 size={14} />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCheckin(c.id)}
+                        className="p-1.5 text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400"
+                        title="Delete check-in"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

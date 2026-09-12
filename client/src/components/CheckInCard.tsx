@@ -15,6 +15,7 @@ interface CheckInCardProps {
   scrobbles?: Scrobble[];
   malojaUrl?: string | null;
   dawarichUrl?: string | null;
+  compact?: boolean;
 }
 
 function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): string {
@@ -27,12 +28,40 @@ function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): stri
   return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
 }
 
-export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl, dawarichUrl }: CheckInCardProps) {
+export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl, dawarichUrl, compact = false }: CheckInCardProps) {
   const { pathname } = useLocation();
 
   const isHomePage = pathname === '/';
   const showOnThisDay = pathname.startsWith("/venues");
   const resolvedAssets = useResolvedPhotos(checkin.id, immichUrl, photos);
+
+  if (compact) {
+    return (
+      <CardShell compact>
+        <div className="flex items-center gap-2 min-w-0">
+          <MapPin size={14} className="text-primary-500 shrink-0" />
+          <Link
+            to={`/venues/${checkin.venue_id}`}
+            className="text-sm font-semibold text-primary-700 dark:text-primary-400 hover:text-primary-600 dark:hover:text-primary-300 transition-colors truncate"
+          >
+            {checkin.venue_name || 'Unknown Venue'}
+          </Link>
+          {checkin.venue_category && (
+            <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 shrink-0">
+              {checkin.venue_category}
+            </span>
+          )}
+          <TimestampLink
+            to={`/checkins/${checkin.id}`}
+            checkedInAt={checkin.checked_in_at}
+            timezone={checkin.venue_timezone}
+            mode="time"
+            classNameOverride="ml-auto mt-0 shrink-0"
+          />
+        </div>
+      </CardShell>
+    );
+  }
 
   return (
     <CardShell>

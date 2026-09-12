@@ -6,6 +6,7 @@ import { normalizeTimezoneForDisplay } from '../utils/checkin';
 
 interface SleepCardProps {
   item: TimelineItem;
+  compact?: boolean;
 }
 
 function formatDuration(startedAt: string, endedAt: string): string {
@@ -91,12 +92,38 @@ function formatTimeWithShortDate(dateTime: string, timezone: string): string {
   }
 }
 
-export default function SleepCard({ item }: SleepCardProps) {
+export default function SleepCard({ item, compact = false }: SleepCardProps) {
   const startedAt = item.sleep_started_at || item.checked_in_at;
   const endedAt = item.sleep_ended_at || item.checked_in_at;
   const timezone = item.sleep_timezone || 'UTC';
   const timezoneLabel = getTimezoneAbbreviation(startedAt, timezone);
   const rating = Number(item.sleep_rating || 0);
+
+  if (compact) {
+    return (
+      <CardShell compact>
+        <div className="flex items-center gap-2 min-w-0">
+          <Moon size={14} className="text-indigo-500 shrink-0" />
+          <Link
+            to={`/sleep-entries/${item.id}`}
+            className="text-sm font-semibold text-indigo-700 dark:text-indigo-300 truncate"
+          >
+            Slept {formatDuration(startedAt, endedAt)}
+          </Link>
+          {rating > 0 && (
+            <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">{renderStars(rating)}</span>
+          )}
+          <Link
+            to={`/sleep-entries/${item.id}`}
+            className="ml-auto text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors shrink-0"
+            title={`${formatClockTime(startedAt, timezone)} - ${formatTimeWithShortDate(endedAt, timezone)} ${timezoneLabel}`}
+          >
+            {formatClockTime(startedAt, timezone)} - {formatClockTime(endedAt, timezone)}
+          </Link>
+        </div>
+      </CardShell>
+    );
+  }
 
   return (
     <CardShell>

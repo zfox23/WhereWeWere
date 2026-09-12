@@ -18,6 +18,7 @@ interface MoodCheckInCardProps {
   photos?: ImmichAsset[] | null;
   scrobbles?: Scrobble[];
   malojaUrl?: string | null;
+  compact?: boolean;
 }
 
 function renderIcon(iconName?: string): React.ReactNode {
@@ -27,11 +28,38 @@ function renderIcon(iconName?: string): React.ReactNode {
   return <IconComponent size={14} className="shrink-0 text-current" />;
 }
 
-export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl }: MoodCheckInCardProps) {
+export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl, compact = false }: MoodCheckInCardProps) {
   const { pathname } = useLocation();
   const mood = typeof item.mood === 'number' && item.mood >= 1 && item.mood <= 5 ? item.mood : 3;
   const activities = Array.isArray(item.activities) ? item.activities : [];
   const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos);
+
+  if (compact) {
+    return (
+      <CardShell compact>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`flex items-center justify-center w-6 h-6 rounded-lg shrink-0 ${MOOD_BG_COLORS[mood]}`}>
+            <MoodIcon mood={mood} pack={iconPack} size={14} />
+          </div>
+          <span className={`text-sm font-semibold truncate ${MOOD_COLORS[mood]}`}>
+            {MOOD_LABELS[mood]}
+          </span>
+          {activities.length > 0 && (
+            <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400 truncate">
+              · {activities.map((a) => a.name).join(', ')}
+            </span>
+          )}
+          <TimestampLink
+            to={`/mood-checkins/${item.id}`}
+            checkedInAt={item.checked_in_at}
+            timezone={item.mood_timezone}
+            mode="time"
+            classNameOverride="ml-auto mt-0 shrink-0"
+          />
+        </div>
+      </CardShell>
+    );
+  }
 
   return (
     <CardShell>

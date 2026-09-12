@@ -568,6 +568,7 @@ export interface UserSettings {
   system_dark_theme: AppThemeId;
   mood_icon_pack: 'emoji' | 'lucide' | 'nature';
   distance_unit: 'metric' | 'imperial';
+  timeline_density: 'comfortable' | 'compact';
 }
 
 export interface ImmichAsset {
