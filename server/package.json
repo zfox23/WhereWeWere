@@ -10,6 +10,7 @@
     "backfill:checkin-timezone": "tsx src/db/backfill-checkin-timezone.ts",
     "backfill:track-max-speeds": "tsx src/db/backfill-track-max-speeds.ts",
     "backfill:track-avg-speeds": "tsx src/db/backfill-track-avg-speeds.ts",
+    "import:games": "tsx src/db/import-games-csv.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

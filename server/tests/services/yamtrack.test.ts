@@ -61,7 +61,8 @@ describe('parseProgressMinutes', () => {
 describe('scoreToRating', () => {
   it('maps raw scores into 0-4 star bands', () => {
     expect(scoreToRating('10')).toBe(4);
-    expect(scoreToRating('9.5')).toBe(3);
+    expect(scoreToRating('9')).toBe(4);
+    expect(scoreToRating('9.5')).toBe(4);
     expect(scoreToRating('7.5')).toBe(3);
     expect(scoreToRating('7.49')).toBe(2);
     expect(scoreToRating('5')).toBe(2);
