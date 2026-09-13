@@ -173,8 +173,8 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
      FROM media_items mi
      LEFT JOIN LATERAL (
        SELECT MAX(mc.checked_in_at) AS last_checkin_at,
-              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_type,
-              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS my_rating
+              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.created_at DESC))[1] AS last_checkin_type,
+              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.created_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS my_rating
        FROM media_checkins mc
        WHERE mc.media_item_id = mi.id
      ) mc_latest ON true
@@ -355,7 +355,7 @@ router.get('/items/:id', async (req: Request, res: Response) => {
     const statsResult = await query(
       `SELECT MAX(checked_in_at) AS last_checkin_at,
               COUNT(*) AS checkin_count,
-              (ARRAY_AGG(rating ORDER BY checked_in_at DESC) FILTER (WHERE rating IS NOT NULL))[1] AS my_rating,
+              (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS my_rating,
               COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count,
               (ARRAY_AGG(time_played_minutes ORDER BY checked_in_at DESC, id DESC)
                  FILTER (WHERE time_played_minutes IS NOT NULL))[1] AS total_time_played_minutes
@@ -469,42 +469,82 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
 
 // PUT /checkins/:id - update a media check-in
 //
-// Semantics: partial, COALESCE-based update. Every field is only written when
-// it is present in the body (with a valid value), so omitted fields keep their
-// stored value. Setting a field back to null is intentionally unsupported via
-// this endpoint (passing null/empty is treated the same as omitting it); edit
-// UI that needs to clear fields will have to extend this contract.
+// Semantics: partial update. Every field that is *present* in the body is
+// written (null explicitly clears it); omitted fields keep their stored value.
+// The edit UI sends a full draft (all fields present), so nothing is stale.
 router.put('/checkins/:id', async (req: Request, res: Response) => {
   try {
-    const { checkin_type, rating, raw_score, notes, checked_in_at, timezone, time_played_minutes } = req.body;
+    const body = req.body as Record<string, unknown>;
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const add = (clause: string, value: unknown) => {
+      params.push(value);
+      sets.push(clause);
+    };
 
+    if (body.season_number !== undefined) {
+      const v = typeof body.season_number === 'number' && Number.isInteger(body.season_number) && body.season_number > 0
+        ? body.season_number : null;
+      add('season_number = $' + (params.length + 1), v);
+    }
+    if (body.episode_number !== undefined) {
+      const v = typeof body.episode_number === 'number' && Number.isInteger(body.episode_number) && body.episode_number > 0
+        ? body.episode_number : null;
+      add('episode_number = $' + (params.length + 1), v);
+    }
+    if (body.episode_title !== undefined) {
+      add('episode_title = $' + (params.length + 1), typeof body.episode_title === 'string' && body.episode_title.trim() ? body.episode_title : null);
+    }
+    if (body.checkin_type !== undefined) {
+      const v = typeof body.checkin_type === 'string' && CHECKIN_TYPES.has(body.checkin_type) ? body.checkin_type : null;
+      if (v == null) return res.status(400).json({ error: 'checkin_type must be one of completed, in_progress, dropped' });
+      add('checkin_type = $' + (params.length + 1), v);
+    }
+    if (body.rating !== undefined) {
+      const v = typeof body.rating === 'number' && Number.isInteger(body.rating) && body.rating >= 0 && body.rating <= 4 ? body.rating : null;
+      if (v == null && body.rating != null) return res.status(400).json({ error: 'rating must be an integer 0-4' });
+      add('rating = $' + (params.length + 1), v);
+    }
+    if (body.raw_score !== undefined) {
+      const v = body.raw_score != null && body.raw_score !== '' ? Number(body.raw_score) : null;
+      if (v != null && !Number.isFinite(v)) return res.status(400).json({ error: 'raw_score must be a number' });
+      add('raw_score = $' + (params.length + 1), v);
+    }
+    if (body.notes !== undefined) {
+      add('notes = $' + (params.length + 1), typeof body.notes === 'string' && body.notes.trim() ? body.notes : null);
+    }
+    if (body.checked_in_at !== undefined) {
+      const v = body.checked_in_at ? new Date(body.checked_in_at as string) : null;
+      if (body.checked_in_at && (v == null || Number.isNaN(v.getTime()))) {
+        return res.status(400).json({ error: 'checked_in_at must be a valid ISO timestamp' });
+      }
+      add('checked_in_at = $' + (params.length + 1) + (v ? '::timestamptz' : ''), v);
+    }
+    if (body.timezone !== undefined) {
+      const v = typeof body.timezone === 'string' && body.timezone ? body.timezone : null;
+      add('checkin_timezone = $' + (params.length + 1), v);
+    }
+    if (body.time_played_minutes !== undefined) {
+      const v = typeof body.time_played_minutes === 'number' && Number.isFinite(body.time_played_minutes) && body.time_played_minutes >= 0
+        ? Math.round(body.time_played_minutes) : null;
+      add('time_played_minutes = $' + (params.length + 1), v);
+    }
+
+    if (sets.length === 0) {
+      const existing = await query('SELECT * FROM media_checkins WHERE id = $1 AND user_id = $2', [req.params.id, USER_ID]);
+      if (existing.rows.length === 0) return res.status(404).json({ error: 'Media check-in not found' });
+      return res.json(existing.rows[0]);
+    }
+
+    const idIdx = params.length + 1;
+    const userIdx = idIdx + 1;
+    params.push(req.params.id, USER_ID);
     const result = await query(
       `UPDATE media_checkins
-       SET checkin_type = COALESCE($2, checkin_type),
-           rating = COALESCE($3, rating),
-           raw_score = COALESCE($4, raw_score),
-           notes = COALESCE($5, notes),
-           checked_in_at = COALESCE($6::timestamptz, checked_in_at),
-           checkin_timezone = COALESCE($7, checkin_timezone),
-           time_played_minutes = COALESCE($9, time_played_minutes),
-           updated_at = NOW()
-       WHERE id = $1 AND user_id = $8
+       SET ${sets.join(', ')}, updated_at = NOW()
+       WHERE id = $${idIdx} AND user_id = $${userIdx}
        RETURNING *`,
-      [
-        req.params.id,
-        checkin_type && CHECKIN_TYPES.has(checkin_type) ? checkin_type : null,
-        rating != null && Number.isInteger(rating) && rating >= 0 && rating <= 4 ? rating : null,
-        raw_score != null && raw_score !== '' ? Number(raw_score) : null,
-        notes !== undefined ? (notes || null) : null,
-        checked_in_at || null,
-        typeof timezone === 'string' && timezone ? timezone : null,
-        USER_ID,
-        time_played_minutes !== undefined
-          ? (typeof time_played_minutes === 'number' && Number.isFinite(time_played_minutes) && time_played_minutes >= 0
-              ? Math.round(time_played_minutes)
-              : null)
-          : null,
-      ]
+      params
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media check-in not found' });

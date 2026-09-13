@@ -568,6 +568,9 @@ export const media = {
     time_played_minutes?: number | null;
   }) => request<MediaCheckIn>(`/media/items/${itemId}/checkins`, { method: 'POST', body: JSON.stringify(data) }),
   updateCheckin: (id: string, data: Partial<{
+    season_number: number | null;
+    episode_number: number | null;
+    episode_title: string | null;
     checkin_type: string;
     rating: number | null;
     raw_score: number | null;

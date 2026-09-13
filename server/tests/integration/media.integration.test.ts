@@ -176,14 +176,17 @@ describe('Media check-in API', () => {
       expect(updated.body.notes).toBe('original');
       expect(Number(updated.body.time_played_minutes)).toBe(90);
 
-      // Null/empty values are treated as omitted (null-out is intentionally
-      // unsupported through this endpoint).
-      const nullOut = await request(app)
+      // Explicitly present fields are written, including clearing to null
+      // (the edit UI sends a full draft, so this is the expected contract).
+      const cleared = await request(app)
         .put(`/api/v1/media/checkins/${created.body.id}`)
         .send({ notes: null, rating: null });
-      expect(nullOut.status).toBe(200);
-      expect(nullOut.body.notes).toBe('original');
-      expect(Number(nullOut.body.rating)).toBe(4);
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.notes).toBeNull();
+      expect(cleared.body.rating).toBeNull();
+      // checkin_type / raw_score were omitted, so they are preserved.
+      expect(cleared.body.checkin_type).toBe('in_progress');
+      expect(Number(cleared.body.raw_score)).toBe(7);
 
       // 404 for an unknown check-in.
       const missing = await request(app)
@@ -220,6 +223,90 @@ describe('Media check-in API', () => {
       expect(Number(created.body.season_number)).toBe(1);
       expect(Number(created.body.episode_number)).toBe(2);
       expect(created.body.episode_title).toBe('Good Orientation');
+    });
+
+    it('full-draft update edits every field and clears to null when present', async () => {
+      const item = (
+        await request(app).post('/api/v1/media/items').send({ media_type: 'tv_show', title: 'Severance' })
+      ).body;
+      const created = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({
+          checkin_type: 'completed',
+          season_number: 1,
+          episode_number: 2,
+          episode_title: 'Good Orientation',
+          rating: 4,
+          raw_score: 9.5,
+          notes: 'original',
+          checked_in_at: '2023-01-02T20:00:00Z',
+          timezone: 'UTC',
+        });
+      expect(created.status).toBe(201);
+      const id = created.body.id;
+
+      // The edit UI sends a full draft; every present field is applied and
+      // explicit nulls clear the stored value.
+      const updated = await request(app)
+        .put(`/api/v1/media/checkins/${id}`)
+        .send({
+          season_number: 2,
+          episode_number: 5,
+          episode_title: '',
+          checkin_type: 'in_progress',
+          rating: null,
+          raw_score: null,
+          notes: '',
+          checked_in_at: '2023-01-03T09:30:00-05:00',
+          timezone: 'America/Chicago',
+        });
+      expect(updated.status).toBe(200);
+      expect(Number(updated.body.season_number)).toBe(2);
+      expect(Number(updated.body.episode_number)).toBe(5);
+      expect(updated.body.episode_title).toBeNull();
+      expect(updated.body.checkin_type).toBe('in_progress');
+      expect(updated.body.rating).toBeNull();
+      expect(updated.body.raw_score).toBeNull();
+      expect(updated.body.notes).toBeNull();
+      expect(updated.body.checkin_timezone).toBe('America/Chicago');
+      expect(new Date(updated.body.checked_in_at).toISOString()).toBe('2023-01-03T14:30:00.000Z');
+
+      // Invalid checkin_type is rejected with a 400.
+      const bad = await request(app)
+        .put(`/api/v1/media/checkins/${id}`)
+        .send({ checkin_type: 'abandoned' });
+      expect(bad.status).toBe(400);
+    });
+
+    it('item rating follows the most recent check-in that has a rating', async () => {
+      const item = (
+        await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })
+      ).body;
+
+      // Older check-in rated 2.
+      const older = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({ checkin_type: 'completed', rating: 2, checked_in_at: '2023-01-01T20:00:00Z', timezone: 'UTC' });
+      expect(older.status).toBe(201);
+
+      // A newer unrated check-in must not erase the rating.
+      const unrated = await request(app)
+        .post(`/api/v1/media/items/${item.id}/checkins`)
+        .send({ checkin_type: 'in_progress', checked_in_at: '2023-01-02T20:00:00Z', timezone: 'UTC' });
+      expect(unrated.status).toBe(201);
+
+      let detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(Number(detail.body.my_rating)).toBe(2);
+
+      // Re-rate on the newest check-in: the item rating follows it.
+      const reRated = await request(app)
+        .put(`/api/v1/media/checkins/${unrated.body.id}`)
+        .send({ rating: 4 });
+      expect(reRated.status).toBe(200);
+      expect(Number(reRated.body.rating)).toBe(4);
+
+      detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(Number(detail.body.my_rating)).toBe(4);
     });
 
     it('never decreases the game total time played (server clamp)', async () => {

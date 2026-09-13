@@ -124,3 +124,58 @@ export function dateInTimezone(iso: string, timezone?: string | null): string {
     return d.toLocaleDateString('en-CA');
   }
 }
+
+/**
+ * `<input type="datetime-local">` value (YYYY-MM-DDTHH:mm) for the instant
+ * `iso` as displayed in `timezone` (falls back to device time).
+ */
+export function isoToDatetimeValue(iso: string, timezone?: string | null): string {
+  const d = new Date(iso);
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone || undefined,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+  } catch {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+}
+
+/**
+ * ISO string for the wall-clock `value` (YYYY-MM-DDTHH:mm from a
+ * datetime-local input) interpreted in `timezone` — i.e. the absolute
+ * instant that instant in `timezone` represents. The offset probe via
+ * formatToParts keeps this correct even when `timezone` differs from the
+ * device timezone.
+ */
+export function datetimeValueToIso(value: string, timezone: string): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const wallUtcMs = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds());
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone || undefined,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(wallUtcMs));
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+    const tzInterpretedMs = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+    const offsetMs = tzInterpretedMs - wallUtcMs;
+    return new Date(wallUtcMs - offsetMs).toISOString();
+  } catch {
+    return null;
+  }
+}

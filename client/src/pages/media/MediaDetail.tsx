@@ -1,20 +1,42 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Loader2, ArrowLeft, ExternalLink, Link2, PlusCircle, ListPlus, Trash2, X,
+  Loader2, ArrowLeft, ExternalLink, PlusCircle, ListPlus, Trash2, X, Calendar,
+  Pencil, Check,
 } from 'lucide-react';
 import { media } from '../../api/client';
 import type { MediaCheckIn, MediaItem, MediaList, MediaSubtype } from '../../types';
 import Stars from '../../components/Stars';
+import ScorePicker from '../../components/ScorePicker';
 import { MarkdownNote } from '../../components/checkin-card/MarkdownNote';
 import {
   MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, dateInTimezone, formatCheckinDate, formatTimePlayed,
+  isoToDatetimeValue, datetimeValueToIso,
 } from '../../utils/media';
+import { TIMEZONE_IDS, isValidTimezoneId } from '../../utils/timezones';
+import { findExactOption } from '../../components/filters/filterUtils';
 import { slugify } from '../../utils/slugify';
 import { usePageTitle } from '../../utils/pageTitle';
 
 interface MediaDetailProps {
   subtype: MediaSubtype;
+}
+
+interface CheckinEditDraft {
+  season_number: number;
+  episode_number: number;
+  episode_title: string;
+  checkin_type: 'completed' | 'in_progress' | 'dropped';
+  rating: number;
+  notes: string;
+  /** datetime-local input value (YYYY-MM-DDTHH:mm) in `timezone`. */
+  datetime: string;
+  /** Committed, valid IANA time zone ID (used on save). */
+  timezone: string;
+  /** Raw text currently in the time zone input (may not match yet). */
+  timezoneInput: string;
+  time_hours: string;
+  time_minutes: string;
 }
 
 export default function MediaDetail({ subtype }: MediaDetailProps) {
@@ -27,13 +49,18 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [highlightedCheckinId, setHighlightedCheckinId] = useState<string | null>(null);
-  const [copiedCheckinId, setCopiedCheckinId] = useState<string | null>(null);
   const location = useLocation();
 
   const [showListModal, setShowListModal] = useState(false);
   const [lists, setLists] = useState<MediaList[]>([]);
   const [newListName, setNewListName] = useState('');
   const [listMsg, setListMsg] = useState<string | null>(null);
+
+  // Inline edit state: at most one check-in row in edit mode at a time.
+  const [editingCheckinId, setEditingCheckinId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<CheckinEditDraft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   usePageTitle(`${config.label}: ${item?.title || ''}`);
 
@@ -74,17 +101,6 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     return () => clearTimeout(timer);
   }, [checkins, loading, location.hash]);
 
-  const handleCopyCheckinLink = async (checkinId: string) => {
-    const url = `${window.location.pathname}#checkin-${checkinId}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedCheckinId(checkinId);
-      setTimeout(() => setCopiedCheckinId((prev) => (prev === checkinId ? null : prev)), 1500);
-    } catch {
-      // Clipboard unavailable (e.g. insecure context); ignore.
-    }
-  };
-
   const openListModal = async () => {
     try {
       setLists(await media.lists());
@@ -124,6 +140,97 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     try {
       await media.removeItemFromList(listId, id);
       setLists(await media.lists());
+    } catch {
+      // ignore
+    }
+  };
+
+  const startEdit = (c: MediaCheckIn) => {
+    setEditingCheckinId(c.id);
+    setEditError(null);
+    const tz = c.checkin_timezone || 'UTC';
+    setDraft({
+      season_number: c.season_number ?? 0,
+      episode_number: c.episode_number ?? 0,
+      episode_title: c.episode_title || '',
+      checkin_type: c.checkin_type,
+      rating: c.rating ?? 0,
+      notes: c.notes || '',
+      datetime: isoToDatetimeValue(c.checked_in_at, c.checkin_timezone),
+      timezone: tz,
+      timezoneInput: tz,
+      time_hours: c.time_played_minutes != null ? String(Math.floor(c.time_played_minutes / 60)) : '',
+      time_minutes: c.time_played_minutes != null ? String(c.time_played_minutes % 60) : '',
+    });
+    // Keep the row visible while editing.
+    window.setTimeout(() => {
+      document.getElementById(`checkin-${c.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
+  };
+
+  const cancelEdit = () => {
+    setEditingCheckinId(null);
+    setDraft(null);
+    setEditError(null);
+  };
+
+  const saveEdit = async (checkinId: string) => {
+    if (!draft || saving) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      const tz = draft.timezone;
+      if (!isValidTimezoneId(tz)) {
+        setEditError('Enter a valid time zone (e.g. America/New_York).');
+        setSaving(false);
+        return;
+      }
+      const checkedInAt = datetimeValueToIso(draft.datetime, tz);
+      if (!checkedInAt) {
+        setEditError('Invalid date & time.');
+        setSaving(false);
+        return;
+      }
+      const h = parseInt(draft.time_hours, 10);
+      const m = parseInt(draft.time_minutes, 10);
+      const totalMin = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+      const timePlayed = subtype === 'game' && totalMin > 0 ? totalMin : null;
+
+      const updated = await media.updateCheckin(checkinId, {
+        season_number: subtype === 'tv_show' && draft.season_number > 0 ? draft.season_number : null,
+        episode_number: subtype === 'tv_show' && draft.episode_number > 0 ? draft.episode_number : null,
+        episode_title: subtype === 'tv_show' ? draft.episode_title.trim() || null : null,
+        checkin_type: draft.checkin_type,
+        rating: draft.rating > 0 ? draft.rating : null,
+        notes: draft.notes.trim() || null,
+        checked_in_at: checkedInAt,
+        timezone: tz,
+        time_played_minutes: timePlayed,
+      });
+
+      // Refresh the check-in row and the item header aggregates.
+      setCheckins((prev) => prev.map((c) => (c.id === checkinId ? { ...c, ...updated } : c)));
+      if (item) {
+        setItem(await media.getItem(item.id));
+      }
+      setEditingCheckinId(null);
+      setDraft(null);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteEdit = async (checkinId: string) => {
+    if (!window.confirm('Delete this check-in? This cannot be undone.')) return;
+    cancelEdit();
+    try {
+      await media.deleteCheckin(checkinId);
+      setCheckins((prev) => prev.filter((c) => c.id !== checkinId));
+      if (item) {
+        setItem(await media.getItem(item.id));
+      }
     } catch {
       // ignore
     }
@@ -274,87 +381,250 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
               </tr>
             </thead>
             <tbody>
-              {checkins.map((c) => (
-                <tr
-                  key={c.id}
-                  id={`checkin-${c.id}`}
-                  className={`border-b border-gray-50 dark:border-gray-800/50 last:border-0 transition-colors ${
-                    highlightedCheckinId === c.id
+              {checkins.map((c) => {
+                const isEditing = editingCheckinId === c.id && draft != null;
+                const patchDraft = (patch: Partial<CheckinEditDraft>) =>
+                  setDraft((d) => (d ? { ...d, ...patch } : d));
+                const tzNeedle = isEditing && draft ? draft.timezoneInput.trim().toLowerCase() : '';
+                const filteredTimezoneOptions = isEditing && draft
+                  ? (tzNeedle
+                      ? TIMEZONE_IDS.filter((tz) => tz.toLowerCase().includes(tzNeedle))
+                      : TIMEZONE_IDS
+                    ).slice(0, 30)
+                  : [];
+                return (
+                  <tr
+                    key={c.id}
+                    id={`checkin-${c.id}`}
+                    className={`border-b border-gray-50 dark:border-gray-800/50 last:border-0 transition-colors ${highlightedCheckinId === c.id
                       ? 'bg-primary-50 dark:bg-primary-900/30'
-                      : ''
-                  }`}
-                >
-                  <td className="px-4 py-2.5">
-                    <a
-                      href={homeDateUrl(c)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-primary-600 hover:underline whitespace-nowrap"
-                      title="Open Home filtered to this date (new tab)"
-                    >
-                      {formatCheckinDate(c.checked_in_at, c.checkin_timezone)}
-                    </a>
-                  </td>
-                  {subtype === 'tv_show' && (
-                    <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 hidden sm:table-cell whitespace-nowrap">
-                      {c.season_number != null ? `S${c.season_number} E${c.episode_number}` : '—'}
-                      {c.episode_title && <span className="hidden lg:inline text-gray-400"> · {c.episode_title}</span>}
-                    </td>
-                  )}
-                  <td className="px-4 py-2.5">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
-                        c.checkin_type === 'completed'
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                          : c.checkin_type === 'dropped'
-                            ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                      : isEditing
+                        ? 'bg-primary-50/50 dark:bg-primary-900/20'
+                        : ''
                       }`}
-                    >
-                      {CHECKIN_TYPE_LABELS[c.checkin_type] || c.checkin_type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {c.rating != null && c.rating > 0 ? <Stars value={c.rating} /> : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                  </td>
-                  {subtype === 'game' && (
-                    <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                      {formatTimePlayed(c.time_played_minutes) ?? '—'}
-                    </td>
-                  )}
-                  <td className="px-4 py-2.5 hidden md:table-cell max-w-[320px]">
-                    {c.notes ? (
-                      <div className="text-xs">
-                        <MarkdownNote note={c.notes} />
-                      </div>
-                    ) : (
-                      <span className="text-gray-300 dark:text-gray-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2.5">
-                    <div className="flex items-center gap-0.5 justify-end">
-                      <button
-                        onClick={() => handleCopyCheckinLink(c.id)}
-                        className="p-1.5 text-gray-300 hover:text-primary-500 dark:text-gray-600 dark:hover:text-primary-400"
-                        title="Copy link to this check-in"
-                      >
-                        {copiedCheckinId === c.id ? (
-                          <span className="text-[10px] text-green-600 dark:text-green-400">copied</span>
-                        ) : (
-                          <Link2 size={14} />
+                  >
+                    {isEditing ? (
+                      <>
+                        <td className="px-4 py-2.5">
+                          <input
+                            type="datetime-local"
+                            value={draft.datetime}
+                            onChange={(e) => patchDraft({ datetime: e.target.value })}
+                            className="input text-xs w-[190px]"
+                          />
+                          <input
+                            type="text"
+                            list="checkin-timezone-options"
+                            value={draft.timezoneInput}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              patchDraft({ timezoneInput: next });
+                              const match = findExactOption(next, TIMEZONE_IDS);
+                              // Commit a recognized IANA id (or clear the
+                              // committed value when the text no longer matches).
+                              if (match && match !== draft.timezone) patchDraft({ timezone: match });
+                              else if (!match && draft.timezone) patchDraft({ timezone: '' });
+                            }}
+                            onBlur={() => {
+                              const match = findExactOption(draft.timezoneInput, TIMEZONE_IDS);
+                              if (match) {
+                                if (match !== draft.timezone) patchDraft({ timezoneInput: match, timezone: match });
+                              } else {
+                                // Revert to the last committed (or original) valid zone.
+                                const fallback = draft.timezone || 'UTC';
+                                patchDraft({ timezoneInput: fallback, timezone: fallback });
+                              }
+                            }}
+                            placeholder="Time zone (e.g. America/New_York)"
+                            className={`input text-[11px] mt-1 w-[190px] ${draft.timezoneInput.trim() && !findExactOption(draft.timezoneInput, TIMEZONE_IDS)
+                              ? 'border-red-400 focus:ring-red-300'
+                              : ''
+                            }`}
+                          />
+                          <datalist id="checkin-timezone-options">
+                            {filteredTimezoneOptions.map((tz) => (
+                              <option key={tz} value={tz} />
+                            ))}
+                          </datalist>
+                          {editError && (
+                            <p className="text-[11px] text-red-500 dark:text-red-400 mt-1">{editError}</p>
+                          )}
+                        </td>
+                        {subtype === 'tv_show' && (
+                          <td className="px-4 py-2.5 hidden sm:table-cell">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={1}
+                                value={draft.season_number > 0 ? draft.season_number : ''}
+                                onChange={(e) => patchDraft({ season_number: parseInt(e.target.value, 10) || 0 })}
+                                placeholder="S"
+                                className="input text-xs w-12"
+                              />
+                              <input
+                                type="number"
+                                min={1}
+                                value={draft.episode_number > 0 ? draft.episode_number : ''}
+                                onChange={(e) => patchDraft({ episode_number: parseInt(e.target.value, 10) || 0 })}
+                                placeholder="E"
+                                className="input text-xs w-12"
+                              />
+                            </div>
+                            <input
+                              type="text"
+                              value={draft.episode_title}
+                              onChange={(e) => patchDraft({ episode_title: e.target.value })}
+                              placeholder="Episode title"
+                              className="input text-xs mt-1"
+                            />
+                          </td>
                         )}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteCheckin(c.id)}
-                        className="p-1.5 text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400"
-                        title="Delete check-in"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        <td className="px-4 py-2.5">
+                          <select
+                            value={draft.checkin_type}
+                            onChange={(e) => patchDraft({ checkin_type: e.target.value as 'completed' | 'in_progress' | 'dropped' })}
+                            className="input text-xs"
+                          >
+                            <option value="completed">{CHECKIN_TYPE_LABELS.completed}</option>
+                            <option value="in_progress">{CHECKIN_TYPE_LABELS.in_progress}</option>
+                            <option value="dropped">{CHECKIN_TYPE_LABELS.dropped}</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <ScorePicker value={draft.rating} onChange={(v) => patchDraft({ rating: v })} size={18} />
+                        </td>
+                        {subtype === 'game' && (
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                value={draft.time_hours}
+                                onChange={(e) => patchDraft({ time_hours: e.target.value })}
+                                placeholder="0"
+                                inputMode="numeric"
+                                className="input text-xs w-14"
+                              />
+                              <span className="text-xs text-gray-400">h</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={59}
+                                value={draft.time_minutes}
+                                onChange={(e) => patchDraft({ time_minutes: e.target.value })}
+                                placeholder="0"
+                                inputMode="numeric"
+                                className="input text-xs w-14"
+                              />
+                              <span className="text-xs text-gray-400">m</span>
+                            </div>
+                          </td>
+                        )}
+                        <td className="px-4 py-2.5 hidden md:table-cell max-w-[320px]">
+                          <textarea
+                            value={draft.notes}
+                            onChange={(e) => patchDraft({ notes: e.target.value })}
+                            rows={2}
+                            placeholder="Notes (Markdown)…"
+                            className="input font-mono text-xs resize-y min-h-[52px]"
+                          />
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <div className="flex items-center gap-0.5 justify-end">
+                            <button
+                              onClick={() => deleteEdit(c.id)}
+                              className="p-1.5 text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400"
+                              title="Delete check-in"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                            <button
+                              onClick={cancelEdit}
+                              className="p-1.5 text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300"
+                              title="Discard changes"
+                            >
+                              <X size={14} />
+                            </button>
+                            <button
+                              onClick={() => saveEdit(c.id)}
+                              disabled={saving}
+                              className="p-1.5 text-gray-300 hover:text-green-500 dark:text-gray-600 dark:hover:text-green-400 disabled:opacity-50"
+                              title="Accept changes"
+                            >
+                              {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-4 py-2.5">
+                          <a
+                            href={`#checkin-${c.id}`}
+                            className="text-primary-600 hover:underline whitespace-nowrap">
+                            {formatCheckinDate(c.checked_in_at, c.checkin_timezone)}
+                          </a>
+                        </td>
+                        {subtype === 'tv_show' && (
+                          <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 hidden sm:table-cell whitespace-nowrap">
+                            {c.season_number != null ? `S${c.season_number} E${c.episode_number}` : '—'}
+                            {c.episode_title && <span className="hidden lg:inline text-gray-400"> · {c.episode_title}</span>}
+                          </td>
+                        )}
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${c.checkin_type === 'completed'
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                              : c.checkin_type === 'dropped'
+                                ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                                : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                              }`}
+                          >
+                            {CHECKIN_TYPE_LABELS[c.checkin_type] || c.checkin_type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {c.rating != null && c.rating > 0 ? <Stars value={c.rating} /> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                        </td>
+                        {subtype === 'game' && (
+                          <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                            {formatTimePlayed(c.time_played_minutes) ?? '—'}
+                          </td>
+                        )}
+                        <td className="px-4 py-2.5 hidden md:table-cell max-w-[320px]">
+                          {c.notes ? (
+                            <div className="text-xs">
+                              <MarkdownNote note={c.notes} />
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 dark:text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <div className="flex items-center gap-0.5 justify-end">
+                            <a
+                              href={homeDateUrl(c)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open Home filtered to this date"
+                              className="p-1.5 text-gray-300 hover:text-primary-500 dark:text-gray-600 dark:hover:text-primary-400"
+                            >
+                              <Calendar size={14} />
+                            </a>
+                            <button
+                              onClick={() => startEdit(c)}
+                              className="p-1.5 text-gray-300 hover:text-primary-500 dark:text-gray-600 dark:hover:text-primary-400"
+                              title="Edit check-in"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -383,11 +653,10 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                     <button
                       onClick={() => handleAddToList(list.id)}
                       disabled={inList}
-                      className={`flex-1 text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
-                        inList
-                          ? 'border-gray-100 dark:border-gray-800 text-gray-400 cursor-default'
-                          : 'border-gray-200 dark:border-gray-700 hover:border-primary-400 text-gray-700 dark:text-gray-300'
-                      }`}
+                      className={`flex-1 text-left px-3 py-2 rounded-lg text-sm border transition-colors ${inList
+                        ? 'border-gray-100 dark:border-gray-800 text-gray-400 cursor-default'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-primary-400 text-gray-700 dark:text-gray-300'
+                        }`}
                     >
                       {list.name}
                       {inList && <span className="ml-2 text-xs text-green-600">✓ added</span>}
