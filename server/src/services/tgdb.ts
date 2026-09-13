@@ -124,7 +124,7 @@ export const tgdb = {
             title: row.game_title,
             releaseYear: yearFromDate(row.release_date),
             imageUrl: imageUrlFor(String(row.id), data.include?.boxart),
-            externalUrl: `https://www.thegamesdb.net/game/${row.id}`,
+            externalUrl: `https://thegamesdb.net/game.php?id=${row.id}`,
             platform: row.platform != null ? platforms[String(row.platform)]?.name || null : null,
           }));
       },

@@ -76,7 +76,7 @@ describe('tgdb.searchGames', () => {
         title: 'Sonic the Hedgehog',
         releaseYear: 1991,
         imageUrl: 'https://cdn.thegamesdb.net/images/medium/boxart/front/53-1.jpg',
-        externalUrl: 'https://www.thegamesdb.net/game/53',
+        externalUrl: 'https://thegamesdb.net/game.php?id=53',
         platform: 'Sega Genesis',
       },
       {
@@ -84,7 +84,7 @@ describe('tgdb.searchGames', () => {
         title: 'Sonic the Hedgehog 2',
         releaseYear: 1992,
         imageUrl: null,
-        externalUrl: 'https://www.thegamesdb.net/game/432',
+        externalUrl: 'https://thegamesdb.net/game.php?id=432',
         platform: 'Sega Genesis',
       },
     ]);
@@ -108,7 +108,7 @@ describe('tgdb.searchGames', () => {
         title: 'SSX Tricky',
         releaseYear: 2001,
         imageUrl: null,
-        externalUrl: 'https://www.thegamesdb.net/game/9',
+        externalUrl: 'https://thegamesdb.net/game.php?id=9',
         platform: null,
       },
       {
@@ -116,7 +116,7 @@ describe('tgdb.searchGames', () => {
         title: 'Mystery',
         releaseYear: 2001,
         imageUrl: null,
-        externalUrl: 'https://www.thegamesdb.net/game/10',
+        externalUrl: 'https://thegamesdb.net/game.php?id=10',
         platform: null,
       },
     ]);

@@ -212,20 +212,22 @@ interface LocalGame {
   id: string;
   title: string;
   external_source: string | null;
+  external_id: string | null;
   /** Latest non-null time_played_minutes across the item's check-ins. */
   time_played_minutes: number | null;
 }
 
 /**
  * Load all game media items with their latest stored time total, indexed by
- * normalized title (exact key first, containment fallback at match time).
+ * normalized title and by (external_source, external_id).
  */
 async function loadLocalGames(): Promise<{
   byExactKey: Map<string, LocalGame>;
+  byExternal: Map<string, LocalGame>;
   all: LocalGame[];
 }> {
   const res = await pool.query<LocalGame>(
-    `SELECT mi.id, mi.title, mi.external_source,
+    `SELECT mi.id, mi.title, mi.external_source, mi.external_id,
             mc.time_played_minutes
      FROM media_items mi
      LEFT JOIN LATERAL (
@@ -241,11 +243,15 @@ async function loadLocalGames(): Promise<{
 
   const all = res.rows;
   const byExactKey = new Map<string, LocalGame>();
+  const byExternal = new Map<string, LocalGame>();
   for (const game of all) {
     const key = normalizeTitle(game.title);
     if (!byExactKey.has(key)) byExactKey.set(key, game);
+    if (game.external_source && game.external_id) {
+      byExternal.set(`${game.external_source}:${game.external_id}`, game);
+    }
   }
-  return { byExactKey, all };
+  return { byExactKey, byExternal, all };
 }
 
 /**
@@ -508,7 +514,10 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
 
   // Local state snapshot (item lookup + idempotency) — matches in memory so
   // the per-row work stays inside a single DB transaction.
-  const { byExactKey, all } = await loadLocalGames();
+  const { byExactKey, byExternal, all } = await loadLocalGames();
+  // Items created earlier in THIS run, keyed the same way as byExternal, so
+  // two CSV rows resolving to the same TGDB id never double-insert.
+  const createdExternal = new Map<string, LocalGame>();
 
   let lookups = new Map<number, TgdbLookup>();
   if (apiKey) {
@@ -559,9 +568,27 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
 
       // Find-or-create the media item.
       const local = matchLocalGame(row.title, byExactKey, all);
+      // An existing item that already claims this TGDB id (from the preloaded
+      // snapshot or created earlier in this run). Reusing it is what keeps
+      // the (external_source, external_id) unique index happy.
+      const externalHolder = match
+        ? byExternal.get(`tgdb:${match.externalId}`) ??
+          createdExternal.get(`tgdb:${match.externalId}`) ??
+          null
+        : null;
       let mediaItemId: string;
+      // When the TGDB id is already claimed by a DIFFERENT item (in the
+      // snapshot or created earlier in this run), attach to that item instead
+      // of the title match — reusing it is what keeps the (external_source,
+      // external_id) unique index happy.
+      const reuseExternal =
+        match && externalHolder && (!local || externalHolder.id !== local.id)
+          ? externalHolder
+          : null;
 
-      if (local) {
+      if (reuseExternal) {
+        mediaItemId = reuseExternal.id;
+      } else if (local) {
         mediaItemId = local.id;
         // Enrich a local-only item with TGDB data, filling nulls only so
         // manually set values are never clobbered.
@@ -607,6 +634,15 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
         );
         mediaItemId = ins.rows[0].id as string;
         stats.itemsCreated++;
+        if (match) {
+          createdExternal.set(`tgdb:${match.externalId}`, {
+            id: mediaItemId,
+            title: match.title ?? row.title,
+            external_source: 'tgdb',
+            external_id: match.externalId,
+            time_played_minutes: null,
+          });
+        }
       }
 
       // Time played: read the current stored total BEFORE inserting so the

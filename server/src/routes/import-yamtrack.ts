@@ -59,7 +59,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
             ? `https://www.themoviedb.org/movie/${plan.external_id}`
             : `https://www.themoviedb.org/tv/${plan.external_id}`
           : plan.external_source === 'tgdb'
-            ? `https://www.thegamesdb.net/game/${plan.external_id}`
+            ? `https://thegamesdb.net/game.php?id=${plan.external_id}`
             : plan.external_source === 'hardcover'
               ? `https://hardcover.app/books/${plan.external_id}`
               : null,
