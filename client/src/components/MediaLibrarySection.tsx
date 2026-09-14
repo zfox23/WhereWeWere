@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowDown, ArrowUp, Loader2, Search, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Loader2, Pencil, Search, Trash2, X } from 'lucide-react';
 import { media } from '../api/client';
 import Stars from './Stars';
 import {
@@ -8,6 +8,7 @@ import {
   MEDIA_SUBTYPE_LIST,
   CHECKIN_TYPE_LABELS,
   formatCheckinDate,
+  formatTimePlayed,
 } from '../utils/media';
 import { slugify } from '../utils/slugify';
 import type { MediaLibraryItem, MediaList, MediaSubtype } from '../types';
@@ -33,13 +34,14 @@ interface MediaLibrarySectionProps {
   to: string;
 }
 
-type SortKey = 'rating' | 'checkin' | 'completed' | 'list';
+type SortKey = 'rating' | 'checkin' | 'completed' | 'time_played' | 'list';
 type SortDir = 'asc' | 'desc';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'checkin', label: 'Last check-in' },
   { value: 'rating', label: 'Rating' },
   { value: 'completed', label: 'Completed count' },
+  { value: 'time_played', label: 'Time played' },
   { value: 'list', label: 'Time added' },
 ];
 
@@ -51,6 +53,8 @@ function sortValue(item: MediaLibraryItem, key: SortKey, addedAtById?: Map<strin
       return new Date(item.last_checkin_at).getTime();
     case 'completed':
       return item.completed_count ?? 0;
+    case 'time_played':
+      return item.total_time_played_minutes ?? 0;
     case 'list':
       return addedAtById?.get(item.id) ? new Date(addedAtById.get(item.id)!).getTime() : -Infinity;
   }
@@ -66,6 +70,15 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   const [filterQuery, setFilterQuery] = useState('');
   const [lists, setLists] = useState<MediaList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
+
+  // Batch edit mode: select multiple cards (shift-click for a range) and delete them.
+  const [editMode, setEditMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{ items: number; checkins: number } | null>(null);
 
   const selectedList = useMemo(
     () => lists.find((l) => l.id === selectedListId) ?? null,
@@ -87,6 +100,13 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   useEffect(() => {
     if (sortBy === 'list' && !selectedListId) setSortBy('checkin');
   }, [sortBy, selectedListId]);
+
+  // "Time played" only applies to games. Selecting it forces the type filter
+  // to games (in the sort dropdown below); if games are filtered out again via
+  // the type chips, fall back to the default sort.
+  useEffect(() => {
+    if (sortBy === 'time_played' && !selectedTypes.includes('game')) setSortBy('checkin');
+  }, [sortBy, selectedTypes]);
 
   const activeTypes = useMemo(
     () => MEDIA_SUBTYPE_LIST.filter((t) => selectedTypes.includes(t)),
@@ -203,6 +223,95 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
 
   const toggleDirection = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 
+  // --- Batch edit mode ---------------------------------------------------------
+
+  const toggleEditMode = () => {
+    const next = !editMode;
+    setEditMode(next);
+    if (!next) {
+      setSelectedIds(new Set());
+      setAnchorIndex(null);
+      setDeleteError(null);
+      setConfirmState(null);
+    }
+  };
+
+  /** Normal click toggles one card; shift-click selects the range from the anchor. */
+  const handleSelect = (index: number, shiftKey: boolean) => {
+    const current = visibleItems[index];
+    if (!current) return;
+    if (shiftKey) {
+      const base = anchorIndex ?? 0;
+      const [lo, hi] = base < index ? [base, index] : [index, base];
+      setSelectedIds(new Set(visibleItems.slice(lo, hi + 1).map((i) => i.id)));
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(current.id)) next.delete(current.id);
+      else next.add(current.id);
+      return next;
+    });
+    setAnchorIndex(index);
+  };
+
+  // Drop selections for cards that are no longer visible (filter/sort/list change, deletion).
+  useEffect(() => {
+    if (!editMode) return;
+    setSelectedIds((prev) => {
+      const visible = new Set(visibleItems.map((i) => i.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visible.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [editMode, visibleItems]);
+
+  /** Ask the server how much would be deleted, then show the confirmation dialog. */
+  const requestDelete = async () => {
+    if (selectedIds.size === 0 || previewing) return;
+    setPreviewing(true);
+    setDeleteError(null);
+    try {
+      const preview = await media.bulkDeleteItems([...selectedIds], true);
+      setConfirmState({ items: preview.deleted_items, checkins: preview.deleted_checkins });
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to load deletion preview');
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const cancelDelete = () => {
+    if (deleting) return;
+    setConfirmState(null);
+    setDeleteError(null);
+  };
+
+  const confirmDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const ids = [...selectedIds];
+      await media.bulkDeleteItems(ids, false);
+      const deleted = new Set(ids);
+      setItems((prev) => prev.filter((i) => !deleted.has(i.id)));
+      // Refresh lists so memberships reflect the deletion.
+      media.lists().then(setLists).catch(() => { /* keep stale list data */ });
+      setSelectedIds(new Set());
+      setAnchorIndex(null);
+      setConfirmState(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete items');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTypes.length === 0) {
       setItems([]);
@@ -248,6 +357,11 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <div className="flex items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-1">
+          {editMode && (
+            <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap" aria-live="polite">
+              {selectedIds.size} selected
+            </span>
+          )}
           <select
             value={selectedListId ?? ''}
             onChange={(e) => setSelectedListId(e.target.value || null)}
@@ -274,6 +388,44 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
           )}
         </div>
         <div className="flex items-center gap-1.5">
+          {editMode ? (
+            <>
+              {deleteError && !confirmState && (
+                <span className="text-xs text-red-500 dark:text-red-400 truncate max-w-[140px]" title={deleteError}>
+                  {deleteError}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={requestDelete}
+                disabled={selectedIds.size === 0 || previewing || deleting}
+                aria-label={`Delete ${selectedIds.size} selected item${selectedIds.size === 1 ? '' : 's'}`}
+                title={`Delete ${selectedIds.size} selected item${selectedIds.size === 1 ? '' : 's'}`}
+                className="p-1.5 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                {deleting || previewing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              </button>
+              <button
+                type="button"
+                onClick={toggleEditMode}
+                aria-label="Done editing"
+                title="Done"
+                className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={toggleEditMode}
+              aria-label="Edit mode: select items for batch operations"
+              title="Select items for batch operations"
+              className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:text-gray-400 dark:hover:text-primary-400 dark:hover:bg-primary-900/20 transition-colors"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
           <div className="relative">
             <Search
               size={12}
@@ -291,7 +443,12 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
           </div>
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            onChange={(e) => {
+              const next = e.target.value as SortKey;
+              setSortBy(next);
+              // Time played is a games-only metric: narrow the library to games.
+              if (next === 'time_played') setSelectedTypes(['game']);
+            }}
             aria-label="Sort library by"
             className="text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
@@ -353,15 +510,19 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
         </p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {visibleItems.map((item) => {
+          {visibleItems.map((item, index) => {
             const config = MEDIA_SUBTYPES[item.media_type] || MEDIA_SUBTYPES.movie;
             const href = `${config.detailBase}/${item.id}/${item.title ? slugify(item.title) : ''}`;
-            return (
-              <Link
-                key={item.id}
-                to={href}
-                className="group bg-white/70 dark:bg-gray-900/70 rounded-lg border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 hover:ring-2 hover:ring-primary-400 transition-shadow"
-              >
+            const isSelected = selectedIds.has(item.id);
+            const timePlayed = item.media_type === 'game' ? formatTimePlayed(item.total_time_played_minutes) : null;
+            const cardClasses = `group bg-white/70 dark:bg-gray-900/70 rounded-lg border shadow-sm shadow-black/3 transition-shadow ${editMode
+              ? isSelected
+                ? 'border-transparent ring-2 ring-primary-500'
+                : 'border-white/40 dark:border-gray-700/40 hover:ring-2 hover:ring-primary-300'
+              : 'border-white/40 dark:border-gray-700/40 hover:ring-2 hover:ring-primary-400'
+            }`;
+            const cardBody = (
+              <>
                 <div className="relative">
                   {item.image_url ? (
                     <img
@@ -383,7 +544,21 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                       ? `${CHECKIN_TYPE_LABELS.completed} ${item.completed_count}x`
                       : CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type}
                   </span>
-                  {selectedList && (
+                  {editMode ? (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => { /* selection handled in onClick */ }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleSelect(index, e.shiftKey);
+                      }}
+                      aria-label={`Select ${item.title}`}
+                      title="Click to toggle, shift-click to select a range"
+                      className="absolute top-2 left-2 z-10 h-5 w-5 cursor-pointer rounded accent-primary-600 bg-white/90 dark:bg-gray-900/80"
+                    />
+                  ) : selectedList ? (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -397,14 +572,23 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                     >
                       <X size={12} />
                     </button>
-                  )}
+                  ) : null}
                 </div>
                 <div className="p-2.5 flex grow flex-col items-between">
-                  <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 leading-tight line-clamp-2 group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                  <p className={`text-xs font-semibold leading-tight line-clamp-2 ${editMode
+                    ? isSelected
+                      ? 'text-primary-600 dark:text-primary-400'
+                      : 'text-gray-800 dark:text-gray-200'
+                    : 'text-gray-800 dark:text-gray-200 group-hover:text-primary-600 dark:group-hover:text-primary-400'
+                    }`}
+                  >
                     {item.title}
                   </p>
                   {item.author && (
                     <p className="text-[11px] text-gray-400 truncate">{item.author}</p>
+                  )}
+                  {timePlayed && (
+                    <p className="text-[11px] text-gray-400 truncate">{timePlayed} played</p>
                   )}
                   <div className="mt-1 flex items-center justify-between gap-1">
                     {item.latest_rating != null && item.latest_rating > 0 ? (
@@ -417,9 +601,68 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                     {formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}
                   </p>
                 </div>
+              </>
+            );
+            return editMode ? (
+              <div
+                key={item.id}
+                role="button"
+                aria-label={item.title}
+                aria-pressed={isSelected}
+                tabIndex={0}
+                onClick={(e) => handleSelect(index, e.shiftKey)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleSelect(index, e.shiftKey);
+                  }
+                }}
+                className={`${cardClasses} cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500`}
+              >
+                {cardBody}
+              </div>
+            ) : (
+              <Link
+                key={item.id}
+                to={href}
+                className={cardClasses}
+              >
+                {cardBody}
               </Link>
             );
           })}
+        </div>
+      )}
+
+      {/* Bulk delete confirmation */}
+      {confirmState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={cancelDelete} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 w-full max-w-sm p-5 space-y-4">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              Delete {confirmState.items} {confirmState.items === 1 ? 'media item' : 'media items'}?
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              This will permanently delete {confirmState.items}{' '}
+              {confirmState.items === 1 ? 'media item' : 'media items'} and{' '}
+              {confirmState.checkins} {confirmState.checkins === 1 ? 'check-in' : 'check-ins'}.
+              The selected items will also be removed from any lists they belong to.
+              This cannot be undone.
+            </p>
+            {deleteError && <p className="text-xs text-red-500 dark:text-red-400">{deleteError}</p>}
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={cancelDelete} disabled={deleting} className="btn-secondary text-sm">
+                <X size={15} className="mr-1.5" />
+                Cancel
+              </button>
+              <button onClick={confirmDelete} disabled={deleting} className="btn-danger text-sm">
+                {deleting
+                  ? <Loader2 size={15} className="mr-1.5 animate-spin" />
+                  : <Trash2 size={15} className="mr-1.5" />}
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

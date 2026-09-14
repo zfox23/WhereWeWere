@@ -845,6 +845,69 @@ router.delete('/checkins/:id', async (req: Request, res: Response) => {
   }
 });
 
+// POST /items/bulk-delete - delete multiple media items along with all of
+// their check-ins and list memberships. With dryRun: true it only reports
+// how many rows would be affected (used to build the confirmation dialog).
+router.post('/items/bulk-delete', async (req: Request, res: Response) => {
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids.filter((id: unknown): id is string => typeof id === 'string' && id.trim() !== '')
+    : [];
+  if (ids.length === 0) {
+    return res.status(400).json({ error: 'ids must be a non-empty array of media item ids' });
+  }
+  if (ids.length > 500) {
+    return res.status(400).json({ error: 'Too many items to delete at once' });
+  }
+  const dryRun = req.body?.dryRun === true;
+
+  const client = await pool.connect();
+  try {
+    if (!dryRun) await client.query('BEGIN');
+    const found = await client.query(
+      'SELECT COUNT(*)::int AS n FROM media_items WHERE user_id = $1 AND id = ANY($2)',
+      [USER_ID, ids]
+    );
+    const checkins = await client.query(
+      'SELECT COUNT(*)::int AS n FROM media_checkins WHERE user_id = $1 AND media_item_id = ANY($2)',
+      [USER_ID, ids]
+    );
+    const memberships = await client.query(
+      `SELECT COUNT(*)::int AS n
+       FROM media_list_items mli
+       JOIN media_items mi ON mi.id = mli.media_item_id
+       WHERE mi.user_id = $1 AND mi.id = ANY($2)`,
+      [USER_ID, ids]
+    );
+
+    if (!dryRun) {
+      // Pull the items out of every list, then delete them. Check-ins and
+      // episode rows cascade off media_items.
+      await client.query(
+        `DELETE FROM media_list_items
+         WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1 AND id = ANY($2))`,
+        [USER_ID, ids]
+      );
+      await client.query(
+        'DELETE FROM media_items WHERE user_id = $1 AND id = ANY($2)',
+        [USER_ID, ids]
+      );
+      await client.query('COMMIT');
+    }
+
+    res.json({
+      deleted_items: found.rows[0].n as number,
+      deleted_checkins: checkins.rows[0].n as number,
+      deleted_list_memberships: memberships.rows[0].n as number,
+    });
+  } catch (err) {
+    if (!dryRun) await client.query('ROLLBACK');
+    console.error('Error bulk-deleting media items:', err);
+    res.status(500).json({ error: 'Failed to delete media items' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /tv/:itemId/seasons - cached season list for the episode picker
 router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
   const client = await pool.connect();
@@ -1015,11 +1078,13 @@ router.get('/library', async (req: Request, res: Response) => {
 
     const result = await query(
       `SELECT mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
-              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_rating,
-              (ARRAY_AGG(mc.checked_in_at ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_at,
-              (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_timezone,
-              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC))[1] AS last_checkin_type,
-              COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
+              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.id DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_rating,
+              (ARRAY_AGG(mc.checked_in_at ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_at,
+              (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_timezone,
+              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_type,
+              COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count,
+              (ARRAY_AGG(mc.time_played_minutes ORDER BY mc.checked_in_at DESC, mc.id DESC)
+                 FILTER (WHERE mc.time_played_minutes IS NOT NULL))[1] AS total_time_played_minutes
        FROM media_checkins mc
        JOIN media_items mi ON mc.media_item_id = mi.id
        ${where}
@@ -1039,6 +1104,7 @@ router.get('/library', async (req: Request, res: Response) => {
       last_checkin_timezone: r.last_checkin_timezone,
       last_checkin_type: r.last_checkin_type,
       completed_count: Number(r.completed_count),
+      total_time_played_minutes: r.total_time_played_minutes != null ? Number(r.total_time_played_minutes) : null,
     })));
   } catch (err) {
     console.error('Error getting media library:', err);

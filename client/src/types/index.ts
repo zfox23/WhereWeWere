@@ -476,6 +476,8 @@ export interface MediaLibraryItem {
   last_checkin_type: 'completed' | 'in_progress' | 'dropped';
   /** Number of completed check-ins for this item. */
   completed_count: number;
+  /** Running time played in minutes (games only; latest check-in total). */
+  total_time_played_minutes: number | null;
 }
 
 export interface MediaTvSeason {

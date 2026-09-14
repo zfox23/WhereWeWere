@@ -543,6 +543,29 @@ describe('Media check-in API', () => {
       expect(response.body[1].completed_count).toBe(1);
     });
 
+    it('reports the latest running time played for games and null for other types', async () => {
+      const game = (await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Hades' })).body;
+      const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;
+
+      await request(app).post(`/api/v1/media/items/${game.id}/checkins`).send({
+        checkin_type: 'in_progress', checked_in_at: '2023-01-02T20:00:00Z', timezone: 'UTC', time_played_minutes: 300,
+      });
+      await request(app).post(`/api/v1/media/items/${game.id}/checkins`).send({
+        checkin_type: 'in_progress', checked_in_at: '2023-01-05T20:00:00Z', timezone: 'UTC', time_played_minutes: 540,
+      });
+      await request(app).post(`/api/v1/media/items/${movie.id}/checkins`).send({
+        checkin_type: 'completed', checked_in_at: '2023-01-04T20:00:00Z', timezone: 'UTC',
+      });
+
+      const response = await request(app).get('/api/v1/media/library');
+      expect(response.status).toBe(200);
+      const byTitle = Object.fromEntries(response.body.map((row: { title: string }) => [row.title, row]));
+      // Running total from the most recent check-in that reported time.
+      expect(byTitle.Hades.total_time_played_minutes).toBe(540);
+      // Non-game items have no time played.
+      expect(byTitle.Dune.total_time_played_minutes).toBeNull();
+    });
+
     it('filters by date range and media types', async () => {
       const tv = (await request(app).post('/api/v1/media/items').send({ media_type: 'tv_show', title: 'Severance' })).body;
       const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;
@@ -688,6 +711,101 @@ describe('Media check-in API', () => {
 
       const after = await request(app).get('/api/v1/media/lists');
       expect(after.body).toHaveLength(0);
+    });
+  });
+
+  describe('bulk delete', () => {
+    async function makeItemWithCheckins(title: string, checkinCount: number) {
+      const item = (
+        await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title })
+      ).body;
+      for (let i = 0; i < checkinCount; i += 1) {
+        const created = await request(app)
+          .post(`/api/v1/media/items/${item.id}/checkins`)
+          .send({
+            checkin_type: 'completed',
+            checked_in_at: `2023-01-0${i + 1}T20:00:00-04:00`,
+            timezone: 'America/New_York',
+          });
+        expect(created.status).toBe(201);
+      }
+      return item;
+    }
+
+    async function addToList(listId: string, itemId: string) {
+      const added = await request(app)
+        .post(`/api/v1/media/lists/${listId}/items`)
+        .send({ media_item_id: itemId });
+      expect(added.status).toBe(201);
+    }
+
+    it('rejects missing or empty ids', async () => {
+      const empty = await request(app).post('/api/v1/media/items/bulk-delete').send({ ids: [] });
+      expect(empty.status).toBe(400);
+      const missing = await request(app).post('/api/v1/media/items/bulk-delete').send({});
+      expect(missing.status).toBe(400);
+    });
+
+    it('dry run reports what would be deleted without deleting anything', async () => {
+      const dune = await makeItemWithCheckins('Dune', 2);
+      const blade = await makeItemWithCheckins('Blade Runner', 1);
+
+      const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Watchlist' })).body;
+      await addToList(list.id, dune.id);
+      await addToList(list.id, blade.id);
+
+      const preview = await request(app)
+        .post('/api/v1/media/items/bulk-delete')
+        .send({ ids: [dune.id, blade.id], dryRun: true });
+      expect(preview.status).toBe(200);
+      expect(preview.body).toEqual({ deleted_items: 2, deleted_checkins: 3, deleted_list_memberships: 2 });
+
+      // Nothing was touched.
+      const items = await query('SELECT COUNT(*)::int AS n FROM media_items');
+      expect(items.rows[0].n).toBe(2);
+      const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins');
+      expect(checkins.rows[0].n).toBe(3);
+      const memberships = await query('SELECT COUNT(*)::int AS n FROM media_list_items');
+      expect(memberships.rows[0].n).toBe(2);
+    });
+
+    it('deletes items, their check-ins, and their list memberships', async () => {
+      const dune = await makeItemWithCheckins('Dune', 2);
+      const blade = await makeItemWithCheckins('Blade Runner', 1);
+      const keeper = await makeItemWithCheckins('Interstellar', 1);
+
+      const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Watchlist' })).body;
+      await addToList(list.id, dune.id);
+      await addToList(list.id, keeper.id);
+
+      const result = await request(app)
+        .post('/api/v1/media/items/bulk-delete')
+        .send({ ids: [dune.id, blade.id] });
+      expect(result.status).toBe(200);
+      expect(result.body.deleted_items).toBe(2);
+      expect(result.body.deleted_checkins).toBe(3);
+      expect(result.body.deleted_list_memberships).toBe(1);
+
+      // The unselected item is intact, along with its check-in and list membership.
+      const items = await query('SELECT id FROM media_items');
+      expect(items.rows).toHaveLength(1);
+      expect(items.rows[0].id).toBe(keeper.id);
+      const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins');
+      expect(checkins.rows[0].n).toBe(1);
+      const lists = await request(app).get('/api/v1/media/lists');
+      expect(lists.body).toHaveLength(1);
+      expect(lists.body[0].items).toHaveLength(1);
+      expect(lists.body[0].items[0].id).toBe(keeper.id);
+    });
+
+    it('ignores ids that do not exist and reports the real counts', async () => {
+      const item = await makeItemWithCheckins('Dune', 1);
+      const result = await request(app)
+        .post('/api/v1/media/items/bulk-delete')
+        .send({ ids: [item.id, '00000000-0000-0000-0000-000000000002'] });
+      expect(result.status).toBe(200);
+      expect(result.body.deleted_items).toBe(1);
+      expect(result.body.deleted_checkins).toBe(1);
     });
   });
 

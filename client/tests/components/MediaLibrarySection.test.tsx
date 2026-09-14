@@ -9,12 +9,14 @@ const libraryMock = vi.fn();
 const listsMock = vi.fn();
 const removeItemFromListMock = vi.fn();
 const deleteListMock = vi.fn();
+const bulkDeleteItemsMock = vi.fn();
 vi.mock('../../src/api/client', () => ({
   media: {
     library: (...args: unknown[]) => libraryMock(...args),
     lists: () => listsMock(),
     removeItemFromList: (listId: string, itemId: string) => removeItemFromListMock(listId, itemId),
     deleteList: (listId: string) => deleteListMock(listId),
+    bulkDeleteItems: (ids: string[], dryRun: boolean) => bulkDeleteItemsMock(ids, dryRun),
   },
 }));
 
@@ -29,6 +31,7 @@ const item: MediaLibraryItem = {
   last_checkin_timezone: 'UTC',
   last_checkin_type: 'completed',
   completed_count: 1,
+  total_time_played_minutes: null,
 };
 
 function renderSection(props: { from?: string; to?: string } = {}) {
@@ -48,6 +51,8 @@ beforeEach(() => {
   removeItemFromListMock.mockResolvedValue({ message: 'removed' });
   deleteListMock.mockReset();
   deleteListMock.mockResolvedValue({ message: 'deleted', id: 'list-1' });
+  bulkDeleteItemsMock.mockReset();
+  bulkDeleteItemsMock.mockResolvedValue({ deleted_items: 1, deleted_checkins: 1, deleted_list_memberships: 0 });
   window.history.pushState({}, '', '/profile?tab=media');
 });
 
@@ -65,6 +70,23 @@ describe('MediaLibrarySection', () => {
     expect(screen.getByText('Frank Herbert')).toBeTruthy();
     expect(screen.getByText('Completed')).toBeTruthy();
     expect(screen.getByText(/Jan 4, 2023, 8:00 PM/)).toBeTruthy();
+  });
+
+  it('shows total time played on game cards only', async () => {
+    libraryMock.mockResolvedValueOnce([
+      { ...item, id: 'g1', title: 'Hades', media_type: 'game', total_time_played_minutes: 330 },
+      { ...item, id: 'g2', title: 'Celeste', media_type: 'game', total_time_played_minutes: null },
+      { ...item, id: 'm1', title: 'Dune', media_type: 'movie', total_time_played_minutes: 330 },
+    ]);
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Hades')).toBeTruthy());
+
+    // Games show the running total…
+    expect(screen.getByText('5h 30m played')).toBeTruthy();
+    // …unless no time has been reported.
+    expect(screen.getByRole('link', { name: /Celeste/ }).textContent).not.toContain('played');
+    // Non-game items never show time played.
+    expect(screen.getByRole('link', { name: /Dune/ }).textContent).not.toContain('played');
   });
 
   it('shows the completed count in the badge when an item has been completed multiple times', async () => {
@@ -133,6 +155,56 @@ describe('MediaLibrarySection', () => {
     // Completed count ascending (0, 1, 3).
     await user.selectOptions(select, 'completed');
     expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
+  });
+
+  it('sorts by time played and narrows the library to games when selected', async () => {
+    libraryMock.mockResolvedValue([
+      { ...item, id: 'a', title: 'Alpha', media_type: 'game', total_time_played_minutes: 120, last_checkin_at: '2023-01-01T00:00:00Z' },
+      { ...item, id: 'b', title: 'Bravo', media_type: 'game', total_time_played_minutes: 300, last_checkin_at: '2023-01-02T00:00:00Z' },
+      { ...item, id: 'c', title: 'Charlie', media_type: 'game', total_time_played_minutes: null, last_checkin_at: '2023-01-03T00:00:00Z' },
+    ]);
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+
+    const select = screen.getByRole('combobox', { name: 'Sort library by' });
+    await user.selectOptions(select, 'time_played');
+
+    // Choosing time played narrows the media type filter to games.
+    await waitFor(() =>
+      expect(libraryMock).toHaveBeenLastCalledWith(undefined, undefined, ['game'])
+    );
+    // Non-game type chips are no longer active.
+    expect(screen.getByRole('button', { name: 'Movies', pressed: false })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Games', pressed: true })).toBeTruthy();
+
+    // Time played descending (300, 120, none); ties/unplayed sort last.
+    const cardTitles = () => screen.getAllByRole('link').map((el) => el.textContent ?? '');
+    const orderOf = (...titles: string[]) =>
+      titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
+    expect(orderOf('Bravo', 'Alpha', 'Charlie')).toEqual([0, 1, 2]);
+
+    // Toggle to ascending: unplayed first.
+    await user.click(screen.getByRole('button', { name: 'Sort ascending' }));
+    expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
+  });
+
+  it('falls back to the default sort when games are filtered out while sorting by time played', async () => {
+    libraryMock.mockResolvedValue([
+      { ...item, id: 'a', title: 'Alpha', media_type: 'game', total_time_played_minutes: 120 },
+      { ...item, id: 'b', title: 'Bravo', media_type: 'game', total_time_played_minutes: 300 },
+    ]);
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+
+    const select = screen.getByRole('combobox', { name: 'Sort library by' });
+    await user.selectOptions(select, 'time_played');
+    expect(select).toHaveValue('time_played');
+
+    // Deselect games via the type chips: time played no longer applies.
+    await user.click(screen.getByRole('button', { name: 'Games' }));
+    await waitFor(() => expect(select).toHaveValue('checkin'));
   });
 
   it('sorts by time added to this list when a list is selected', async () => {
@@ -240,5 +312,126 @@ describe('MediaLibrarySection', () => {
     await waitFor(() => expect((listSelect as HTMLSelectElement).value).toBe(''));
     expect(screen.queryByRole('button', { name: 'Delete list Watchlist' })).toBeNull();
     confirmSpy.mockRestore();
+  });
+});
+
+describe('MediaLibrarySection batch edit mode', () => {
+  const threeItems: MediaLibraryItem[] = [
+    { ...item, id: 'a', title: 'Alpha' },
+    { ...item, id: 'b', title: 'Bravo' },
+    { ...item, id: 'c', title: 'Charlie' },
+  ];
+
+  const EDIT_BUTTON = 'Edit mode: select items for batch operations';
+
+  async function enterEditMode(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: EDIT_BUTTON }));
+  }
+
+  beforeEach(() => {
+    libraryMock.mockResolvedValue(threeItems);
+  });
+
+  it('shows a checkbox on each card and toggles selection on click', async () => {
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+
+    // Cards are links until edit mode is entered.
+    expect(screen.getByRole('link', { name: /Alpha/ })).toBeTruthy();
+    await enterEditMode(user);
+
+    // Clicking a card's checkbox selects it.
+    expect(screen.getByRole('button', { name: 'Alpha', pressed: false })).toBeTruthy();
+    await user.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
+    expect(screen.getByRole('button', { name: 'Alpha', pressed: true })).toBeTruthy();
+    expect(screen.getByText('1 selected')).toBeTruthy();
+
+    // Clicking a second checkbox adds to the selection.
+    await user.click(screen.getByRole('checkbox', { name: 'Select Charlie' }));
+    expect(screen.getByRole('button', { name: 'Charlie', pressed: true })).toBeTruthy();
+    expect(screen.getByText('2 selected')).toBeTruthy();
+
+    // Clicking a selected card again deselects it.
+    await user.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
+    expect(screen.getByRole('button', { name: 'Alpha', pressed: false })).toBeTruthy();
+    expect(screen.getByText('1 selected')).toBeTruthy();
+
+    // Done exits edit mode, restores the links, and clears the selection.
+    await user.click(screen.getByRole('button', { name: 'Done editing' }));
+    expect(screen.queryByRole('checkbox', { name: 'Select Alpha' })).toBeNull();
+    expect(screen.getByRole('link', { name: /Alpha/ })).toBeTruthy();
+  });
+
+  it('selects a range when shift-clicking a checkbox', async () => {
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+    await enterEditMode(user);
+
+    // Anchor on the first card, then shift-click the last: the whole range is selected.
+    await user.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByRole('checkbox', { name: 'Select Charlie' }));
+    await user.keyboard('{/Shift}');
+
+    expect(screen.getByText('3 selected')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Alpha', pressed: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Bravo', pressed: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Charlie', pressed: true })).toBeTruthy();
+  });
+
+  it('deletes selected items after a confirmation showing item and check-in counts', async () => {
+    bulkDeleteItemsMock
+      .mockResolvedValueOnce({ deleted_items: 2, deleted_checkins: 5, deleted_list_memberships: 1 })
+      .mockResolvedValueOnce({ deleted_items: 2, deleted_checkins: 5, deleted_list_memberships: 1 });
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+    await enterEditMode(user);
+
+    await user.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByRole('checkbox', { name: 'Select Bravo' }));
+    await user.keyboard('{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Delete 2 selected items' }));
+
+    // Deleting first requests a dry-run preview for the confirmation dialog.
+    expect(bulkDeleteItemsMock).toHaveBeenLastCalledWith(['a', 'b'], true);
+    await waitFor(() => expect(screen.getByText('Delete 2 media items?')).toBeTruthy());
+    const body = screen.getByText((_, el) => el?.tagName === 'P' && /permanently delete/.test(el.textContent ?? ''));
+    expect(body.textContent).toMatch(/2 media items and 5 check-ins/);
+    expect(body.textContent).toMatch(/removed from any lists they belong to/);
+
+    // Cancelling keeps the items and performs no deletion.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(bulkDeleteItemsMock.mock.calls.length).toBe(1);
+    expect(screen.queryByText('Delete 2 media items?')).toBeNull();
+    expect(screen.getByText('Alpha')).toBeTruthy();
+
+    // Re-open the confirmation and confirm: the real delete runs and the
+    // deleted items disappear from the library.
+    await user.click(screen.getByRole('button', { name: 'Delete 2 selected items' }));
+    await waitFor(() => expect(screen.getByText('Delete 2 media items?')).toBeTruthy());
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(bulkDeleteItemsMock).toHaveBeenLastCalledWith(['a', 'b'], false);
+    await waitFor(() => {
+      expect(screen.queryByText('Alpha')).toBeNull();
+      expect(screen.queryByText('Bravo')).toBeNull();
+    });
+    expect(screen.getByText('Charlie')).toBeTruthy();
+    expect(screen.getByText('0 selected')).toBeTruthy();
+  });
+
+  it('disables the delete button when nothing is selected', async () => {
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+    await enterEditMode(user);
+
+    const deleteButton = screen.getByRole('button', { name: 'Delete 0 selected items' });
+    expect(deleteButton).toBeDisabled();
+    await user.click(deleteButton);
+    expect(bulkDeleteItemsMock).not.toHaveBeenCalled();
   });
 });

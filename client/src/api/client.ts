@@ -635,6 +635,16 @@ export const media = {
     request<{ message: string }>(`/media/lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: mediaItemId }) }),
   removeItemFromList: (listId: string, mediaItemId: string) =>
     request<{ message: string }>(`/media/lists/${listId}/items/${mediaItemId}`, { method: 'DELETE' }),
+  /**
+   * Delete media items along with all of their check-ins and list
+   * memberships. With `dryRun` it only reports how many rows would be
+   * affected, without deleting anything.
+   */
+  bulkDeleteItems: (ids: string[], dryRun: boolean) =>
+    request<{ deleted_items: number; deleted_checkins: number; deleted_list_memberships: number }>(
+      '/media/items/bulk-delete',
+      { method: 'POST', body: JSON.stringify({ ids, dryRun }) }
+    ),
 };
 
 // Yamtrack import
