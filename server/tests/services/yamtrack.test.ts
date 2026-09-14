@@ -36,10 +36,13 @@ const CSV_HEADER =
 describe('mapYamtrackSource', () => {
   it('maps known sources', () => {
     expect(mapYamtrackSource('tmdb')).toBe('tmdb');
-    expect(mapYamtrackSource('igdb')).toBe('tgdb');
     expect(mapYamtrackSource('tgdb')).toBe('tgdb');
     expect(mapYamtrackSource('hardcover')).toBe('hardcover');
     expect(mapYamtrackSource('unknown')).toBeNull();
+  });
+
+  it('does not map igdb to tgdb (IGDB ids are not TGDB ids)', () => {
+    expect(mapYamtrackSource('igdb')).toBeNull();
   });
 });
 
@@ -205,7 +208,8 @@ describe('planYamtrackImport', () => {
     expect(plans[0].raw_score).toBe(8);
     expect(plans[0].checked_in_at).toBe('2023-01-01');
     expect(plans[1].checkin_type).toBe('in_progress');
-    expect(plans[1].external_source).toBe('tgdb');
+    expect(plans[1].external_source).toBeNull();
+    expect(plans[1].external_id).toBeNull();
     expect(plans[1].checked_in_at).toBe('2023-01-02');
     expect(plans[2].checkin_type).toBe('dropped');
     expect(plans[2].external_source).toBe('hardcover');
@@ -315,6 +319,10 @@ describe('end-to-end parse + plan on a real-shaped CSV', () => {
     ].join('\n');
 
     const plans = planYamtrackImport(parseYamtrackCsv(csv));
+    const game = plans.find((p) => p.row.media_type === 'game')!;
+    // igdb rows import local-only: the IGDB media_id must not be stored.
+    expect(game.external_source).toBeNull();
+    expect(game.external_id).toBeNull();
     const counts = countPlans(plans);
     expect(counts.total).toBe(6);
     expect(counts.create_tv_show).toBe(1);

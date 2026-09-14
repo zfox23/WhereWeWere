@@ -553,6 +553,33 @@ export const media = {
     series_count?: number | null;
   }) => request<MediaItem>('/media/items', { method: 'POST', body: JSON.stringify(data) }),
   getItem: (id: string) => request<MediaItem>(`/media/items/${id}`),
+  updateItem: (id: string, data: {
+    title?: string;
+    author?: string | null;
+    release_year?: number | null;
+    image_url?: string | null;
+    external_url?: string | null;
+    platform?: string | null;
+    /** Book: page count of the default physical edition. */
+    page_count?: number | null;
+    /** Book: series name, if applicable. */
+    series_name?: string | null;
+    /** Book: this book's number within its series. */
+    series_position?: number | null;
+    /** Book: total number of books in the series. */
+    series_count?: number | null;
+    /** Set the provider's ID for this item (derives external_source from media_type). */
+    external_id?: string | null;
+  }) => request<MediaItem>(`/media/items/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  /**
+   * Fetch the latest provider metadata; returns a diff-ready payload. For
+   * local-only games the server may re-key the item by title instead (writes
+   * the external id, signals it via `rekeyed: true`).
+   */
+  syncItem: (id: string) =>
+    request<{ provider: string; found: boolean; rekeyed?: boolean; metadata: Record<string, string | number | null> }>(
+      `/media/items/${id}/sync`, { method: 'POST' }
+    ),
   listCheckins: (itemId: string) => request<MediaCheckIn[]>(`/media/items/${itemId}/checkins`),
   createCheckin: (itemId: string, data: {
     season_number?: number | null;

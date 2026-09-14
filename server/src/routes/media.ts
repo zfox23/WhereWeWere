@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { query, pool } from '../db';
 import { tmdb } from '../services/tmdb';
-import { tgdb } from '../services/tgdb';
+import { tgdb, type TgdbGameResult } from '../services/tgdb';
+import { normalizeTitle, titleRelation } from '../services/titleMatch';
 import { hardcover } from '../services/hardcover';
 
 const router = Router();
@@ -336,6 +337,277 @@ router.post('/items', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error creating media item:', err);
     res.status(500).json({ error: 'Failed to create media item' });
+  }
+});
+
+/** media_type -> external source name stored in external_source (null = no provider). */
+const SOURCE_BY_TYPE: Record<string, string | null> = {
+  movie: 'tmdb',
+  tv_show: 'tmdb',
+  game: 'tgdb',
+  book: 'hardcover',
+  board_game: null,
+};
+
+// PUT /items/:id - update editable metadata fields on an existing item
+router.put('/items/:id', async (req: Request, res: Response) => {
+  try {
+    const itemResult = await query(
+      `SELECT id, media_type FROM media_items WHERE id = $1 AND user_id = $2`,
+      [req.params.id, USER_ID]
+    );
+    if (itemResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Media item not found' });
+    }
+    const mediaType: string = itemResult.rows[0].media_type;
+    const allowedSource = SOURCE_BY_TYPE[mediaType] || null;
+
+    const { title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count } = req.body;
+    let external_id: unknown = req.body.external_id;
+
+    // Board games are local-only: external fields are not applicable.
+    if (mediaType === 'board_game' && external_id !== undefined) {
+      return res.status(400).json({ error: 'Board games are local-only and have no external provider' });
+    }
+
+    // Setting an external_id derives the external_source from the media type.
+    // If another item already claims that source+id, refuse rather than
+    // merge check-ins into the wrong item.
+    let externalSource: string | null = null;
+    if (external_id !== undefined && external_id !== null) {
+      const extId = String(external_id).trim();
+      if (!extId) {
+        external_id = null;
+      } else {
+        externalSource = allowedSource;
+        if (!externalSource) {
+          return res.status(400).json({ error: 'This media type has no external provider' });
+        }
+        const conflict = await query(
+          `SELECT id FROM media_items
+           WHERE user_id = $1 AND media_type = $2 AND external_source = $3 AND external_id = $4 AND id <> $5`,
+          [USER_ID, mediaType, externalSource, extId, req.params.id]
+        );
+        if (conflict.rows.length > 0) {
+          return res.status(409).json({ error: 'Another item already has this external ID' });
+        }
+        external_id = extId;
+      }
+    }
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const add = (column: string, value: unknown) => {
+      params.push(value);
+      sets.push(`${column} = $${params.length}`);
+    };
+
+    if (title !== undefined) {
+      const t = typeof title === 'string' ? title.trim() : '';
+      if (!t) return res.status(400).json({ error: 'title must be a non-empty string' });
+      add('title', t);
+    }
+    if (author !== undefined) add('author', author ? String(author).trim() || null : null);
+    if (release_year !== undefined) add('release_year', toIntOrNull(release_year));
+    if (image_url !== undefined) add('image_url', image_url ? String(image_url).trim() || null : null);
+    if (external_url !== undefined) add('external_url', external_url ? String(external_url).trim() || null : null);
+    if (platform !== undefined && mediaType === 'game') {
+      add('platform', platform ? String(platform).trim() || null : null);
+    }
+    if (mediaType === 'book') {
+      if (page_count !== undefined) add('page_count', toIntOrNull(page_count));
+      if (series_name !== undefined) add('series_name', series_name ? String(series_name).trim() || null : null);
+      if (series_position !== undefined) add('series_position', toIntOrNull(series_position));
+      if (series_count !== undefined) add('series_count', toIntOrNull(series_count));
+    }
+    if (external_id !== undefined) {
+      add('external_source', external_id ? externalSource : null);
+      add('external_id', external_id ? String(external_id) : null);
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+    sets.push('updated_at = NOW()');
+
+    params.push(req.params.id, USER_ID);
+    await query(
+      `UPDATE media_items SET ${sets.join(', ')} WHERE id = $${params.length - 1} AND user_id = $${params.length}`,
+      params
+    );
+    // Return the full item with aggregates (same shape as GET /items/:id) so
+    // clients don't need a follow-up fetch after every update.
+    const item = await query(
+      `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
+              page_count, series_name, series_position, series_count, created_at
+       FROM media_items WHERE id = $1 AND user_id = $2`,
+      [req.params.id, USER_ID]
+    );
+    if (item.rows.length === 0) {
+      return res.status(404).json({ error: 'Media item not found' });
+    }
+    const statsResult = await query(
+      `SELECT MAX(checked_in_at) AS last_checkin_at,
+              COUNT(*) AS checkin_count,
+              (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS my_rating,
+              COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count,
+              (ARRAY_AGG(time_played_minutes ORDER BY checked_in_at DESC, id DESC)
+                 FILTER (WHERE time_played_minutes IS NOT NULL))[1] AS total_time_played_minutes
+       FROM media_checkins WHERE media_item_id = $1`,
+      [req.params.id]
+    );
+    const s = statsResult.rows[0];
+    res.json({
+      ...item.rows[0],
+      last_checkin_at: s.last_checkin_at,
+      checkin_count: Number(s.checkin_count),
+      my_rating: s.my_rating != null ? Number(s.my_rating) : null,
+      completed_count: Number(s.completed_count),
+      total_time_played_minutes: s.total_time_played_minutes != null ? Number(s.total_time_played_minutes) : null,
+    });
+  } catch (err) {
+    console.error('Error updating media item:', err);
+    res.status(500).json({ error: 'Failed to update media item' });
+  }
+});
+
+/**
+ * Re-key a local-only game by title: find a strict TGDB title match (exact or
+ * edition qualifier) that no other local row already owns, and adopt its id +
+ * metadata in place. This is what makes Yamtrack-imported games (which store
+ * no external id) self-heal on their first sync. Returns the adopted TGDB
+ * record, or null when no usable match exists.
+ */
+async function rekeyGameByTitle(itemId: string, title: string): Promise<TgdbGameResult | null> {
+  const keys = await getApiKeys();
+  if (!keys.tgdb_api_key) return null;
+  const found = await tgdb.searchGames(keys.tgdb_api_key, title);
+  if (!found) return null;
+  const target = normalizeTitle(title);
+  for (const candidate of found) {
+    if (titleRelation(target, normalizeTitle(candidate.title)) === 'none') continue;
+    // Another local row may already own this TGDB id (partial unique index on
+    // user/type/source/id); skip to the next strict match instead of
+    // violating the constraint.
+    const owner = await query(
+      `SELECT id FROM media_items
+       WHERE user_id = $1 AND media_type = 'game' AND external_source = 'tgdb' AND external_id = $2 AND id <> $3`,
+      [USER_ID, candidate.externalId, itemId]
+    );
+    if (owner.rows.length > 0) continue;
+    await query(
+      `UPDATE media_items
+       SET external_source = 'tgdb',
+           external_id = $2,
+           external_url = $3,
+           release_year = COALESCE($4, release_year),
+           image_url = COALESCE($5, image_url),
+           platform = COALESCE($6, platform),
+           updated_at = NOW()
+       WHERE id = $1 AND user_id = $7`,
+      [itemId, candidate.externalId, `https://thegamesdb.net/game.php?id=${candidate.externalId}`,
+       candidate.releaseYear, candidate.imageUrl, candidate.platform, USER_ID]
+    );
+    return candidate;
+  }
+  return null;
+}
+
+/** Fetch the latest metadata for an item from its provider. Never writes (except the game title re-key above). */
+async function fetchSyncMetadata(item: {
+  media_type: string;
+  external_id: string;
+  title: string;
+}): Promise<{ provider: string; found: boolean; metadata: Record<string, string | number | null> } | null> {
+  const keys = await getApiKeys();
+  switch (item.media_type) {
+    case 'movie': {
+      const d = await tmdb.getMovieDetails(keys.tmdb_api_key, item.external_id);
+      if (!d) return null;
+      return { provider: 'TMDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl } };
+    }
+    case 'tv_show': {
+      const d = await tmdb.getTvShowDetails(keys.tmdb_api_key, item.external_id);
+      if (!d) return null;
+      return { provider: 'TMDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl } };
+    }
+    case 'game': {
+      const d = await tgdb.getGameDetails(keys.tgdb_api_key, item.external_id);
+      if (!d) return null;
+      return { provider: 'TGDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl, platform: d.platform } };
+    }
+    case 'book': {
+      const d = await hardcover.getBookByExternalId(keys.hardcover_api_key, item.external_id, item.title);
+      if (!d) return null;
+      return {
+        provider: 'Hardcover',
+        found: true,
+        metadata: {
+          title: d.title,
+          author: d.author,
+          release_year: d.releaseYear,
+          image_url: d.imageUrl,
+          page_count: d.pageCount,
+          series_name: d.seriesName,
+          series_position: d.seriesPosition,
+          series_count: d.seriesCount,
+        },
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+// POST /items/:id/sync - fetch fresh provider metadata; the client diffs and
+// the user accepts changes explicitly via PUT /items/:id
+router.post('/items/:id/sync', async (req: Request, res: Response) => {
+  try {
+    const itemResult = await query(
+      `SELECT id, media_type, external_source, external_id, title FROM media_items WHERE id = $1 AND user_id = $2`,
+      [req.params.id, USER_ID]
+    );
+    if (itemResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Media item not found' });
+    }
+    const item = itemResult.rows[0];
+    if (item.media_type === 'board_game') {
+      return res.status(400).json({ error: 'Board games are local-only and have no provider to sync from' });
+    }
+    if (!item.external_id) {
+      if (item.media_type === 'game') {
+        // Local-only games (e.g. imported from Yamtrack, whose IGDB ids we
+        // must not store) self-heal: resolve them by title against TGDB.
+        const match = await rekeyGameByTitle(item.id, item.title);
+        if (!match) {
+          return res.status(404).json({ error: 'Could not find this game in TGDB by title (it may be missing from the database).' });
+        }
+        return res.json({
+          provider: 'TGDB',
+          found: true,
+          rekeyed: true,
+          metadata: { title: match.title, release_year: match.releaseYear, image_url: match.imageUrl, platform: match.platform },
+        });
+      }
+      return res.status(400).json({ error: 'This item has no external ID. Set one in edit mode first.' });
+    }
+    const result = await fetchSyncMetadata(item);
+    if (!result) {
+      const keys = await getApiKeys();
+      const hasKey = item.media_type === 'book'
+        ? !!keys.hardcover_api_key
+        : item.media_type === 'game'
+          ? !!keys.tgdb_api_key
+          : !!keys.tmdb_api_key;
+      if (!hasKey) {
+        return res.status(400).json({ error: 'API key for this provider is not configured' });
+      }
+      return res.status(404).json({ error: 'Provider could not find this item (it may have been removed)' });
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('Error syncing media item:', err);
+    res.status(500).json({ error: 'Failed to sync metadata' });
   }
 });
 

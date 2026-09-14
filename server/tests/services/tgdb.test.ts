@@ -166,3 +166,77 @@ describe('tgdb.searchGames', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+const byIdBody = {
+  code: 200,
+  status: 'Success',
+  data: {
+    count: 1,
+    games: [
+      { id: 101643, game_title: 'Hollow Knight: Silksong', release_date: '2025-09-04', platform: 1, region_id: 9, country_id: 0 },
+    ],
+  },
+  include: {
+    boxart: {
+      base_url: { medium: 'https://cdn.thegamesdb.net/images/medium/' },
+      data: {
+        '101643': [{ id: 482204, type: 'boxart', side: 'front', filename: 'boxart/front/101643-1.jpg' }],
+      },
+    },
+    platform: {
+      data: { '1': { id: 1, name: 'PC', alias: 'pc' } },
+    },
+  },
+};
+
+describe('tgdb.getGameDetails', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => jsonResponse(byIdBody));
+    vi.stubGlobal('fetch', fetchMock);
+    tgdb.cache.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    tgdb.cache.clear();
+  });
+
+  it('returns null without an API key and does not fetch', async () => {
+    await expect(tgdb.getGameDetails(null, '101643')).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('calls the v1 ByGameID endpoint (v1.1 has no by-id lookup)', async () => {
+    await tgdb.getGameDetails('KEY', '101643');
+    const url = fetchMock.mock.calls[0][0] as string;
+    const parsed = new URL(url);
+    expect(parsed.origin).toBe('https://api.thegamesdb.net');
+    expect(parsed.pathname).toBe('/v1/Games/ByGameID');
+    expect(parsed.searchParams.get('apikey')).toBe('KEY');
+    expect(parsed.searchParams.get('id')).toBe('101643');
+  });
+
+  it('maps a single game row including platform and front boxart', async () => {
+    const result = await tgdb.getGameDetails('KEY', '101643');
+    expect(result).toEqual({
+      externalId: '101643',
+      title: 'Hollow Knight: Silksong',
+      releaseYear: 2025,
+      imageUrl: 'https://cdn.thegamesdb.net/images/medium/boxart/front/101643-1.jpg',
+      externalUrl: 'https://thegamesdb.net/game.php?id=101643',
+      platform: 'PC',
+    });
+  });
+
+  it('returns null when the API returns no games', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ code: 200, status: 'Success', data: { count: 0, games: [] } }));
+    await expect(tgdb.getGameDetails('KEY', '999999')).resolves.toBeNull();
+  });
+
+  it('returns null (degraded) when the API 404s', async () => {
+    fetchMock.mockImplementation(async () => new Response('nope', { status: 404 }));
+    await expect(tgdb.getGameDetails('KEY', '101643')).resolves.toBeNull();
+  });
+});

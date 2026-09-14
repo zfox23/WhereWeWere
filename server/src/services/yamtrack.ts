@@ -78,9 +78,13 @@ export function mapYamtrackSource(source: string): 'tmdb' | 'tgdb' | 'hardcover'
   switch (source) {
     case 'tmdb':
       return 'tmdb';
-    case 'igdb':
     case 'tgdb':
       return 'tgdb';
+    case 'igdb':
+      // Yamtrack keys games by IGDB id, which is NOT a TGDB id. Storing it
+      // would produce broken links and corrupt metadata sync, so igdb rows
+      // import as local-only games (enriched later by title search).
+      return null;
     case 'hardcover':
       return 'hardcover';
     default:
@@ -214,6 +218,10 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
   for (const row of rows) {
     const mediaType = mapYamtrackMediaType(row.media_type, row.source);
     const externalSource = mapYamtrackSource(row.source);
+    // Only store the Yamtrack media_id when the source actually maps to one of
+    // our external providers. For unmapped sources (e.g. 'igdb', whose ids are
+    // not TGDB ids) the item imports local-only: external_id stays null.
+    const externalId = externalSource ? row.media_id || null : null;
 
     if (!mediaType || !row.title) {
       plans.push({
@@ -243,7 +251,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         reason: 'TV show / season entry creates the local TV show entity',
         media_type: 'tv_show',
         external_source: externalSource,
-        external_id: row.media_id || null,
+        external_id: externalId,
         checkin_type: null,
         season_number: row.season_number ? parseInt(row.season_number, 10) : null,
         episode_number: null,
@@ -267,7 +275,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           reason: 'Episode row missing season/episode number',
           media_type: 'tv_show',
           external_source: externalSource,
-          external_id: row.media_id || null,
+          external_id: externalId,
           checkin_type: null,
           season_number: null,
           episode_number: null,
@@ -291,7 +299,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           reason: `Duplicate episode row (same media, season, episode, and end_date as line ${rows[existingIdx].line})`,
           media_type: 'tv_show',
           external_source: externalSource,
-          external_id: row.media_id || null,
+          external_id: externalId,
           checkin_type: null,
           season_number: s,
           episode_number: e,
@@ -313,7 +321,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           : 'Episode row without end_date creates the TV show entity only',
         media_type: 'tv_show',
         external_source: externalSource,
-        external_id: row.media_id || null,
+        external_id: externalId,
         checkin_type: checkedAt ? 'completed' : null,
         season_number: s,
         episode_number: e,
@@ -345,7 +353,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           reason: `Progress "${row.progress}" creates an In-Progress check-in (progressed_at, UTC) with time played`,
           media_type: 'game',
           external_source: externalSource,
-          external_id: row.media_id || null,
+          external_id: externalId,
           checkin_type: 'in_progress',
           season_number: null,
           episode_number: null,
@@ -370,7 +378,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         reason: `Status "${statusText}" only creates the media entity (no check-in)`,
         media_type: mediaType,
         external_source: externalSource,
-        external_id: row.media_id || null,
+        external_id: externalId,
         checkin_type: null,
         season_number: null,
         episode_number: null,
@@ -391,7 +399,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         reason: `Status "${statusText}" but no end_date; creates the media entity only`,
         media_type: mediaType,
         external_source: externalSource,
-        external_id: row.media_id || null,
+        external_id: externalId,
         checkin_type: null,
         season_number: null,
         episode_number: null,
@@ -412,7 +420,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
       reason: `Status "${statusText}" with end_date creates a ${checkinType} check-in (UTC)`,
       media_type: mediaType,
       external_source: externalSource,
-      external_id: row.media_id || null,
+      external_id: externalId,
       checkin_type: checkinType,
       season_number: null,
       episode_number: null,

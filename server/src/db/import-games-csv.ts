@@ -45,6 +45,10 @@ import { parse } from 'csv-parse/sync';
 import { pool } from './index';
 import { tgdb, type TgdbGameResult } from '../services/tgdb';
 import { scoreToRating } from '../services/yamtrack';
+import { normalizeTitle, titleRelation } from '../services/titleMatch';
+
+// Re-exported for any external consumers of this module's title helpers.
+export { normalizeTitle, titleRelation };
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const TGDB_API_LIMIT_URL = 'https://api.thegamesdb.net/v1/API/Limit';
@@ -79,19 +83,6 @@ function cleanStr(value: unknown): string | null {
   if (value == null) return null;
   const str = String(value).trim();
   return str === '' ? null : str;
-}
-
-/**
- * Title key used for local matching and idempotency: lowercase,
- * alphanumerics joined by single spaces (so "Assassin's Creed: Brotherhood"
- * and "Assassin's Creed Brotherhood" collide).
- */
-export function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
 }
 
 export function parseGamesCsv(csv: string): GameCsvRow[] {
@@ -144,64 +135,6 @@ export function parseGamesCsv(csv: string): GameCsvRow[] {
 /** Stable idempotency key for the check-in created by a CSV row. */
 function checkinEventId(title: string): string {
   return `ggbl:${crypto.createHash('sha1').update(normalizeTitle(title)).digest('hex')}`;
-}
-
-/** Edition qualifiers that make a longer title refer to the SAME game. */
-const EDITION_QUALIFIERS = new Set([
-  'steam edition', 'gog edition', 'digital edition', 'digital deluxe edition',
-  'definitive edition', 'complete edition', 'gold edition', 'platinum edition',
-  'ultimate edition', 'standard edition', 'deluxe edition', 'special edition',
-  'limited edition', 'anniversary edition', 'enhanced edition', 'directors cut',
-  'remastered', 'remaster', 'complete collection', 'bundle',
-]);
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * True when `shorterKey` occurs in `longerKey` as a whole word (the normalized
- * keys are space-delimited, so word boundaries are spaces / string ends).
- * This is what makes "battlefield 2" NOT match "battlefield 2042".
- */
-function wordContains(longerKey: string, shorterKey: string): boolean {
-  if (!shorterKey || longerKey === shorterKey) return false;
-  const re = new RegExp(`(^| )${escapeRegExp(shorterKey)}( |$)`);
-  return re.test(longerKey);
-}
-
-/** The part of `longerKey` beyond a word-prefix/word-suffix `shorterKey`, else null. */
-function extensionTail(longerKey: string, shorterKey: string): string | null {
-  if (longerKey.startsWith(shorterKey + ' ')) return longerKey.slice(shorterKey.length + 1);
-  if (longerKey.endsWith(' ' + shorterKey)) return longerKey.slice(0, longerKey.length - shorterKey.length - 1);
-  return null;
-}
-
-type TitleRelation = 'exact' | 'edition' | 'none';
-
-/**
- * Classify how a CSV/search title (aKey) relates to a candidate title (bKey),
- * both already normalized. Only these denote the SAME game:
- *   - exact: identical.
- *   - edition: one title extends the other with a whitelisted edition
- *     qualifier ("… Steam Edition", "… Director's Cut").
- * Anything else — sequel numbers, subtitles ("… Season 1",
- * "… Episode One"), mid-token overlaps, unrelated titles — is 'none' so a
- * check-in and its time total are never folded into a different game. When in
- * doubt, a new game is created instead.
- */
-export function titleRelation(aKey: string, bKey: string): TitleRelation {
-  if (!aKey || !bKey) return 'none';
-  if (aKey === bKey) return 'exact';
-
-  // The longer title must be a whole-word extension of the shorter one by an
-  // edition qualifier only.
-  const [shorter, longer] = aKey.length <= bKey.length ? [aKey, bKey] : [bKey, aKey];
-  const tail = extensionTail(longer, shorter);
-  if (tail != null && wordContains(longer, shorter) && EDITION_QUALIFIERS.has(tail)) {
-    return 'edition';
-  }
-  return 'none';
 }
 
 // ============================================================================

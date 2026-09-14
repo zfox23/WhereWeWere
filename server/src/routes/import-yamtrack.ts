@@ -6,6 +6,7 @@ import {
   countPlans,
   type YamtrackPlanItem,
 } from '../services/yamtrack';
+import { normalizeTitle, titleRelation } from '../services/titleMatch';
 
 const router = Router();
 
@@ -188,6 +189,13 @@ async function applyMaxTimePlayed(
 /**
  * Find-or-create a media item within the caller's transaction.
  * Mirrors upsertMediaItem but takes an explicit client.
+ *
+ * Local-only items (no external_source/external_id — e.g. Yamtrack games,
+ * which carry IGDB ids we must not store as TGDB ids, and board games) are
+ * deduped by strict title match instead: exact normalized title, or a
+ * same-game edition qualifier. Everything else counts as a different item,
+ * so re-imports never create duplicate rows (same rules as the games-CSV
+ * importer).
  */
 async function upsertMediaItemWithClient(
   client: import('pg').PoolClient,
@@ -210,6 +218,20 @@ async function upsertMediaItemWithClient(
     );
     if (existing.rows.length > 0) {
       return { id: existing.rows[0].id as string, created: false };
+    }
+  } else {
+    // Local-only: find an existing item of the same type by strict title.
+    const siblings = await client.query(
+      `SELECT id, title FROM media_items
+       WHERE user_id = $1 AND media_type = $2 AND external_source IS NULL`,
+      [USER_ID, input.media_type]
+    );
+    const key = normalizeTitle(input.title);
+    const match = siblings.rows.find(
+      (r) => titleRelation(key, normalizeTitle(r.title as string)) !== 'none'
+    );
+    if (match) {
+      return { id: match.id as string, created: false };
     }
   }
 

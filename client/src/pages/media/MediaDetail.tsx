@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Loader2, ArrowLeft, ExternalLink, PlusCircle, ListPlus, Trash2, X, Calendar,
-  Pencil, Check,
+  Pencil, Check, RefreshCw,
 } from 'lucide-react';
 import { media } from '../../api/client';
 import type { MediaCheckIn, MediaItem, MediaList, MediaSubtype } from '../../types';
@@ -39,6 +39,44 @@ interface CheckinEditDraft {
   time_minutes: string;
 }
 
+/** Draft state for editing the media item's own metadata (header edit mode). */
+interface ItemEditDraft {
+  title: string;
+  author: string;
+  release_year: string;
+  image_url: string;
+  external_url: string;
+  platform: string;
+  page_count: string;
+  series_name: string;
+  series_position: string;
+  series_count: string;
+  external_id: string;
+}
+
+/** Fields a provider can refresh via sync (all keys of MediaItem). */
+type SyncableField =
+  | 'title' | 'author' | 'release_year' | 'image_url' | 'platform'
+  | 'page_count' | 'series_name' | 'series_position' | 'series_count';
+
+interface MetadataDiff {
+  field: SyncableField;
+  current: string | number | null;
+  proposed: string | number;
+}
+
+const METADATA_FIELD_LABELS: Record<SyncableField, string> = {
+  title: 'Title',
+  author: 'Author',
+  release_year: 'Release year',
+  image_url: 'Image URL',
+  platform: 'Platform',
+  page_count: 'Page count',
+  series_name: 'Series',
+  series_position: 'Series position',
+  series_count: 'Series count',
+};
+
 export default function MediaDetail({ subtype }: MediaDetailProps) {
   const config = MEDIA_SUBTYPES[subtype];
   const { id } = useParams<{ id: string }>();
@@ -61,6 +99,19 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
   const [draft, setDraft] = useState<CheckinEditDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  // Header metadata edit mode.
+  const [editingItem, setEditingItem] = useState(false);
+  const [itemDraft, setItemDraft] = useState<ItemEditDraft | null>(null);
+  const [savingItem, setSavingItem] = useState(false);
+  const [itemEditError, setItemEditError] = useState<string | null>(null);
+
+  // Provider sync (only meaningful in edit mode, for items with an external_id).
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncDiff, setSyncDiff] = useState<MetadataDiff[] | null>(null);
+  const [acceptingField, setAcceptingField] = useState<SyncableField | null>(null);
+  const [acceptingAll, setAcceptingAll] = useState(false);
 
   usePageTitle(`${config.label}: ${item?.title || ''}`);
 
@@ -254,6 +305,208 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     }
   };
 
+  // --- Header metadata editing -------------------------------------------------
+
+  const startItemEdit = () => {
+    if (!item) return;
+    setItemEditError(null);
+    setSyncError(null);
+    setSyncDiff(null);
+    setItemDraft({
+      title: item.title || '',
+      author: item.author || '',
+      release_year: item.release_year != null ? String(item.release_year) : '',
+      image_url: item.image_url || '',
+      external_url: item.external_url || '',
+      platform: item.platform || '',
+      page_count: item.page_count != null ? String(item.page_count) : '',
+      series_name: item.series_name || '',
+      series_position: item.series_position != null ? String(item.series_position) : '',
+      series_count: item.series_count != null ? String(item.series_count) : '',
+      external_id: item.external_id || '',
+    });
+    setEditingItem(true);
+  };
+
+  const cancelItemEdit = () => {
+    setEditingItem(false);
+    setItemDraft(null);
+    setItemEditError(null);
+    setSyncError(null);
+    setSyncDiff(null);
+  };
+
+  const patchItemDraft = (patch: Partial<ItemEditDraft>) =>
+    setItemDraft((d) => (d ? { ...d, ...patch } : d));
+
+  /** Persist a subset of the current item draft (or explicit fields). */
+  const saveItemFields = async (explicit?: Partial<ItemEditDraft>): Promise<boolean> => {
+    if (!item || !itemDraft) return false;
+    const d = explicit ? { ...itemDraft, ...explicit } : itemDraft;
+    const payload: Record<string, unknown> = {};
+    const put = (key: string, value: string, numeric = false) => {
+      payload[key] = numeric ? (value.trim() === '' ? null : parseInt(value, 10) || null)
+        : (value.trim() === '' ? null : value.trim());
+    };
+    payload.title = d.title.trim();
+    put('author', d.author);
+    put('release_year', d.release_year, true);
+    put('image_url', d.image_url);
+    put('external_url', d.external_url);
+    if (subtype === 'game') put('platform', d.platform);
+    if (subtype === 'book') {
+      put('page_count', d.page_count, true);
+      put('series_name', d.series_name);
+      put('series_position', d.series_position, true);
+      put('series_count', d.series_count, true);
+    }
+    // Only send external_id when it differs from the saved value (setting it
+    // derives external_source on the server; clearing is not supported here).
+    if (subtype !== 'board_game' && d.external_id.trim() !== (item.external_id || '')) {
+      payload.external_id = d.external_id.trim() || null;
+    }
+    try {
+      setSavingItem(true);
+      // PUT returns the full item with aggregates (same shape as GET).
+      const updated = await media.updateItem(item.id, payload);
+      setItem(updated);
+      setItemDraft({ ...d, external_id: updated.external_id || '' });
+      return true;
+    } catch (err) {
+      setItemEditError(err instanceof Error ? err.message : 'Failed to save changes');
+      return false;
+    } finally {
+      setSavingItem(false);
+    }
+  };
+
+  const saveItemEdit = async () => {
+    if (!itemDraft) return;
+    if (!itemDraft.title.trim()) {
+      setItemEditError('Title is required.');
+      return;
+    }
+    const ok = await saveItemFields();
+    if (ok) cancelItemEdit();
+  };
+
+  // --- Provider sync -----------------------------------------------------------
+
+  const buildSyncDiff = (
+    base: { author?: string | null; release_year?: number | null; image_url?: string | null; platform?: string | null;
+      page_count?: number | null; series_name?: string | null; series_position?: number | null; series_count?: number | null },
+    metadata: Record<string, string | number | null>
+  ): MetadataDiff[] => {
+    const diffs: MetadataDiff[] = [];
+    const push = (field: SyncableField, current: string | number | null | undefined, proposed: string | number | null | undefined) => {
+      if (proposed == null || proposed === '') return;
+      const cur = current == null || current === '' ? null : current;
+      if (String(cur ?? '') === String(proposed)) return;
+      diffs.push({ field, current: cur, proposed: proposed as string | number });
+    };
+    // Title diff is computed against the (possibly already-edited) draft.
+    if (itemDraft && metadata.title != null && String(metadata.title) !== itemDraft.title.trim()) {
+      diffs.push({ field: 'title', current: itemDraft.title.trim(), proposed: String(metadata.title) });
+    }
+    push('author', base.author, metadata.author);
+    push('release_year', base.release_year, metadata.release_year);
+    push('image_url', base.image_url, metadata.image_url);
+    push('platform', base.platform, metadata.platform);
+    push('page_count', base.page_count, metadata.page_count);
+    push('series_name', base.series_name, metadata.series_name);
+    push('series_position', base.series_position, metadata.series_position);
+    push('series_count', base.series_count, metadata.series_count);
+    return diffs;
+  };
+
+  const handleSyncMetadata = async () => {
+    if (!item || !itemDraft || !config.apiName) return;
+    // If the external_id only exists in the unsaved draft, persist it first so
+    // the server can resolve the provider lookup against the saved item.
+    // Games are exempt: a local-only game is re-keyed by the server via title
+    // search, so syncing is allowed without an external id.
+    if (!item.external_id && subtype !== 'game') {
+      if (!itemDraft.external_id.trim()) {
+        setSyncError('Enter the external ID above, then sync.');
+        return;
+      }
+      const ok = await saveItemFields();
+      if (!ok) return; // itemEditError is set
+    }
+    setSyncing(true);
+    setSyncError(null);
+    setSyncDiff(null);
+    try {
+      // Re-read the item (it may have just been updated with the external_id)
+      // so the diff compares provider values against fresh server state.
+      const [freshItem, res] = await Promise.all([
+        media.getItem(item.id),
+        media.syncItem(item.id),
+      ]);
+      setItem(freshItem);
+      const diffs = buildSyncDiff(freshItem, res.metadata);
+      if (diffs.length === 0) {
+        setSyncError(`Metadata from ${res.provider} is already up to date.`);
+      } else {
+        setSyncDiff(diffs);
+      }
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const acceptDiffField = async (field: SyncableField) => {
+    if (!item || !syncDiff) return;
+    const row = syncDiff.find((d) => d.field === field);
+    if (!row) return;
+    setAcceptingField(field);
+    setSyncError(null);
+    try {
+      const payload: Record<string, unknown> = { [field]: row.proposed };
+      const updated = await media.updateItem(item.id, payload);
+      setItem(updated);
+      if (itemDraft) {
+        const draftKey = field as keyof ItemEditDraft;
+        const value = row.proposed == null ? '' : String(row.proposed);
+        setItemDraft((d) => (d ? { ...d, [draftKey]: value } : d));
+      }
+      const remaining = syncDiff.filter((d) => d.field !== field);
+      setSyncDiff(remaining.length > 0 ? remaining : null);
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Failed to apply change');
+    } finally {
+      setAcceptingField(null);
+    }
+  };
+
+  const rejectDiffField = (field: SyncableField) => {
+    setSyncDiff((prev) => {
+      if (!prev) return prev;
+      const remaining = prev.filter((d) => d.field !== field);
+      return remaining.length > 0 ? remaining : null;
+    });
+  };
+
+  const acceptAllDiff = async () => {
+    if (!item || !syncDiff || syncDiff.length === 0) return;
+    setAcceptingAll(true);
+    setSyncError(null);
+    try {
+      const payload: Record<string, unknown> = {};
+      for (const row of syncDiff) payload[row.field] = row.proposed;
+      const updated = await media.updateItem(item.id, payload);
+      setItem(updated);
+      setSyncDiff(null);
+      cancelItemEdit();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Failed to apply changes');
+    } finally {
+      setAcceptingAll(false);
+    }
+  };
+
   /** Home URL with a single-day filter applied (opens in a new tab). */
   const homeDateUrl = (checkin: MediaCheckIn): string => {
     const date = dateInTimezone(checkin.checked_in_at, checkin.checkin_timezone);
@@ -295,66 +548,306 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       </button>
 
       {/* Header */}
-      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 flex gap-5">
-        {item.image_url ? (
-          <img src={item.image_url} alt={item.title} className="w-24 h-32 object-cover rounded-xl shadow-md shrink-0" />
-        ) : (
-          <div className="w-24 h-32 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-4xl shrink-0">
-            {config.icon}
-          </div>
+      <div className="relative bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 flex gap-5">
+        {!editingItem && (
+          <button
+            onClick={startItemEdit}
+            className="absolute top-3.5 right-3.5 p-2 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:text-gray-500 dark:hover:text-primary-400 dark:hover:bg-primary-900/20"
+            title="Edit metadata"
+          >
+            <Pencil size={15} />
+          </button>
         )}
-        <div className="min-w-0 flex flex-col">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h1>
-          {item.author && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{item.author}</p>}
-          {subtype === 'book' && item.series_name && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {item.series_position != null && <span>#{item.series_position}{item.series_count != null ? ` of ${item.series_count}` : ''} in </span>}
-              <span className="italic">{item.series_name}</span>
-            </p>
-          )}
-          <div className="flex items-center gap-4 mt-1.5 flex-wrap">
-            {item.release_year && <span className="text-sm text-gray-500">{item.release_year}</span>}
-            {subtype === 'book' && item.page_count != null && (
-              <span className="text-sm text-gray-500">{item.page_count} pages</span>
+        {editingItem && itemDraft ? (
+          <>
+            {itemDraft.image_url.trim() ? (
+              <img src={itemDraft.image_url.trim()} alt={itemDraft.title} className="w-24 h-32 object-cover rounded-xl shadow-md shrink-0" />
+            ) : (
+              <div className="w-24 h-32 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-4xl shrink-0">
+                {config.icon}
+              </div>
             )}
-            {subtype === 'game' && item.total_time_played_minutes != null && (
-              <span className="text-sm text-gray-500">
-                {formatTimePlayed(item.total_time_played_minutes)} played
-              </span>
+            <div className="min-w-0 flex flex-col gap-2.5 pr-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Title</span>
+                  <input
+                    type="text"
+                    value={itemDraft.title}
+                    onChange={(e) => patchItemDraft({ title: e.target.value })}
+                    className="input text-sm mt-0.5"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Author</span>
+                  <input
+                    type="text"
+                    value={itemDraft.author}
+                    onChange={(e) => patchItemDraft({ author: e.target.value })}
+                    placeholder="—"
+                    className="input text-sm mt-0.5"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Release year</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={itemDraft.release_year}
+                    onChange={(e) => patchItemDraft({ release_year: e.target.value })}
+                    placeholder="e.g. 2019"
+                    inputMode="numeric"
+                    className="input text-sm mt-0.5"
+                  />
+                </label>
+                {subtype === 'game' && (
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Platform</span>
+                    <input
+                      type="text"
+                      value={itemDraft.platform}
+                      onChange={(e) => patchItemDraft({ platform: e.target.value })}
+                      placeholder="e.g. PlayStation 5"
+                      className="input text-sm mt-0.5"
+                    />
+                  </label>
+                )}
+                {subtype === 'book' && (
+                  <>
+                    <label className="block">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Page count</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={itemDraft.page_count}
+                        onChange={(e) => patchItemDraft({ page_count: e.target.value })}
+                        placeholder="—"
+                        inputMode="numeric"
+                        className="input text-sm mt-0.5"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Series</span>
+                      <input
+                        type="text"
+                        value={itemDraft.series_name}
+                        onChange={(e) => patchItemDraft({ series_name: e.target.value })}
+                        placeholder="—"
+                        className="input text-sm mt-0.5"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Series position</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={itemDraft.series_position}
+                        onChange={(e) => patchItemDraft({ series_position: e.target.value })}
+                        placeholder="—"
+                        inputMode="numeric"
+                        className="input text-sm mt-0.5"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Books in series</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={itemDraft.series_count}
+                        onChange={(e) => patchItemDraft({ series_count: e.target.value })}
+                        placeholder="—"
+                        inputMode="numeric"
+                        className="input text-sm mt-0.5"
+                      />
+                    </label>
+                  </>
+                )}
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Image URL</span>
+                  <input
+                    type="text"
+                    value={itemDraft.image_url}
+                    onChange={(e) => patchItemDraft({ image_url: e.target.value })}
+                    placeholder="https://…"
+                    className="input text-sm mt-0.5 font-mono text-xs"
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">External URL</span>
+                  <input
+                    type="text"
+                    value={itemDraft.external_url}
+                    onChange={(e) => patchItemDraft({ external_url: e.target.value })}
+                    placeholder="https://…"
+                    className="input text-sm mt-0.5 font-mono text-xs"
+                  />
+                </label>
+                {subtype !== 'board_game' && (
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      {config.apiName} ID
+                      <span className="font-normal text-gray-400">
+                        {' — '}
+                        {subtype === 'game'
+                          ? 'optional — sync finds the game by title when this is empty'
+                          : `set this to enable syncing metadata from ${config.apiName}`}
+                      </span>
+                    </span>
+                    <input
+                      type="text"
+                      value={itemDraft.external_id}
+                      onChange={(e) => patchItemDraft({ external_id: e.target.value })}
+                      placeholder={item.external_id ? item.external_id : `e.g. ${config.apiName} ID`}
+                      className="input text-sm mt-0.5 font-mono text-xs"
+                    />
+                  </label>
+                )}
+              </div>
+              {itemEditError && <p className="text-xs text-red-500 dark:text-red-400">{itemEditError}</p>}
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                <button
+                  onClick={saveItemEdit}
+                  disabled={savingItem}
+                  className="btn-primary text-sm"
+                >
+                  {savingItem ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : <Check size={15} className="mr-1.5" />}
+                  Save
+                </button>
+                <button onClick={cancelItemEdit} className="btn-secondary text-sm">
+                  <X size={15} className="mr-1.5" />
+                  Cancel
+                </button>
+                {config.apiName && (
+                  <button
+                    onClick={handleSyncMetadata}
+                    disabled={syncing || savingItem}
+                    className="btn-secondary text-sm"
+                    title="Fetch the latest metadata from the provider and review the changes"
+                  >
+                    {syncing ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : <RefreshCw size={15} className="mr-1.5" />}
+                    Sync metadata from {config.apiName}
+                  </button>
+                )}
+              </div>
+              {syncError && <p className="text-xs text-amber-600 dark:text-amber-400">{syncError}</p>}
+            </div>
+          </>
+        ) : (
+          <>
+            {item.image_url ? (
+              <img src={item.image_url} alt={item.title} className="w-24 h-32 object-cover rounded-xl shadow-md shrink-0" />
+            ) : (
+              <div className="w-24 h-32 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-4xl shrink-0">
+                {config.icon}
+              </div>
             )}
-            {item.my_rating != null && item.my_rating > 0 && (
-              <span className="flex items-center gap-1.5">
-                <Stars value={item.my_rating} />
-              </span>
-            )}
-            {item.last_checkin_at && (
-              <span className="text-xs text-gray-400">
-                Last check-in: {new Date(item.last_checkin_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
-              </span>
-            )}
-          </div>
-          {item.external_url && (
-            <a
-              href={item.external_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline mt-2"
-            >
-              View on {config.apiName || 'web'} <ExternalLink size={11} />
-            </a>
-          )}
-          <div className="flex items-center gap-3 mt-auto pt-4">
-            <button onClick={handleAddToTimeline} className="btn-primary text-sm">
-              <PlusCircle size={15} className="mr-1.5" />
-              Add to Timeline
-            </button>
-            <button onClick={openListModal} className="btn-secondary text-sm">
-              <ListPlus size={15} className="mr-1.5" />
-              Add to List
-            </button>
-          </div>
-        </div>
+            <div className="min-w-0 flex flex-col">
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h1>
+              {item.author && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{item.author}</p>}
+              {subtype === 'book' && item.series_name && (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {item.series_position != null && <span>#{item.series_position}{item.series_count != null ? ` of ${item.series_count}` : ''} in </span>}
+                  <span className="italic">{item.series_name}</span>
+                </p>
+              )}
+              <div className="flex items-center gap-4 mt-1.5 flex-wrap">
+                {item.release_year && <span className="text-sm text-gray-500">{item.release_year}</span>}
+                {subtype === 'book' && item.page_count != null && (
+                  <span className="text-sm text-gray-500">{item.page_count} pages</span>
+                )}
+                {subtype === 'game' && item.total_time_played_minutes != null && (
+                  <span className="text-sm text-gray-500">
+                    {formatTimePlayed(item.total_time_played_minutes)} played
+                  </span>
+                )}
+                {item.my_rating != null && item.my_rating > 0 && (
+                  <span className="flex items-center gap-1.5">
+                    <Stars value={item.my_rating} />
+                  </span>
+                )}
+                {item.last_checkin_at && (
+                  <span className="text-xs text-gray-400">
+                    Last check-in: {new Date(item.last_checkin_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                  </span>
+                )}
+              </div>
+              {item.external_url && (
+                <a
+                  href={item.external_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline mt-2"
+                >
+                  View on {config.apiName || 'web'} <ExternalLink size={11} />
+                </a>
+              )}
+              <div className="flex items-center gap-3 mt-auto pt-4">
+                <button onClick={handleAddToTimeline} className="btn-primary text-sm">
+                  <PlusCircle size={15} className="mr-1.5" />
+                  Add to Timeline
+                </button>
+                <button onClick={openListModal} className="btn-secondary text-sm">
+                  <ListPlus size={15} className="mr-1.5" />
+                  Add to List
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* Metadata sync diff (shown in edit mode after a provider sync) */}
+      {editingItem && syncDiff && syncDiff.length > 0 && (
+        <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-primary-200 dark:border-primary-800/40 shadow-sm shadow-black/3 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              Proposed changes from {config.apiName}
+            </h2>
+            <button
+              onClick={acceptAllDiff}
+              disabled={acceptingAll}
+              className="btn-primary text-xs whitespace-nowrap"
+            >
+              {acceptingAll ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Check size={13} className="mr-1.5" />}
+              Accept all
+            </button>
+          </div>
+          <ul className="divide-y divide-gray-50 dark:divide-gray-800/50">
+            {syncDiff.map((row) => (
+              <li key={row.field} className="px-4 py-2.5 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{METADATA_FIELD_LABELS[row.field]}</div>
+                  <div className="text-sm text-gray-700 dark:text-gray-300 break-all">
+                    <span className="text-gray-400 line-through">{row.current == null ? '—' : String(row.current)}</span>
+                    <span className="mx-1.5 text-gray-300 dark:text-gray-600">→</span>
+                    <span className="font-medium">{String(row.proposed)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    onClick={() => rejectDiffField(row.field)}
+                    disabled={acceptingAll || acceptingField !== null}
+                    className="p-1.5 text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300 disabled:opacity-40"
+                    title="Reject this change"
+                  >
+                    <X size={14} />
+                  </button>
+                  <button
+                    onClick={() => acceptDiffField(row.field)}
+                    disabled={acceptingAll || acceptingField !== null}
+                    className="p-1.5 text-gray-300 hover:text-green-500 dark:text-gray-600 dark:hover:text-green-400 disabled:opacity-40"
+                    title="Accept this change"
+                  >
+                    {acceptingField === row.field
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <Check size={14} />}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Check-ins table */}
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">

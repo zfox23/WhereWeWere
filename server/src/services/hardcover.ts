@@ -205,4 +205,23 @@ export const hardcover = {
       `Hardcover book search "${query}"`
     );
   },
+
+  /**
+   * Fetch a single book by its Hardcover external id (for metadata sync).
+   * The GraphQL API has no by-id query, so we search by title and pick the
+   * hit whose id matches. Returns null if no match (e.g. the item was
+   * removed from Hardcover, or the local title no longer matches).
+   */
+  async getBookByExternalId(apiKey: string | null, externalId: string, title: string): Promise<HardcoverBookResult | null> {
+    if (!apiKey) return null;
+    return withDegradation(
+      async () => {
+        const found = await this.searchBooks(apiKey, title);
+        if (!found) return null;
+        return found.find((r) => r.externalId === externalId) || null;
+      },
+      null,
+      `Hardcover book details ${externalId}`
+    );
+  },
 };

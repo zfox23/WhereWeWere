@@ -64,6 +64,20 @@ interface TgdbSearchResponse {
   };
 }
 
+/** Response shape for v1 Games/ByGameID (mirrors the search payload). */
+interface TgdbGameByIdResponse {
+  data?: {
+    count?: number;
+    games?: TgdbGameRow[];
+  };
+  include?: {
+    boxart?: TgdbBoxartInclude;
+    platform?: {
+      data?: Record<string, TgdbPlatformSkinny>;
+    };
+  };
+}
+
 // Shared response cache; cleared on server restart.
 const cache = new ApiCache(60 * 60 * 1000);
 
@@ -130,6 +144,39 @@ export const tgdb = {
       },
       null,
       `TGDB game search "${query}"`
+    );
+  },
+
+  /**
+   * Fetch a single game by its TGDB id (for metadata sync).
+   * NOTE: By-id lookups live on the v1 API (`/v1/Games/ByGameID`); the v1.1
+   * API only offers name search. The response shape matches the v1.1 search
+   * payload (data.games + include.boxart/platform).
+   */
+  async getGameDetails(apiKey: string | null, gameId: string): Promise<TgdbGameResult | null> {
+    if (!apiKey) return null;
+    const url = `${TGDB_BASE}/v1/Games/ByGameID?apikey=${encodeURIComponent(apiKey)}&id=${encodeURIComponent(gameId)}&fields=platform&include=boxart,platform`;
+    return withDegradation(
+      async () => {
+        const data = await cache.get<TgdbGameByIdResponse>(`tgdb:game:${gameId}`, async () => {
+          const json = await externalFetchJson<TgdbGameByIdResponse>(url);
+          return json;
+        });
+        const rows = dedupeByGameId(data.data?.games || []).filter((r) => r.game_title);
+        if (rows.length === 0) return null;
+        const row = rows[0];
+        const platforms = data.include?.platform?.data || {};
+        return {
+          externalId: String(row.id),
+          title: row.game_title,
+          releaseYear: yearFromDate(row.release_date),
+          imageUrl: imageUrlFor(String(row.id), data.include?.boxart),
+          externalUrl: `https://thegamesdb.net/game.php?id=${row.id}`,
+          platform: row.platform != null ? platforms[String(row.platform)]?.name || null : null,
+        };
+      },
+      null,
+      `TGDB game details ${gameId}`
     );
   },
 };

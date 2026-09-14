@@ -793,6 +793,48 @@ describe('Media check-in API', () => {
       expect(Number(rows.rows[0].time_played_minutes)).toBe(300);
     });
 
+    it('imports igdb games as local-only and dedupes them by title on re-import', async () => {
+      // Yamtrack keys games by IGDB id; that id must NOT be stored as a
+      // TGDB external_id, so the item imports local-only.
+      const first = [
+        CSV_HEADER,
+        '"770","igdb","game","Hades","img","","","","In progress","","","2023-04-06 01:50:00+00:00","0","",""',
+      ].join('\n');
+      const import1 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: first });
+      expect(import1.status).toBe(200);
+      expect(import1.body.counts.imported_checkins).toBe(1);
+
+      const after1 = await query(
+        'SELECT external_source, external_id, external_url FROM media_items WHERE media_type = \'game\''
+      );
+      expect(after1.rows).toHaveLength(1);
+      expect(after1.rows[0].external_source).toBeNull();
+      expect(after1.rows[0].external_id).toBeNull();
+      expect(after1.rows[0].external_url).toBeNull();
+
+      // A later export of the same game (different IGDB id, edition-qualifier
+      // title): must fold into the existing local-only row, not create a
+      // duplicate.
+      const second = [
+        CSV_HEADER,
+        '"888","igdb","game","Hades  Remastered","img","","","","Completed","","","2023-05-06 01:50:00+00:00","0","",""',
+      ].join('\n');
+      const import2 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: second });
+      expect(import2.status).toBe(200);
+      expect(import2.body.counts.imported_checkins).toBe(1);
+
+      const after2 = await query(
+        'SELECT COUNT(*)::int AS n FROM media_items WHERE media_type = \'game\''
+      );
+      expect(after2.rows[0].n).toBe(1);
+
+      const stillLocalOnly = await query(
+        'SELECT external_source, external_id FROM media_items WHERE media_type = \'game\''
+      );
+      expect(stillLocalOnly.rows[0].external_source).toBeNull();
+      expect(stillLocalOnly.rows[0].external_id).toBeNull();
+    });
+
     it('requires a csv string', async () => {
       const response = await request(app).post('/api/v1/import/yamtrack/import').send({});
       expect(response.status).toBe(400);

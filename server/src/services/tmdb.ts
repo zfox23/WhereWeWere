@@ -29,6 +29,34 @@ export interface TmdbSeasonInfo {
   episodeCount: number;
 }
 
+/** Fresh metadata for a single movie, fetched by TMDB id (for sync). */
+export interface TmdbMovieDetails {
+  title: string;
+  releaseYear: number | null;
+  imageUrl: string | null;
+}
+
+/** Fresh metadata for a single TV show, fetched by TMDB id (for sync). */
+export interface TmdbTvDetails {
+  title: string;
+  releaseYear: number | null;
+  imageUrl: string | null;
+}
+
+interface TmdbMovieDetailsRow {
+  id: number;
+  title?: string | null;
+  release_date?: string | null;
+  poster_path?: string | null;
+}
+
+interface TmdbTvDetailsRow {
+  id: number;
+  name?: string | null;
+  first_air_date?: string | null;
+  poster_path?: string | null;
+}
+
 export interface TmdbEpisodeInfo {
   episodeNumber: number;
   episodeTitle: string | null;
@@ -161,6 +189,48 @@ export const tmdb = {
       },
       null,
       `TMDB episodes for show ${tmdbId} season ${seasonNumber}`
+    );
+  },
+
+  async getMovieDetails(apiKey: string | null, tmdbId: string): Promise<TmdbMovieDetails | null> {
+    if (!apiKey) return null;
+    const url = `${TMDB_BASE}/movie/${encodeURIComponent(tmdbId)}?api_key=${encodeURIComponent(apiKey)}&language=en-US`;
+    return withDegradation(
+      async () => {
+        const data = await cache.get<TmdbMovieDetailsRow>(`tmdb:movie:${tmdbId}`, async () => {
+          const json = await externalFetchJson<TmdbMovieDetailsRow>(url);
+          return json;
+        });
+        if (!data.title) return null;
+        return {
+          title: data.title,
+          releaseYear: yearFromDate(data.release_date ?? null),
+          imageUrl: data.poster_path ? `${TMDB_IMAGE_BASE}${data.poster_path}` : null,
+        };
+      },
+      null,
+      `TMDB movie details ${tmdbId}`
+    );
+  },
+
+  async getTvShowDetails(apiKey: string | null, tmdbId: string): Promise<TmdbTvDetails | null> {
+    if (!apiKey) return null;
+    const url = `${TMDB_BASE}/tv/${encodeURIComponent(tmdbId)}?api_key=${encodeURIComponent(apiKey)}&language=en-US`;
+    return withDegradation(
+      async () => {
+        const data = await cache.get<TmdbTvDetailsRow>(`tmdb:tv:${tmdbId}`, async () => {
+          const json = await externalFetchJson<TmdbTvDetailsRow>(url);
+          return json;
+        });
+        if (!data.name) return null;
+        return {
+          title: data.name,
+          releaseYear: yearFromDate(data.first_air_date ?? null),
+          imageUrl: data.poster_path ? `${TMDB_IMAGE_BASE}${data.poster_path}` : null,
+        };
+      },
+      null,
+      `TMDB TV details ${tmdbId}`
     );
   },
 };
