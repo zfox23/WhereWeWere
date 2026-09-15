@@ -126,6 +126,11 @@ interface SearchHit {
   local_id: string | null;
   last_checkin_at: string | null;
   last_checkin_type: string | null;
+  /** Item-level rating (media_items.rating), null when never set. */
+  rating: number | null;
+  /** Item-level status for games (completed/in_progress/dropped). */
+  status: string | null;
+  /** Display rating: item rating if set, else the latest check-in's rating. */
   my_rating: number | null;
 }
 
@@ -170,12 +175,13 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     `SELECT mi.id, mi.title, mi.author, mi.release_year, mi.image_url, mi.external_url,
             mi.external_source, mi.external_id, mi.platform,
             mi.page_count, mi.series_name, mi.series_position, mi.series_count,
-            mc_latest.last_checkin_at, mc_latest.last_checkin_type, mc_latest.my_rating
+            mi.rating, mi.status,
+            mc_latest.last_checkin_at, mc_latest.last_checkin_type, mc_latest.latest_checkin_rating
      FROM media_items mi
      LEFT JOIN LATERAL (
        SELECT MAX(mc.checked_in_at) AS last_checkin_at,
               (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.created_at DESC))[1] AS last_checkin_type,
-              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.created_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS my_rating
+              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.created_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_checkin_rating
        FROM media_checkins mc
        WHERE mc.media_item_id = mi.id
      ) mc_latest ON true
@@ -209,7 +215,11 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     local_id: r.id,
     last_checkin_at: r.last_checkin_at,
     last_checkin_type: r.last_checkin_type,
-    my_rating: r.my_rating != null ? Number(r.my_rating) : null,
+    rating: r.rating != null ? Number(r.rating) : null,
+    status: r.status || null,
+    my_rating: r.rating != null
+      ? Number(r.rating)
+      : r.latest_checkin_rating != null ? Number(r.latest_checkin_rating) : null,
   }));
 
   let degraded = false;
@@ -283,6 +293,8 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
         local_id: null,
         last_checkin_at: null,
         last_checkin_type: null,
+        rating: null,
+        status: null,
         my_rating: null,
       });
     }
@@ -330,7 +342,7 @@ router.post('/items', async (req: Request, res: Response) => {
       series_count: toIntOrNull(series_count),
     });
     const item = await query(
-      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count, created_at FROM media_items WHERE id = $1',
+      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status, created_at FROM media_items WHERE id = $1',
       [id]
     );
     res.status(201).json(item.rows[0]);
@@ -362,7 +374,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     const mediaType: string = itemResult.rows[0].media_type;
     const allowedSource = SOURCE_BY_TYPE[mediaType] || null;
 
-    const { title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count } = req.body;
+    const { title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status } = req.body;
     let external_id: unknown = req.body.external_id;
 
     // Board games are local-only: external fields are not applicable.
@@ -420,6 +432,31 @@ router.put('/items/:id', async (req: Request, res: Response) => {
       if (series_position !== undefined) add('series_position', toIntOrNull(series_position));
       if (series_count !== undefined) add('series_count', toIntOrNull(series_count));
     }
+    // Item-level user metadata: set directly on the media item (independent
+    // of check-ins). Manual edits may lower time_played_minutes — the
+    // never-decrease rule applies only to imports.
+    if (rating !== undefined) {
+      const v = typeof rating === 'number' && Number.isInteger(rating) && rating >= 0 && rating <= 4 ? rating : null;
+      if (v == null && rating != null) return res.status(400).json({ error: 'rating must be an integer 0-4' });
+      add('rating', v);
+    }
+    if (raw_score !== undefined) {
+      const v = raw_score != null && raw_score !== '' ? Number(raw_score) : null;
+      if (v != null && !Number.isFinite(v)) return res.status(400).json({ error: 'raw_score must be a number' });
+      add('raw_score', v);
+    }
+    if (notes !== undefined) add('notes', typeof notes === 'string' && notes.trim() ? notes : null);
+    if (time_played_minutes !== undefined) {
+      const v = typeof time_played_minutes === 'number' && Number.isFinite(time_played_minutes) && time_played_minutes >= 0
+        ? Math.round(time_played_minutes) : null;
+      if (v == null && time_played_minutes != null) return res.status(400).json({ error: 'time_played_minutes must be a non-negative number' });
+      add('time_played_minutes', v);
+    }
+    if (status !== undefined) {
+      const v = typeof status === 'string' && CHECKIN_TYPES.has(status) ? status : null;
+      if (v == null && status != null) return res.status(400).json({ error: 'status must be one of completed, in_progress, dropped' });
+      add('status', v);
+    }
     if (external_id !== undefined) {
       add('external_source', external_id ? externalSource : null);
       add('external_id', external_id ? String(external_id) : null);
@@ -439,7 +476,8 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     // clients don't need a follow-up fetch after every update.
     const item = await query(
       `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
-              page_count, series_name, series_position, series_count, created_at
+              page_count, series_name, series_position, series_count, rating, raw_score, notes,
+              time_played_minutes, status, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
       [req.params.id, USER_ID]
     );
@@ -449,21 +487,21 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     const statsResult = await query(
       `SELECT MAX(checked_in_at) AS last_checkin_at,
               COUNT(*) AS checkin_count,
-              (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS my_rating,
-              COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count,
-              (ARRAY_AGG(time_played_minutes ORDER BY checked_in_at DESC, id DESC)
-                 FILTER (WHERE time_played_minutes IS NOT NULL))[1] AS total_time_played_minutes
+              (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS latest_checkin_rating,
+              COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count
        FROM media_checkins WHERE media_item_id = $1`,
       [req.params.id]
     );
     const s = statsResult.rows[0];
+    const it = item.rows[0];
     res.json({
-      ...item.rows[0],
+      ...it,
       last_checkin_at: s.last_checkin_at,
       checkin_count: Number(s.checkin_count),
-      my_rating: s.my_rating != null ? Number(s.my_rating) : null,
+      my_rating: it.rating != null
+        ? Number(it.rating)
+        : s.latest_checkin_rating != null ? Number(s.latest_checkin_rating) : null,
       completed_count: Number(s.completed_count),
-      total_time_played_minutes: s.total_time_played_minutes != null ? Number(s.total_time_played_minutes) : null,
     });
   } catch (err) {
     console.error('Error updating media item:', err);
@@ -616,7 +654,8 @@ router.get('/items/:id', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
       `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
-              page_count, series_name, series_position, series_count, created_at
+              page_count, series_name, series_position, series_count, rating, raw_score, notes,
+              time_played_minutes, status, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
       [req.params.id, USER_ID]
     );
@@ -627,22 +666,22 @@ router.get('/items/:id', async (req: Request, res: Response) => {
     const statsResult = await query(
       `SELECT MAX(checked_in_at) AS last_checkin_at,
               COUNT(*) AS checkin_count,
-              (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS my_rating,
-              COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count,
-              (ARRAY_AGG(time_played_minutes ORDER BY checked_in_at DESC, id DESC)
-                 FILTER (WHERE time_played_minutes IS NOT NULL))[1] AS total_time_played_minutes
+              (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS latest_checkin_rating,
+              COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count
        FROM media_checkins WHERE media_item_id = $1`,
       [req.params.id]
     );
     const s = statsResult.rows[0];
+    const it = itemResult.rows[0];
 
     res.json({
-      ...itemResult.rows[0],
+      ...it,
       last_checkin_at: s.last_checkin_at,
       checkin_count: Number(s.checkin_count),
-      my_rating: s.my_rating != null ? Number(s.my_rating) : null,
+      my_rating: it.rating != null
+        ? Number(it.rating)
+        : s.latest_checkin_rating != null ? Number(s.latest_checkin_rating) : null,
       completed_count: Number(s.completed_count),
-      total_time_played_minutes: s.total_time_played_minutes != null ? Number(s.total_time_played_minutes) : null,
     });
   } catch (err) {
     console.error('Error getting media item:', err);
@@ -694,25 +733,12 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Media item not found' });
     }
 
-    // "Total time played" is a running total for games: new check-ins update
-    // the total, they never lower it. Clamp the submitted value to the current
-    // total (same rule the yamtrack importer applies via applyMaxTimePlayed).
+    // Per-session time played context on the check-in row (item-level total
+    // time lives on media_items and is edited on the detail page).
     const submittedTime =
       typeof time_played_minutes === 'number' && Number.isFinite(time_played_minutes) && time_played_minutes >= 0
         ? Math.round(time_played_minutes)
         : null;
-
-    let storedTime = submittedTime;
-    if (submittedTime != null) {
-      const latest = await query(
-        `SELECT time_played_minutes FROM media_checkins
-         WHERE media_item_id = $1 AND time_played_minutes IS NOT NULL
-         ORDER BY checked_in_at DESC, id DESC LIMIT 1`,
-        [req.params.id]
-      );
-      const existing = latest.rows[0]?.time_played_minutes;
-      storedTime = Math.max(existing != null ? Number(existing) : 0, submittedTime);
-    }
 
     const result = await query(
       `INSERT INTO media_checkins
@@ -729,7 +755,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
         notes || null,
         checked_in_at || null,
         checkinTimezone,
-        storedTime,
+        submittedTime,
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -1078,17 +1104,17 @@ router.get('/library', async (req: Request, res: Response) => {
 
     const result = await query(
       `SELECT mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
-              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.id DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_rating,
+              mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status,
+              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.id DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_checkin_rating,
               (ARRAY_AGG(mc.checked_in_at ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_at,
               (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_timezone,
               (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_type,
-              COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count,
-              (ARRAY_AGG(mc.time_played_minutes ORDER BY mc.checked_in_at DESC, mc.id DESC)
-                 FILTER (WHERE mc.time_played_minutes IS NOT NULL))[1] AS total_time_played_minutes
+              COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
        FROM media_checkins mc
        JOIN media_items mi ON mc.media_item_id = mi.id
        ${where}
-       GROUP BY mi.id, mi.media_type, mi.title, mi.author, mi.image_url
+       GROUP BY mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
+                mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status
        ORDER BY last_checkin_at DESC`,
       params
     );
@@ -1099,12 +1125,19 @@ router.get('/library', async (req: Request, res: Response) => {
       title: r.title,
       author: r.author,
       image_url: r.image_url,
-      latest_rating: r.latest_rating != null ? Number(r.latest_rating) : null,
+      rating: r.rating != null ? Number(r.rating) : null,
+      raw_score: r.raw_score != null ? Number(r.raw_score) : null,
+      notes: r.notes || null,
+      time_played_minutes: r.time_played_minutes != null ? Number(r.time_played_minutes) : null,
+      status: r.status || null,
+      // Display rating: item rating if set, else the latest check-in's rating.
+      latest_rating: r.rating != null
+        ? Number(r.rating)
+        : r.latest_checkin_rating != null ? Number(r.latest_checkin_rating) : null,
       last_checkin_at: r.last_checkin_at,
       last_checkin_timezone: r.last_checkin_timezone,
       last_checkin_type: r.last_checkin_type,
       completed_count: Number(r.completed_count),
-      total_time_played_minutes: r.total_time_played_minutes != null ? Number(r.total_time_played_minutes) : null,
     })));
   } catch (err) {
     console.error('Error getting media library:', err);
@@ -1146,14 +1179,18 @@ router.get('/stats', async (req: Request, res: Response) => {
 
     const topResult = await query(
       `SELECT mi.id, mi.media_type, mi.title, mi.image_url, mi.author,
-              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS rating,
+              COALESCE(mi.rating, latest_mc.rating) AS rating,
               COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
        FROM media_checkins mc
        JOIN media_items mi ON mc.media_item_id = mi.id
+       LEFT JOIN LATERAL (
+         SELECT mc2.rating FROM media_checkins mc2
+         WHERE mc2.media_item_id = mi.id AND mc2.rating IS NOT NULL
+         ORDER BY mc2.checked_in_at DESC, mc2.id DESC LIMIT 1
+       ) latest_mc ON true
        ${where}
-         AND mc.rating IS NOT NULL
-       GROUP BY mi.id, mi.media_type, mi.title, mi.image_url, mi.author
-       HAVING (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] >= 3
+       GROUP BY mi.id, mi.media_type, mi.title, mi.image_url, mi.author, latest_mc.rating
+       HAVING COALESCE(mi.rating, latest_mc.rating) >= 3
        ORDER BY rating DESC, completed_count DESC
        LIMIT 10`,
       params

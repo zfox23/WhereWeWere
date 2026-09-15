@@ -52,6 +52,13 @@ interface ItemEditDraft {
   series_position: string;
   series_count: string;
   external_id: string;
+  /** Item-level user metadata (all types). */
+  rating: number;
+  notes: string;
+  /** Games only: cumulative time played. */
+  time_hours: string;
+  time_minutes: string;
+  status: string;
 }
 
 /** Fields a provider can refresh via sync (all keys of MediaItem). */
@@ -324,6 +331,11 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       series_position: item.series_position != null ? String(item.series_position) : '',
       series_count: item.series_count != null ? String(item.series_count) : '',
       external_id: item.external_id || '',
+      rating: item.rating ?? 0,
+      notes: item.notes || '',
+      time_hours: item.time_played_minutes != null ? String(Math.floor(item.time_played_minutes / 60)) : '',
+      time_minutes: item.time_played_minutes != null ? String(item.time_played_minutes % 60) : '',
+      status: item.status || '',
     });
     setEditingItem(true);
   };
@@ -364,6 +376,16 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     // derives external_source on the server; clearing is not supported here).
     if (subtype !== 'board_game' && d.external_id.trim() !== (item.external_id || '')) {
       payload.external_id = d.external_id.trim() || null;
+    }
+    // Item-level user metadata (independent of check-ins).
+    payload.rating = d.rating;
+    payload.notes = d.notes.trim() || null;
+    if (subtype === 'game') {
+      const h = parseInt(d.time_hours, 10);
+      const m = parseInt(d.time_minutes, 10);
+      const total = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+      payload.time_played_minutes = total > 0 ? total : null;
+      payload.status = d.status || null;
     }
     try {
       setSavingItem(true);
@@ -682,6 +704,71 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                     className="input text-sm mt-0.5 font-mono text-xs"
                   />
                 </label>
+                <div className="sm:col-span-2 border-t border-gray-200 dark:border-gray-700 pt-2.5 mt-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                    Your details {subtype === 'game' ? '(the game itself, not a check-in)' : '(independent of check-ins)'}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">My rating</span>
+                      <ScorePicker value={itemDraft.rating} onChange={(v: number) => patchItemDraft({ rating: v })} />
+                    </label>
+                    {subtype === 'game' && (
+                      <>
+                        <label className="block">
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Status</span>
+                          <select
+                            value={itemDraft.status}
+                            onChange={(e) => patchItemDraft({ status: e.target.value })}
+                            className="input text-sm mt-0.5"
+                          >
+                            <option value="">—</option>
+                            <option value="completed">Completed</option>
+                            <option value="in_progress">In progress</option>
+                            <option value="dropped">Dropped</option>
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Total time played</span>
+                          <div className="flex items-center gap-2 w-fit mt-0.5">
+                            <input
+                              type="number"
+                              min="0"
+                              max="10000"
+                              value={itemDraft.time_hours}
+                              onChange={(e) => patchItemDraft({ time_hours: e.target.value })}
+                              placeholder="0"
+                              inputMode="numeric"
+                              className="input text-sm w-20"
+                            />
+                            <span className="text-xs text-gray-500">h</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="59"
+                              value={itemDraft.time_minutes}
+                              onChange={(e) => patchItemDraft({ time_minutes: e.target.value })}
+                              placeholder="0"
+                              inputMode="numeric"
+                              className="input text-sm w-20"
+                            />
+                            <span className="text-xs text-gray-500">m</span>
+                          </div>
+                        </label>
+                      </>
+                    )}
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">My notes (Markdown)</span>
+                      <textarea
+                        value={itemDraft.notes}
+                        onChange={(e) => patchItemDraft({ notes: e.target.value })}
+                        rows={3}
+                        placeholder="Your notes about this item…"
+                        className="input text-sm mt-0.5 resize-y"
+                      />
+                    </label>
+                  </div>
+                </div>
                 {subtype !== 'board_game' && (
                   <label className="block sm:col-span-2">
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -755,10 +842,13 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                 {subtype === 'book' && item.page_count != null && (
                   <span className="text-sm text-gray-500">{item.page_count} pages</span>
                 )}
-                {subtype === 'game' && item.total_time_played_minutes != null && (
+                {subtype === 'game' && item.time_played_minutes != null && (
                   <span className="text-sm text-gray-500">
-                    {formatTimePlayed(item.total_time_played_minutes)} played
+                    {formatTimePlayed(item.time_played_minutes)} played
                   </span>
+                )}
+                {subtype === 'game' && item.status != null && (
+                  <span className="text-sm text-gray-500 capitalize">{item.status.replace('_', ' ')}</span>
                 )}
                 {item.my_rating != null && item.my_rating > 0 && (
                   <span className="flex items-center gap-1.5">
@@ -771,6 +861,11 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                   </span>
                 )}
               </div>
+              {item.notes && (
+                <div className="mt-2 rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2 text-sm text-gray-600 dark:text-gray-300">
+                  <MarkdownNote note={item.notes} />
+                </div>
+              )}
               {item.external_url && (
                 <a
                   href={item.external_url}

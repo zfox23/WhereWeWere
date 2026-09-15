@@ -69,13 +69,36 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
       // Count only genuinely new media_items rows, not upserts of existing ones.
       if (created) createdMediaItems += 1;
 
+      // Game rows: write item-level metadata directly on media_items.
+      // No check-ins are created for games. Time played is a cumulative
+      // total that never decreases; rating/notes use the last import value.
+      if (plan.disposition === 'update_game_item') {
+        await client.query(
+          `UPDATE media_items
+           SET rating = COALESCE($2, rating),
+               raw_score = COALESCE($3, raw_score),
+               notes = COALESCE($4, notes),
+               status = COALESCE($5, status),
+               time_played_minutes = CASE
+                 WHEN $6::integer IS NOT NULL THEN GREATEST(COALESCE(time_played_minutes, 0), $6::integer)
+                 ELSE time_played_minutes
+               END,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [
+            mediaItemId,
+            plan.rating,
+            plan.raw_score,
+            row.notes || null,
+            plan.item_status,
+            plan.time_played_minutes,
+          ]
+        );
+        continue;
+      }
+
       // Insert the check-in if the plan calls for one.
       if ((plan.disposition === 'create_checkin' || plan.disposition === 'create_episode_checkin') && plan.checked_in_at) {
-        // Capture the current total *before* inserting so the new row does
-        // not mask the prior value in the max computation.
-        const totalBefore = plan.time_played_minutes != null
-          ? await currentTotalPlayed(client, mediaItemId)
-          : null;
         const ins = await client.query(
           `INSERT INTO media_checkins
              (user_id, media_item_id, season_number, episode_number,
@@ -83,13 +106,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
               time_played_minutes)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, 'UTC', $10, $11)
            ON CONFLICT (user_id, external_event_id) WHERE external_event_id IS NOT NULL
-           DO UPDATE SET
-             time_played_minutes = CASE
-               WHEN $11 IS NULL THEN media_checkins.time_played_minutes
-               WHEN media_checkins.time_played_minutes IS NULL THEN $11
-               ELSE GREATEST(media_checkins.time_played_minutes, $11)
-             END,
-             updated_at = media_checkins.updated_at
+           DO UPDATE SET updated_at = media_checkins.updated_at
            RETURNING id, checked_in_at, (xmax = 0) AS inserted`,
           [
             USER_ID,
@@ -119,11 +136,6 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
           duplicatesSkipped += 1;
         }
 
-        // Time-played rule: the stored total is the max of the pre-import
-        // total and the imported value — times are never summed.
-        if (plan.time_played_minutes != null && plan.imported_checkin_id) {
-          await applyMaxTimePlayed(client, mediaItemId, plan.time_played_minutes, totalBefore);
-        }
       }
     }
 
@@ -136,54 +148,6 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
   }
 
   return { results, imported_checkins: importedCheckins, created_media_items: createdMediaItems, duplicates_skipped: duplicatesSkipped };
-}
-
-/** Latest non-null time_played_minutes for a media item (the stored total). */
-async function currentTotalPlayed(
-  client: import('pg').PoolClient,
-  mediaItemId: string
-): Promise<number | null> {
-  const res = await client.query(
-    `SELECT time_played_minutes FROM media_checkins
-     WHERE media_item_id = $1 AND time_played_minutes IS NOT NULL
-     ORDER BY checked_in_at DESC, id DESC
-     LIMIT 1`,
-    [mediaItemId]
-  );
-  return res.rows[0]?.time_played_minutes != null ? Number(res.rows[0].time_played_minutes) : null;
-}
-
-/**
- * Apply the "never decrease the total" rule to time played. `currentTotal`
- * must be the total read *before* the imported check-in was inserted.
- * The effective total max(current, imported) is written to the most recent
- * check-in (the row the UI reads as the current total), which is the
- * imported row in both the inserted and conflict cases.
- */
-async function applyMaxTimePlayed(
-  client: import('pg').PoolClient,
-  mediaItemId: string,
-  importedMinutes: number,
-  currentTotal: number | null
-): Promise<void> {
-  const effective = Math.max(currentTotal ?? 0, importedMinutes);
-  if (effective === (currentTotal ?? 0) && currentTotal != null) return;
-
-  await client.query(
-    `WITH ranked AS (
-       SELECT id, time_played_minutes,
-              ROW_NUMBER() OVER (ORDER BY checked_in_at DESC, id DESC) AS rn
-       FROM media_checkins
-       WHERE media_item_id = $1
-     )
-     UPDATE media_checkins mc
-     SET time_played_minutes = $2, updated_at = NOW()
-     FROM ranked
-     WHERE mc.id = ranked.id
-       AND ranked.rn = 1
-       AND (mc.time_played_minutes IS NULL OR mc.time_played_minutes < $2)`,
-    [mediaItemId, effective]
-  );
 }
 
 /**

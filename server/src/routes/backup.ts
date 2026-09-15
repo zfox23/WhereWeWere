@@ -177,6 +177,11 @@ interface BackupMediaItem {
   series_name?: string | null;
   series_position?: number | null;
   series_count?: number | null;
+  rating?: number | null;
+  raw_score?: number | string | null;
+  notes?: string | null;
+  time_played_minutes?: number | null;
+  status?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -259,6 +264,13 @@ function toIntOrNull(value: unknown): number | null {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n);
+}
+
+/** Coerce a value to a valid media item status, or null otherwise. */
+function toStatusOrNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  return v === 'completed' || v === 'in_progress' || v === 'dropped' ? v : null;
 }
 
 function ensureV1Backup(raw: unknown): BackupV1 {
@@ -451,6 +463,7 @@ router.get('/export', async (_req: Request, res: Response) => {
        `SELECT id, media_type, external_source, external_id,
                title, author, release_year, image_url, external_url,
                platform, page_count, series_name, series_position, series_count,
+               rating, raw_score, notes, time_played_minutes, status,
                created_at, updated_at
         FROM media_items
         WHERE user_id = $1
@@ -1028,35 +1041,42 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
            id, user_id, media_type, external_source, external_id,
            title, author, release_year, image_url, external_url,
            platform, page_count, series_name, series_position, series_count,
+           rating, raw_score, notes, time_played_minutes, status,
            created_at, updated_at
          )
          VALUES (
            $1, $2, $3, $4, $5,
            $6, $7, $8, $9, $10,
            $11, $12, $13, $14, $15,
-           COALESCE($16::timestamptz, NOW()), COALESCE($17::timestamptz, NOW())
+           $16, $17, $18, $19, $20,
+           COALESCE($21::timestamptz, NOW()), COALESCE($22::timestamptz, NOW())
          )
          ON CONFLICT (id) DO NOTHING`,
-        [
-          item.id,
-          USER_ID,
-          item.media_type,
-          toStringOrNull(item.external_source),
-          toStringOrNull(item.external_id),
-          item.title,
-          toStringOrNull(item.author),
-          item.release_year != null ? toNumber(item.release_year, NaN) : null,
-          toStringOrNull(item.image_url),
-          toStringOrNull(item.external_url),
-          toStringOrNull(item.platform),
-          toIntOrNull(item.page_count),
-          toStringOrNull(item.series_name),
-          toIntOrNull(item.series_position),
-          toIntOrNull(item.series_count),
-          item.created_at || null,
-          item.updated_at || null,
-        ]
-      );
+         [
+           item.id,
+           USER_ID,
+           item.media_type,
+           toStringOrNull(item.external_source),
+           toStringOrNull(item.external_id),
+           item.title,
+           toStringOrNull(item.author),
+           item.release_year != null ? toNumber(item.release_year, NaN) : null,
+           toStringOrNull(item.image_url),
+           toStringOrNull(item.external_url),
+           toStringOrNull(item.platform),
+           toIntOrNull(item.page_count),
+           toStringOrNull(item.series_name),
+           toIntOrNull(item.series_position),
+           toIntOrNull(item.series_count),
+           item.rating != null ? toNumber(item.rating, NaN) : null,
+           item.raw_score != null ? String(item.raw_score) : null,
+           toStringOrNull(item.notes),
+           toIntOrNull(item.time_played_minutes),
+           toStatusOrNull(item.status),
+           item.created_at || null,
+           item.updated_at || null,
+         ]
+       );
 
       if (result.rowCount === 1) {
         counts.mediaItems.inserted += 1;

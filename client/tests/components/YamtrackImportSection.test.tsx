@@ -24,6 +24,7 @@ const previewFixture = {
     create_episode_checkin: 1,
     create_checkin: 1,
     create_media_item: 1,
+    update_game_item: 0,
     duplicate: 0,
     skipped: 0,
   },

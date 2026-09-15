@@ -26,12 +26,16 @@ const item: MediaLibraryItem = {
   title: 'Dune',
   author: 'Frank Herbert',
   image_url: 'https://example.com/dune.jpg',
+  rating: 4,
+  raw_score: null,
+  notes: null,
+  time_played_minutes: null,
+  status: null,
   latest_rating: 4,
   last_checkin_at: '2023-01-04T20:00:00Z',
   last_checkin_timezone: 'UTC',
   last_checkin_type: 'completed',
   completed_count: 1,
-  total_time_played_minutes: null,
 };
 
 function renderSection(props: { from?: string; to?: string } = {}) {
@@ -74,9 +78,9 @@ describe('MediaLibrarySection', () => {
 
   it('shows total time played on game cards only', async () => {
     libraryMock.mockResolvedValueOnce([
-      { ...item, id: 'g1', title: 'Hades', media_type: 'game', total_time_played_minutes: 330 },
-      { ...item, id: 'g2', title: 'Celeste', media_type: 'game', total_time_played_minutes: null },
-      { ...item, id: 'm1', title: 'Dune', media_type: 'movie', total_time_played_minutes: 330 },
+      { ...item, id: 'g1', title: 'Hades', media_type: 'game', time_played_minutes: 330 },
+      { ...item, id: 'g2', title: 'Celeste', media_type: 'game', time_played_minutes: null },
+      { ...item, id: 'm1', title: 'Dune', media_type: 'movie', time_played_minutes: 330 },
     ]);
     renderSection();
     await waitFor(() => expect(screen.getByText('Hades')).toBeTruthy());
@@ -159,9 +163,9 @@ describe('MediaLibrarySection', () => {
 
   it('sorts by time played and narrows the library to games when selected', async () => {
     libraryMock.mockResolvedValue([
-      { ...item, id: 'a', title: 'Alpha', media_type: 'game', total_time_played_minutes: 120, last_checkin_at: '2023-01-01T00:00:00Z' },
-      { ...item, id: 'b', title: 'Bravo', media_type: 'game', total_time_played_minutes: 300, last_checkin_at: '2023-01-02T00:00:00Z' },
-      { ...item, id: 'c', title: 'Charlie', media_type: 'game', total_time_played_minutes: null, last_checkin_at: '2023-01-03T00:00:00Z' },
+      { ...item, id: 'a', title: 'Alpha', media_type: 'game', time_played_minutes: 120, last_checkin_at: '2023-01-01T00:00:00Z' },
+      { ...item, id: 'b', title: 'Bravo', media_type: 'game', time_played_minutes: 300, last_checkin_at: '2023-01-02T00:00:00Z' },
+      { ...item, id: 'c', title: 'Charlie', media_type: 'game', time_played_minutes: null, last_checkin_at: '2023-01-03T00:00:00Z' },
     ]);
     renderSection();
     const user = userEvent.setup();
@@ -191,8 +195,8 @@ describe('MediaLibrarySection', () => {
 
   it('falls back to the default sort when games are filtered out while sorting by time played', async () => {
     libraryMock.mockResolvedValue([
-      { ...item, id: 'a', title: 'Alpha', media_type: 'game', total_time_played_minutes: 120 },
-      { ...item, id: 'b', title: 'Bravo', media_type: 'game', total_time_played_minutes: 300 },
+      { ...item, id: 'a', title: 'Alpha', media_type: 'game', time_played_minutes: 120 },
+      { ...item, id: 'b', title: 'Bravo', media_type: 'game', time_played_minutes: 300 },
     ]);
     renderSection();
     const user = userEvent.setup();

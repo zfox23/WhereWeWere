@@ -43,7 +43,13 @@ describe('Backup export/import media round-trip', () => {
       });
     expect(book.status).toBe(201);
 
-    // Check-ins: the game check-in carries cumulative time played, the book one does not.
+    // Item-level user metadata on the game (independent of check-ins).
+    const gameMeta = await request(app)
+      .put(`/api/v1/media/items/${game.body.id}`)
+      .send({ rating: 4, raw_score: 9.5, notes: 'speedrun gold', time_played_minutes: 185, status: 'in_progress' });
+    expect(gameMeta.status).toBe(200);
+
+    // Check-ins: the game check-in carries per-session time played, the book one does not.
     const gameCheckin = await request(app)
       .post(`/api/v1/media/items/${game.body.id}/checkins`)
       .send({
@@ -91,6 +97,11 @@ describe('Backup export/import media round-trip', () => {
     expect(exportedGame).toBeTruthy();
     expect(exportedGame.platform).toBe('Nintendo Switch');
     expect(exportedGame.page_count).toBeNull();
+    expect(exportedGame.rating).toBe(4);
+    expect(Number(exportedGame.raw_score)).toBe(9.5);
+    expect(exportedGame.notes).toBe('speedrun gold');
+    expect(exportedGame.time_played_minutes).toBe(185);
+    expect(exportedGame.status).toBe('in_progress');
     expect(exportedGame.series_name).toBeNull();
     expect(exportedGame.series_position).toBeNull();
     expect(exportedGame.series_count).toBeNull();
@@ -102,6 +113,9 @@ describe('Backup export/import media round-trip', () => {
     expect(exportedBook.series_name).toBe('Dune');
     expect(exportedBook.series_position).toBe(1);
     expect(exportedBook.series_count).toBe(6);
+    expect(exportedBook.rating).toBeNull();
+    expect(exportedBook.time_played_minutes).toBeNull();
+    expect(exportedBook.status).toBeNull();
 
     const exportedGameCheckin = payload.data.mediaCheckins.find((c: any) => c.id === gameCheckin.id);
     expect(exportedGameCheckin).toBeTruthy();
@@ -126,7 +140,12 @@ describe('Backup export/import media round-trip', () => {
     const gameAfter = await request(app).get(`/api/v1/media/items/${game.id}`);
     expect(gameAfter.status).toBe(200);
     expect(gameAfter.body.platform).toBe('Nintendo Switch');
-    expect(gameAfter.body.total_time_played_minutes).toBe(185);
+    expect(gameAfter.body.rating).toBe(4);
+    expect(Number(gameAfter.body.raw_score)).toBe(9.5);
+    expect(gameAfter.body.notes).toBe('speedrun gold');
+    expect(Number(gameAfter.body.time_played_minutes)).toBe(185);
+    expect(gameAfter.body.status).toBe('in_progress');
+    expect(Number(gameAfter.body.my_rating)).toBe(4);
 
     const bookAfter = await request(app).get(`/api/v1/media/items/${book.id}`);
     expect(bookAfter.status).toBe(200);
@@ -160,6 +179,11 @@ describe('Backup export/import media round-trip', () => {
       delete item.series_name;
       delete item.series_position;
       delete item.series_count;
+      delete item.rating;
+      delete item.raw_score;
+      delete item.notes;
+      delete item.time_played_minutes;
+      delete item.status;
     }
     for (const checkin of payload.data.mediaCheckins) {
       delete checkin.time_played_minutes;
@@ -176,7 +200,11 @@ describe('Backup export/import media round-trip', () => {
     const gameAfter = await request(app).get(`/api/v1/media/items/${game.id}`);
     expect(gameAfter.status).toBe(200);
     expect(gameAfter.body.platform).toBeNull();
-    expect(gameAfter.body.total_time_played_minutes).toBeNull();
+    expect(gameAfter.body.rating).toBeNull();
+    expect(gameAfter.body.raw_score).toBeNull();
+    expect(gameAfter.body.notes).toBeNull();
+    expect(gameAfter.body.time_played_minutes).toBeNull();
+    expect(gameAfter.body.status).toBeNull();
 
     const bookAfter = await request(app).get(`/api/v1/media/items/${book.id}`);
     expect(bookAfter.status).toBe(200);

@@ -54,7 +54,7 @@ function sortValue(item: MediaLibraryItem, key: SortKey, addedAtById?: Map<strin
     case 'completed':
       return item.completed_count ?? 0;
     case 'time_played':
-      return item.total_time_played_minutes ?? 0;
+      return item.time_played_minutes ?? 0;
     case 'list':
       return addedAtById?.get(item.id) ? new Date(addedAtById.get(item.id)!).getTime() : -Infinity;
   }
@@ -514,7 +514,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
             const config = MEDIA_SUBTYPES[item.media_type] || MEDIA_SUBTYPES.movie;
             const href = `${config.detailBase}/${item.id}/${item.title ? slugify(item.title) : ''}`;
             const isSelected = selectedIds.has(item.id);
-            const timePlayed = item.media_type === 'game' ? formatTimePlayed(item.total_time_played_minutes) : null;
+            const timePlayed = item.media_type === 'game' && item.time_played_minutes != null ? formatTimePlayed(item.time_played_minutes) : null;
             const cardClasses = `group bg-white/70 dark:bg-gray-900/70 rounded-lg border shadow-sm shadow-black/3 transition-shadow ${editMode
               ? isSelected
                 ? 'border-transparent ring-2 ring-primary-500'

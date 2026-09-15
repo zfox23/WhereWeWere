@@ -1,6 +1,6 @@
 // ============================================================================
 // One-off importer for a hand-maintained games CSV (columns:
-//   Title, Genre, Platform, Rating, Notes, Playtime (Hours)).
+//   Title, Genre, Platform, Rating, Notes, Playtime (Hours), Status).
 //
 // Usage (from server/):
 //   npm run import:games -- --dry-run             # offline preview: no TGDB calls, no writes
@@ -10,11 +10,15 @@
 //
 // Behavior:
 //   - Genre is dropped (nothing in the schema stores it).
-//   - Every row becomes a 'completed' check-in at the import time (UTC).
+//   - NO check-ins are created. Rating, notes, time played, and status are
+//     written directly on the media_items row (item-level metadata).
 //   - Rating (0-10) is stored as raw_score (exact) and rating (0-4 stars,
 //     via scoreToRating — same convention as Yamtrack imports).
 //   - Time played is a cumulative total that NEVER decreases:
 //     stored = max(current stored total, CSV hours * 60).
+//   - Status (optional column: completed / in progress / dropped). When the
+//     column or its value is absent, it defaults to 'completed' when the row
+//     has a rating or playtime, else 'in_progress'.
 //   - Metadata enrichment uses one TGDB ByGameName call per game, sequential
 //     with a delay between calls. After repeated failures (e.g. hitting the
 //     monthly rate cap, 403) further calls stop and the remaining games are
@@ -25,13 +29,9 @@
 //     ("Battlefield 2" vs "Battlefield 2042", "Half-Life 2: Episode One" vs
 //     "Half-Life 2") are treated as different games — a new item is created
 //     instead of folding data into the wrong one.
-//   - Idempotent:
-//       * check-ins are deduped by external_event_id =
-//         'ggbl:' + sha1(normalized title);
-//       * media items are matched by normalized title against ALL existing
-//         game items loaded into memory.
-//     Re-running only raises time played (never lowers it) and enriches
-//     local-only items; it never creates duplicate rows.
+//   - Idempotent: media items are matched by normalized title against ALL
+//     existing game items loaded into memory; the metadata UPDATE is safe to
+//     re-run (only raises time played, re-enriches local-only items).
 //
 // A backup is recommended before the first real run: the Settings page has a
 // full backup export, or use pg_dump on the database.
@@ -40,7 +40,6 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import crypto from 'crypto';
 import { parse } from 'csv-parse/sync';
 import { pool } from './index';
 import { tgdb, type TgdbGameResult } from '../services/tgdb';
@@ -73,10 +72,14 @@ interface GameCsvRow {
   platform: string | null;
   rawRating: string | null;
   notes: string | null;
+  /** Raw Status column value (completed / in progress / dropped), if present. */
+  rawStatus: string | null;
   playtimeHours: number | null;
   timePlayedMinutes: number | null;
   rating: number | null;
   rawScore: number | null;
+  /** Resolved item status: explicit CSV value, else a default. */
+  status: 'completed' | 'in_progress' | 'dropped';
 }
 
 function cleanStr(value: unknown): string | null {
@@ -117,24 +120,30 @@ export function parseGamesCsv(csv: string): GameCsvRow[] {
       }
     }
 
+    const rawStatus = cleanStr(rec['Status']);
+    const normalizedStatus = rawStatus ? rawStatus.toLowerCase().replace(/[\s-]+/g, '_') : null;
+    const status: GameCsvRow['status'] =
+      normalizedStatus === 'completed' ? 'completed'
+      : normalizedStatus === 'in_progress' ? 'in_progress'
+      : normalizedStatus === 'dropped' ? 'dropped'
+      : // No explicit status: a rated or played game is treated as completed.
+        rating != null || playtimeHours != null ? 'completed' : 'in_progress';
+
     return {
       line: idx + 2,
       title,
       platform: cleanStr(rec['Platform']),
       rawRating,
       notes: cleanStr(rec['Notes']),
+      rawStatus,
       playtimeHours,
       timePlayedMinutes:
         playtimeHours != null ? Math.round(playtimeHours * 60) : null,
       rating,
       rawScore,
+      status,
     };
   });
-}
-
-/** Stable idempotency key for the check-in created by a CSV row. */
-function checkinEventId(title: string): string {
-  return `ggbl:${crypto.createHash('sha1').update(normalizeTitle(title)).digest('hex')}`;
 }
 
 // ============================================================================
@@ -146,12 +155,12 @@ interface LocalGame {
   title: string;
   external_source: string | null;
   external_id: string | null;
-  /** Latest non-null time_played_minutes across the item's check-ins. */
+  /** Item-level stored time total. */
   time_played_minutes: number | null;
 }
 
 /**
- * Load all game media items with their latest stored time total, indexed by
+ * Load all game media items with their stored time total, indexed by
  * normalized title and by (external_source, external_id).
  */
 async function loadLocalGames(): Promise<{
@@ -160,17 +169,9 @@ async function loadLocalGames(): Promise<{
   all: LocalGame[];
 }> {
   const res = await pool.query<LocalGame>(
-    `SELECT mi.id, mi.title, mi.external_source, mi.external_id,
-            mc.time_played_minutes
-     FROM media_items mi
-     LEFT JOIN LATERAL (
-       SELECT time_played_minutes
-       FROM media_checkins
-       WHERE media_item_id = mi.id AND time_played_minutes IS NOT NULL
-       ORDER BY checked_in_at DESC, id DESC
-       LIMIT 1
-     ) mc ON true
-     WHERE mi.user_id = $1 AND mi.media_type = 'game'`,
+    `SELECT id, title, external_source, external_id, time_played_minutes
+     FROM media_items
+     WHERE user_id = $1 AND media_type = 'game'`,
     [USER_ID]
   );
 
@@ -201,22 +202,6 @@ function matchLocalGame(
   const exact = byExactKey.get(key);
   if (exact) return exact;
   return all.find((g) => titleRelation(key, normalizeTitle(g.title)) === 'edition') ?? null;
-}
-
-/** Set of normalized titles that already have a check-in from a prior import. */
-async function loadImportedTitles(): Promise<Set<string>> {
-  const res = await pool.query(
-    `SELECT external_event_id FROM media_checkins
-     WHERE user_id = $1 AND external_event_id LIKE 'ggbl:%'`,
-    [USER_ID]
-  );
-  const imported = new Set<string>();
-  for (const row of res.rows) {
-    // Inverse of checkinEventId is not computable (sha1); instead we re-hash
-    // nothing here — the caller compares event ids directly. Keep the raw ids.
-    imported.add(row.external_event_id as string);
-  }
-  return imported;
 }
 
 // ============================================================================
@@ -327,35 +312,25 @@ async function lookupGames(
 
 async function runDryRun(rows: GameCsvRow[]): Promise<void> {
   const { byExactKey, all } = await loadLocalGames();
-  const importedEventIds = await loadImportedTitles();
 
   let matchedLocal = 0;
   let newGames = 0;
-  let alreadyImported = 0;
 
   console.log('');
   console.log('=== DRY RUN (no TGDB calls, no writes) ===');
   console.log('');
   console.log(
-    pad('CSV title', 50) + pad('status', 18) + pad('matched local game', 38) +
-      'rating      time played'
+    pad('CSV title', 50) + pad('match', 18) + pad('matched local game', 38) +
+      'rating      time played   item status'
   );
   console.log('-'.repeat(128));
 
   for (const row of rows) {
     const local = matchLocalGame(row.title, byExactKey, all);
 
-    // A row is "already imported" when a ggbl: check-in for this exact title
-    // exists from a prior run of this script.
-    const isImported = importedEventIds.has(checkinEventId(row.title));
-
     let status: string;
     let matchLabel: string;
-    if (isImported) {
-      status = 'ALREADY IMPORTED';
-      matchLabel = local ? local.title : '—';
-      alreadyImported++;
-    } else if (local) {
+    if (local) {
       status = local.external_source ? 'matches TGDB local' : 'matches manual';
       matchLabel = local.title;
       matchedLocal++;
@@ -387,14 +362,14 @@ async function runDryRun(rows: GameCsvRow[]): Promise<void> {
         pad(status, 18) +
         pad(truncate(matchLabel, 38), 38) +
         pad(ratingLabel, 12) +
-        timeLabel
+        pad(timeLabel, 22) +
+        row.status
     );
   }
 
   console.log('-'.repeat(128));
   console.log(
-    `${rows.length} rows · ${alreadyImported} already imported (skipped) · ` +
-      `${matchedLocal} match existing local games · ${newGames} new (TGDB lookup at import time)`
+    `${rows.length} rows · ${matchedLocal} match existing local games · ${newGames} new (TGDB lookup at import time)`
   );
   console.log('');
   console.log('If this looks right, re-run without --dry-run to import.');
@@ -418,8 +393,7 @@ function truncate(s: string, width: number): string {
 // ============================================================================
 
 interface ImportStats {
-  checkinsCreated: number;
-  checkinsSkipped: number;
+  itemsUpdated: number;
   itemsCreated: number;
   itemsEnriched: number;
   timeRaised: number;
@@ -429,8 +403,7 @@ interface ImportStats {
 
 async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
   const stats: ImportStats = {
-    checkinsCreated: 0,
-    checkinsSkipped: 0,
+    itemsUpdated: 0,
     itemsCreated: 0,
     itemsEnriched: 0,
     timeRaised: 0,
@@ -475,7 +448,6 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
     console.warn('No TGDB API key in user_settings — all games will be local-only.');
   }
 
-  const importTime = new Date().toISOString();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -485,19 +457,6 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
       const match = lookup?.match ?? null;
       if (match) stats.tgdbMatches++;
       if (lookup?.failed) stats.tgdbFailed++;
-
-      const eventId = checkinEventId(row.title);
-
-      // Idempotency: a ggbl: check-in for this title means an earlier run of
-      // this script already imported the row — nothing more to do.
-      const existing = await client.query(
-        `SELECT id FROM media_checkins WHERE user_id = $1 AND external_event_id = $2`,
-        [USER_ID, eventId]
-      );
-      if (existing.rows.length > 0) {
-        stats.checkinsSkipped++;
-        continue;
-      }
 
       // Find-or-create the media item.
       const local = matchLocalGame(row.title, byExactKey, all);
@@ -578,19 +537,12 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
         }
       }
 
-      // Time played: read the current stored total BEFORE inserting so the
-      // new row does not mask it, then store max(current, imported).
-      const totalRes = await client.query(
-        `SELECT time_played_minutes FROM media_checkins
-         WHERE media_item_id = $1 AND time_played_minutes IS NOT NULL
-         ORDER BY checked_in_at DESC, id DESC LIMIT 1`,
-        [mediaItemId]
-      );
+      // Write item-level metadata. Time played is a cumulative total that
+      // NEVER decreases: stored = max(current stored total, CSV value).
       const currentTotal =
-        totalRes.rows[0]?.time_played_minutes != null
-          ? Number(totalRes.rows[0].time_played_minutes)
-          : null;
-
+        local?.time_played_minutes != null ? Number(local.time_played_minutes)
+        : reuseExternal?.time_played_minutes != null ? Number(reuseExternal.time_played_minutes)
+        : null;
       const storedTime =
         row.timePlayedMinutes != null
           ? Math.max(currentTotal ?? 0, row.timePlayedMinutes)
@@ -600,22 +552,43 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
       }
 
       await client.query(
-        `INSERT INTO media_checkins
-           (user_id, media_item_id, checkin_type, rating, raw_score, notes,
-            checked_in_at, checkin_timezone, external_event_id, time_played_minutes)
-         VALUES ($1, $2, 'completed', $3, $4, $5, $6::timestamptz, 'UTC', $7, $8)`,
+        `UPDATE media_items
+         SET rating = $2,
+             raw_score = $3,
+             notes = $4,
+             status = $5,
+             time_played_minutes = CASE
+               WHEN $6::integer IS NOT NULL THEN GREATEST(COALESCE(time_played_minutes, 0), $6::integer)
+               ELSE time_played_minutes
+             END,
+             updated_at = NOW()
+         WHERE id = $1 AND user_id = $7`,
         [
-          USER_ID,
           mediaItemId,
           row.rating,
           row.rawScore,
           row.notes,
-          importTime,
-          eventId,
+          row.status,
           storedTime,
+          USER_ID,
         ]
       );
-      stats.checkinsCreated++;
+      stats.itemsUpdated++;
+
+      // Refresh the in-memory snapshot so a later CSV row for the same
+      // item (different title spelling) sees the updated time total.
+      const updated: LocalGame = {
+        id: mediaItemId,
+        title: local?.title ?? reuseExternal?.title ?? (match?.title ?? row.title),
+        external_source: match ? 'tgdb' : (local?.external_source ?? reuseExternal?.external_source ?? null),
+        external_id: match?.externalId ?? local?.external_id ?? reuseExternal?.external_id ?? null,
+        time_played_minutes: storedTime ?? currentTotal,
+      };
+      const key = normalizeTitle(updated.title);
+      byExactKey.set(key, updated);
+      if (match) {
+        byExternal.set(`tgdb:${match.externalId}`, updated);
+      }
 
       const src = match
         ? `TGDB ${match.externalId}`
@@ -673,8 +646,7 @@ async function main() {
     const stats = await runImport(rows);
     console.log('');
     console.log('=== IMPORT COMPLETE ===');
-    console.log(`  check-ins created:    ${stats.checkinsCreated}`);
-    console.log(`  check-ins skipped:    ${stats.checkinsSkipped} (already imported)`);
+    console.log(`  media items updated:  ${stats.itemsUpdated} (item-level rating/notes/time/status)`);
     console.log(`  media items created:  ${stats.itemsCreated}`);
     console.log(`  media items enriched: ${stats.itemsEnriched}`);
     console.log(`  time totals raised:   ${stats.timeRaised}`);

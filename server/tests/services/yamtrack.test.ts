@@ -196,10 +196,9 @@ describe('planYamtrackImport', () => {
     expect(plans.every((p) => p.disposition === 'create_episode_checkin')).toBe(true);
   });
 
-  it('classifies movie/game/book with a completed status and end_date as check-ins timed at end_date', () => {
+  it('classifies movie/book with a completed status and end_date as check-ins timed at end_date', () => {
     const plans = planYamtrackImport([
       row({ line: 2, media_type: 'movie', title: 'Film', media_id: '20', status: 'Completed', end_date: '2023-01-01', score: '8' }),
-      row({ line: 3, media_type: 'game', source: 'igdb', title: 'Game', media_id: '30', status: 'In progress', end_date: '2023-01-02' }),
       row({ line: 4, media_type: 'book', source: 'hardcover', title: 'Book', media_id: '40', status: 'Dropped', end_date: '2023-01-03' }),
     ]);
     expect(plans[0].disposition).toBe('create_checkin');
@@ -207,13 +206,9 @@ describe('planYamtrackImport', () => {
     expect(plans[0].rating).toBe(3);
     expect(plans[0].raw_score).toBe(8);
     expect(plans[0].checked_in_at).toBe('2023-01-01');
-    expect(plans[1].checkin_type).toBe('in_progress');
-    expect(plans[1].external_source).toBeNull();
-    expect(plans[1].external_id).toBeNull();
-    expect(plans[1].checked_in_at).toBe('2023-01-02');
-    expect(plans[2].checkin_type).toBe('dropped');
-    expect(plans[2].external_source).toBe('hardcover');
-    expect(plans[2].checked_in_at).toBe('2023-01-03');
+    expect(plans[1].checkin_type).toBe('dropped');
+    expect(plans[1].external_source).toBe('hardcover');
+    expect(plans[1].checked_in_at).toBe('2023-01-03');
   });
 
   it('ignores start_date for check-in time: a movie with only start_date is media-only', () => {
@@ -234,49 +229,58 @@ describe('planYamtrackImport', () => {
     expect(plans.every((p) => p.checkin_type === null)).toBe(true);
   });
 
-  it('creates an in-progress check-in at progressed_at for any game with progress > 0min', () => {
+  it('never creates check-ins for games: metadata goes on the item (update_game_item)', () => {
     const plans = planYamtrackImport([
-      // Paused status + progress + progressed_at: the time rule wins over the status rule.
+      // No status + progress > 0: item status defaults to in_progress.
       row({
         line: 2, media_type: 'game', source: 'igdb', title: 'Game A', media_id: '60',
-        status: 'Paused', progress: '5h 26min',
-        progressed_at: '2026-01-19 18:34:58+00:00',
+        progress: '5h 26min', progressed_at: '2026-01-19 18:34:58+00:00', score: '9',
       }),
-      // In-progress status without progress: falls back to the status rule.
+      // In-progress status without progress.
       row({
         line: 3, media_type: 'game', source: 'igdb', title: 'Game B', media_id: '61',
         status: 'In progress', end_date: '2023-01-02',
       }),
-      // Progress of 0min: no time check-in, status rule applies (media-only when no end_date).
+      // Planning status + progress 0min: no explicit status, no time ->
+      // item status left untouched (null).
       row({
         line: 4, media_type: 'game', source: 'igdb', title: 'Game C', media_id: '62',
-        status: 'Planning', progress: '0min', progressed_at: '2026-01-19 18:34:58+00:00',
+        status: 'Planning', progress: '0min',
       }),
-      // Progress but no progressed_at: falls back to the status rule.
+      // Completed status + progress + score.
       row({
         line: 5, media_type: 'game', source: 'igdb', title: 'Game D', media_id: '63',
-        status: 'In progress', progress: '2h', end_date: '2023-02-01',
+        status: 'Completed', progress: '2h', score: '10',
       }),
     ]);
     const a = plans[0];
-    expect(a.disposition).toBe('create_checkin');
-    expect(a.checkin_type).toBe('in_progress');
-    expect(a.checked_in_at).toBe('2026-01-19 18:34:58+00:00');
+    expect(a.disposition).toBe('update_game_item');
+    expect(a.checkin_type).toBeNull();
+    expect(a.checked_in_at).toBeNull();
+    expect(a.external_event_id).toBeNull();
     expect(a.time_played_minutes).toBe(326);
+    expect(a.item_status).toBe('in_progress');
+    expect(a.rating).toBe(4);
+    expect(a.raw_score).toBe(9);
 
     const b = plans[1];
-    expect(b.disposition).toBe('create_checkin');
-    expect(b.checkin_type).toBe('in_progress');
-    expect(b.checked_in_at).toBe('2023-01-02');
+    expect(b.disposition).toBe('update_game_item');
+    expect(b.item_status).toBe('in_progress');
     expect(b.time_played_minutes).toBeNull();
+    // igdb rows import local-only: the IGDB media_id must not be stored.
+    expect(b.external_source).toBeNull();
+    expect(b.external_id).toBeNull();
 
-    expect(plans[2].disposition).toBe('create_media_item');
-    expect(plans[2].time_played_minutes).toBeNull();
+    const c = plans[2];
+    expect(c.disposition).toBe('update_game_item');
+    expect(c.item_status).toBeNull();
+    expect(c.time_played_minutes).toBeNull();
 
     const d = plans[3];
-    expect(d.disposition).toBe('create_checkin');
-    expect(d.checked_in_at).toBe('2023-02-01');
-    expect(d.time_played_minutes).toBeNull();
+    expect(d.disposition).toBe('update_game_item');
+    expect(d.item_status).toBe('completed');
+    expect(d.time_played_minutes).toBe(120);
+    expect(d.rating).toBe(4);
   });
 
   it('skips unrecognized media types and missing titles', () => {
@@ -320,6 +324,9 @@ describe('end-to-end parse + plan on a real-shaped CSV', () => {
 
     const plans = planYamtrackImport(parseYamtrackCsv(csv));
     const game = plans.find((p) => p.row.media_type === 'game')!;
+    // Games never create check-ins: item-level metadata only.
+    expect(game.disposition).toBe('update_game_item');
+    expect(game.item_status).toBe('in_progress');
     // igdb rows import local-only: the IGDB media_id must not be stored.
     expect(game.external_source).toBeNull();
     expect(game.external_id).toBeNull();
@@ -328,7 +335,8 @@ describe('end-to-end parse + plan on a real-shaped CSV', () => {
     expect(counts.create_tv_show).toBe(1);
     expect(counts.create_episode_checkin).toBe(1);
     expect(counts.duplicate).toBe(1);
-    expect(counts.create_checkin).toBe(2);
+    expect(counts.create_checkin).toBe(1);
+    expect(counts.update_game_item).toBe(1);
     expect(counts.create_media_item).toBe(1);
 
     const episode = plans.find((p) => p.disposition === 'create_episode_checkin')!;

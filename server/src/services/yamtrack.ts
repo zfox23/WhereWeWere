@@ -12,12 +12,13 @@ import { parse } from 'csv-parse/sync';
 //   - episode rows           -> Completed episode check-in timed at end_date
 //                               (timezone UTC). Rows are duplicates only when
 //                               media_id, season, episode, AND end_date match.
-//   - game + progress > 0min -> In-Progress check-in timed at progressed_at,
-//     carrying the parsed time played (the importer stores the max of the
-//     existing total and this value; times are never summed).
-//   - movie/game/book + Completed/In progress/Dropped -> media_item + check-in
+//   - game rows (any)        -> upsert the game media_item and write item-level
+//     rating/notes/time played/status directly on media_items. NO check-ins
+//     are created for games. Time played is a cumulative total that never
+//     decreases (stored = max(current, imported)).
+//   - movie/book + Completed/In progress/Dropped -> media_item + check-in
 //     timed at end_date (start_date is ignored for check-in time entirely)
-//   - movie/game/book + Planning/Paused               -> media_item only
+//   - movie/book + Planning/Paused               -> media_item only
 // ============================================================================
 
 export type YamtrackMediaType = 'tv' | 'season' | 'episode' | 'movie' | 'game' | 'book';
@@ -47,6 +48,7 @@ export type YamtrackDisposition =
   | 'create_episode_checkin'
   | 'create_checkin'
   | 'create_media_item'
+  | 'update_game_item'
   | 'duplicate'
   | 'skipped';
 
@@ -64,6 +66,11 @@ export interface YamtrackPlanItem {
   raw_score: number | null;
   /** Total time played in minutes (games only, from the progress column). */
   time_played_minutes: number | null;
+  /**
+   * Item-level status to write on media_items (games only). Null means
+   * "leave the item's existing status untouched".
+   */
+  item_status: 'completed' | 'in_progress' | 'dropped' | null;
   checked_in_at: string | null;
   external_event_id: string | null;
   /** For duplicate rows: the line number of the row that will be imported. */
@@ -237,6 +244,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         rating: null,
         raw_score: null,
         time_played_minutes: null,
+        item_status: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -258,6 +266,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         rating: null,
         raw_score: null,
         time_played_minutes: null,
+        item_status: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -282,6 +291,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           rating: null,
           raw_score: null,
           time_played_minutes: null,
+          item_status: null,
           checked_in_at: null,
           external_event_id: null,
           duplicate_of_line: null,
@@ -306,6 +316,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
           rating: null,
           raw_score: null,
           time_played_minutes: null,
+          item_status: null,
           checked_in_at: null,
           external_event_id: null,
           duplicate_of_line: rows[existingIdx].line,
@@ -328,6 +339,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         rating: scoreToRating(row.score),
         raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
         time_played_minutes: null,
+        item_status: null,
         checked_in_at: checkedAt,
         external_event_id: checkedAt ? yamtrackExternalEventId(row, dedupeKey) : null,
         duplicate_of_line: null,
@@ -339,33 +351,36 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
 
     // movie / game / book
 
-    // Game time-tracking rule: any game with progress > 0min gets an
-    // In-Progress check-in timed at progressed_at, carrying the parsed time
-    // played (the importer stores the max of existing and imported values).
-    // Takes precedence over the status-based rule for games.
+    // Games: NO check-ins. Rating, notes, time played, and status are written
+    // directly on the media_items row. Time played is a cumulative total that
+    // never decreases (the importer applies max(current, imported)).
     if (mediaType === 'game') {
       const played = parseProgressMinutes(row.progress);
-      if (played != null && played > 0 && row.progressed_at) {
-        const playtimeKey = `${row.media_id}|${row.source}|game-playtime|${row.progressed_at}`;
-        plans.push({
-          row,
-          disposition: 'create_checkin',
-          reason: `Progress "${row.progress}" creates an In-Progress check-in (progressed_at, UTC) with time played`,
-          media_type: 'game',
-          external_source: externalSource,
-          external_id: externalId,
-          checkin_type: 'in_progress',
-          season_number: null,
-          episode_number: null,
-          rating: scoreToRating(row.score),
-          raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
-          time_played_minutes: played,
-          checked_in_at: row.progressed_at,
-          external_event_id: yamtrackExternalEventId(row, playtimeKey),
-          duplicate_of_line: null,
-        });
-        continue;
-      }
+      const status = mapYamtrackStatus(row.status);
+      const statusText = row.status || 'no status';
+      plans.push({
+        row,
+        disposition: 'update_game_item',
+        reason: status
+          ? `Status "${statusText}" updates the game item's metadata (no check-in)`
+          : `Status "${statusText}" + progress updates the game item's metadata (no check-in)`,
+        media_type: 'game',
+        external_source: externalSource,
+        external_id: externalId,
+        checkin_type: null,
+        season_number: null,
+        episode_number: null,
+        rating: scoreToRating(row.score),
+        raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
+        time_played_minutes: played != null && played > 0 ? played : null,
+        // No explicit status: any played time implies in-progress. Otherwise
+        // leave the item's existing status untouched (null).
+        item_status: status ?? (played != null && played > 0 ? 'in_progress' : null),
+        checked_in_at: null,
+        external_event_id: null,
+        duplicate_of_line: null,
+      });
+      continue;
     }
 
     const checkinType = mapYamtrackStatus(row.status);
@@ -385,6 +400,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         rating: null,
         raw_score: null,
         time_played_minutes: null,
+        item_status: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -406,6 +422,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         rating: null,
         raw_score: null,
         time_played_minutes: null,
+        item_status: null,
         checked_in_at: null,
         external_event_id: null,
         duplicate_of_line: null,
@@ -427,6 +444,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
       rating: scoreToRating(row.score),
       raw_score: row.score && Number.isFinite(Number(row.score)) ? Number(row.score) : null,
       time_played_minutes: null,
+      item_status: null,
       checked_in_at: row.end_date,
       external_event_id: yamtrackExternalEventId(row, dedupeKey),
       duplicate_of_line: null,
@@ -442,6 +460,7 @@ export interface YamtrackPlanCounts {
   create_episode_checkin: number;
   create_checkin: number;
   create_media_item: number;
+  update_game_item: number;
   duplicate: number;
   skipped: number;
 }
@@ -453,6 +472,7 @@ export function countPlans(plans: YamtrackPlanItem[]): YamtrackPlanCounts {
     create_episode_checkin: 0,
     create_checkin: 0,
     create_media_item: 0,
+    update_game_item: 0,
     duplicate: 0,
     skipped: 0,
   };

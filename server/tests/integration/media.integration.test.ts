@@ -309,12 +309,11 @@ describe('Media check-in API', () => {
       expect(Number(detail.body.my_rating)).toBe(4);
     });
 
-    it('never decreases the game total time played (server clamp)', async () => {
+    it('stores check-in time as per-row context without clamping or touching the item', async () => {
       const item = (
         await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Hades' })
       ).body;
 
-      // Initial total: 120 minutes.
       const first = await request(app)
         .post(`/api/v1/media/items/${item.id}/checkins`)
         .send({
@@ -326,10 +325,8 @@ describe('Media check-in API', () => {
       expect(first.status).toBe(201);
       expect(Number(first.body.time_played_minutes)).toBe(120);
 
-      let detail = await request(app).get(`/api/v1/media/items/${item.id}`);
-      expect(detail.body.total_time_played_minutes).toBe(120);
-
-      // A lower value must not decrease the total.
+      // A later check-in with a lower value is stored as-is: check-ins no
+      // longer clamp, and they never touch the item-level total.
       const lower = await request(app)
         .post(`/api/v1/media/items/${item.id}/checkins`)
         .send({
@@ -339,28 +336,12 @@ describe('Media check-in API', () => {
           timezone: 'UTC',
         });
       expect(lower.status).toBe(201);
-      // The stored value is clamped up to the existing total.
-      expect(Number(lower.body.time_played_minutes)).toBe(120);
+      expect(Number(lower.body.time_played_minutes)).toBe(60);
 
-      detail = await request(app).get(`/api/v1/media/items/${item.id}`);
-      expect(detail.body.total_time_played_minutes).toBe(120);
+      let detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(detail.body.time_played_minutes).toBeNull();
 
-      // A higher value raises the total.
-      const higher = await request(app)
-        .post(`/api/v1/media/items/${item.id}/checkins`)
-        .send({
-          checkin_type: 'in_progress',
-          time_played_minutes: 300,
-          checked_in_at: '2023-01-03T20:00:00Z',
-          timezone: 'UTC',
-        });
-      expect(higher.status).toBe(201);
-      expect(Number(higher.body.time_played_minutes)).toBe(300);
-
-      detail = await request(app).get(`/api/v1/media/items/${item.id}`);
-      expect(detail.body.total_time_played_minutes).toBe(300);
-
-      // Omitting time_played_minutes leaves the total unchanged.
+      // Omitting time_played_minutes stores null on the check-in row.
       const omitted = await request(app)
         .post(`/api/v1/media/items/${item.id}/checkins`)
         .send({
@@ -372,7 +353,79 @@ describe('Media check-in API', () => {
       expect(omitted.body.time_played_minutes).toBeNull();
 
       detail = await request(app).get(`/api/v1/media/items/${item.id}`);
-      expect(detail.body.total_time_played_minutes).toBe(300);
+      expect(detail.body.time_played_minutes).toBeNull();
+    });
+
+    it('reads and writes item-level rating, notes, status, and time played via PUT /items/:id', async () => {
+      const item = (
+        await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Hades' })
+      ).body;
+
+      // Submitting a check-in never updates item-level fields.
+      await request(app).post(`/api/v1/media/items/${item.id}/checkins`).send({
+        checkin_type: 'in_progress',
+        rating: 2,
+        notes: 'session note',
+        checked_in_at: '2023-01-01T20:00:00Z',
+        timezone: 'UTC',
+      });
+      let detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(detail.body.rating).toBeNull();
+      expect(detail.body.notes).toBeNull();
+      expect(detail.body.status).toBeNull();
+      expect(detail.body.time_played_minutes).toBeNull();
+      // Display rating falls back to the latest check-in rating.
+      expect(Number(detail.body.my_rating)).toBe(2);
+
+      const updated = await request(app)
+        .put(`/api/v1/media/items/${item.id}`)
+        .send({ rating: 4, raw_score: 9.5, notes: 'love it', time_played_minutes: 320, status: 'completed' });
+      expect(updated.status).toBe(200);
+      expect(Number(updated.body.rating)).toBe(4);
+      expect(Number(updated.body.raw_score)).toBe(9.5);
+      expect(updated.body.notes).toBe('love it');
+      expect(Number(updated.body.time_played_minutes)).toBe(320);
+      expect(updated.body.status).toBe('completed');
+
+      detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      // Item rating takes precedence over the check-in rating.
+      expect(Number(detail.body.my_rating)).toBe(4);
+
+      // Manual edits may lower the time played.
+      const lowered = await request(app).put(`/api/v1/media/items/${item.id}`).send({ time_played_minutes: 240 });
+      expect(Number(lowered.body.time_played_minutes)).toBe(240);
+
+      // null explicitly clears fields.
+      const cleared = await request(app)
+        .put(`/api/v1/media/items/${item.id}`)
+        .send({ rating: null, notes: null, time_played_minutes: null, status: null });
+      expect(cleared.body.rating).toBeNull();
+      expect(cleared.body.notes).toBeNull();
+      expect(cleared.body.time_played_minutes).toBeNull();
+      expect(cleared.body.status).toBeNull();
+      expect(Number(cleared.body.my_rating)).toBe(2);
+    });
+
+    it('rejects invalid item-level metadata values', async () => {
+      const item = (
+        await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Hades' })
+      ).body;
+      for (const body of [
+        { rating: 5 },
+        { rating: 'four' },
+        { raw_score: 'abc' },
+        { time_played_minutes: -1 },
+        { status: 'abandoned' },
+      ]) {
+        const res = await request(app).put(`/api/v1/media/items/${item.id}`).send(body);
+        expect(res.status).toBe(400);
+      }
+      const detail = await request(app).get(`/api/v1/media/items/${item.id}`);
+      expect(detail.body.rating).toBeNull();
+      expect(detail.body.raw_score).toBeNull();
+      expect(detail.body.notes).toBeNull();
+      expect(detail.body.time_played_minutes).toBeNull();
+      expect(detail.body.status).toBeNull();
     });
   });
 
@@ -485,14 +538,19 @@ describe('Media check-in API', () => {
       const tv = (await request(app).post('/api/v1/media/items').send({ media_type: 'tv_show', title: 'Severance' })).body;
       const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;
 
+      // Item-level rating takes precedence over check-in ratings for top media.
+      const movieSet = await request(app).put(`/api/v1/media/items/${movie.id}`).send({ rating: 4 });
+      expect(movieSet.status).toBe(200);
+
       await request(app).post(`/api/v1/media/items/${tv.id}/checkins`).send({
-        checkin_type: 'completed', rating: 4, checked_in_at: '2023-01-02T20:00:00Z', timezone: 'UTC',
+        checkin_type: 'completed', rating: 3, checked_in_at: '2023-01-02T20:00:00Z', timezone: 'UTC',
       });
       await request(app).post(`/api/v1/media/items/${tv.id}/checkins`).send({
         checkin_type: 'in_progress', checked_in_at: '2023-01-03T20:00:00Z', timezone: 'UTC',
       });
+      // A check-in rating lower than the item rating must not drag the item down.
       await request(app).post(`/api/v1/media/items/${movie.id}/checkins`).send({
-        checkin_type: 'completed', rating: 3, checked_in_at: '2023-01-04T20:00:00Z', timezone: 'UTC',
+        checkin_type: 'completed', rating: 2, checked_in_at: '2023-01-04T20:00:00Z', timezone: 'UTC',
       });
 
       const all = await request(app).get('/api/v1/media/stats');
@@ -501,7 +559,9 @@ describe('Media check-in API', () => {
       expect(all.body.movies_watched).toBe(1);
       expect(all.body.books_completed).toBe(0);
       expect(all.body.top_media).toHaveLength(2);
-      expect(all.body.top_media[0].title).toBe('Severance');
+      expect(all.body.top_media[0].title).toBe('Dune');
+      expect(Number(all.body.top_media[0].rating)).toBe(4);
+      expect(all.body.top_media[1].title).toBe('Severance');
 
       const filtered = await request(app).get('/api/v1/media/stats').query({ from: '2023-01-04', to: '2023-01-04' });
       expect(filtered.body.tv_episodes_completed).toBe(0);
@@ -543,15 +603,17 @@ describe('Media check-in API', () => {
       expect(response.body[1].completed_count).toBe(1);
     });
 
-    it('reports the latest running time played for games and null for other types', async () => {
+    it('reports the item-level time played, rating, and status for library rows', async () => {
       const game = (await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Hades' })).body;
       const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;
 
+      const setGame = await request(app)
+        .put(`/api/v1/media/items/${game.id}`)
+        .send({ rating: 3, notes: 'fun', time_played_minutes: 540, status: 'in_progress' });
+      expect(setGame.status).toBe(200);
+
       await request(app).post(`/api/v1/media/items/${game.id}/checkins`).send({
-        checkin_type: 'in_progress', checked_in_at: '2023-01-02T20:00:00Z', timezone: 'UTC', time_played_minutes: 300,
-      });
-      await request(app).post(`/api/v1/media/items/${game.id}/checkins`).send({
-        checkin_type: 'in_progress', checked_in_at: '2023-01-05T20:00:00Z', timezone: 'UTC', time_played_minutes: 540,
+        checkin_type: 'in_progress', checked_in_at: '2023-01-05T20:00:00Z', timezone: 'UTC', time_played_minutes: 300,
       });
       await request(app).post(`/api/v1/media/items/${movie.id}/checkins`).send({
         checkin_type: 'completed', checked_in_at: '2023-01-04T20:00:00Z', timezone: 'UTC',
@@ -560,10 +622,17 @@ describe('Media check-in API', () => {
       const response = await request(app).get('/api/v1/media/library');
       expect(response.status).toBe(200);
       const byTitle = Object.fromEntries(response.body.map((row: { title: string }) => [row.title, row]));
-      // Running total from the most recent check-in that reported time.
-      expect(byTitle.Hades.total_time_played_minutes).toBe(540);
-      // Non-game items have no time played.
-      expect(byTitle.Dune.total_time_played_minutes).toBeNull();
+      // Item-level fields are reported as stored (not derived from check-ins).
+      expect(byTitle.Hades.time_played_minutes).toBe(540);
+      expect(byTitle.Hades.rating).toBe(3);
+      expect(byTitle.Hades.notes).toBe('fun');
+      expect(byTitle.Hades.status).toBe('in_progress');
+      expect(byTitle.Hades.latest_rating).toBe(3);
+      // Non-game items have no time played and no item-level rating yet.
+      expect(byTitle.Dune.time_played_minutes).toBeNull();
+      expect(byTitle.Dune.rating).toBeNull();
+      // latest_rating falls back to the latest check-in rating.
+      expect(byTitle.Dune.latest_rating).toBeNull();
     });
 
     it('filters by date range and media types', async () => {
@@ -887,17 +956,18 @@ describe('Media check-in API', () => {
       expect(checkins.rows[0].n).toBe(3);
     });
 
-    it('keeps the existing total when the imported game time is lower (max rule)', async () => {
+    it('keeps the existing item time when the imported game time is lower (max rule, no check-ins)', async () => {
       const first = [
         CSV_HEADER,
         '"321","tgdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","5h","","2023-02-01 00:00:00+00:00"',
       ].join('\n');
       const import1 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: first });
       expect(import1.status).toBe(200);
-      expect(import1.body.counts.imported_checkins).toBe(1);
+      expect(import1.body.counts.imported_checkins).toBe(0);
+      expect(import1.body.counts.update_game_item).toBe(1);
 
-      // A later export of the same game with lower progress at the same
-      // progressed_at: the stored total must not decrease (imported < existing).
+      // A later export of the same game with lower progress: the item total
+      // must not decrease (imported < existing).
       const lower = [
         CSV_HEADER,
         '"321","tgdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","1h 30min","","2023-02-01 00:00:00+00:00"',
@@ -906,9 +976,14 @@ describe('Media check-in API', () => {
       expect(import2.status).toBe(200);
       expect(import2.body.counts.imported_checkins).toBe(0);
 
-      const rows = await query('SELECT time_played_minutes FROM media_checkins');
-      expect(rows.rows).toHaveLength(1);
-      expect(Number(rows.rows[0].time_played_minutes)).toBe(300);
+      const items = await query('SELECT time_played_minutes, status FROM media_items WHERE media_type = \'game\'');
+      expect(items.rows).toHaveLength(1);
+      expect(Number(items.rows[0].time_played_minutes)).toBe(300);
+      expect(items.rows[0].status).toBe('in_progress');
+
+      // Games create no check-ins at all.
+      const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins');
+      expect(checkins.rows[0].n).toBe(0);
     });
 
     it('imports igdb games as local-only and dedupes them by title on re-import', async () => {
@@ -920,7 +995,7 @@ describe('Media check-in API', () => {
       ].join('\n');
       const import1 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: first });
       expect(import1.status).toBe(200);
-      expect(import1.body.counts.imported_checkins).toBe(1);
+      expect(import1.body.counts.imported_checkins).toBe(0);
 
       const after1 = await query(
         'SELECT external_source, external_id, external_url FROM media_items WHERE media_type = \'game\''
@@ -939,18 +1014,16 @@ describe('Media check-in API', () => {
       ].join('\n');
       const import2 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: second });
       expect(import2.status).toBe(200);
-      expect(import2.body.counts.imported_checkins).toBe(1);
+      expect(import2.body.counts.imported_checkins).toBe(0);
 
       const after2 = await query(
-        'SELECT COUNT(*)::int AS n FROM media_items WHERE media_type = \'game\''
+        'SELECT external_source, external_id, status FROM media_items WHERE media_type = \'game\''
       );
-      expect(after2.rows[0].n).toBe(1);
-
-      const stillLocalOnly = await query(
-        'SELECT external_source, external_id FROM media_items WHERE media_type = \'game\''
-      );
-      expect(stillLocalOnly.rows[0].external_source).toBeNull();
-      expect(stillLocalOnly.rows[0].external_id).toBeNull();
+      expect(after2.rows).toHaveLength(1);
+      expect(after2.rows[0].external_source).toBeNull();
+      expect(after2.rows[0].external_id).toBeNull();
+      // Item-level status tracks the latest import.
+      expect(after2.rows[0].status).toBe('completed');
     });
 
     it('requires a csv string', async () => {

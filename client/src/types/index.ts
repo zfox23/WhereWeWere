@@ -375,13 +375,22 @@ export interface MediaItem {
   series_position: number | null;
   /** Book: total number of books in its series. */
   series_count: number | null;
+  /** Item-level user rating (0-4 stars), set independently of check-ins. */
+  rating: number | null;
+  /** Item-level raw score (e.g. 0-10 from imports). */
+  raw_score: number | null;
+  /** Item-level user notes. */
+  notes: string | null;
+  /** Cumulative time played in minutes (games only). */
+  time_played_minutes: number | null;
+  /** Item-level status for games (completed/in_progress/dropped). */
+  status: 'completed' | 'in_progress' | 'dropped' | null;
   created_at: string;
   last_checkin_at?: string | null;
   checkin_count?: number;
+  /** Display rating: the item's rating if set, else the latest check-in's. */
   my_rating?: number | null;
   completed_count?: number;
-  /** Latest total time played (minutes) for games; null when not tracked. */
-  total_time_played_minutes?: number | null;
 }
 
 export interface MediaSearchHit {
@@ -402,9 +411,14 @@ export interface MediaSearchHit {
   series_position: number | null;
   /** Book: total number of books in its series. */
   series_count: number | null;
+  /** Item-level user rating (local hits only; null for external rows). */
+  rating: number | null;
+  /** Item-level status for games (local hits only). */
+  status: string | null;
   local_id: string | null;
   last_checkin_at: string | null;
   last_checkin_type: string | null;
+  /** Display rating: the item's rating if set, else the latest check-in's. */
   my_rating: number | null;
 }
 
@@ -469,15 +483,23 @@ export interface MediaLibraryItem {
   title: string;
   author: string | null;
   image_url: string | null;
-  /** Most recent non-null rating, or null when never rated. */
+  /** Item-level user rating; null when never set. */
+  rating: number | null;
+  /** Item-level raw score; null when never set. */
+  raw_score: number | null;
+  /** Item-level user notes. */
+  notes: string | null;
+  /** Cumulative time played in minutes (games only). */
+  time_played_minutes: number | null;
+  /** Item-level status for games. */
+  status: 'completed' | 'in_progress' | 'dropped' | null;
+  /** Display rating: the item's rating if set, else the latest check-in's. */
   latest_rating: number | null;
   last_checkin_at: string;
   last_checkin_timezone: string;
   last_checkin_type: 'completed' | 'in_progress' | 'dropped';
   /** Number of completed check-ins for this item. */
   completed_count: number;
-  /** Running time played in minutes (games only; latest check-in total). */
-  total_time_played_minutes: number | null;
 }
 
 export interface MediaTvSeason {
@@ -490,6 +512,7 @@ export type YamtrackDisposition =
   | 'create_episode_checkin'
   | 'create_checkin'
   | 'create_media_item'
+  | 'update_game_item'
   | 'duplicate'
   | 'skipped';
 
@@ -533,6 +556,7 @@ export interface YamtrackPreview {
     create_episode_checkin: number;
     create_checkin: number;
     create_media_item: number;
+    update_game_item: number;
     duplicate: number;
     skipped: number;
   };

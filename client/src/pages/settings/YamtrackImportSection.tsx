@@ -16,6 +16,7 @@ const DISPOSITION_LABELS: Record<YamtrackDisposition, string> = {
   create_episode_checkin: 'Episode check-in',
   create_checkin: 'Check-in',
   create_media_item: 'Media only (no check-in)',
+  update_game_item: 'Game (item only, no check-in)',
   duplicate: 'Duplicate',
   skipped: 'Skipped',
 };
@@ -25,6 +26,7 @@ const DISPOSITION_STYLES: Record<YamtrackDisposition, string> = {
   create_episode_checkin: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
   create_checkin: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
   create_media_item: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  update_game_item: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
   duplicate: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
   skipped: 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500',
 };
@@ -166,11 +168,12 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
 
       {phase === 'previewed' && preview && (
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2 md:grid-cols-6 text-center text-xs">
+          <div className="grid grid-cols-3 gap-2 md:grid-cols-7 text-center text-xs">
             <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-2"><div className="text-lg font-semibold">{preview.counts.total}</div>Total</div>
             <div className="bg-sky-50 dark:bg-sky-950/30 rounded-lg p-2"><div className="text-lg font-semibold">{preview.counts.create_tv_show}</div>TV shows</div>
             <div className="bg-violet-50 dark:bg-violet-950/30 rounded-lg p-2"><div className="text-lg font-semibold">{preview.counts.create_episode_checkin}</div>Episodes</div>
             <div className="bg-green-50 dark:bg-green-950/30 rounded-lg p-2"><div className="text-lg font-semibold">{preview.counts.create_checkin}</div>Check-ins</div>
+            <div className="bg-rose-50 dark:bg-rose-950/30 rounded-lg p-2"><div className="text-lg font-semibold">{preview.counts.update_game_item}</div>Games</div>
             <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-2"><div className="text-lg font-semibold">{preview.counts.create_media_item}</div>Media only</div>
             <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-2"><div className="text-lg font-semibold">{preview.counts.duplicate}</div>Duplicates</div>
           </div>
