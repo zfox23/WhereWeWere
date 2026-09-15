@@ -1191,6 +1191,10 @@ router.get('/library', async (req: Request, res: Response) => {
       .filter((t) => MEDIA_TYPES.has(t));
     const mediaTypes = requestedTypes.length > 0 ? requestedTypes : [...MEDIA_TYPES];
 
+    // With no date range (period "all"), items without any check-ins are
+    // included too; with a date range only items checked in during it appear.
+    const includeUncheckedItems = !from && !to;
+
     const params: unknown[] = [USER_ID, mediaTypes];
     const dateConditions: string[] = [];
     if (from) {
@@ -1201,7 +1205,11 @@ router.get('/library', async (req: Request, res: Response) => {
       dateConditions.push(`(mc.checked_in_at AT TIME ZONE mc.checkin_timezone)::date <= $${params.length + 1}::date`);
       params.push(to);
     }
-    const where = `WHERE mc.user_id = $1 AND mi.media_type = ANY($2) ${dateConditions.length ? `AND ${dateConditions.join(' AND ')}` : ''}`;
+    const userCondition = includeUncheckedItems ? 'mi.user_id = $1' : 'mc.user_id = $1';
+    const where = `WHERE ${userCondition} AND mi.media_type = ANY($2) ${dateConditions.length ? `AND ${dateConditions.join(' AND ')}` : ''}`;
+    const join = includeUncheckedItems
+      ? `LEFT JOIN media_checkins mc ON mc.media_item_id = mi.id AND mc.user_id = $1`
+      : `JOIN media_checkins mc ON mc.media_item_id = mi.id`;
 
     const result = await query(
       `SELECT mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
@@ -1211,12 +1219,12 @@ router.get('/library', async (req: Request, res: Response) => {
               (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_timezone,
               (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_type,
               COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
-       FROM media_checkins mc
-       JOIN media_items mi ON mc.media_item_id = mi.id
+       FROM media_items mi
+       ${join}
        ${where}
        GROUP BY mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
                 mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status
-       ORDER BY last_checkin_at DESC`,
+       ORDER BY last_checkin_at DESC NULLS LAST`,
       params
     );
 

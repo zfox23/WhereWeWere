@@ -686,6 +686,39 @@ describe('Media check-in API', () => {
       expect(byTitle.Dune.latest_rating).toBeNull();
     });
 
+    it('includes items without check-ins only when no date range is set', async () => {
+      const checkedIn = (await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Hades' })).body;
+      await request(app).post('/api/v1/media/items').send({ media_type: 'game', title: 'Celeste' });
+
+      await request(app).post(`/api/v1/media/items/${checkedIn.id}/checkins`).send({
+        checkin_type: 'in_progress', checked_in_at: '2023-01-05T20:00:00Z', timezone: 'UTC',
+      });
+
+      // Without a date range (period "all"), the item without check-ins appears…
+      const all = await request(app).get('/api/v1/media/library');
+      expect(all.status).toBe(200);
+      const allByTitle = Object.fromEntries(all.body.map((row: { title: string }) => [row.title, row]));
+      expect(allByTitle.Celeste).toBeDefined();
+      expect(allByTitle.Celeste.last_checkin_at).toBeNull();
+      expect(allByTitle.Celeste.last_checkin_type).toBeNull();
+      expect(allByTitle.Celeste.completed_count).toBe(0);
+      expect(allByTitle.Celeste.latest_rating).toBeNull();
+
+      // …but with a date range only checked-in items within it appear.
+      const ranged = await request(app).get('/api/v1/media/library?from=2023-01-01&to=2023-01-31');
+      expect(ranged.status).toBe(200);
+      const rangedByTitle = Object.fromEntries(ranged.body.map((row: { title: string }) => [row.title, row]));
+      expect(rangedByTitle.Hades).toBeDefined();
+      expect(rangedByTitle.Celeste).toBeUndefined();
+
+      // A date range that excludes the check-in drops the item entirely.
+      const outside = await request(app).get('/api/v1/media/library?from=2024-01-01&to=2024-01-31');
+      expect(outside.status).toBe(200);
+      const outsideByTitle = Object.fromEntries(outside.body.map((row: { title: string }) => [row.title, row]));
+      expect(outsideByTitle.Hades).toBeUndefined();
+      expect(outsideByTitle.Celeste).toBeUndefined();
+    });
+
     it('filters by date range and media types', async () => {
       const tv = (await request(app).post('/api/v1/media/items').send({ media_type: 'tv_show', title: 'Severance' })).body;
       const movie = (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title: 'Dune' })).body;

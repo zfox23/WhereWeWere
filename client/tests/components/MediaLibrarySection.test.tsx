@@ -128,7 +128,39 @@ describe('MediaLibrarySection', () => {
   it('shows an empty state when the API returns no items', async () => {
     libraryMock.mockResolvedValueOnce([]);
     renderSection();
+    await waitFor(() => expect(screen.getByText('No media in your library.')).toBeTruthy());
+  });
+
+  it('shows the check-in empty state when a date range is set', async () => {
+    libraryMock.mockResolvedValueOnce([]);
+    renderSection({ from: '2023-01-01', to: '2023-01-31' });
     await waitFor(() => expect(screen.getByText('No media checked in during this period.')).toBeTruthy());
+  });
+
+  it('renders items without check-ins with a neutral badge and no date', async () => {
+    libraryMock.mockResolvedValueOnce([
+      {
+        ...item,
+        id: 'g1',
+        title: 'Hades',
+        media_type: 'game',
+        rating: null,
+        latest_rating: null,
+        last_checkin_at: null,
+        last_checkin_timezone: null,
+        last_checkin_type: null,
+        completed_count: 0,
+        time_played_minutes: 326,
+      },
+    ]);
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Hades')).toBeTruthy());
+
+    const card = screen.getByRole('link', { name: /Hades/ });
+    expect(card.textContent).toContain('No check-ins');
+    // No check-in date line, and no completed badge.
+    expect(card.textContent).not.toContain('Completed');
+    expect(screen.queryByText(/Jan 4, 2023/)).toBeNull();
   });
 
   it('sorts items by the selected key and direction', async () => {

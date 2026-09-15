@@ -50,7 +50,7 @@ function sortValue(item: MediaLibraryItem, key: SortKey, addedAtById?: Map<strin
     case 'rating':
       return item.latest_rating ?? -Infinity;
     case 'checkin':
-      return new Date(item.last_checkin_at).getTime();
+      return item.last_checkin_at ? new Date(item.last_checkin_at).getTime() : -Infinity;
     case 'completed':
       return item.completed_count ?? 0;
     case 'time_played':
@@ -197,7 +197,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
           item.author,
           MEDIA_SUBTYPES[item.media_type]?.label,
           MEDIA_SUBTYPES[item.media_type]?.plural,
-          CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type,
+          item.last_checkin_type ? CHECKIN_TYPE_LABELS[item.last_checkin_type] : 'no check-ins',
         ]
           .filter(Boolean)
           .join(' ')
@@ -211,8 +211,9 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       const vb = sortValue(b, sortBy, selectedListAddedAt);
       // Both null ratings compare equal (avoid Infinity - Infinity = NaN).
       if (va === vb) {
-        const ts = new Date(b.last_checkin_at).getTime() - new Date(a.last_checkin_at).getTime();
-        if (ts !== 0) return ts;
+        const ta = a.last_checkin_at ? new Date(a.last_checkin_at).getTime() : 0;
+        const tb = b.last_checkin_at ? new Date(b.last_checkin_at).getTime() : 0;
+        if (tb - ta !== 0) return tb - ta;
         return a.title.localeCompare(b.title);
       }
       const diff = va - vb;
@@ -506,7 +507,9 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
             ? `No media matching "${filterQuery.trim()}".`
             : selectedList
               ? `No media from "${selectedList.name}" checked in during this period.`
-              : 'No media checked in during this period.'}
+              : from || to
+                ? 'No media checked in during this period.'
+                : 'No media in your library.'}
         </p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -537,12 +540,16 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                     </div>
                   )}
                   <span
-                    className={`absolute top-2 right-2 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${BADGE_CLASSES[item.last_checkin_type] || BADGE_CLASSES.completed
+                    className={`absolute top-2 right-2 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${item.last_checkin_type
+                      ? BADGE_CLASSES[item.last_checkin_type] || BADGE_CLASSES.completed
+                      : 'bg-gray-100 text-gray-500/90 dark:bg-gray-700 dark:text-gray-300'
                       }`}
                   >
                     {item.last_checkin_type === 'completed' && item.completed_count > 1
                       ? `${CHECKIN_TYPE_LABELS.completed} ${item.completed_count}x`
-                      : CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type}
+                      : item.last_checkin_type
+                        ? CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type
+                        : 'No check-ins'}
                   </span>
                   {editMode ? (
                     <input
@@ -597,9 +604,11 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                       <span />
                     )}
                   </div>
-                  <p className="mt-1 text-[11px] text-gray-400 truncate" title={formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}>
-                    {formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}
-                  </p>
+                  {item.last_checkin_at && (
+                    <p className="mt-1 text-[11px] text-gray-400 truncate" title={formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}>
+                      {formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}
+                    </p>
+                  )}
                 </div>
               </>
             );

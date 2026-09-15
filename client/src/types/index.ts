@@ -523,9 +523,10 @@ export interface MediaLibraryItem {
   status: 'completed' | 'in_progress' | 'dropped' | null;
   /** Display rating: the item's rating if set, else the latest check-in's. */
   latest_rating: number | null;
-  last_checkin_at: string;
-  last_checkin_timezone: string;
-  last_checkin_type: 'completed' | 'in_progress' | 'dropped';
+  /** Null when the item has no check-ins (only in the unfiltered "all" period). */
+  last_checkin_at: string | null;
+  last_checkin_timezone: string | null;
+  last_checkin_type: 'completed' | 'in_progress' | 'dropped' | null;
   /** Number of completed check-ins for this item. */
   completed_count: number;
 }
