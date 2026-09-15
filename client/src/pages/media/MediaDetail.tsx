@@ -72,6 +72,7 @@ interface ItemEditDraft {
 /** Fields a provider can refresh via sync (all keys of MediaItem). */
 type SyncableField =
   | 'title' | 'author' | 'release_year' | 'image_url' | 'platform'
+  | 'external_id' | 'external_url'
   | 'overview' | 'content_rating' | 'players' | 'coop'
   | 'genres' | 'developers' | 'publishers'
   | 'page_count' | 'series_name' | 'series_position' | 'series_count';
@@ -88,6 +89,8 @@ const METADATA_FIELD_LABELS: Record<SyncableField, string> = {
   release_year: 'Release year',
   image_url: 'Image URL',
   platform: 'Platform',
+  external_id: 'External ID',
+  external_url: 'External URL',
   overview: 'Overview',
   content_rating: 'Content rating',
   players: 'Players',
@@ -462,6 +465,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
 
   const buildSyncDiff = (
     base: { author?: string | null; release_year?: number | null; image_url?: string | null; platform?: string | null;
+      external_id?: string | null; external_url?: string | null;
       overview?: string | null; content_rating?: string | null; players?: number | null; coop?: string | null;
       genres?: string[] | null; developers?: string[] | null; publishers?: string[] | null;
       page_count?: number | null; series_name?: string | null; series_position?: number | null; series_count?: number | null },
@@ -483,6 +487,8 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     push('release_year', base.release_year, metadata.release_year);
     push('image_url', base.image_url, metadata.image_url);
     push('platform', base.platform, metadata.platform);
+    push('external_id', base.external_id, metadata.external_id);
+    push('external_url', base.external_url, metadata.external_url);
     push('overview', base.overview, metadata.overview);
     push('content_rating', base.content_rating, metadata.content_rating);
     push('players', base.players, metadata.players);

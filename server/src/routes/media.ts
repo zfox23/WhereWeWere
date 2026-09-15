@@ -637,12 +637,13 @@ async function fetchSyncMetadata(item: {
     case 'movie': {
       const d = await tmdb.getMovieDetails(keys.tmdb_api_key, item.external_id);
       if (!d) return null;
-      return { provider: 'TMDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl } };
+      // TMDB ids are the lookup key; the web URL is deterministic from it.
+      return { provider: 'TMDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl, external_id: item.external_id, external_url: `https://www.themoviedb.org/movie/${item.external_id}` } };
     }
     case 'tv_show': {
       const d = await tmdb.getTvShowDetails(keys.tmdb_api_key, item.external_id);
       if (!d) return null;
-      return { provider: 'TMDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl } };
+      return { provider: 'TMDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl, external_id: item.external_id, external_url: `https://www.themoviedb.org/tv/${item.external_id}` } };
     }
     case 'game': {
       const d = await tgdb.getGameDetails(keys.tgdb_api_key, item.external_id);
@@ -654,6 +655,8 @@ async function fetchSyncMetadata(item: {
           title: d.title,
           release_year: d.releaseYear,
           image_url: d.imageUrl,
+          external_id: d.externalId,
+          external_url: d.externalUrl,
           platform: d.platform,
           overview: d.overview,
           content_rating: d.contentRating,
@@ -676,6 +679,8 @@ async function fetchSyncMetadata(item: {
           author: d.author,
           release_year: d.releaseYear,
           image_url: d.imageUrl,
+          external_id: d.externalId,
+          external_url: d.externalUrl,
           page_count: d.pageCount,
           series_name: d.seriesName,
           series_position: d.seriesPosition,
@@ -719,6 +724,8 @@ router.post('/items/:id/sync', async (req: Request, res: Response) => {
             title: match.title,
             release_year: match.releaseYear,
             image_url: match.imageUrl,
+            external_id: match.externalId,
+            external_url: match.externalUrl,
             platform: match.platform,
             overview: match.overview,
             content_rating: match.contentRating,

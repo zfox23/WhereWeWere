@@ -9,12 +9,13 @@ const getItemMock = vi.fn();
 const listCheckinsMock = vi.fn();
 const listsMock = vi.fn();
 const updateItemMock = vi.fn();
+const syncItemMock = vi.fn();
 vi.mock('../../src/api/client', () => ({
   media: {
     getItem: (...args: unknown[]) => getItemMock(...args),
     listCheckins: (...args: unknown[]) => listCheckinsMock(...args),
     lists: () => listsMock(),
-    syncItem: () => Promise.reject(new Error('not used in tests')),
+    syncItem: (...args: unknown[]) => syncItemMock(...args),
     updateItem: (...args: unknown[]) => updateItemMock(...args),
   },
 }));
@@ -78,6 +79,8 @@ beforeEach(() => {
     ...gameItem(),
     ...payload,
   }));
+  syncItemMock.mockReset();
+  syncItemMock.mockResolvedValue({ provider: 'TGDB', found: true, metadata: {} });
 });
 
 afterEach(() => {
@@ -203,5 +206,52 @@ describe('MediaDetail (game)', () => {
     expect(payload.genres).toBeNull();
     expect(payload.content_rating).toBeNull();
     expect(payload.players).toBeNull();
+  });
+
+  it('sync diff includes external id/url plus all TGDB game fields', async () => {
+    const user = userEvent.setup();
+    // Provider values differ on every stored game field.
+    syncItemMock.mockResolvedValue({
+      provider: 'TGDB',
+      found: true,
+      metadata: {
+        title: 'Sonic the Hedgehog',
+        release_year: 1991,
+        image_url: 'https://cdn.thegamesdb.net/images/medium/boxart/front/53-1.jpg',
+        external_id: '54',
+        external_url: 'https://thegamesdb.net/game.php?id=54',
+        platform: 'Sega Genesis',
+        overview: 'Updated synopsis.',
+        content_rating: 'E10+ - Everyone 10+',
+        players: 2,
+        coop: 'Yes',
+        genres: ['Action', 'Racing'],
+        developers: ['Blue Sky'],
+        publishers: ['Sega of America'],
+      },
+    });
+    renderDetail();
+    await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
+
+    await user.click(screen.getByTitle('Edit metadata'));
+    await user.click(screen.getByRole('button', { name: 'Sync metadata from TGDB' }));
+
+    // Every changed stored field appears as a proposed change row. Scope to the
+    // diff list because the open edit form shows the same field labels.
+    const heading = await screen.findByText('Proposed changes from TGDB');
+    const diffList = heading.parentElement!.nextElementSibling as HTMLUListElement;
+    const diffText = diffList.textContent || '';
+    for (const label of [
+      'External ID', 'External URL', 'Image URL', 'Overview', 'Content rating',
+      'Players', 'Co-op', 'Genres', 'Developers', 'Publishers',
+    ]) {
+      expect(diffText).toContain(label);
+    }
+    // Untouched fields (title, release year, platform) are not proposed as
+    // rows (exact label match, since "Platform" also appears in the genres value).
+    const labels = [...diffList.querySelectorAll('div.text-xs.font-medium')].map((el) => el.textContent);
+    expect(labels).not.toContain('Release year');
+    expect(labels).not.toContain('Platform');
+    expect(labels).not.toContain('Title');
   });
 });
