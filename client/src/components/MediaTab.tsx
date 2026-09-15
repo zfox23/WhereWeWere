@@ -143,11 +143,11 @@ export function MediaTab() {
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 md:grid-cols-5 md:gap-3">
-        <StatCard icon={Tv} label="TV Episodes" value={statsData?.tv_episodes_completed ?? 0} />
-        <StatCard icon={Film} label="Movies" value={statsData?.movies_watched ?? 0} />
-        <StatCard icon={BookOpen} label="Books" value={statsData?.books_completed ?? 0} />
-        <StatCard icon={Gamepad2} label="Games" value={statsData?.games_completed ?? 0} />
-        <StatCard icon={Dices} label="Board Games" value={statsData?.board_games_completed ?? 0} />
+        <StatCard icon={Tv} label="TV Episodes Watched" value={statsData?.tv_episodes_completed ?? 0} />
+        <StatCard icon={Film} label="Movies Watched" value={statsData?.movies_watched ?? 0} />
+        <StatCard icon={BookOpen} label="Books Read" value={statsData?.books_completed ?? 0} />
+        <StatCard icon={Gamepad2} label="Games Finished" value={statsData?.games_completed ?? 0} />
+        <StatCard icon={Dices} label="Board Games Played" value={statsData?.board_games_completed ?? 0} />
       </div>
 
       <MediaLibrarySection from={visibleRange.from} to={visibleRange.to} />
