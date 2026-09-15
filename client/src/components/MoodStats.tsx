@@ -1153,7 +1153,13 @@ export function MoodsTab() {
       next.set('moodsMonth', selectedMonth);
       changed = true;
     }
-    if (next.get('moodsPeriod') !== periodMode) {
+    // Omit the period param at its default ('single') to keep the URL short.
+    if (periodMode === 'single') {
+      if (next.has('moodsPeriod')) {
+        next.delete('moodsPeriod');
+        changed = true;
+      }
+    } else if (next.get('moodsPeriod') !== periodMode) {
       next.set('moodsPeriod', periodMode);
       changed = true;
     }

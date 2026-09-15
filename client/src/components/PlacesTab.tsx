@@ -792,18 +792,21 @@ export function PlacesTab() {
       url.searchParams.set('tab', 'places');
       changed = true;
     }
-    if (url.searchParams.get('placesMonth') !== placesSelectedMonth) {
-      url.searchParams.set('placesMonth', placesSelectedMonth);
-      changed = true;
-    }
-    if (url.searchParams.get('placesPeriod') !== placesPeriodMode) {
-      url.searchParams.set('placesPeriod', placesPeriodMode);
-      changed = true;
-    }
-    if (url.searchParams.get('placesWeek') !== placesSelectedWeek) {
-      url.searchParams.set('placesWeek', placesSelectedWeek);
-      changed = true;
-    }
+    // Only persist non-default filter values so the URL stays short.
+    const setOrDelete = (key: string, value: string, isDefault: boolean) => {
+      if (isDefault) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      } else if (url.searchParams.get(key) !== value) {
+        url.searchParams.set(key, value);
+        changed = true;
+      }
+    };
+    setOrDelete('placesMonth', placesSelectedMonth, placesSelectedMonth === getCurrentMonthIso());
+    setOrDelete('placesPeriod', placesPeriodMode, placesPeriodMode === 'single');
+    setOrDelete('placesWeek', placesSelectedWeek, placesSelectedWeek === getCurrentDateIso());
 
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);

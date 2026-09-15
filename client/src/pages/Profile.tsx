@@ -8,6 +8,16 @@ import { SleepTab } from '../components/SleepTab';
 import { TracksTab } from '../components/TracksTab';
 import { usePageTitle } from '../utils/pageTitle';
 
+/** Filter params each tab writes to the URL (so a tab switch can strip the others'). */
+const TAB_PARAMS: Record<string, string[]> = {
+  places: ['placesMonth', 'placesWeek', 'placesPeriod'],
+  moods: ['moodsMonth', 'moodsWeek', 'moodsPeriod'],
+  sleep: ['sleepMonth', 'sleepWeek', 'sleepPeriod'],
+  tracks: ['trackMonth', 'trackWeek', 'trackPeriod'],
+  media: ['mediaMonth', 'mediaWeek', 'mediaPeriod', 'mediaTypes'],
+  reflect: [],
+};
+
 export default function Profile() {
   type ProfileTab = 'places' | 'reflect' | 'moods' | 'sleep' | 'tracks' | 'media';
 
@@ -51,12 +61,27 @@ export default function Profile() {
 
   useEffect(() => {
     const url = new URL(window.location.href);
-    if (url.searchParams.get('tab') === activeTab) {
-      return;
+    let changed = false;
+
+    if (url.searchParams.get('tab') !== activeTab) {
+      url.searchParams.set('tab', activeTab);
+      changed = true;
+    }
+    // Drop the previous tab's filter params so the URL only carries the
+    // active tab's state (each tab re-syncs its own params on mount).
+    for (const [tab, params] of Object.entries(TAB_PARAMS)) {
+      if (tab === activeTab) continue;
+      for (const param of params) {
+        if (url.searchParams.has(param)) {
+          url.searchParams.delete(param);
+          changed = true;
+        }
+      }
     }
 
-    url.searchParams.set('tab', activeTab);
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    if (changed) {
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    }
   }, [activeTab]);
 
   return (

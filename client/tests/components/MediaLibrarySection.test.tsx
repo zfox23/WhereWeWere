@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MediaLibrarySection } from '../../src/components/MediaLibrarySection';
 import type { MediaLibraryItem } from '../../src/types';
 
@@ -38,10 +38,29 @@ const item: MediaLibraryItem = {
   completed_count: 1,
 };
 
+/**
+ * Renders MediaLibrarySection plus probe routes that display the router
+ * location state, so tests can assert what the back button will navigate to
+ * (the `mediaFrom` deep link carried in navigation state).
+ */
+function DetailProbe() {
+  const loc = useLocation();
+  return <div>detail{loc.search}{(loc.state as { mediaFrom?: string } | null)?.mediaFrom ?? ''}</div>;
+}
+
 function renderSection(props: { from?: string; to?: string } = {}) {
   return render(
-    <MemoryRouter>
-      <MediaLibrarySection from={props.from ?? ''} to={props.to ?? ''} />
+    <MemoryRouter initialEntries={['/profile?tab=media']}>
+      <Routes>
+        <Route
+          path="/profile"
+          element={<MediaLibrarySection from={props.from ?? ''} to={props.to ?? ''} />}
+        />
+        <Route
+          path="/media/movie/:id/:slug"
+          element={<DetailProbe />}
+        />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -74,6 +93,31 @@ describe('MediaLibrarySection', () => {
     expect(screen.getByText('Frank Herbert')).toBeTruthy();
     expect(screen.getByText('Completed')).toBeTruthy();
     expect(screen.getByText(/Jan 4, 2023, 8:00 PM/)).toBeTruthy();
+  });
+
+  it('passes the current library URL as mediaFrom in navigation state', async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+
+    // Bare detail href, but the click navigates with the library URL attached
+    // so the detail page's back button can deep-link back to this view.
+    await user.click(screen.getByRole('link', { name: /Dune/ }));
+    await waitFor(() => expect(screen.getByText('detail/profile?tab=media')).toBeTruthy());
+  });
+
+  it('includes the active filters in the mediaFrom deep link', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/profile?tab=media&mediaMonth=2026-09&mediaTypes=game,book');
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+
+    await user.click(screen.getByRole('link', { name: /Dune/ }));
+    await waitFor(() =>
+      expect(
+        screen.getByText('detail/profile?tab=media&mediaMonth=2026-09&mediaTypes=game%2Cbook'),
+      ).toBeTruthy(),
+    );
   });
 
   it('shows total time played on game cards only', async () => {

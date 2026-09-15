@@ -481,18 +481,21 @@ export function TracksTab() {
       url.searchParams.set('tab', 'tracks');
       changed = true;
     }
-    if (url.searchParams.get('trackMonth') !== selectedMonth) {
-      url.searchParams.set('trackMonth', selectedMonth);
-      changed = true;
-    }
-    if (url.searchParams.get('trackPeriod') !== periodMode) {
-      url.searchParams.set('trackPeriod', periodMode);
-      changed = true;
-    }
-    if (url.searchParams.get('trackWeek') !== selectedWeek) {
-      url.searchParams.set('trackWeek', selectedWeek);
-      changed = true;
-    }
+    // Only persist non-default filter values so the URL stays short.
+    const setOrDelete = (key: string, value: string, isDefault: boolean) => {
+      if (isDefault) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      } else if (url.searchParams.get(key) !== value) {
+        url.searchParams.set(key, value);
+        changed = true;
+      }
+    };
+    setOrDelete('trackMonth', selectedMonth, selectedMonth === getCurrentMonthIso());
+    setOrDelete('trackPeriod', periodMode, periodMode === 'single');
+    setOrDelete('trackWeek', selectedWeek, selectedWeek === getCurrentDateIso());
 
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);

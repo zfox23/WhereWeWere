@@ -123,6 +123,20 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
   const [highlightedCheckinId, setHighlightedCheckinId] = useState<string | null>(null);
   const location = useLocation();
 
+  // The back button restores the page the user came from. Library cards pass
+  // the library's current filter URL as `mediaFrom` in navigation state, so
+  // returning there deep-links back to the previously-set filters. Without
+  // it (e.g. arriving from the check-in form, a timeline link, or a shared
+  // URL), fall back to the media check-in search screen.
+  const handleBack = () => {
+    const from = (location.state as { mediaFrom?: string } | null)?.mediaFrom;
+    if (from && from.startsWith('/')) {
+      navigate(from);
+    } else {
+      navigate(config.searchPath);
+    }
+  };
+
   const [showListModal, setShowListModal] = useState(false);
   const [lists, setLists] = useState<MediaList[]>([]);
   const [newListName, setNewListName] = useState('');
@@ -618,7 +632,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     return (
       <div className="space-y-4">
         <button
-          onClick={() => navigate(config.searchPath)}
+          onClick={handleBack}
           className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
         >
           <ArrowLeft size={15} /> Back
@@ -631,7 +645,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
   return (
     <div className="space-y-6">
       <button
-        onClick={() => navigate(config.searchPath)}
+        onClick={handleBack}
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
       >
         <ArrowLeft size={15} /> {config.plural}

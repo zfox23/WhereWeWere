@@ -246,18 +246,21 @@ export function SleepTab() {
       url.searchParams.set('tab', 'sleep');
       changed = true;
     }
-    if (url.searchParams.get('sleepMonth') !== selectedMonth) {
-      url.searchParams.set('sleepMonth', selectedMonth);
-      changed = true;
-    }
-    if (url.searchParams.get('sleepPeriod') !== periodMode) {
-      url.searchParams.set('sleepPeriod', periodMode);
-      changed = true;
-    }
-    if (url.searchParams.get('sleepWeek') !== selectedWeek) {
-      url.searchParams.set('sleepWeek', selectedWeek);
-      changed = true;
-    }
+    // Only persist non-default filter values so the URL stays short.
+    const setOrDelete = (key: string, value: string, isDefault: boolean) => {
+      if (isDefault) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      } else if (url.searchParams.get(key) !== value) {
+        url.searchParams.set(key, value);
+        changed = true;
+      }
+    };
+    setOrDelete('sleepMonth', selectedMonth, selectedMonth === getCurrentMonthIso());
+    setOrDelete('sleepPeriod', periodMode, periodMode === 'single');
+    setOrDelete('sleepWeek', selectedWeek, selectedWeek === getCurrentDateIso());
 
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);

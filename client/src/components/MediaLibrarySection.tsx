@@ -516,6 +516,14 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
           {visibleItems.map((item, index) => {
             const config = MEDIA_SUBTYPES[item.media_type] || MEDIA_SUBTYPES.movie;
             const href = `${config.detailBase}/${item.id}/${item.title ? slugify(item.title) : ''}`;
+            // Carry the library's current filter state (period + types) in
+            // navigation state so the detail page's back button can deep-link
+            // straight back to this view without bloating the URL.
+            const origin = new URL(window.location.href);
+            const allTypes = selectedTypes.length === MEDIA_SUBTYPE_LIST.length;
+            if (allTypes) origin.searchParams.delete('mediaTypes');
+            else origin.searchParams.set('mediaTypes', selectedTypes.join(','));
+            const fromState = { mediaFrom: `${origin.pathname}${origin.search}` };
             const isSelected = selectedIds.has(item.id);
             const timePlayed = item.media_type === 'game' && item.time_played_minutes != null ? formatTimePlayed(item.time_played_minutes) : null;
             const cardClasses = `group bg-white/70 dark:bg-gray-900/70 rounded-lg border shadow-sm shadow-black/3 transition-shadow ${editMode
@@ -634,6 +642,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
               <Link
                 key={item.id}
                 to={href}
+                state={fromState}
                 className={cardClasses}
               >
                 {cardBody}

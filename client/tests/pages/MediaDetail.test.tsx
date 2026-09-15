@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import MediaDetail from '../../src/pages/media/MediaDetail';
 import type { MediaItem } from '../../src/types';
 
@@ -253,5 +253,55 @@ describe('MediaDetail (game)', () => {
     expect(labels).not.toContain('Release year');
     expect(labels).not.toContain('Platform');
     expect(labels).not.toContain('Title');
+  });
+});
+
+describe('MediaDetail back button', () => {
+  // Renders the router location so tests can assert which filters were
+  // restored on the (mock) profile page.
+  function ProfileProbe() {
+    const loc = useLocation();
+    return <div>media library{loc.search}</div>;
+  }
+
+  function renderBack(entry: { pathname: string; state?: unknown }) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/profile" element={<ProfileProbe />} />
+          <Route path="/media-check-in/game" element={<div>media check-in</div>} />
+          <Route path="/media/game/:id" element={<MediaDetail subtype="game" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it('deep-links back to the library with its filters via navigation state', async () => {
+    renderBack({
+      pathname: '/media/game/game-1',
+      state: { mediaFrom: '/profile?tab=media&mediaMonth=2026-09&mediaTypes=game' },
+    });
+    await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Games' }));
+    await waitFor(() =>
+      expect(screen.getByText('media library?tab=media&mediaMonth=2026-09&mediaTypes=game')).toBeTruthy(),
+    );
+  });
+
+  it('falls back to the check-in search screen when mediaFrom is absent', async () => {
+    renderBack({ pathname: '/media/game/game-1' });
+    await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Games' }));
+    await waitFor(() => expect(screen.getByText('media check-in')).toBeTruthy());
+  });
+
+  it('ignores a mediaFrom value that does not start with a slash', async () => {
+    renderBack({ pathname: '/media/game/game-1', state: { mediaFrom: 'https://evil.example' } });
+    await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Games' }));
+    await waitFor(() => expect(screen.getByText('media check-in')).toBeTruthy());
   });
 });

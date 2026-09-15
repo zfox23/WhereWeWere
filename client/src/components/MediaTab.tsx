@@ -94,18 +94,23 @@ export function MediaTab() {
       url.searchParams.set('tab', 'media');
       changed = true;
     }
-    if (url.searchParams.get('mediaMonth') !== selectedMonth) {
-      url.searchParams.set('mediaMonth', selectedMonth);
-      changed = true;
-    }
-    if (url.searchParams.get('mediaPeriod') !== periodMode) {
-      url.searchParams.set('mediaPeriod', periodMode);
-      changed = true;
-    }
-    if (url.searchParams.get('mediaWeek') !== selectedWeek) {
-      url.searchParams.set('mediaWeek', selectedWeek);
-      changed = true;
-    }
+    // Only persist non-default filter values so the URL stays short.
+    const monthDefault = getCurrentMonthIso();
+    const weekDefault = getCurrentMonthIso().slice(0, 4) + '-01-01';
+    const setOrDelete = (key: string, value: string, isDefault: boolean) => {
+      if (isDefault) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      } else if (url.searchParams.get(key) !== value) {
+        url.searchParams.set(key, value);
+        changed = true;
+      }
+    };
+    setOrDelete('mediaMonth', selectedMonth, selectedMonth === monthDefault);
+    setOrDelete('mediaPeriod', periodMode, periodMode === 'single');
+    setOrDelete('mediaWeek', selectedWeek, selectedWeek === weekDefault);
 
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
