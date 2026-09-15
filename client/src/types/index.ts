@@ -563,16 +563,16 @@ export interface YamtrackPlanRow {
   checkin_type: 'completed' | 'in_progress' | 'dropped' | null;
   rating: number | null;
   raw_score: number | null;
+  /** Total time played in minutes (games only, from the CSV progress column). */
+  time_played_minutes: number | null;
   duplicate_of_line: number | null;
 }
 
 /**
- * A plan row as returned by POST /import/yamtrack/import. The stored ids and
- * time played only exist after the import has run, so they are absent from
- * the preview response.
+ * A plan row as returned by POST /import/yamtrack/import. The stored ids only
+ * exist after the import has run, so they are absent from the preview response.
  */
 export interface YamtrackImportPlanRow extends YamtrackPlanRow {
-  time_played_minutes: number | null;
   media_item_id: string | null;
   imported_checkin_id: string | null;
 }

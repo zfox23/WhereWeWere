@@ -244,6 +244,7 @@ router.post('/preview', async (req: Request, res: Response) => {
         checkin_type: p.checkin_type,
         rating: p.rating,
         raw_score: p.raw_score,
+        time_played_minutes: p.time_played_minutes,
         duplicate_of_line: p.duplicate_of_line,
       })),
     });

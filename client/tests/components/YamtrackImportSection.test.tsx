@@ -19,12 +19,12 @@ const csvFile = new File(['header\nrow'], 'export.csv', { type: 'text/csv' });
 
 const previewFixture = {
   counts: {
-    total: 4,
+    total: 5,
     create_tv_show: 1,
     create_episode_checkin: 1,
     create_checkin: 1,
     create_media_item: 1,
-    update_game_item: 0,
+    update_game_item: 1,
     duplicate: 0,
     skipped: 0,
   },
@@ -32,7 +32,8 @@ const previewFixture = {
     { line: 2, media_id: '1', source: 'tmdb', media_type: 'tv', title: 'Show', season_number: null, episode_number: null, status: 'Completed', score: null, start_date: '2023-04-04', end_date: '2025-05-26', checked_in_at: null, disposition: 'create_tv_show', reason: '', checkin_type: null, rating: null, raw_score: null, duplicate_of_line: null },
     { line: 3, media_id: '1', source: 'tmdb', media_type: 'episode', title: 'Pilot', season_number: '1', episode_number: '1', status: 'Completed', score: '10', start_date: null, end_date: '2023-04-04 01:50:00+00:00', checked_in_at: '2023-04-04 01:50:00+00:00', disposition: 'create_episode_checkin', reason: '', checkin_type: 'completed', rating: 4, raw_score: 10, duplicate_of_line: null },
     { line: 4, media_id: '2', source: 'tmdb', media_type: 'movie', title: 'Film', season_number: null, episode_number: null, status: 'Completed', score: null, start_date: '2023-04-05', end_date: null, checked_in_at: '2023-04-05', disposition: 'create_checkin', reason: '', checkin_type: 'completed', rating: null, raw_score: null, duplicate_of_line: null },
-    { line: 5, media_id: '3', source: 'hardcover', media_type: 'book', title: 'Book', season_number: null, episode_number: null, status: 'Planning', score: null, start_date: null, end_date: null, checked_in_at: null, disposition: 'create_media_item', reason: '', checkin_type: null, rating: null, raw_score: null, duplicate_of_line: null },
+    { line: 5, media_id: '3', source: 'hardcover', media_type: 'book', title: 'Book', season_number: null, episode_number: null, status: 'Planning', score: null, start_date: null, end_date: null, checked_in_at: null, disposition: 'create_media_item', reason: '', checkin_type: null, rating: null, raw_score: null, time_played_minutes: null, duplicate_of_line: null },
+    { line: 6, media_id: '4', source: 'tgdb', media_type: 'game', title: 'Hades', season_number: null, episode_number: null, status: 'In progress', score: '9', start_date: null, end_date: null, checked_in_at: null, disposition: 'update_game_item', reason: '', checkin_type: null, rating: 4, raw_score: 9, time_played_minutes: 326, duplicate_of_line: null },
   ],
 } as any;
 
@@ -87,6 +88,10 @@ describe('YamtrackImportSection', () => {
     expect(screen.getByText('Film')).toBeTruthy();
     expect(screen.getByText('Book')).toBeTruthy();
     expect(screen.getAllByText('Episode check-in')).toHaveLength(1);
+    expect(screen.getByText('Hades')).toBeTruthy();
+    // Time played column renders for the game row, '—' for the others.
+    expect(screen.getByText('5h 26m')).toBeTruthy();
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(4);
 
     await user.click(screen.getByRole('button', { name: /import/i }));
 

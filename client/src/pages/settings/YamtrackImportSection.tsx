@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { Upload, FileText, Loader2, Check, AlertCircle, Play, X, ExternalLink } from 'lucide-react';
 import { yamtrackImport } from '../../api/client';
-import { MEDIA_SUBTYPES } from '../../utils/media';
+import { MEDIA_SUBTYPES, formatTimePlayed } from '../../utils/media';
 import { slugify } from '../../utils/slugify';
 import type {
   YamtrackDisposition,
@@ -188,6 +188,7 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
                   <th className="px-2 py-1.5">Disposition</th>
                   <th className="px-2 py-1.5">Date</th>
                   <th className="px-2 py-1.5">Rating</th>
+                  <th className="px-2 py-1.5">Time played</th>
                 </tr>
               </thead>
               <tbody>
@@ -204,6 +205,9 @@ export function YamtrackImportSection({ onImportComplete }: { onImportComplete?:
                     </td>
                     <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">
                       {row.rating != null ? `${row.rating}★` : row.raw_score != null ? String(row.raw_score) : '—'}
+                    </td>
+                    <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">
+                      {formatTimePlayed(row.time_played_minutes) ?? '—'}
                     </td>
                   </tr>
                 ))}
