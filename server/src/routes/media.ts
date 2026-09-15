@@ -119,6 +119,17 @@ interface SearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
+  /** Game: TGDB synopsis. */
+  overview: string | null;
+  /** Game: ESRB-style content rating, e.g. "E - Everyone". */
+  content_rating: string | null;
+  /** Game: minimum player count. */
+  players: number | null;
+  /** Game: co-op support ("Yes"/"No"). */
+  coop: string | null;
+  genres: string[] | null;
+  developers: string[] | null;
+  publishers: string[] | null;
   page_count: number | null;
   series_name: string | null;
   series_position: number | null;
@@ -174,6 +185,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
   const localRows = await query(
     `SELECT mi.id, mi.title, mi.author, mi.release_year, mi.image_url, mi.external_url,
             mi.external_source, mi.external_id, mi.platform,
+            mi.overview, mi.content_rating, mi.players, mi.coop, mi.genres, mi.developers, mi.publishers,
             mi.page_count, mi.series_name, mi.series_position, mi.series_count,
             mi.rating, mi.status,
             mc_latest.last_checkin_at, mc_latest.last_checkin_type, mc_latest.latest_checkin_rating
@@ -208,6 +220,13 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     image_url: r.image_url,
     external_url: r.external_url,
     platform: r.platform || null,
+    overview: r.overview || null,
+    content_rating: r.content_rating || null,
+    players: r.players != null ? Number(r.players) : null,
+    coop: r.coop || null,
+    genres: r.genres?.length ? r.genres : null,
+    developers: r.developers?.length ? r.developers : null,
+    publishers: r.publishers?.length ? r.publishers : null,
     page_count: r.page_count ?? null,
     series_name: r.series_name || null,
     series_position: r.series_position ?? null,
@@ -223,7 +242,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
   }));
 
   let degraded = false;
-  let external: { external_source: string; rows: { externalId: string; title: string; releaseYear: number | null; imageUrl: string | null; externalUrl: string; author?: string | null; platform?: string | null; pageCount?: number | null; seriesName?: string | null; seriesPosition?: number | null; seriesCount?: number | null }[] } | null = null;
+  let external: { external_source: string; rows: { externalId: string; title: string; releaseYear: number | null; imageUrl: string | null; externalUrl: string; author?: string | null; platform?: string | null; overview?: string | null; contentRating?: string | null; players?: number | null; coop?: string | null; genres?: string[] | null; developers?: string[] | null; publishers?: string[] | null; pageCount?: number | null; seriesName?: string | null; seriesPosition?: number | null; seriesCount?: number | null }[] } | null = null;
 
   if (type === 'movie' || type === 'tv_show') {
     const found = type === 'movie'
@@ -242,7 +261,7 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
     if (!found) {
       degraded = true;
     } else {
-      external = { external_source: 'tgdb', rows: found.map((f) => ({ externalId: f.externalId, title: f.title, releaseYear: f.releaseYear, imageUrl: f.imageUrl, externalUrl: f.externalUrl, platform: f.platform })) };
+      external = { external_source: 'tgdb', rows: found.map((f) => ({ externalId: f.externalId, title: f.title, releaseYear: f.releaseYear, imageUrl: f.imageUrl, externalUrl: f.externalUrl, platform: f.platform, overview: f.overview, contentRating: f.contentRating, players: f.players, coop: f.coop, genres: f.genres, developers: f.developers, publishers: f.publishers })) };
     }
   } else if (type === 'book') {
     const found = await hardcover.searchBooks(keys.hardcover_api_key, q);
@@ -286,6 +305,13 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
         image_url: row.imageUrl,
         external_url: row.externalUrl,
         platform: row.platform || null,
+        overview: row.overview ?? null,
+        content_rating: row.contentRating ?? null,
+        players: row.players ?? null,
+        coop: row.coop ?? null,
+        genres: row.genres ?? null,
+        developers: row.developers ?? null,
+        publishers: row.publishers ?? null,
         page_count: row.pageCount ?? null,
         series_name: row.seriesName || null,
         series_position: row.seriesPosition ?? null,
@@ -342,7 +368,7 @@ router.post('/items', async (req: Request, res: Response) => {
       series_count: toIntOrNull(series_count),
     });
     const item = await query(
-      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status, created_at FROM media_items WHERE id = $1',
+      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, overview, content_rating, players, coop, genres, developers, publishers, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status, created_at FROM media_items WHERE id = $1',
       [id]
     );
     res.status(201).json(item.rows[0]);
@@ -374,7 +400,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     const mediaType: string = itemResult.rows[0].media_type;
     const allowedSource = SOURCE_BY_TYPE[mediaType] || null;
 
-    const { title, author, release_year, image_url, external_url, platform, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status } = req.body;
+    const { title, author, release_year, image_url, external_url, platform, overview, content_rating, players, coop, genres, developers, publishers, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status } = req.body;
     let external_id: unknown = req.body.external_id;
 
     // Board games are local-only: external fields are not applicable.
@@ -426,6 +452,42 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     if (platform !== undefined && mediaType === 'game') {
       add('platform', platform ? String(platform).trim() || null : null);
     }
+    // TGDB-sourced game metadata (sync applies these; also editable directly).
+    if (mediaType === 'game') {
+      if (overview !== undefined) add('overview', overview ? String(overview).trim() || null : null);
+      if (content_rating !== undefined) add('content_rating', content_rating ? String(content_rating).trim() || null : null);
+      if (coop !== undefined) add('coop', coop ? String(coop).trim() || null : null);
+      if (players !== undefined) {
+        const v = typeof players === 'number' && Number.isInteger(players) && players > 0 ? players : null;
+        if (v == null && players != null) return res.status(400).json({ error: 'players must be a positive integer' });
+        add('players', v);
+      }
+      const toNameArray = (value: unknown, label: string): string[] | null | undefined => {
+        if (value == null) return null;
+        if (!Array.isArray(value)) {
+          res.status(400).json({ error: `${label} must be an array of strings` });
+          return undefined;
+        }
+        const names = value.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '');
+        if (value.length > 0 && names.length === 0) return null;
+        if (names.length > 10 || names.some((n) => n.length > 100)) {
+          res.status(400).json({ error: `${label} must be an array of short strings` });
+          return undefined;
+        }
+        return names.length > 0 ? names : null;
+      };
+      for (const [column, value, label] of [
+        ['genres', genres, 'genres'],
+        ['developers', developers, 'developers'],
+        ['publishers', publishers, 'publishers'],
+      ] as const) {
+        if (value !== undefined) {
+          const arr = toNameArray(value, label);
+          if (arr === undefined) return; // 400 already sent
+          add(column, arr);
+        }
+      }
+    }
     if (mediaType === 'book') {
       if (page_count !== undefined) add('page_count', toIntOrNull(page_count));
       if (series_name !== undefined) add('series_name', series_name ? String(series_name).trim() || null : null);
@@ -476,6 +538,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     // clients don't need a follow-up fetch after every update.
     const item = await query(
       `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
+              overview, content_rating, players, coop, genres, developers, publishers,
               page_count, series_name, series_position, series_count, rating, raw_score, notes,
               time_played_minutes, status, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
@@ -541,11 +604,20 @@ async function rekeyGameByTitle(itemId: string, title: string): Promise<TgdbGame
            release_year = COALESCE($4, release_year),
            image_url = COALESCE($5, image_url),
            platform = COALESCE($6, platform),
+           overview = COALESCE(overview, $7),
+           content_rating = COALESCE(content_rating, $8),
+           players = COALESCE(players, $9),
+           coop = COALESCE(coop, $10),
+           genres = COALESCE(genres, $11),
+           developers = COALESCE(developers, $12),
+           publishers = COALESCE(publishers, $13),
            updated_at = NOW()
-       WHERE id = $1 AND user_id = $7`,
-      [itemId, candidate.externalId, `https://thegamesdb.net/game.php?id=${candidate.externalId}`,
-       candidate.releaseYear, candidate.imageUrl, candidate.platform, USER_ID]
-    );
+       WHERE id = $1 AND user_id = $14`,
+     [itemId, candidate.externalId, `https://thegamesdb.net/game.php?id=${candidate.externalId}`,
+      candidate.releaseYear, candidate.imageUrl, candidate.platform,
+      candidate.overview, candidate.contentRating, candidate.players, candidate.coop,
+      candidate.genres, candidate.developers, candidate.publishers, USER_ID]
+   );
     return candidate;
   }
   return null;
@@ -556,7 +628,7 @@ async function fetchSyncMetadata(item: {
   media_type: string;
   external_id: string;
   title: string;
-}): Promise<{ provider: string; found: boolean; metadata: Record<string, string | number | null> } | null> {
+}): Promise<{ provider: string; found: boolean; metadata: Record<string, string | number | null | string[]> } | null> {
   const keys = await getApiKeys();
   switch (item.media_type) {
     case 'movie': {
@@ -572,7 +644,23 @@ async function fetchSyncMetadata(item: {
     case 'game': {
       const d = await tgdb.getGameDetails(keys.tgdb_api_key, item.external_id);
       if (!d) return null;
-      return { provider: 'TGDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl, platform: d.platform } };
+      return {
+        provider: 'TGDB',
+        found: true,
+        metadata: {
+          title: d.title,
+          release_year: d.releaseYear,
+          image_url: d.imageUrl,
+          platform: d.platform,
+          overview: d.overview,
+          content_rating: d.contentRating,
+          players: d.players,
+          coop: d.coop,
+          genres: d.genres,
+          developers: d.developers,
+          publishers: d.publishers,
+        },
+      };
     }
     case 'book': {
       const d = await hardcover.getBookByExternalId(keys.hardcover_api_key, item.external_id, item.title);
@@ -624,7 +712,19 @@ router.post('/items/:id/sync', async (req: Request, res: Response) => {
           provider: 'TGDB',
           found: true,
           rekeyed: true,
-          metadata: { title: match.title, release_year: match.releaseYear, image_url: match.imageUrl, platform: match.platform },
+          metadata: {
+            title: match.title,
+            release_year: match.releaseYear,
+            image_url: match.imageUrl,
+            platform: match.platform,
+            overview: match.overview,
+            content_rating: match.contentRating,
+            players: match.players,
+            coop: match.coop,
+            genres: match.genres,
+            developers: match.developers,
+            publishers: match.publishers,
+          },
         });
       }
       return res.status(400).json({ error: 'This item has no external ID. Set one in edit mode first.' });
@@ -654,6 +754,7 @@ router.get('/items/:id', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
       `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
+              overview, content_rating, players, coop, genres, developers, publishers,
               page_count, series_name, series_position, series_count, rating, raw_score, notes,
               time_played_minutes, status, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,

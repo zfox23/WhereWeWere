@@ -22,11 +22,24 @@ describe('Backup export/import media round-trip', () => {
   });
 
   async function seed() {
-    // Game item with a platform.
+    // Game item with a platform + TGDB-sourced metadata (set via PUT, the
+    // same path the provider sync applies through).
     const game = await request(app)
       .post('/api/v1/media/items')
       .send({ media_type: 'game', title: 'Hades', platform: 'Nintendo Switch' });
     expect(game.status).toBe(201);
+    const gameTgdb = await request(app)
+      .put(`/api/v1/media/items/${game.body.id}`)
+      .send({
+        overview: 'Slash your way to freedom from the Underworld.',
+        content_rating: 'T - Teen',
+        players: 1,
+        coop: 'No',
+        genres: ['Action', 'Roguelike'],
+        developers: ['Supergiant Games'],
+        publishers: ['Supergiant Games'],
+      });
+    expect(gameTgdb.status).toBe(200);
 
     // Book item with page count / series metadata.
     const book = await request(app)
@@ -96,6 +109,13 @@ describe('Backup export/import media round-trip', () => {
     const exportedGame = payload.data.mediaItems.find((i: any) => i.id === game.id);
     expect(exportedGame).toBeTruthy();
     expect(exportedGame.platform).toBe('Nintendo Switch');
+    expect(exportedGame.overview).toBe('Slash your way to freedom from the Underworld.');
+    expect(exportedGame.content_rating).toBe('T - Teen');
+    expect(exportedGame.players).toBe(1);
+    expect(exportedGame.coop).toBe('No');
+    expect(exportedGame.genres).toEqual(['Action', 'Roguelike']);
+    expect(exportedGame.developers).toEqual(['Supergiant Games']);
+    expect(exportedGame.publishers).toEqual(['Supergiant Games']);
     expect(exportedGame.page_count).toBeNull();
     expect(exportedGame.rating).toBe(4);
     expect(Number(exportedGame.raw_score)).toBe(9.5);
@@ -140,6 +160,13 @@ describe('Backup export/import media round-trip', () => {
     const gameAfter = await request(app).get(`/api/v1/media/items/${game.id}`);
     expect(gameAfter.status).toBe(200);
     expect(gameAfter.body.platform).toBe('Nintendo Switch');
+    expect(gameAfter.body.overview).toBe('Slash your way to freedom from the Underworld.');
+    expect(gameAfter.body.content_rating).toBe('T - Teen');
+    expect(gameAfter.body.players).toBe(1);
+    expect(gameAfter.body.coop).toBe('No');
+    expect(gameAfter.body.genres).toEqual(['Action', 'Roguelike']);
+    expect(gameAfter.body.developers).toEqual(['Supergiant Games']);
+    expect(gameAfter.body.publishers).toEqual(['Supergiant Games']);
     expect(gameAfter.body.rating).toBe(4);
     expect(Number(gameAfter.body.raw_score)).toBe(9.5);
     expect(gameAfter.body.notes).toBe('speedrun gold');
@@ -175,6 +202,13 @@ describe('Backup export/import media round-trip', () => {
     // Strip the new keys to simulate a backup created before the fix.
     for (const item of payload.data.mediaItems) {
       delete item.platform;
+      delete item.overview;
+      delete item.content_rating;
+      delete item.players;
+      delete item.coop;
+      delete item.genres;
+      delete item.developers;
+      delete item.publishers;
       delete item.page_count;
       delete item.series_name;
       delete item.series_position;
@@ -200,6 +234,13 @@ describe('Backup export/import media round-trip', () => {
     const gameAfter = await request(app).get(`/api/v1/media/items/${game.id}`);
     expect(gameAfter.status).toBe(200);
     expect(gameAfter.body.platform).toBeNull();
+    expect(gameAfter.body.overview).toBeNull();
+    expect(gameAfter.body.content_rating).toBeNull();
+    expect(gameAfter.body.players).toBeNull();
+    expect(gameAfter.body.coop).toBeNull();
+    expect(gameAfter.body.genres).toBeNull();
+    expect(gameAfter.body.developers).toBeNull();
+    expect(gameAfter.body.publishers).toBeNull();
     expect(gameAfter.body.rating).toBeNull();
     expect(gameAfter.body.raw_score).toBeNull();
     expect(gameAfter.body.notes).toBeNull();

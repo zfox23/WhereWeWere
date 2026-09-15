@@ -107,6 +107,57 @@ describe('Media check-in API', () => {
       expect(item.body.series_position).toBe(1);
       expect(item.body.series_count).toBe(6);
     });
+
+    it('persists and validates TGDB game metadata via PUT', async () => {
+      const created = await request(app)
+        .post('/api/v1/media/items')
+        .send({ media_type: 'game', title: 'Sonic the Hedgehog' });
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+
+      const ok = await request(app).put(`/api/v1/media/items/${id}`).send({
+        overview: 'Join Sonic as he races through six zones.',
+        content_rating: 'E - Everyone',
+        players: 1,
+        coop: 'No',
+        genres: ['Action', 'Platform'],
+        developers: ['Sega'],
+        publishers: ['Sega'],
+      });
+      expect(ok.status).toBe(200);
+      expect(ok.body.overview).toBe('Join Sonic as he races through six zones.');
+      expect(ok.body.content_rating).toBe('E - Everyone');
+      expect(ok.body.players).toBe(1);
+      expect(ok.body.coop).toBe('No');
+      expect(ok.body.genres).toEqual(['Action', 'Platform']);
+      expect(ok.body.developers).toEqual(['Sega']);
+      expect(ok.body.publishers).toEqual(['Sega']);
+
+      // Non-positive player counts are rejected.
+      const badPlayers = await request(app).put(`/api/v1/media/items/${id}`).send({ players: 0 });
+      expect(badPlayers.status).toBe(400);
+      expect(badPlayers.body.error).toMatch(/players/);
+
+      // Name arrays are validated: non-arrays and oversized entries are rejected.
+      const notArray = await request(app).put(`/api/v1/media/items/${id}`).send({ genres: 'Action' });
+      expect(notArray.status).toBe(400);
+      const tooLong = await request(app)
+        .put(`/api/v1/media/items/${id}`)
+        .send({ developers: ['x'.repeat(101)] });
+      expect(tooLong.status).toBe(400);
+
+      // Empty-string entries are dropped; an all-blank array stores null.
+      const blanks = await request(app).put(`/api/v1/media/items/${id}`).send({ publishers: ['  '] });
+      expect(blanks.status).toBe(200);
+      expect(blanks.body.publishers).toBeNull();
+
+      // GET returns the full shape after the updates.
+      const item = await request(app).get(`/api/v1/media/items/${id}`);
+      expect(item.status).toBe(200);
+      expect(item.body.content_rating).toBe('E - Everyone');
+      expect(item.body.players).toBe(1);
+      expect(item.body.genres).toEqual(['Action', 'Platform']);
+    });
   });
 
   describe('media check-ins', () => {

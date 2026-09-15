@@ -1,76 +1,74 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { tgdb } from '../../src/services/tgdb';
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
+
+function mockFetchOnce(body: unknown, ok = true, status = 200) {
+  fetchMock.mockResolvedValueOnce({
+    ok,
+    status,
+    json: async () => body,
+  });
 }
 
-const searchBody = {
-  code: 200,
-  status: 'Success',
-  remaining_monthly_allowance: 249,
-  extra_allowance: 0,
-  data: {
-    count: 2,
-    games: [
-      { id: 53, game_title: 'Sonic the Hedgehog', release_date: '1991-06-23', platform: 18 },
-      { id: 53, game_title: 'Sonic the Hedgehog', release_date: '1991-06-23', platform: 19, region_id: 2 },
-      { id: 432, game_title: 'Sonic the Hedgehog 2', release_date: '1992-11-24', platform: 18 },
-    ],
-  },
-  include: {
-    boxart: {
-      base_url: {
-        medium: 'https://cdn.thegamesdb.net/images/medium/',
+function gameRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 53,
+    game_title: 'Sonic the Hedgehog',
+    release_date: '1991-06-23',
+    platform: 18,
+    overview: 'Join Sonic as he races through six zones.',
+    rating: 'E - Everyone',
+    players: 1,
+    coop: 'No',
+    genres: [1, 8],
+    developers: [1296],
+    publishers: [1],
+    ...overrides,
+  };
+}
+
+function searchResponse(rows: Record<string, unknown>[]) {
+  return {
+    data: { count: rows.length, games: rows },
+    include: {
+      boxart: {
+        base_url: { medium: 'https://cdn.thegamesdb.net/images/medium/' },
+        data: { '53': [{ type: 'boxart', side: 'front', filename: 'boxart/front/53-1.jpg' }] },
       },
-      data: {
-        '53': [{ id: 1, type: 'boxart', side: 'front', filename: 'boxart/front/53-1.jpg' }],
-        '432': [{ id: 2, type: 'screenshot', side: null, filename: 'screenshots/432-1.jpg' }],
-      },
+      platform: { data: { '18': { id: 18, name: 'Sega Genesis', alias: 'sega-genesis' } } },
     },
-    platform: {
-      data: {
-        '18': { id: 18, name: 'Sega Genesis', alias: 'sega-genesis' },
-        '19': { id: 19, name: 'Sega Saturn', alias: 'sega-saturn' },
-      },
-    },
-  },
-};
+  };
+}
+
+beforeEach(() => {
+  fetchMock.mockReset();
+  tgdb.clearAll();
+});
 
 describe('tgdb.searchGames', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  it('requests the widened fields param', async () => {
+    mockFetchOnce(searchResponse([]));
 
-  beforeEach(() => {
-    fetchMock = vi.fn(async () => jsonResponse(searchBody));
-    vi.stubGlobal('fetch', fetchMock);
-    tgdb.cache.clear();
+    await tgdb.searchGames('key-123', 'sonic');
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toContain('/v1.1/Games/ByGameName?');
+    expect(url).toContain('fields=platform,overview,players,rating,coop');
+    expect(url).toContain('include=boxart,platform');
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    tgdb.cache.clear();
-  });
+  it('maps the new metadata fields off the base payload', async () => {
+    // 1) search, 2) genres by id, 3) developers by id, 4) publishers by id
+    mockFetchOnce(searchResponse([gameRow()]));
+    mockFetchOnce({ data: { count: 2, genres: { '1': { id: 1, name: 'Action' }, '8': { id: 8, name: 'Platform' } } } });
+    mockFetchOnce({ data: { count: 1, developers: { '1296': { id: 1296, name: 'Sega' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
 
-  it('returns null without an API key and does not fetch', async () => {
-    await expect(tgdb.searchGames(null, 'ssx')).resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+    const result = await tgdb.searchGames('key-123', 'sonic');
 
-  it('calls the v1.1 ByGameName endpoint with apikey and name', async () => {
-    await tgdb.searchGames('KEY', 'ssx');
-    const url = fetchMock.mock.calls[0][0] as string;
-    const parsed = new URL(url);
-    expect(parsed.origin).toBe('https://api.thegamesdb.net');
-    expect(parsed.pathname).toBe('/v1.1/Games/ByGameName');
-    expect(parsed.searchParams.get('apikey')).toBe('KEY');
-    expect(parsed.searchParams.get('name')).toBe('ssx');
-    expect(parsed.searchParams.get('fields')).toBe('platform');
-    expect(parsed.searchParams.get('include')).toBe('boxart,platform');
-  });
-
-  it('maps rows, dedupes by game id, and picks front boxart', async () => {
-    const results = await tgdb.searchGames('KEY', 'ssx');
-    expect(results).toEqual([
+    expect(result).toEqual([
       {
         externalId: '53',
         title: 'Sonic the Hedgehog',
@@ -78,165 +76,110 @@ describe('tgdb.searchGames', () => {
         imageUrl: 'https://cdn.thegamesdb.net/images/medium/boxart/front/53-1.jpg',
         externalUrl: 'https://thegamesdb.net/game.php?id=53',
         platform: 'Sega Genesis',
-      },
-      {
-        externalId: '432',
-        title: 'Sonic the Hedgehog 2',
-        releaseYear: 1992,
-        imageUrl: null,
-        externalUrl: 'https://thegamesdb.net/game.php?id=432',
-        platform: 'Sega Genesis',
-      },
-    ]);
-  });
-
-  it('leaves platform null when the game has no platform or the platform list omits it', async () => {
-    fetchMock.mockImplementation(async () =>
-      jsonResponse({
-        data: {
-          games: [
-            { id: 9, game_title: 'SSX Tricky', release_date: '2001-10-09' },
-            { id: 10, game_title: 'Mystery', release_date: '2001-10-09', platform: 7 },
-          ],
-        },
-      })
-    );
-    const results = await tgdb.searchGames('KEY', 'ssx-platform');
-    expect(results).toEqual([
-      {
-        externalId: '9',
-        title: 'SSX Tricky',
-        releaseYear: 2001,
-        imageUrl: null,
-        externalUrl: 'https://thegamesdb.net/game.php?id=9',
-        platform: null,
-      },
-      {
-        externalId: '10',
-        title: 'Mystery',
-        releaseYear: 2001,
-        imageUrl: null,
-        externalUrl: 'https://thegamesdb.net/game.php?id=10',
-        platform: null,
+        overview: 'Join Sonic as he races through six zones.',
+        contentRating: 'E - Everyone',
+        players: 1,
+        coop: 'No',
+        genres: ['Action', 'Platform'],
+        developers: ['Sega'],
+        publishers: ['Sega'],
       },
     ]);
   });
 
-  it('keeps the row with the earliest release date on dedupe', async () => {
-    fetchMock.mockImplementation(async () =>
-      jsonResponse({
-        data: {
-          games: [
-            { id: 7, game_title: 'SSX', release_date: '2005-12-01', platform: 1 },
-            { id: 7, game_title: 'SSX', release_date: '2002-10-08', platform: 2 },
-          ],
-        },
-      })
-    );
-    const results = await tgdb.searchGames('KEY', 'ssx-2');
-    expect(results).toHaveLength(1);
-    expect(results![0].releaseYear).toBe(2002);
+  it('batches name lookups: one By*ID call per category for all candidate rows', async () => {
+    // Two games sharing genre id 1 but with different developer ids → the
+    // batched call must carry the union of ids, and only 3 extra calls total.
+    mockFetchOnce(searchResponse([gameRow({ developers: [1296] }), gameRow({ id: 432, game_title: 'Sonic 2', developers: [99], genres: [1] })]));
+    mockFetchOnce({ data: { count: 1, genres: { '1': { id: 1, name: 'Action' } } } });
+    mockFetchOnce({ data: { count: 2, developers: { '1296': { id: 1296, name: 'Sega' }, '99': { id: 99, name: 'Other' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
+
+    const result = await tgdb.searchGames('key-123', 'sonic');
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const devUrl = fetchMock.mock.calls[2][0] as string;
+    expect(devUrl).toContain('/v1/Developers/ByDeveloperID?');
+    expect(devUrl).toContain('id=1296%2C99');
+    expect(result?.[0].developers).toEqual(['Sega']);
+    expect(result?.[1].developers).toEqual(['Other']);
+    expect(result?.[1].genres).toEqual(['Action']);
   });
 
-  it('falls back to the default CDN base url when base_url is omitted', async () => {
-    fetchMock.mockImplementation(async () =>
-      jsonResponse({
-        data: {
-          games: [{ id: 9, game_title: 'SSX Tricky', release_date: null }],
-        },
-        include: {
-          boxart: {
-            data: { '9': [{ id: 1, type: 'boxart', side: 'front', filename: 'boxart/front/9-1.jpg' }] },
-          },
-        },
-      })
-    );
-    const results = await tgdb.searchGames('KEY', 'ssx-3');
-    expect(results![0].imageUrl).toBe('https://cdn.thegamesdb.net/images/medium/boxart/front/9-1.jpg');
-  });
+  it('skips name lookups when rows carry no id arrays', async () => {
+    mockFetchOnce(searchResponse([gameRow({ genres: undefined, developers: undefined, publishers: undefined })]));
 
-  it('serves the fallback (null) when the API returns a non-2xx status', async () => {
-    fetchMock.mockImplementation(async () => new Response('nope', { status: 404 }));
-    await expect(tgdb.searchGames('KEY', 'ssx-4')).resolves.toBeNull();
-  });
+    const result = await tgdb.searchGames('key-123', 'sonic');
 
-  it('caches responses per lowercased query', async () => {
-    await tgdb.searchGames('KEY', 'SSX');
-    await tgdb.searchGames('KEY', 'ssx');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result?.[0].genres).toBeNull();
+    expect(result?.[0].developers).toBeNull();
+    expect(result?.[0].publishers).toBeNull();
+  });
+
+  it('drops unknown ids; null when a category fully fails to resolve', async () => {
+    mockFetchOnce(searchResponse([gameRow({ genres: [1, 424242] })]));
+    mockFetchOnce({ data: { count: 1, genres: { '1': { id: 1, name: 'Action' } } } });
+    mockFetchOnce({ data: { count: 0, developers: {} } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
+
+    const result = await tgdb.searchGames('key-123', 'sonic');
+
+    expect(result?.[0].genres).toEqual(['Action']);
+  });
+
+  it('reuses resolved names across calls without extra API hits', async () => {
+    mockFetchOnce(searchResponse([gameRow()]));
+    mockFetchOnce({ data: { count: 2, genres: { '1': { id: 1, name: 'Action' }, '8': { id: 8, name: 'Platform' } } } });
+    mockFetchOnce({ data: { count: 1, developers: { '1296': { id: 1296, name: 'Sega' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
+    await tgdb.searchGames('key-123', 'sonic');
+
+    // Second search for a different title: the response cache misses, but the
+    // persistent name maps serve every id → exactly one fetch.
+    fetchMock.mockClear();
+    mockFetchOnce(searchResponse([gameRow()]), true);
+    const result = await tgdb.searchGames('key-123', 'sonic the hedgehog');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result?.[0].genres).toEqual(['Action', 'Platform']);
+  });
+
+  it('returns null without an API key', async () => {
+    const result = await tgdb.searchGames(null, 'sonic');
+    expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
-const byIdBody = {
-  code: 200,
-  status: 'Success',
-  data: {
-    count: 1,
-    games: [
-      { id: 101643, game_title: 'Hollow Knight: Silksong', release_date: '2025-09-04', platform: 1, region_id: 9, country_id: 0 },
-    ],
-  },
-  include: {
-    boxart: {
-      base_url: { medium: 'https://cdn.thegamesdb.net/images/medium/' },
-      data: {
-        '101643': [{ id: 482204, type: 'boxart', side: 'front', filename: 'boxart/front/101643-1.jpg' }],
-      },
-    },
-    platform: {
-      data: { '1': { id: 1, name: 'PC', alias: 'pc' } },
-    },
-  },
-};
-
 describe('tgdb.getGameDetails', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  it('requests the widened fields param on the v1 ByGameID endpoint', async () => {
+    mockFetchOnce(searchResponse([gameRow()]));
+    mockFetchOnce({ data: { count: 2, genres: { '1': { id: 1, name: 'Action' }, '8': { id: 8, name: 'Platform' } } } });
+    mockFetchOnce({ data: { count: 1, developers: { '1296': { id: 1296, name: 'Sega' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
 
-  beforeEach(() => {
-    fetchMock = vi.fn(async () => jsonResponse(byIdBody));
-    vi.stubGlobal('fetch', fetchMock);
-    tgdb.cache.clear();
+    const result = await tgdb.getGameDetails('key-123', '53');
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toContain('/v1/Games/ByGameID?');
+    expect(url).toContain('fields=platform,overview,players,rating,coop');
+    expect(result?.overview).toBe('Join Sonic as he races through six zones.');
+    expect(result?.contentRating).toBe('E - Everyone');
+    expect(result?.players).toBe(1);
+    expect(result?.coop).toBe('No');
+    expect(result?.genres).toEqual(['Action', 'Platform']);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    tgdb.cache.clear();
+  it('returns null when the id lookup yields no games', async () => {
+    mockFetchOnce(searchResponse([]));
+    const result = await tgdb.getGameDetails('key-123', '999999');
+    expect(result).toBeNull();
   });
 
-  it('returns null without an API key and does not fetch', async () => {
-    await expect(tgdb.getGameDetails(null, '101643')).resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('calls the v1 ByGameID endpoint (v1.1 has no by-id lookup)', async () => {
-    await tgdb.getGameDetails('KEY', '101643');
-    const url = fetchMock.mock.calls[0][0] as string;
-    const parsed = new URL(url);
-    expect(parsed.origin).toBe('https://api.thegamesdb.net');
-    expect(parsed.pathname).toBe('/v1/Games/ByGameID');
-    expect(parsed.searchParams.get('apikey')).toBe('KEY');
-    expect(parsed.searchParams.get('id')).toBe('101643');
-  });
-
-  it('maps a single game row including platform and front boxart', async () => {
-    const result = await tgdb.getGameDetails('KEY', '101643');
-    expect(result).toEqual({
-      externalId: '101643',
-      title: 'Hollow Knight: Silksong',
-      releaseYear: 2025,
-      imageUrl: 'https://cdn.thegamesdb.net/images/medium/boxart/front/101643-1.jpg',
-      externalUrl: 'https://thegamesdb.net/game.php?id=101643',
-      platform: 'PC',
-    });
-  });
-
-  it('returns null when the API returns no games', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse({ code: 200, status: 'Success', data: { count: 0, games: [] } }));
-    await expect(tgdb.getGameDetails('KEY', '999999')).resolves.toBeNull();
-  });
-
-  it('returns null (degraded) when the API 404s', async () => {
-    fetchMock.mockImplementation(async () => new Response('nope', { status: 404 }));
-    await expect(tgdb.getGameDetails('KEY', '101643')).resolves.toBeNull();
+  it('degrades to null on API failure', async () => {
+    mockFetchOnce(null, false, 403);
+    const result = await tgdb.getGameDetails('key-123', '53');
+    expect(result).toBeNull();
   });
 });

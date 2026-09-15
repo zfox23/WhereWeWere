@@ -485,6 +485,8 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
         // Enrich a local-only item with TGDB data, filling nulls only so
         // manually set values are never clobbered.
         if (match && !local.external_source) {
+          // Enrich a local-only item with TGDB data, filling nulls only so
+          // manually set values are never clobbered.
           await client.query(
             `UPDATE media_items
              SET external_source = 'tgdb',
@@ -493,6 +495,13 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
                  image_url = COALESCE(image_url, $4),
                  external_url = COALESCE(external_url, $5),
                  platform = COALESCE(platform, $6),
+                 overview = COALESCE(overview, $7),
+                 content_rating = COALESCE(content_rating, $8),
+                 players = COALESCE(players, $9),
+                 coop = COALESCE(coop, $10),
+                 genres = COALESCE(genres, $11),
+                 developers = COALESCE(developers, $12),
+                 publishers = COALESCE(publishers, $13),
                  updated_at = NOW()
              WHERE id = $1`,
             [
@@ -502,6 +511,13 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
               match.imageUrl,
               match.externalUrl,
               match.platform ?? row.platform,
+              match.overview,
+              match.contentRating,
+              match.players,
+              match.coop,
+              match.genres,
+              match.developers,
+              match.publishers,
             ]
           );
           stats.itemsEnriched++;
@@ -510,9 +526,11 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
         const ins = await client.query(
           `INSERT INTO media_items
              (user_id, media_type, external_source, external_id, title,
-              release_year, image_url, external_url, platform)
-           VALUES ($1, 'game', $2, $3, $4, $5, $6, $7, $8)
-           RETURNING id`,
+              release_year, image_url, external_url, platform,
+              overview, content_rating, players, coop, genres, developers, publishers)
+          VALUES ($1, 'game', $2, $3, $4, $5, $6, $7, $8,
+                  $9, $10, $11, $12, $13, $14, $15)
+          RETURNING id`,
           [
             USER_ID,
             match ? 'tgdb' : null,
@@ -522,6 +540,13 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
             match?.imageUrl ?? null,
             match?.externalUrl ?? null,
             match?.platform ?? row.platform ?? null,
+            match?.overview ?? null,
+            match?.contentRating ?? null,
+            match?.players ?? null,
+            match?.coop ?? null,
+            match?.genres ?? null,
+            match?.developers ?? null,
+            match?.publishers ?? null,
           ]
         );
         mediaItemId = ins.rows[0].id as string;

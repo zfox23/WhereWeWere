@@ -64,12 +64,14 @@ interface ItemEditDraft {
 /** Fields a provider can refresh via sync (all keys of MediaItem). */
 type SyncableField =
   | 'title' | 'author' | 'release_year' | 'image_url' | 'platform'
+  | 'overview' | 'content_rating' | 'players' | 'coop'
+  | 'genres' | 'developers' | 'publishers'
   | 'page_count' | 'series_name' | 'series_position' | 'series_count';
 
 interface MetadataDiff {
   field: SyncableField;
-  current: string | number | null;
-  proposed: string | number;
+  current: string | number | string[] | null;
+  proposed: string | number | string[];
 }
 
 const METADATA_FIELD_LABELS: Record<SyncableField, string> = {
@@ -78,11 +80,25 @@ const METADATA_FIELD_LABELS: Record<SyncableField, string> = {
   release_year: 'Release year',
   image_url: 'Image URL',
   platform: 'Platform',
+  overview: 'Overview',
+  content_rating: 'Content rating',
+  players: 'Players',
+  coop: 'Co-op',
+  genres: 'Genres',
+  developers: 'Developers',
+  publishers: 'Publishers',
   page_count: 'Page count',
   series_name: 'Series',
   series_position: 'Series position',
   series_count: 'Series count',
 };
+
+/** Render a diff value (scalar or name array) as display text. */
+function diffValueText(value: string | number | string[] | null): string {
+  if (value == null) return '—';
+  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : '—';
+  return String(value);
+}
 
 export default function MediaDetail({ subtype }: MediaDetailProps) {
   const config = MEDIA_SUBTYPES[subtype];
@@ -416,15 +432,18 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
 
   const buildSyncDiff = (
     base: { author?: string | null; release_year?: number | null; image_url?: string | null; platform?: string | null;
+      overview?: string | null; content_rating?: string | null; players?: number | null; coop?: string | null;
+      genres?: string[] | null; developers?: string[] | null; publishers?: string[] | null;
       page_count?: number | null; series_name?: string | null; series_position?: number | null; series_count?: number | null },
-    metadata: Record<string, string | number | null>
+    metadata: Record<string, string | number | string[] | null>
   ): MetadataDiff[] => {
     const diffs: MetadataDiff[] = [];
-    const push = (field: SyncableField, current: string | number | null | undefined, proposed: string | number | null | undefined) => {
-      if (proposed == null || proposed === '') return;
-      const cur = current == null || current === '' ? null : current;
+    const push = (field: SyncableField, current: string | number | string[] | null | undefined, proposed: string | number | string[] | null | undefined) => {
+      if (proposed == null || proposed === '' || (Array.isArray(proposed) && proposed.length === 0)) return;
+      const cur = current == null || current === '' || (Array.isArray(current) && current.length === 0) ? null : current;
       if (String(cur ?? '') === String(proposed)) return;
-      diffs.push({ field, current: cur, proposed: proposed as string | number });
+      if (Array.isArray(cur) && Array.isArray(proposed) && cur.join(',') === proposed.join(',')) return;
+      diffs.push({ field, current: cur, proposed: proposed as string | number | string[] });
     };
     // Title diff is computed against the (possibly already-edited) draft.
     if (itemDraft && metadata.title != null && String(metadata.title) !== itemDraft.title.trim()) {
@@ -434,6 +453,13 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     push('release_year', base.release_year, metadata.release_year);
     push('image_url', base.image_url, metadata.image_url);
     push('platform', base.platform, metadata.platform);
+    push('overview', base.overview, metadata.overview);
+    push('content_rating', base.content_rating, metadata.content_rating);
+    push('players', base.players, metadata.players);
+    push('coop', base.coop, metadata.coop);
+    push('genres', base.genres, metadata.genres);
+    push('developers', base.developers, metadata.developers);
+    push('publishers', base.publishers, metadata.publishers);
     push('page_count', base.page_count, metadata.page_count);
     push('series_name', base.series_name, metadata.series_name);
     push('series_position', base.series_position, metadata.series_position);
@@ -489,7 +515,9 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       const payload: Record<string, unknown> = { [field]: row.proposed };
       const updated = await media.updateItem(item.id, payload);
       setItem(updated);
-      if (itemDraft) {
+      // Only mirror into the edit draft for fields the draft actually holds;
+      // provider-sourced game metadata (overview, genres, …) is display-only.
+      if (itemDraft && field in itemDraft) {
         const draftKey = field as keyof ItemEditDraft;
         const value = row.proposed == null ? '' : String(row.proposed);
         setItemDraft((d) => (d ? { ...d, [draftKey]: value } : d));
@@ -861,6 +889,47 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                   </span>
                 )}
               </div>
+              {/* Game metadata from TGDB (display-only; edited via provider sync) */}
+              {subtype === 'game' && (item.overview || item.content_rating || item.players != null || item.coop || item.genres?.length || item.developers?.length || item.publishers?.length) && (
+                <div className="mt-3 space-y-2">
+                  {item.genres && item.genres.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {item.genres.map((g) => (
+                        <span key={g} className="px-2 py-0.5 rounded-full bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 text-xs font-medium">
+                          {g}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3 flex-wrap text-sm text-gray-500 dark:text-gray-400">
+                    {item.content_rating && (
+                      <span className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                        {item.content_rating}
+                      </span>
+                    )}
+                    {item.players != null && (
+                      <span>{item.players} player{item.players > 1 ? 's' : ''}</span>
+                    )}
+                    {item.coop && item.coop.toLowerCase() !== 'no' && (
+                      <span>Co-op</span>
+                    )}
+                    {item.platform && <span>{item.platform}</span>}
+                  </div>
+                  {(item.developers?.length || item.publishers?.length) && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
+                      {item.developers && item.developers.length > 0 && (
+                        <p>Developed by {item.developers.join(', ')}</p>
+                      )}
+                      {item.publishers && item.publishers.length > 0 && (
+                        <p>Published by {item.publishers.join(', ')}</p>
+                      )}
+                    </div>
+                  )}
+                  {item.overview && (
+                    <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{item.overview}</p>
+                  )}
+                </div>
+              )}
               {item.notes && (
                 <div className="mt-2 rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2 text-sm text-gray-600 dark:text-gray-300">
                   <MarkdownNote note={item.notes} />
@@ -912,10 +981,10 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
               <li key={row.field} className="px-4 py-2.5 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{METADATA_FIELD_LABELS[row.field]}</div>
-                  <div className="text-sm text-gray-700 dark:text-gray-300 break-all">
-                    <span className="text-gray-400 line-through">{row.current == null ? '—' : String(row.current)}</span>
+                  <div className="text-sm text-gray-700 dark:text-gray-300 break-words">
+                    <span className="text-gray-400 line-through">{diffValueText(row.current)}</span>
                     <span className="mx-1.5 text-gray-300 dark:text-gray-600">→</span>
-                    <span className="font-medium">{String(row.proposed)}</span>
+                    <span className="font-medium">{diffValueText(row.proposed)}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">

@@ -367,6 +367,20 @@ export interface MediaItem {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
+  /** Game: TGDB synopsis. */
+  overview: string | null;
+  /** Game: ESRB-style content rating, e.g. "E - Everyone". */
+  content_rating: string | null;
+  /** Game: minimum player count. */
+  players: number | null;
+  /** Game: co-op support ("Yes"/"No"). */
+  coop: string | null;
+  /** Game: genre names from TGDB. */
+  genres: string[] | null;
+  /** Game: developer names from TGDB. */
+  developers: string[] | null;
+  /** Game: publisher names from TGDB. */
+  publishers: string[] | null;
   /** Book: page count of the default physical edition. */
   page_count: number | null;
   /** Book: series name, if applicable. */
@@ -403,6 +417,20 @@ export interface MediaSearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
+  /** Game: TGDB synopsis. */
+  overview: string | null;
+  /** Game: ESRB-style content rating, e.g. "E - Everyone". */
+  content_rating: string | null;
+  /** Game: minimum player count. */
+  players: number | null;
+  /** Game: co-op support ("Yes"/"No"). */
+  coop: string | null;
+  /** Game: genre names from TGDB. */
+  genres: string[] | null;
+  /** Game: developer names from TGDB. */
+  developers: string[] | null;
+  /** Game: publisher names from TGDB. */
+  publishers: string[] | null;
   /** Book: page count of the default physical edition. */
   page_count: number | null;
   /** Book: series name, if applicable. */

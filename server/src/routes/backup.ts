@@ -173,6 +173,13 @@ interface BackupMediaItem {
   image_url: string | null;
   external_url: string | null;
   platform?: string | null;
+  overview?: string | null;
+  content_rating?: string | null;
+  players?: number | null;
+  coop?: string | null;
+  genres?: string[] | null;
+  developers?: string[] | null;
+  publishers?: string[] | null;
   page_count?: number | null;
   series_name?: string | null;
   series_position?: number | null;
@@ -271,6 +278,18 @@ function toStatusOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const v = value.trim();
   return v === 'completed' || v === 'in_progress' || v === 'dropped' ? v : null;
+}
+
+/**
+ * Coerce a value to a string array (PG TEXT[] columns: genres/developers/
+ * publishers), or null when absent. Non-string elements are dropped; an
+ * array of only blanks becomes null.
+ */
+function toStringArrayOrNull(value: unknown): string[] | null {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  const names = value.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '');
+  return names.length > 0 ? names : null;
 }
 
 function ensureV1Backup(raw: unknown): BackupV1 {
@@ -462,7 +481,9 @@ router.get('/export', async (_req: Request, res: Response) => {
      query(
        `SELECT id, media_type, external_source, external_id,
                title, author, release_year, image_url, external_url,
-               platform, page_count, series_name, series_position, series_count,
+               platform, overview, content_rating, players, coop,
+               genres, developers, publishers,
+               page_count, series_name, series_position, series_count,
                rating, raw_score, notes, time_played_minutes, status,
                created_at, updated_at
         FROM media_items
@@ -1040,7 +1061,9 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         `INSERT INTO media_items (
            id, user_id, media_type, external_source, external_id,
            title, author, release_year, image_url, external_url,
-           platform, page_count, series_name, series_position, series_count,
+           platform, overview, content_rating, players, coop,
+           genres, developers, publishers,
+           page_count, series_name, series_position, series_count,
            rating, raw_score, notes, time_played_minutes, status,
            created_at, updated_at
          )
@@ -1049,7 +1072,8 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
            $6, $7, $8, $9, $10,
            $11, $12, $13, $14, $15,
            $16, $17, $18, $19, $20,
-           COALESCE($21::timestamptz, NOW()), COALESCE($22::timestamptz, NOW())
+           $21, $22, $23, $24, $25, $26, $27,
+           COALESCE($28::timestamptz, NOW()), COALESCE($29::timestamptz, NOW())
          )
          ON CONFLICT (id) DO NOTHING`,
          [
@@ -1064,6 +1088,15 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
            toStringOrNull(item.image_url),
            toStringOrNull(item.external_url),
            toStringOrNull(item.platform),
+           toStringOrNull(item.overview),
+           toStringOrNull(item.content_rating),
+           // CHECK (players IS NULL OR players > 0) — non-positive values are
+           // dropped rather than failing the insert.
+           item.players != null && Number(item.players) > 0 ? Math.round(Number(item.players)) : null,
+           toStringOrNull(item.coop),
+           toStringArrayOrNull(item.genres),
+           toStringArrayOrNull(item.developers),
+           toStringArrayOrNull(item.publishers),
            toIntOrNull(item.page_count),
            toStringOrNull(item.series_name),
            toIntOrNull(item.series_position),
