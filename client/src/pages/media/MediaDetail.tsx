@@ -59,6 +59,14 @@ interface ItemEditDraft {
   time_hours: string;
   time_minutes: string;
   status: string;
+  /** Games only: TGDB-sourced metadata (directly editable). */
+  overview: string;
+  content_rating: string;
+  players: string;
+  coop: string;
+  genres: string;
+  developers: string;
+  publishers: string;
 }
 
 /** Fields a provider can refresh via sync (all keys of MediaItem). */
@@ -352,6 +360,13 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       time_hours: item.time_played_minutes != null ? String(Math.floor(item.time_played_minutes / 60)) : '',
       time_minutes: item.time_played_minutes != null ? String(item.time_played_minutes % 60) : '',
       status: item.status || '',
+      overview: item.overview || '',
+      content_rating: item.content_rating || '',
+      players: item.players != null ? String(item.players) : '',
+      coop: item.coop || '',
+      genres: (item.genres || []).join(', '),
+      developers: (item.developers || []).join(', '),
+      publishers: (item.publishers || []).join(', '),
     });
     setEditingItem(true);
   };
@@ -402,6 +417,21 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       const total = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
       payload.time_played_minutes = total > 0 ? total : null;
       payload.status = d.status || null;
+      // TGDB-sourced metadata (comma-separated lists → string arrays; empty → null).
+      payload.overview = d.overview.trim() || null;
+      payload.content_rating = d.content_rating.trim() || null;
+      const players = d.players.trim() === '' ? null : parseInt(d.players, 10);
+      payload.players = players != null && Number.isInteger(players) && players > 0 ? players : null;
+      payload.coop = d.coop.trim() || null;
+      const toArr = (s: string) =>
+        s.split(',').map((v) => v.trim()).filter((v) => v !== '');
+      const nameArr = (s: string) => {
+        const a = toArr(s);
+        return a.length > 0 ? a : null;
+      };
+      payload.genres = nameArr(d.genres);
+      payload.developers = nameArr(d.developers);
+      payload.publishers = nameArr(d.publishers);
     }
     try {
       setSavingItem(true);
@@ -515,11 +545,15 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       const payload: Record<string, unknown> = { [field]: row.proposed };
       const updated = await media.updateItem(item.id, payload);
       setItem(updated);
-      // Only mirror into the edit draft for fields the draft actually holds;
-      // provider-sourced game metadata (overview, genres, …) is display-only.
+      // Mirror into the edit draft for fields the draft actually holds so the
+      // open edit form doesn't go stale. Arrays (genres/developers/publishers)
+      // are stored comma-separated in the draft.
       if (itemDraft && field in itemDraft) {
         const draftKey = field as keyof ItemEditDraft;
-        const value = row.proposed == null ? '' : String(row.proposed);
+        const proposed = row.proposed;
+        const value = proposed == null
+          ? ''
+          : Array.isArray(proposed) ? proposed.join(', ') : String(proposed);
         setItemDraft((d) => (d ? { ...d, [draftKey]: value } : d));
       }
       const remaining = syncDiff.filter((d) => d.field !== field);
@@ -732,6 +766,91 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                     className="input text-sm mt-0.5 font-mono text-xs"
                   />
                 </label>
+                {subtype === 'game' && (
+                  <div className="sm:col-span-2 border-t border-gray-200 dark:border-gray-700 pt-2.5 mt-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                      About the game <span className="normal-case font-normal">(from {config.apiName}, editable)</span>
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <label className="block sm:col-span-2">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Overview</span>
+                        <textarea
+                          value={itemDraft.overview}
+                          onChange={(e) => patchItemDraft({ overview: e.target.value })}
+                          rows={3}
+                          placeholder="Synopsis…"
+                          className="input text-sm mt-0.5 resize-y"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Content rating</span>
+                        <input
+                          type="text"
+                          value={itemDraft.content_rating}
+                          onChange={(e) => patchItemDraft({ content_rating: e.target.value })}
+                          placeholder="e.g. E10+ - Everyone 10+"
+                          className="input text-sm mt-0.5"
+                        />
+                      </label>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <label className="block">
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Players</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={itemDraft.players}
+                            onChange={(e) => patchItemDraft({ players: e.target.value })}
+                            placeholder="—"
+                            inputMode="numeric"
+                            className="input text-sm mt-0.5"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Co-op</span>
+                          <select
+                            value={itemDraft.coop}
+                            onChange={(e) => patchItemDraft({ coop: e.target.value })}
+                            className="input text-sm mt-0.5"
+                          >
+                            <option value="">—</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label className="block">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Genres <span className="font-normal">(comma-separated)</span></span>
+                        <input
+                          type="text"
+                          value={itemDraft.genres}
+                          onChange={(e) => patchItemDraft({ genres: e.target.value })}
+                          placeholder="e.g. Action, Platform"
+                          className="input text-sm mt-0.5"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Developers <span className="font-normal">(comma-separated)</span></span>
+                        <input
+                          type="text"
+                          value={itemDraft.developers}
+                          onChange={(e) => patchItemDraft({ developers: e.target.value })}
+                          placeholder="e.g. Sega"
+                          className="input text-sm mt-0.5"
+                        />
+                      </label>
+                      <label className="block sm:col-span-2">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Publishers <span className="font-normal">(comma-separated)</span></span>
+                        <input
+                          type="text"
+                          value={itemDraft.publishers}
+                          onChange={(e) => patchItemDraft({ publishers: e.target.value })}
+                          placeholder="e.g. Sega"
+                          className="input text-sm mt-0.5"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
                 <div className="sm:col-span-2 border-t border-gray-200 dark:border-gray-700 pt-2.5 mt-1">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">
                     Your details {subtype === 'game' ? '(the game itself, not a check-in)' : '(independent of check-ins)'}
