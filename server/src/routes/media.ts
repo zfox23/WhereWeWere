@@ -579,10 +579,13 @@ router.put('/items/:id', async (req: Request, res: Response) => {
  * no external id) self-heal on their first sync. Returns the adopted TGDB
  * record, or null when no usable match exists.
  */
-async function rekeyGameByTitle(itemId: string, title: string): Promise<TgdbGameResult | null> {
+async function rekeyGameByTitle(itemId: string, title: string, platform?: string | null): Promise<TgdbGameResult | null> {
   const keys = await getApiKeys();
   if (!keys.tgdb_api_key) return null;
-  const found = await tgdb.searchGames(keys.tgdb_api_key, title);
+  // Narrow the name search to the item's platform so the right version of a
+  // multi-platform title is matched; searchGames falls back to unfiltered
+  // when the platform can't be resolved or yields nothing.
+  const found = await tgdb.searchGames(keys.tgdb_api_key, title, platform);
   if (!found) return null;
   const target = normalizeTitle(title);
   for (const candidate of found) {
@@ -690,7 +693,7 @@ async function fetchSyncMetadata(item: {
 router.post('/items/:id/sync', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
-      `SELECT id, media_type, external_source, external_id, title FROM media_items WHERE id = $1 AND user_id = $2`,
+      `SELECT id, media_type, external_source, external_id, title, platform FROM media_items WHERE id = $1 AND user_id = $2`,
       [req.params.id, USER_ID]
     );
     if (itemResult.rows.length === 0) {
@@ -704,7 +707,7 @@ router.post('/items/:id/sync', async (req: Request, res: Response) => {
       if (item.media_type === 'game') {
         // Local-only games (e.g. imported from Yamtrack, whose IGDB ids we
         // must not store) self-heal: resolve them by title against TGDB.
-        const match = await rekeyGameByTitle(item.id, item.title);
+        const match = await rekeyGameByTitle(item.id, item.title, item.platform);
         if (!match) {
           return res.status(404).json({ error: 'Could not find this game in TGDB by title (it may be missing from the database).' });
         }

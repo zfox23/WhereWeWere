@@ -150,6 +150,73 @@ describe('tgdb.searchGames', () => {
     expect(result).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('filters the name search by the item platform (resolved to a platform id)', async () => {
+    // 1) platform name→id, 2) filtered search, 3-5) name lookups
+    mockFetchOnce({ data: { count: 1, platforms: [{ id: 18, name: 'Sega Genesis', alias: 'sega-genesis' }] } });
+    mockFetchOnce(searchResponse([gameRow()]));
+    mockFetchOnce({ data: { count: 2, genres: { '1': { id: 1, name: 'Action' }, '8': { id: 8, name: 'Platform' } } } });
+    mockFetchOnce({ data: { count: 1, developers: { '1296': { id: 1296, name: 'Sega' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
+
+    const result = await tgdb.searchGames('key-123', 'sonic', 'Sega Genesis');
+
+    const platformUrl = fetchMock.mock.calls[0][0] as string;
+    expect(platformUrl).toContain('/v1/Platforms/ByPlatformName?');
+    const searchUrl = fetchMock.mock.calls[1][0] as string;
+    expect(searchUrl).toContain('/v1.1/Games/ByGameName?');
+    expect(searchUrl).toContain('filter[platform]=18');
+    expect(result?.[0].externalId).toBe('53');
+  });
+
+  it('serves the platform id from the persistent map on a later filtered search', async () => {
+    mockFetchOnce({ data: { count: 1, platforms: [{ id: 18, name: 'Sega Genesis', alias: 'sega-genesis' }] } });
+    mockFetchOnce(searchResponse([gameRow()]));
+    mockFetchOnce({ data: { count: 2, genres: { '1': { id: 1, name: 'Action' }, '8': { id: 8, name: 'Platform' } } } });
+    mockFetchOnce({ data: { count: 1, developers: { '1296': { id: 1296, name: 'Sega' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
+    await tgdb.searchGames('key-123', 'sonic', 'Sega Genesis');
+
+    // Different title (response cache miss) but the same platform: the
+    // persistent name→id map must serve the id, so only the search fetches.
+    fetchMock.mockClear();
+    mockFetchOnce(searchResponse([gameRow()]), true);
+    await tgdb.searchGames('key-123', 'sonic the hedgehog', 'Sega Genesis');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((fetchMock.mock.calls[0][0] as string)).toContain('/v1.1/Games/ByGameName?');
+    expect((fetchMock.mock.calls[0][0] as string)).toContain('filter[platform]=18');
+  });
+
+  it('falls back to an unfiltered search when the filtered search is empty', async () => {
+    mockFetchOnce({ data: { count: 1, platforms: [{ id: 18, name: 'Sega Genesis', alias: 'sega-genesis' }] } });
+    mockFetchOnce(searchResponse([])); // filtered: nothing
+    mockFetchOnce(searchResponse([gameRow()])); // unfiltered: the game
+    mockFetchOnce({ data: { count: 2, genres: { '1': { id: 1, name: 'Action' }, '8': { id: 8, name: 'Platform' } } } });
+    mockFetchOnce({ data: { count: 1, developers: { '1296': { id: 1296, name: 'Sega' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
+
+    const result = await tgdb.searchGames('key-123', 'sonic', 'Sega Genesis');
+
+    const searchUrls = fetchMock.mock.calls.slice(1, 3).map((c) => c[0] as string);
+    expect(searchUrls[0]).toContain('filter[platform]=18');
+    expect(searchUrls[1]).not.toContain('filter[platform]');
+    expect(result?.[0].externalId).toBe('53');
+  });
+
+  it('searches unfiltered when the platform name cannot be resolved', async () => {
+    mockFetchOnce({ data: { count: 0, platforms: [] } });
+    mockFetchOnce(searchResponse([gameRow()]));
+    mockFetchOnce({ data: { count: 2, genres: { '1': { id: 1, name: 'Action' }, '8': { id: 8, name: 'Platform' } } } });
+    mockFetchOnce({ data: { count: 1, developers: { '1296': { id: 1296, name: 'Sega' } } } });
+    mockFetchOnce({ data: { count: 1, publishers: { '1': { id: 1, name: 'Sega' } } } });
+
+    const result = await tgdb.searchGames('key-123', 'sonic', 'Handheld XYZ');
+
+    const searchUrl = fetchMock.mock.calls[1][0] as string;
+    expect(searchUrl).not.toContain('filter[platform]');
+    expect(result?.[0].externalId).toBe('53');
+  });
 });
 
 describe('tgdb.getGameDetails', () => {

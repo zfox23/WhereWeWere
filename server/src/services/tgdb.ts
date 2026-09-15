@@ -112,6 +112,14 @@ interface TgdbNameByIdResponse {
   };
 }
 
+/** Response shape for /v1/Platforms/ByPlatformName?name=... */
+interface TgdbPlatformNameResponse {
+  data?: {
+    count?: number;
+    platforms?: TgdbPlatformSkinny[];
+  };
+}
+
 type NameKind = 'genres' | 'developers' | 'publishers';
 
 type NameMap = Record<string, { id: number; name: string }>;
@@ -134,6 +142,12 @@ const nameMaps: Record<NameKind, Map<number, string>> = {
   developers: new Map(),
   publishers: new Map(),
 };
+/**
+ * Persistent platform name→id map (keyed by lowercased name) so repeated
+ * platform-filtered searches cost zero extra API calls across the process
+ * lifetime; cleared on server restart.
+ */
+const platformIdByName = new Map<string, number>();
 
 function yearFromDate(date: string | null | undefined): number | null {
   if (!date) return null;
@@ -220,6 +234,35 @@ async function resolveNames(apiKey: string, kind: NameKind, ids: number[]): Prom
 }
 
 /**
+ * Resolve a platform display name to a TGDB platform id via ByPlatformName.
+ * Served from the persistent name→id map when possible; a failed lookup
+ * returns null so callers degrade to an unfiltered search.
+ */
+async function resolvePlatformId(apiKey: string, platform: string): Promise<number | null> {
+  const name = platform.trim().toLowerCase();
+  if (!name) return null;
+  const known = platformIdByName.get(name);
+  if (known != null) return known;
+
+  const url = `${TGDB_BASE}/v1/Platforms/ByPlatformName?apikey=${encodeURIComponent(apiKey)}&name=${encodeURIComponent(platform.trim())}`;
+  try {
+    const data = await cache.get<TgdbPlatformNameResponse>(`tgdb:platform-name:${name}`, async () => {
+      return externalFetchJson<TgdbPlatformNameResponse>(url);
+    });
+    const hit = (data.data?.platforms || []).find(
+      (p) => p.name.toLowerCase() === name || (p.alias && p.alias.toLowerCase() === name)
+    );
+    if (hit?.id != null) {
+      platformIdByName.set(name, hit.id);
+      return hit.id;
+    }
+  } catch {
+    // Lookup failed; degrade to an unfiltered search.
+  }
+  return null;
+}
+
+/**
  * Map a raw id array to names. Returns null when the source list is absent or
  * no ids could be resolved (so callers can distinguish "TGDB said nothing"
  * from "resolved to an empty list").
@@ -241,25 +284,56 @@ export const tgdb = {
     return cache;
   },
 
-  /** Clear the response cache and the persistent id→name maps. */
+  /** Clear the response cache and the persistent id→name / name→id maps. */
   clearAll(): void {
     cache.clear();
     nameMaps.genres.clear();
     nameMaps.developers.clear();
     nameMaps.publishers.clear();
+    platformIdByName.clear();
   },
 
-  async searchGames(apiKey: string | null, query: string): Promise<TgdbGameResult[] | null> {
+  /**
+   * Search games by name. When `platform` is given, the stored platform name
+   * is resolved to a TGDB platform id (one cached ByPlatformName call) and the
+   * name search is filtered with `filter[platform]` so candidates belong to
+   * the item's platform. If the platform cannot be resolved — or the filtered
+   * search comes back empty — an unfiltered search is used as a fallback so a
+   * quirky stored platform string never blocks a match.
+   */
+  async searchGames(apiKey: string | null, query: string, platform?: string | null): Promise<TgdbGameResult[] | null> {
     if (!apiKey) return null;
-    const url = `${TGDB_BASE}/v1.1/Games/ByGameName?apikey=${encodeURIComponent(apiKey)}&name=${encodeURIComponent(query)}&fields=${GAME_FIELDS}&include=boxart,platform`;
+
+    const buildUrl = (filterPlatform?: number | null): string => {
+      const filter = filterPlatform != null ? `&filter[platform]=${filterPlatform}` : '';
+      return `${TGDB_BASE}/v1.1/Games/ByGameName?apikey=${encodeURIComponent(apiKey)}&name=${encodeURIComponent(query)}&fields=${GAME_FIELDS}&include=boxart,platform${filter}`;
+    };
+
+    const platformId = platform ? await resolvePlatformId(apiKey, platform) : null;
+    const url = buildUrl(platformId ?? undefined);
     return withDegradation(
       async () => {
-        const data = await cache.get<TgdbSearchResponse>(`tgdb:search:${query.toLowerCase()}`, async () => {
-          const json = await externalFetchJson<TgdbSearchResponse>(url);
-          return json;
-        });
+        const fetchResponse = (filterPlatform?: number | null): Promise<TgdbSearchResponse> => {
+          const cacheKey = `tgdb:search:${filterPlatform ?? ''}:${query.toLowerCase()}`;
+          return cache.get<TgdbSearchResponse>(cacheKey, async () => {
+            const json = await externalFetchJson<TgdbSearchResponse>(buildUrl(filterPlatform));
+            return json;
+          });
+        };
+
+        let data = await fetchResponse(platformId);
+        let rows = dedupeByGameId(data.data?.games || []).filter((r) => r.game_title);
+
+        // The stored platform may not exist in TGDB or may be spelled
+        // differently than the platform the entry was filed under: retry
+        // unfiltered so a quirky platform string never blocks a match.
+        if (rows.length === 0 && platformId != null) {
+          data = await fetchResponse();
+          rows = dedupeByGameId(data.data?.games || []).filter((r) => r.game_title);
+        }
+        if (rows.length === 0) return [];
+
         const platforms = data.include?.platform?.data || {};
-        const rows = dedupeByGameId(data.data?.games || []).filter((r) => r.game_title);
 
         // Batch-resolve all genre/developer/publisher ids across the
         // candidate rows in at most 3 extra calls.
