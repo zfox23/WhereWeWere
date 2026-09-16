@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2022",
     "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -15,7 +19,19 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "wwp-shared": [
+        "../shared/src/index.ts"
+      ],
+      "wwp-shared/*": [
+        "../shared/src/*"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "../plugins/**/client.tsx",
+    "../plugins/**/manifest.ts"
+  ]
 }

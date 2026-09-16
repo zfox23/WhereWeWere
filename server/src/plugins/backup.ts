@@ -1,0 +1,205 @@
+/**
+ * Framework backup/restore/start-over support for check-in type plugins.
+ *
+ * Export shape (under backup.data.plugins):
+ *   {
+ *     [pluginId]: {
+ *       checkins: <rows from backupExport, generic rows for generic storage>,
+ *       extra: { [tableName]: rows[] }   // custom storage extraBackupTables
+ *     }
+ *   }
+ *
+ * Import:
+ *   - generic plugins: plugin_checkins rows are re-inserted with the backup
+ *     id (ON CONFLICT DO NOTHING).
+ *   - custom plugins: restore steps run in `backupOrder` — 'primary' runs
+ *     backupImport(payload.checkins), extra table names run the declared
+ *     select/insert templates.
+ *   - When a plugin's payload is present, its `legacyBackupKeys` are
+ *     claimed: the caller must skip the corresponding legacy import loops.
+ */
+
+import type { PoolClient } from 'pg';
+import { query } from '../db';
+import { allPlugins } from './registry';
+import { exportGenericCheckins, type PluginCheckinBackupRow } from './genericStore';
+
+export interface PluginBackupEntry {
+  checkins: unknown;
+  extra?: Record<string, Record<string, unknown>[]>;
+}
+
+export type PluginBackupPayload = Record<string, PluginBackupEntry>;
+
+/** Collect all plugin data for a backup. */
+export async function exportPluginData(user_id: string): Promise<PluginBackupPayload> {
+  const out: PluginBackupPayload = {};
+
+  for (const plugin of allPlugins()) {
+    const isCustom = plugin.server.storage === 'custom';
+    if (isCustom) {
+      if (!plugin.server.backupExport) {
+        throw new Error(`Plugin "${plugin.id}" declares custom storage but has no backupExport`);
+      }
+      const checkins = await plugin.server.backupExport({ user_id });
+      const extra: Record<string, Record<string, unknown>[]> = {};
+      for (const table of plugin.server.extraBackupTables ?? []) {
+        const result = await query(table.select, [user_id]);
+        extra[table.table] = result.rows;
+      }
+      out[plugin.id] = Object.keys(extra).length > 0
+        ? { checkins, extra }
+        : { checkins };
+    } else {
+      const checkins: PluginCheckinBackupRow[] = await exportGenericCheckins(user_id);
+      // Only include the plugin's own rows (export returns all generic rows).
+      out[plugin.id] = { checkins: checkins.filter((r) => r.plugin_id === plugin.id) };
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Which legacy backup data keys are claimed by plugins that have a payload.
+ * The backup import must skip the legacy loops for these keys.
+ */
+export function claimedLegacyKeys(pluginsPayload: PluginBackupPayload | null | undefined): Set<string> {
+  const claimed = new Set<string>();
+  if (!pluginsPayload) return claimed;
+  for (const plugin of allPlugins()) {
+    if (pluginsPayload[plugin.id]) {
+      for (const key of plugin.server.legacyBackupKeys ?? []) {
+        claimed.add(key);
+      }
+    }
+  }
+  return claimed;
+}
+
+export interface PluginImportCounts {
+  [pluginKey: string]: { inserted: number; skipped: number };
+}
+
+/**
+ * Restore plugin data from a backup payload. Must run inside the caller's
+ * transaction (on `client`). Returns per-plugin counts.
+ */
+export async function importPluginData(
+  client: PoolClient,
+  user_id: string,
+  pluginsPayload: PluginBackupPayload,
+): Promise<PluginImportCounts> {
+  const counts: PluginImportCounts = {};
+
+  for (const plugin of allPlugins()) {
+    const entry = pluginsPayload[plugin.id];
+    if (!entry) continue;
+
+    const isCustom = plugin.server.storage === 'custom';
+    const order = plugin.server.backupOrder ?? (
+      isCustom ? ['primary', ...(plugin.server.extraBackupTables ?? []).map((t) => t.table)] : ['primary']
+    );
+
+    const pluginCounts = { inserted: 0, skipped: 0 };
+
+    for (const step of order) {
+      if (step === 'primary') {
+        if (isCustom) {
+          if (!plugin.server.backupImport) {
+            throw new Error(`Plugin "${plugin.id}" declares custom storage but has no backupImport`);
+          }
+          const inserted = await plugin.server.backupImport({ user_id, client }, entry.checkins);
+          pluginCounts.inserted += inserted;
+        } else {
+          const result = await importGenericCheckinsOnClient(client, user_id, entry.checkins as PluginCheckinBackupRow[] | null);
+          pluginCounts.inserted += result.inserted;
+          pluginCounts.skipped += result.skipped;
+        }
+      } else {
+        const table = (plugin.server.extraBackupTables ?? []).find((t) => t.table === step);
+        if (!table) {
+          throw new Error(`Plugin "${plugin.id}" backupOrder references unknown table "${step}"`);
+        }
+        const rows = entry.extra?.[table.table] ?? [];
+        for (const row of rows) {
+          const values = table.userIdFirst ? [user_id, ...Object.values(row)] : Object.values(row);
+          const result = await client.query(table.insert, values);
+          if ((result.rowCount ?? 0) > 0) pluginCounts.inserted += 1;
+          else pluginCounts.skipped += 1;
+        }
+      }
+    }
+
+    counts[plugin.id] = pluginCounts;
+  }
+
+  return counts;
+}
+
+// Re-export the generic import, bound to a transaction client.
+async function importGenericCheckinsOnClient(
+  client: PoolClient,
+  user_id: string,
+  rows: PluginCheckinBackupRow[] | null,
+): Promise<{ inserted: number; skipped: number }> {
+  let inserted = 0;
+  let skipped = 0;
+  for (const row of rows ?? []) {
+    if (!row || typeof row.id !== 'string' || typeof row.plugin_id !== 'string') {
+      skipped++;
+      continue;
+    }
+    const result = await client.query(
+      `INSERT INTO plugin_checkins (id, plugin_id, user_id, checked_in_at, checkin_timezone, data, created_at, updated_at)
+       VALUES ($1, $2, $3, $4::timestamptz, $5, $6::jsonb, COALESCE($7::timestamptz, NOW()), COALESCE($8::timestamptz, NOW()))
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        row.id,
+        row.plugin_id,
+        user_id,
+        row.checked_in_at,
+        row.checkin_timezone ?? null,
+        JSON.stringify(row.data ?? {}),
+        row.created_at ?? null,
+        row.updated_at ?? null,
+      ],
+    );
+    if ((result.rowCount ?? 0) > 0) inserted++;
+    else skipped++;
+  }
+  return { inserted, skipped };
+}
+
+/**
+ * Start-over: delete all plugin data for the user. Returns per-plugin row
+ * counts (generic rows deleted for generic plugins; deleteUserData for
+ * custom plugins plus cascade-deleted extra tables).
+ */
+export async function deletePluginData(
+  client: PoolClient,
+  user_id: string,
+  /** When provided, only these plugin ids are deleted; otherwise ALL plugins. */
+  pluginIds?: string[],
+): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  const selected = pluginIds ? allPlugins().filter((p) => pluginIds.includes(p.id)) : allPlugins();
+
+  for (const plugin of selected) {
+    if (plugin.server.storage === 'custom') {
+      if (!plugin.server.deleteUserData) {
+        throw new Error(`Plugin "${plugin.id}" declares custom storage but has no deleteUserData`);
+      }
+      const deleted = await plugin.server.deleteUserData({ user_id, client });
+      counts[plugin.id] = deleted;
+    } else {
+      const result = await client.query(
+        `DELETE FROM plugin_checkins WHERE user_id = $1 AND plugin_id = $2 RETURNING id`,
+        [user_id, plugin.id],
+      );
+      counts[plugin.id] = result.rowCount ?? 0;
+    }
+  }
+
+  return counts;
+}

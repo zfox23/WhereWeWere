@@ -1,0 +1,57 @@
+/**
+ * Server-side check-in type plugin registry.
+ *
+ * Each plugin folder under `plugins/<name>/` contains:
+ *   - manifest.ts  (pure data: id, version, fields, strings)
+ *   - server.ts    (exports `server: CheckinTypeServerPlugin`)
+ *
+ * The registry joins the manifest with the server half and enforces
+ * duplicate-id detection. Built-in check-in types register here as plugins
+ * during the transition; until then the timeline route also keeps its
+ * hard-coded branches.
+ */
+
+import type { CheckinTypeServer } from 'wwp-shared';
+import { isValidPluginId } from 'wwp-shared';
+
+// Import plugin server halves here. Convention:
+//   import { server as moodServer } from '../../../plugins/mood/server';
+//   import { manifest as moodManifest } from '../../../plugins/mood/manifest';
+import { server as moodServer } from '../../../plugins/mood/server';
+import { manifest as moodManifest } from '../../../plugins/mood/manifest';
+
+const registrations: CheckinTypeServer[] = [
+  { ...moodManifest, server: moodServer },
+];
+
+const byId = new Map<string, CheckinTypeServer>();
+
+for (const plugin of registrations) {
+  if (!isValidPluginId(plugin.id)) {
+    throw new Error(`Plugin id "${plugin.id}" is invalid (must match /^[a-z][a-z0-9_]*$/)`);
+  }
+  if (byId.has(plugin.id)) {
+    throw new Error(`Duplicate check-in plugin id: ${plugin.id}`);
+  }
+  byId.set(plugin.id, plugin);
+}
+
+/** All registered plugins, in registration order. */
+export function allPlugins(): CheckinTypeServer[] {
+  return registrations;
+}
+
+/** Look up a plugin by id. */
+export function getPlugin(id: string): CheckinTypeServer | undefined {
+  return byId.get(id);
+}
+
+/** True when a plugin with this id is registered. */
+export function hasPlugin(id: string): boolean {
+  return byId.has(id);
+}
+
+/** All plugin ids. */
+export function pluginIds(): string[] {
+  return Array.from(byId.keys());
+}

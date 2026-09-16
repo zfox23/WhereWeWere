@@ -1,0 +1,31 @@
+{
+  "name": "wwp-shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/cjs/index.js",
+  "types": "dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/cjs/index.d.ts",
+      "require": "./dist/cjs/index.js",
+      "import": "./src/index.ts"
+    },
+    "./fields": {
+      "types": "./dist/cjs/fields.d.ts",
+      "require": "./dist/cjs/fields.js",
+      "import": "./src/fields.ts"
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.cjs.json && node scripts/write-cjs-marker.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"(no tests)\""
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

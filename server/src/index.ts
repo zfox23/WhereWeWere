@@ -11,7 +11,6 @@ import { importRouter } from './routes/import';
 import { jobsRouter } from './routes/jobs';
 import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
-import { moodCheckinsRouter } from './routes/mood-checkins';
 import { moodActivitiesRouter } from './routes/mood-activities';
 import { timelineRouter } from './routes/timeline';
 import { importDaylioRouter } from './routes/import-daylio';
@@ -25,6 +24,8 @@ import { llmRouter } from './routes/llm';
 import { mediaRouter } from './routes/media';
 import { importYamtrackRouter } from './routes/import-yamtrack';
 import { runMigrations } from './db/runMigrations';
+import { pluginsRouter } from './plugins/routes';
+import { allPlugins } from './plugins/registry';
 
 export function createApp() {
   const app = express();
@@ -81,7 +82,7 @@ export function createApp() {
   app.use('/api/v1/jobs', jobsRouter);
   app.use('/api/v1/scrobbles', scrobblesRouter);
   app.use('/api/v1/immich', immichRouter);
-  app.use('/api/v1/mood-checkins', moodCheckinsRouter);
+  // NOTE: /api/v1/mood-checkins is mounted by the mood check-in plugin below.
   app.use('/api/v1/mood-activities', moodActivitiesRouter);
   app.use('/api/v1/timeline', timelineRouter);
   app.use('/api/v1/import/daylio', importDaylioRouter);
@@ -94,6 +95,14 @@ export function createApp() {
   app.use('/api/v1/llm', llmRouter);
   app.use('/api/v1/media', mediaRouter);
   app.use('/api/v1/import/yamtrack', importYamtrackRouter);
+  app.use('/api/v1/plugins', pluginsRouter);
+
+  // Plugin-owned API routes (custom-storage plugins mount their own CRUD).
+  for (const plugin of allPlugins()) {
+    if (plugin.server.api) {
+      app.use(`/api/v1${plugin.server.api.mount}`, plugin.server.api.router);
+    }
+  }
 
   return app;
 }

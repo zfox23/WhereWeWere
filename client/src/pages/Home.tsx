@@ -3,9 +3,11 @@ import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-do
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon, Route, Clapperboard, AlignJustify, Rows3 } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats, tracks } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
+import type { PluginTimelineEntry } from 'wwp-shared';
+import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/registry';
+import { PluginTimelineCard } from '../plugins/autoCard';
 import CheckInCard from '../components/CheckInCard';
 import MediaCard from '../components/MediaCard';
-import MoodCheckInCard from '../components/MoodCheckInCard';
 import SleepCard from '../components/SleepCard';
 import TrackCard from '../components/TrackCard';
 import Filters from '../components/filters/Filters';
@@ -16,6 +18,27 @@ import type { MediaSubtype } from '../types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
+
+/** Check-in plugins that should appear in the expandable FAB, by fabOrder. */
+const FAB_PLUGINS = allClientPlugins().slice().sort((a, b) => (a.client.fabOrder ?? 100) - (b.client.fabOrder ?? 100));
+/** Hotkey -> plugin check-in route (plugins with a declared hotkey). */
+const PLUGIN_HOTKEYS: Record<string, string> = Object.fromEntries(
+  allClientPlugins()
+    .filter((p) => p.client.hotkey)
+    .map((p) => [p.client.hotkey as string, p.client.checkInPath]),
+);
+
+/**
+ * Timeline types that still use the legacy built-in filter panel and include
+ * state (location/mood/sleep/track/media). A plugin whose id is here is
+ * rendered as a plugin (card/FAB/hotkey/detail) but its FILTERS + include
+ * toggle remain on the legacy path so nothing is lost during transition.
+ * Brand-new plugins (id not in this set) get the generic plugin filter
+ * section and include state automatically.
+ */
+const LEGACY_TYPE_IDS = new Set(['location', 'mood', 'sleep', 'track', 'media']);
+/** Check-in plugins that are NOT legacy types (fully generic treatment). */
+const NEW_PLUGINS = allClientPlugins().filter((p) => !LEGACY_TYPE_IDS.has(p.id));
 
 function formatDateHeader(dateStr: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -35,15 +58,18 @@ function getLocalDateKey(item: TimelineItem): string {
   const dateValue = item.type === 'sleep'
     ? item.sleep_ended_at || item.checked_in_at
     : item.checked_in_at;
-  const tz = item.type === 'location'
-    ? item.venue_timezone
-    : item.type === 'mood'
-      ? item.mood_timezone
-      : item.type === 'track'
-        ? item.track_timezone
-        : item.type === 'media'
-          ? item.media_timezone
-          : item.sleep_timezone;
+  // Plugin check-ins carry their timezone in the shared `timezone` column.
+  const pluginTz = hasClientPlugin(item.type) ? (item as PluginTimelineEntry).timezone : null;
+  const tz = pluginTz
+    ?? (item.type === 'location'
+      ? item.venue_timezone
+      : item.type === 'mood'
+        ? item.mood_timezone
+        : item.type === 'track'
+          ? item.track_timezone
+          : item.type === 'media'
+            ? item.media_timezone
+            : item.sleep_timezone);
   return new Date(dateValue).toLocaleDateString('en-CA', {
     ...(tz ? { timeZone: tz } : {}),
   });
@@ -141,17 +167,25 @@ function ExpandableFAB() {
             Location
             <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">L</kbd>
           </Link>
-          <Link
-            to="/mood-check-in"
-            onClick={() => setExpanded(false)}
-            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '80ms' : '0ms' }}
-            tabIndex={expanded ? 0 : -1}
-          >
-            <Smile size={18} className="text-green-500" />
-            Mood
-            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">M</kbd>
-          </Link>
+          {FAB_PLUGINS.map((plugin) => {
+            const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
+            return (
+              <Link
+                key={plugin.id}
+                to={plugin.client.checkInPath}
+                onClick={() => setExpanded(false)}
+                className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
+                style={{ transitionDelay: expanded ? '80ms' : '0ms' }}
+                tabIndex={expanded ? 0 : -1}
+              >
+                <Icon size={18} className={plugin.client.iconColor} />
+                {plugin.strings.title}
+                {plugin.client.hotkey && (
+                  <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">{plugin.client.hotkey.toUpperCase()}</kbd>
+                )}
+              </Link>
+            );
+          })}
       </div>
 
       <button
@@ -184,6 +218,19 @@ export default function Home() {
   const [includeSleep, setIncludeSleep] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'track');
   const [includeTrack, setIncludeTrack] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'sleep');
   const [includeMedia, setIncludeMedia] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'sleep' && timelineType !== 'track');
+  // Inclusion state for NEW check-in plugin types (legacy types like mood
+  // keep their built-in include state).
+  const [pluginIncludes, setPluginIncludes] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(NEW_PLUGINS.map((p) => [p.id, true])),
+  );
+  const setAllPluginIncludes = useCallback((value: boolean) => {
+    setPluginIncludes(Object.fromEntries(NEW_PLUGINS.map((p) => [p.id, value])));
+  }, []);
+  const setOnlyPluginInclude = useCallback((pluginId: string, value: boolean) => {
+    setPluginIncludes(Object.fromEntries(
+      NEW_PLUGINS.map((p) => [p.id, value && p.id === pluginId]),
+    ));
+  }, []);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [trackActivityOptions, setTrackActivityOptions] = useState<string[]>([]);
@@ -250,6 +297,29 @@ export default function Home() {
   const trackActivity = searchParams.get('track_activity') || '';
   const mediaSubtypes = searchParams.get('media_subtype') || '';
   const [showFilters, setShowFilters] = useState(false);
+
+  // Check-in plugin filter params, scoped per NEW plugin (legacy types like
+  // mood keep their built-in filter params/panel).
+  const pluginFilterParams = useMemo(() => {
+    const out: Record<string, Record<string, string>> = {};
+    for (const plugin of NEW_PLUGINS) {
+      const params: Record<string, string> = {};
+      for (const name of plugin.filterParams ?? []) {
+        const v = searchParams.get(name);
+        if (v) params[name] = v;
+      }
+      out[plugin.id] = params;
+    }
+    return out;
+  }, [searchParams]);
+  const pluginFilterKeys = NEW_PLUGINS.flatMap((p) => p.filterParams ?? []);
+  const activePluginFilterId = useMemo(() => {
+    for (const plugin of NEW_PLUGINS) {
+      if (Object.keys(pluginFilterParams[plugin.id] ?? {}).length > 0) return plugin.id;
+    }
+    return null;
+  }, [pluginFilterParams]);
+  const hasPluginFilter = activePluginFilterId !== null;
   const hasMoodTypeFilter = Boolean(mood || activity);
   const hasLocationTypeFilter = Boolean(venueId || category || country);
   const hasSleepTypeFilter = Boolean(sleepDuration);
@@ -271,6 +341,69 @@ export default function Home() {
   const trackSectionDisabled = trackFiltersDisabled || !includeTrack;
   const mediaSectionDisabled = mediaFiltersDisabled || !includeMedia;
 
+  // Plugin filter disabled states (mutually exclusive with every other type).
+  const pluginFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter || hasPluginFilter;
+  const pluginTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter || hasPluginFilter;
+
+  const pluginFilterSpecs = NEW_PLUGINS.map((plugin) => ({
+    plugin,
+    included: pluginIncludes[plugin.id] ?? true,
+    filtersDisabled: pluginFiltersDisabled || !includedForType(plugin.id),
+    sectionDisabled: pluginFiltersDisabled || !(pluginIncludes[plugin.id] ?? true),
+    typeToggleDisabled: pluginTypeToggleDisabled,
+    params: pluginFilterParams[plugin.id] ?? {},
+    onToggleIncluded: () => togglePluginType(plugin.id),
+    onSetParam: (name: string, value: string) => setPluginTypeFilter(plugin.id, name, value),
+  }));
+
+  function includedForType(type: string): boolean {
+    if (type === 'location') return includeLocation;
+    if (type === 'mood') return includeMood;
+    if (type === 'sleep') return includeSleep;
+    if (type === 'track') return includeTrack;
+    if (type === 'media') return includeMedia;
+    if (NEW_PLUGINS.some((p) => p.id === type)) return pluginIncludes[type] ?? true;
+    return true;
+  }
+
+  function togglePluginType(pluginId: string) {
+    if (pluginTypeToggleDisabled) return;
+    setPluginIncludes((prev) => {
+      const current = prev[pluginId] ?? true;
+      // Keep at least one type visible.
+      const othersOn = Object.keys(prev).some((k) => k !== pluginId && (prev[k] ?? true));
+      if (current && !othersOn && includeLocation === false && includeSleep === false && includeTrack === false && includeMedia === false) {
+        return prev;
+      }
+      return { ...prev, [pluginId]: !current };
+    });
+  }
+
+  function setPluginTypeFilter(pluginId: string, name: string, value: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      // Clear every other type's filter params (mutual exclusivity).
+      for (const key of pluginFilterKeys) next.delete(key);
+      next.delete('venue_id');
+      next.delete('category');
+      next.delete('country');
+      next.delete('sleep_duration');
+      next.delete('track_activity');
+      next.delete('media_subtype');
+      next.delete('type');
+      if (value) next.set(name, value);
+      return next;
+    }, { replace: true });
+
+    if (value) {
+      setIncludeLocation(false);
+      setIncludeSleep(false);
+      setIncludeTrack(false);
+      setIncludeMedia(false);
+      setPluginIncludes(Object.fromEntries(allClientPlugins().map((p) => [p.id, p.id === pluginId])));
+    }
+  }
+
   useEffect(() => {
     if (hasMoodTypeFilter) {
       setIncludeLocation(false);
@@ -278,8 +411,23 @@ export default function Home() {
       setIncludeSleep(false);
       setIncludeTrack(false);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
     }
-  }, [hasMoodTypeFilter]);
+  }, [hasMoodTypeFilter, setAllPluginIncludes]);
+
+  // A plugin filter narrows to that one plugin type.
+  useEffect(() => {
+    if (activePluginFilterId) {
+      setIncludeLocation(false);
+      setIncludeSleep(false);
+      setIncludeTrack(false);
+      setIncludeMedia(false);
+      if (hasClientPlugin(activePluginFilterId)) {
+        setIncludeMood(false);
+        setOnlyPluginInclude(activePluginFilterId, true);
+      }
+    }
+  }, [activePluginFilterId, setOnlyPluginInclude]);
 
   useEffect(() => {
     if (hasLocationTypeFilter) {
@@ -452,12 +600,14 @@ export default function Home() {
         target.isContentEditable;
       if (isEditable || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
 
+      // Built-in hotkeys plus plugin-declared hotkeys (plugins may override
+      // built-in keys, e.g. mood's 'm').
       const hotkeyRoutes: Record<string, string> = {
         l: '/check-in',
-        m: '/mood-check-in',
         s: '/sleep-check-in',
         t: '/track-check-in',
         n: '/media-check-in',
+        ...PLUGIN_HOTKEYS,
       };
       const route = hotkeyRoutes[e.key.toLowerCase()];
       if (route) {
@@ -684,6 +834,13 @@ export default function Home() {
           if (sleepDuration) params.sleep_duration = sleepDuration;
           if (trackActivity) params.track_activity = trackActivity;
           if (mediaSubtypes) params.media_subtype = mediaSubtypes;
+          // New-plugin filter params (mood/activity are already sent above).
+          for (const [pluginId, pluginParams] of Object.entries(pluginFilterParams)) {
+            if (!NEW_PLUGINS.some((p) => p.id === pluginId)) continue;
+            for (const [name, value] of Object.entries(pluginParams)) {
+              params[name] = value;
+            }
+          }
 
         const data = await timelineApi.list(params);
         if (append) {
@@ -844,11 +1001,13 @@ export default function Home() {
     setIncludeSleep(true);
     setIncludeTrack(true);
     setIncludeMedia(true);
+    setAllPluginIncludes(true);
     setShowFilters(false);
   };
 
-  const hasTypeSelectionFilter = !includeLocation || !includeMood || !includeSleep || !includeTrack || !includeMedia;
-  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || sleepDuration || hasTypeSelectionFilter;
+  const hasNewPluginFilter = Object.keys(pluginIncludes).some((k) => !(pluginIncludes[k] ?? true));
+  const hasTypeSelectionFilter = !includeLocation || !includeMood || !includeSleep || !includeTrack || !includeMedia || hasNewPluginFilter;
+  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || sleepDuration || hasPluginFilter || hasTypeSelectionFilter;
   const visibleItems = useMemo(
     () => items.filter((item) => {
       if (item.type === 'location') return includeLocation;
@@ -856,9 +1015,10 @@ export default function Home() {
       if (item.type === 'sleep') return includeSleep;
       if (item.type === 'track') return includeTrack;
       if (item.type === 'media') return includeMedia;
+      if (NEW_PLUGINS.some((p) => p.id === item.type)) return pluginIncludes[item.type] ?? true;
       return false;
     }),
-    [items, includeLocation, includeMood, includeSleep, includeTrack, includeMedia]
+    [items, includeLocation, includeMood, includeSleep, includeTrack, includeMedia, pluginIncludes]
   );
   const rawGrouped = groupByDate(visibleItems);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
@@ -1064,6 +1224,7 @@ export default function Home() {
             onSetTrackFilter={setTrackTypeFilter}
             onSetMediaFilter={setMediaSubtypeFilter}
             onClearAll={clearFilters}
+            pluginFilterSpecs={pluginFilterSpecs}
           />
         </div>
       </div>
@@ -1191,15 +1352,15 @@ export default function Home() {
                         className={isNew ? 'new-entry-highlight' : 'motion-safe-reveal'}
                         style={isNew ? undefined : revealStyle}
                       >
-                        {item.type === 'mood' ? (
-                          <MoodCheckInCard
-                            item={item}
-                            iconPack={iconPack}
-                            immichUrl={immichUrl}
+                        {hasClientPlugin(item.type) ? (
+                          <PluginTimelineCard
+                            item={item as PluginTimelineEntry}
+                            plugin={getClientPlugin(item.type)!}
+                            integrations={{ immich_url: immichUrl, maloja_url: malojaUrl }}
+                            compact={timelineDensity === 'compact'}
                             photos={photosMap[item.id] ?? null}
                             scrobbles={dedupedScrobblesMap[item.id]}
-                            malojaUrl={malojaUrl}
-                            compact={timelineDensity === 'compact'}
+                            iconPack={iconPack}
                           />
                         ) : item.type === 'sleep' ? (
                           <SleepCard

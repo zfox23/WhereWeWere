@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
+import { allPlugins } from '../plugins/registry';
+import { genericTimelineSelect, genericTimelineWhere } from '../plugins/genericStore';
+import type { PluginTimelineContext } from 'wwp-shared';
 
 const router = Router();
 
@@ -19,7 +22,23 @@ function extractDateString(value: unknown): string | null {
   return match ? match[1] : null;
 }
 
-// GET / - unified timeline of location + mood checkins
+/** Rebase $n placeholders so they start after `offset` parameters. */
+function rebasePlaceholders(sql: string, offset: number): string {
+  return sql.replace(/\$(\d+)/g, (_m, n) => `$${offset + parseInt(n, 10)}`);
+}
+
+/**
+ * A branch of the unified timeline: a SELECT plus its WHERE.
+ * Placeholders in `whereSql` are 1-based relative to `values`.
+ */
+interface TimelineBranch {
+  key: string;
+  selectSql: string;
+  whereSql: string | null;
+  values: unknown[];
+}
+
+// GET / - unified timeline of all check-in types (built-ins + plugins)
 router.get('/', async (req: Request, res: Response) => {
   try {
     const {
@@ -27,251 +46,179 @@ router.get('/', async (req: Request, res: Response) => {
       limit = '50', offset = '0',
     } = req.query;
 
-    const params: unknown[] = [];
-    const locationConditions: string[] = [];
-    const moodConditions: string[] = [];
-    const sleepConditions: string[] = [];
-    const trackConditions: string[] = [];
-    const mediaConditions: string[] = [];
-    let paramIndex = 1;
-    const hasMoodTypeFilter = Boolean(req.query.mood || req.query.activity);
+    const userId = user_id ? String(user_id) : null;
+    const fromDate = extractDateString(from);
+    const toDate = extractDateString(to);
+    const searchQuery = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : null;
+
+    const plugins = allPlugins();
+
+    // Scope each plugin's declared filter params out of the query string.
+    const pluginFilterParams = new Map<string, Record<string, string>>();
+    for (const plugin of plugins) {
+      const params: Record<string, string> = {};
+      for (const name of plugin.filterParams ?? []) {
+        const v = req.query[name];
+        if (typeof v === 'string' && v !== '') params[name] = v;
+      }
+      pluginFilterParams.set(plugin.id, params);
+    }
+    const activePluginFilterIds = plugins
+      .filter((p) => Object.keys(pluginFilterParams.get(p.id) ?? {}).length > 0)
+      .map((p) => p.id);
+
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
     const hasSleepTypeFilter = Boolean(req.query.sleep_duration);
     const hasTrackTypeFilter = Boolean(req.query.track_activity);
     const hasMediaTypeFilter = Boolean(req.query.media_subtype);
-    const fromDate = extractDateString(from);
-    const toDate = extractDateString(to);
 
-    if (user_id) {
-      locationConditions.push(`c.user_id = $${paramIndex}`);
-      moodConditions.push(`mc.user_id = $${paramIndex}`);
-      sleepConditions.push(`se.user_id = $${paramIndex}`);
-      trackConditions.push(`t.user_id = $${paramIndex}`);
-      mediaConditions.push(`mmc.user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
+    // Decide which branches to include (a type filter narrows to one type;
+    // plugin filters win first, mirroring the legacy behavior where the mood
+    // filter checked ahead of the location filters).
+    const includedKeys: string[] = [];
+    if (activePluginFilterIds.length > 0) {
+      includedKeys.push(`plugin:${activePluginFilterIds[0]}`);
+    } else if (hasLocationTypeFilter) {
+      includedKeys.push('location');
+    } else if (hasSleepTypeFilter) {
+      includedKeys.push('sleep');
+    } else if (hasTrackTypeFilter) {
+      includedKeys.push('track');
+    } else if (hasMediaTypeFilter) {
+      includedKeys.push('media');
+    } else {
+      includedKeys.push('location', ...plugins.map((p) => `plugin:${p.id}`), 'sleep', 'track', 'media');
     }
 
-    if (fromDate) {
-      locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${paramIndex}::date`);
-      moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date >= $${paramIndex}::date`);
-      sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= $${paramIndex}::date`);
-      trackConditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= $${paramIndex}::date`);
-      mediaConditions.push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date >= $${paramIndex}::date`);
-      params.push(fromDate);
-      paramIndex++;
-    }
+    // ------------------------------------------------------------------
+    // Built-in branches (location, sleep, track, media). Mood is a plugin.
+    // ------------------------------------------------------------------
+    const builtInWhereBuilders: Record<string, () => { sql: string | null; values: unknown[] }> = {
+      location: () => {
+        const conditions: string[] = [];
+        const values: unknown[] = [];
+        const push = (cond: string, value: unknown) => {
+          values.push(value);
+          conditions.push(cond.replace('?', `$${values.length}`));
+        };
+        if (userId) push('c.user_id = ?', userId);
+        if (fromDate) push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= ?::date`, fromDate);
+        if (toDate) push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= ?::date`, toDate);
+        if (req.query.venue_id) push('c.venue_id = ?', String(req.query.venue_id));
+        if (req.query.category) push('vc.name = ?', String(req.query.category));
+        if (req.query.country) push('v.country = ?', String(req.query.country));
+        if (searchQuery) {
+          values.push(searchQuery, searchQuery);
+          conditions.push(
+            `(c.search_vector @@ plainto_tsquery('english', $${values.length - 1}) OR v.search_vector @@ plainto_tsquery('english', $${values.length}))`,
+          );
+        }
+        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+      },
+      sleep: () => {
+        const conditions: string[] = [];
+        const values: unknown[] = [];
+        const push = (cond: string, value: unknown) => {
+          values.push(value);
+          conditions.push(cond.replace('?', `$${values.length}`));
+        };
+        if (userId) push('se.user_id = ?', userId);
+        if (fromDate) push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= ?::date`, fromDate);
+        if (toDate) push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date <= ?::date`, toDate);
+        if (searchQuery) push(`se.comment ILIKE '%' || ? || '%'`, searchQuery);
+        const durationFilter = String(req.query.sleep_duration ?? '').toLowerCase();
+        if (durationFilter === 'lte6') {
+          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) <= 21600`);
+        } else if (durationFilter === '6to8') {
+          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) > 21600`);
+          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) < 28800`);
+        } else if (durationFilter === 'gte8') {
+          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) >= 28800`);
+        }
+        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+      },
+      track: () => {
+        const conditions: string[] = [];
+        const values: unknown[] = [];
+        const push = (cond: string, value: unknown) => {
+          values.push(value);
+          conditions.push(cond.replace('?', `$${values.length}`));
+        };
+        if (userId) push('t.user_id = ?', userId);
+        if (fromDate) push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= ?::date`, fromDate);
+        if (toDate) push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date <= ?::date`, toDate);
+        if (searchQuery) push(`t.name ILIKE '%' || ? || '%'`, searchQuery);
+        if (req.query.track_activity) push(`t.activity_type ILIKE ?`, String(req.query.track_activity));
+        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+      },
+      media: () => {
+        const conditions: string[] = [];
+        const values: unknown[] = [];
+        const push = (cond: string, value: unknown) => {
+          values.push(value);
+          conditions.push(cond.replace('?', `$${values.length}`));
+        };
+        if (userId) push('mmc.user_id = ?', userId);
+        if (fromDate) push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date >= ?::date`, fromDate);
+        if (toDate) push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date <= ?::date`, toDate);
+        if (searchQuery) {
+          values.push(searchQuery, searchQuery);
+          conditions.push(
+            `(mi.title ILIKE '%' || $${values.length - 1} || '%' OR mmc.notes ILIKE '%' || $${values.length} || '%')`,
+          );
+        }
+        if (req.query.media_subtype) {
+          const subtypes = String(req.query.media_subtype)
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => ['movie', 'tv_show', 'game', 'book', 'board_game'].includes(s));
+          if (subtypes.length > 0) {
+            push(`mi.media_type = ANY(?::text[])`, subtypes);
+          }
+        }
+        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+      },
+    };
 
-    if (toDate) {
-      locationConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $${paramIndex}::date`);
-      moodConditions.push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date <= $${paramIndex}::date`);
-      sleepConditions.push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date <= $${paramIndex}::date`);
-      trackConditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date <= $${paramIndex}::date`);
-      mediaConditions.push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date <= $${paramIndex}::date`);
-      params.push(toDate);
-      paramIndex++;
-    }
-
-    if (req.query.venue_id) {
-      locationConditions.push(`c.venue_id = $${paramIndex}`);
-      params.push(req.query.venue_id);
-      paramIndex++;
-    }
-
-    // Location-only filters
-    if (req.query.category) {
-      locationConditions.push(`vc.name = $${paramIndex}`);
-      params.push(req.query.category);
-      paramIndex++;
-    }
-
-    if (req.query.country) {
-      locationConditions.push(`v.country = $${paramIndex}`);
-      params.push(req.query.country);
-      paramIndex++;
-    }
-
-    if (req.query.mood) {
-      const moodValue = parseInt(req.query.mood as string, 10);
-      if (moodValue >= 1 && moodValue <= 5) {
-        moodConditions.push(`mc.mood = $${paramIndex}`);
-        params.push(moodValue);
-        paramIndex++;
-      }
-    }
-
-    if (req.query.activity) {
-      moodConditions.push(
-        `EXISTS (
-          SELECT 1 FROM mood_checkin_activities mca2
-          JOIN mood_activities ma2 ON mca2.activity_id = ma2.id
-          WHERE mca2.mood_checkin_id = mc.id
-            AND ma2.name ILIKE $${paramIndex}
-        )`
-      );
-      params.push(req.query.activity);
-      paramIndex++;
-    }
-
-    if (req.query.sleep_duration) {
-      const durationFilter = String(req.query.sleep_duration).toLowerCase();
-      if (durationFilter === 'lte6') {
-        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) <= 21600`);
-      } else if (durationFilter === '6to8') {
-        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) > 21600`);
-        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) < 28800`);
-      } else if (durationFilter === 'gte8') {
-        sleepConditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) >= 28800`);
-      }
-    }
-
-    if (req.query.track_activity) {
-      trackConditions.push(`t.activity_type ILIKE $${paramIndex}`);
-      params.push(req.query.track_activity);
-      paramIndex++;
-    }
-
-    if (req.query.media_subtype) {
-      const subtypes = String(req.query.media_subtype)
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s) => ['movie', 'tv_show', 'game', 'book', 'board_game'].includes(s));
-      if (subtypes.length > 0) {
-        mediaConditions.push(`mi.media_type = ANY($${paramIndex}::text[])`);
-        params.push(subtypes);
-        paramIndex++;
-      }
-    }
-
-    if (req.query.q) {
-      const searchQuery = req.query.q as string;
-      locationConditions.push(
-        `(c.search_vector @@ plainto_tsquery('english', $${paramIndex})
-          OR v.search_vector @@ plainto_tsquery('english', $${paramIndex}))`
-      );
-      moodConditions.push(
-        `mc.note ILIKE '%' || $${paramIndex} || '%'`
-      );
-      sleepConditions.push(
-        `se.comment ILIKE '%' || $${paramIndex} || '%'`
-      );
-      trackConditions.push(
-        `t.name ILIKE '%' || $${paramIndex} || '%'`
-      );
-      mediaConditions.push(
-        `(mi.title ILIKE '%' || $${paramIndex} || '%' OR mmc.notes ILIKE '%' || $${paramIndex} || '%')`
-      );
-      params.push(searchQuery);
-      paramIndex++;
-    }
-
-    const locationWhere = locationConditions.length > 0
-      ? `WHERE ${locationConditions.join(' AND ')}`
-      : '';
-    const moodWhere = moodConditions.length > 0
-      ? `WHERE ${moodConditions.join(' AND ')}`
-      : '';
-    const sleepWhere = sleepConditions.length > 0
-      ? `WHERE ${sleepConditions.join(' AND ')}`
-      : '';
-    const trackWhere = trackConditions.length > 0
-      ? `WHERE ${trackConditions.join(' AND ')}`
-      : '';
-    const mediaWhere = mediaConditions.length > 0
-      ? `WHERE ${mediaConditions.join(' AND ')}`
-      : '';
-
-    params.push(parseInt(limit as string, 10));
-    const limitParam = `$${paramIndex}`;
-    paramIndex++;
-
-    params.push(parseInt(offset as string, 10));
-    const offsetParam = `$${paramIndex}`;
-
-    const locationSelect = `
+    const builtInSelects: Record<string, string> = {
+      location: `
       SELECT 'location' AS type, c.id, c.user_id, c.venue_id, c.notes,
              c.checked_in_at, c.created_at,
              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
               c.checkin_timezone AS venue_timezone,
              vc.name AS venue_category,
              pv.id AS parent_venue_id, pv.name AS parent_venue_name,
-        NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-        NULL::bigint AS sleep_as_android_id,
-        NULL::timestamptz AS sleep_started_at,
-        NULL::timestamptz AS sleep_ended_at,
-        NULL::text AS sleep_timezone,
-        NULL::numeric AS sleep_rating,
-        NULL::text AS sleep_comment,
-        NULL::text AS track_name,
-        NULL::numeric AS track_distance_m,
-        NULL::text AS track_timezone,
-        NULL::timestamptz AS track_started_at,
-        NULL::timestamptz AS track_ended_at,
-        NULL::bigint AS track_elapsed_time_s,
-        NULL::text AS media_type,
-        NULL::uuid AS media_item_id,
-        NULL::text AS media_title,
-        NULL::text AS media_image_url,
-        NULL::text AS media_author,
-        NULL::smallint AS media_rating,
-        NULL::text AS media_checkin_type,
-        NULL::int AS media_season_number,
-        NULL::int AS media_episode_number,
-        NULL::text AS media_episode_title,
-        NULL::text AS media_timezone
+         NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
+         NULL::bigint AS sleep_as_android_id,
+         NULL::timestamptz AS sleep_started_at,
+         NULL::timestamptz AS sleep_ended_at,
+         NULL::text AS sleep_timezone,
+         NULL::numeric AS sleep_rating,
+         NULL::text AS sleep_comment,
+         NULL::text AS track_name,
+         NULL::numeric AS track_distance_m,
+         NULL::text AS track_timezone,
+         NULL::timestamptz AS track_started_at,
+         NULL::timestamptz AS track_ended_at,
+         NULL::bigint AS track_elapsed_time_s,
+         NULL::text AS media_type,
+         NULL::uuid AS media_item_id,
+         NULL::text AS media_title,
+         NULL::text AS media_image_url,
+         NULL::text AS media_author,
+         NULL::smallint AS media_rating,
+         NULL::text AS media_checkin_type,
+         NULL::int AS media_season_number,
+         NULL::int AS media_episode_number,
+         NULL::text AS media_episode_title,
+         NULL::text AS media_timezone,
+         NULL::jsonb AS data
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
       LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-      ${locationWhere}
-    `;
-
-    const moodSelect = `
-      SELECT 'mood' AS type, mc.id, mc.user_id, NULL AS venue_id, mc.note AS notes,
-             mc.checked_in_at, mc.created_at,
-             NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
-             NULL::text AS venue_timezone,
-             NULL AS venue_category,
-             NULL AS parent_venue_id, NULL AS parent_venue_name,
-             mc.mood, mc.mood_timezone,
-             COALESCE(
-               (SELECT json_agg(json_build_object(
-                 'id', ma.id, 'name', ma.name, 'group_name', mag.name, 'icon', ma.icon
-               ) ORDER BY mag.display_order, ma.display_order)
-               FROM mood_checkin_activities mca
-               JOIN mood_activities ma ON mca.activity_id = ma.id
-               JOIN mood_activity_groups mag ON ma.group_id = mag.id
-               WHERE mca.mood_checkin_id = mc.id),
-               '[]'::json
-             ) AS activities,
-             NULL::bigint AS sleep_as_android_id,
-             NULL::timestamptz AS sleep_started_at,
-             NULL::timestamptz AS sleep_ended_at,
-             NULL::text AS sleep_timezone,
-             NULL::numeric AS sleep_rating,
-             NULL::text AS sleep_comment,
-             NULL::text AS track_name,
-             NULL::numeric AS track_distance_m,
-             NULL::text AS track_timezone,
-             NULL::timestamptz AS track_started_at,
-             NULL::timestamptz AS track_ended_at,
-             NULL::bigint AS track_elapsed_time_s,
-             NULL::text AS media_type,
-             NULL::uuid AS media_item_id,
-             NULL::text AS media_title,
-             NULL::text AS media_image_url,
-             NULL::text AS media_author,
-             NULL::smallint AS media_rating,
-             NULL::text AS media_checkin_type,
-             NULL::int AS media_season_number,
-             NULL::int AS media_episode_number,
-             NULL::text AS media_episode_title,
-             NULL::text AS media_timezone
-            FROM mood_checkins mc
-            ${moodWhere}
-   `;
-
-    const sleepSelect = `
+    `,
+      sleep: `
       SELECT 'sleep' AS type, se.id, se.user_id, NULL AS venue_id, se.comment AS notes,
              se.started_at AS checked_in_at, se.created_at,
              NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
@@ -298,12 +245,11 @@ router.get('/', async (req: Request, res: Response) => {
               NULL::int AS media_season_number,
               NULL::int AS media_episode_number,
               NULL::text AS media_episode_title,
-              NULL::text AS media_timezone
+              NULL::text AS media_timezone,
+              NULL::jsonb AS data
               FROM sleep_entries se
-              ${sleepWhere}
-    `;
-
-    const trackSelect = `
+    `,
+      track: `
       SELECT 'track' AS type, t.id, t.user_id, NULL AS venue_id, t.name AS notes,
              t.started_at AS checked_in_at, t.created_at,
              NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
@@ -330,12 +276,11 @@ router.get('/', async (req: Request, res: Response) => {
              NULL::int AS media_season_number,
              NULL::int AS media_episode_number,
              NULL::text AS media_episode_title,
-             NULL::text AS media_timezone
+             NULL::text AS media_timezone,
+             NULL::jsonb AS data
              FROM tracks t
-             ${trackWhere}
-           `;
-      
-          const mediaSelect = `
+            `,
+      media: `
             SELECT 'media' AS type, mmc.id, mmc.user_id, NULL AS venue_id, mmc.notes,
                    mmc.checked_in_at, mmc.created_at,
                    NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
@@ -365,69 +310,86 @@ router.get('/', async (req: Request, res: Response) => {
                    mmc.season_number AS media_season_number,
                    mmc.episode_number AS media_episode_number,
                    mmc.episode_title AS media_episode_title,
-                   mmc.checkin_timezone AS media_timezone
-             FROM media_checkins mmc
-             JOIN media_items mi ON mmc.media_item_id = mi.id
-             ${mediaWhere}
-          `;
+                   mmc.checkin_timezone AS media_timezone,
+                   NULL::jsonb AS data
+              FROM media_checkins mmc
+              JOIN media_items mi ON mmc.media_item_id = mi.id
+          `,
+    };
 
-    let sql: string;
+    // ------------------------------------------------------------------
+    // Assemble branches in display order, tracking the global param offset.
+    // ------------------------------------------------------------------
+    const branches: TimelineBranch[] = [];
 
-    if (hasMoodTypeFilter) {
-      sql = `
-        ${moodSelect}
-        ORDER BY checked_in_at DESC
-        LIMIT ${limitParam} OFFSET ${offsetParam}
-      `;
-    } else if (hasLocationTypeFilter) {
-      sql = `
-        ${locationSelect}
-        ORDER BY checked_in_at DESC
-        LIMIT ${limitParam} OFFSET ${offsetParam}
-      `;
-    } else if (hasSleepTypeFilter) {
-      sql = `
-        ${sleepSelect}
-        ORDER BY checked_in_at DESC
-        LIMIT ${limitParam} OFFSET ${offsetParam}
-      `;
-    } else if (hasTrackTypeFilter) {
-      sql = `
-        ${trackSelect}
-        ORDER BY checked_in_at DESC
-        LIMIT ${limitParam} OFFSET ${offsetParam}
-      `;
-    } else if (hasMediaTypeFilter) {
-      sql = `
-        ${mediaSelect}
-        ORDER BY checked_in_at DESC
-        LIMIT ${limitParam} OFFSET ${offsetParam}
-      `;
-    } else {
-      sql = `
-        (
-          ${locationSelect}
-        )
-        UNION ALL
-        (
-          ${moodSelect}
-        )
-        UNION ALL
-        (
-          ${sleepSelect}
-        )
-        UNION ALL
-        (
-          ${trackSelect}
-        )
-        UNION ALL
-        (
-          ${mediaSelect}
-        )
-        ORDER BY checked_in_at DESC
-        LIMIT ${limitParam} OFFSET ${offsetParam}
-      `;
+    for (const key of includedKeys) {
+      if (key.startsWith('plugin:')) {
+        const plugin = plugins.find((p) => `plugin:${p.id}` === key);
+        if (!plugin) continue;
+
+        if (plugin.server.storage === 'custom') {
+          if (!plugin.server.buildTimelineSelect || !plugin.server.buildTimelineWhere) {
+            console.error(`Plugin "${plugin.id}" declares custom storage but is missing timeline hooks`);
+            continue;
+          }
+          const ctx: PluginTimelineContext = {
+            user_id: userId,
+            from: fromDate,
+            to: toDate,
+            q: searchQuery,
+            filterParams: pluginFilterParams.get(plugin.id) ?? {},
+          };
+          const selectSql = plugin.server.buildTimelineSelect().sql;
+          const clause = plugin.server.buildTimelineWhere(ctx);
+          branches.push({ key, selectSql, whereSql: clause?.sql ?? null, values: clause?.values ?? [] });
+        } else {
+          const clause = genericTimelineWhere(plugin, {
+            user_id: userId,
+            from: fromDate,
+            to: toDate,
+            q: searchQuery,
+            filterParams: pluginFilterParams.get(plugin.id) ?? {},
+          });
+          branches.push({ key, selectSql: genericTimelineSelect(plugin.id), whereSql: clause.sql, values: clause.values });
+        }
+      } else {
+        const where = builtInWhereBuilders[key]?.();
+        const selectSql = builtInSelects[key];
+        if (!where || !selectSql) continue;
+        branches.push({ key, selectSql, whereSql: where.sql, values: where.values });
+      }
     }
+
+    if (branches.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    // Concatenate per-branch WHERE values with rebased placeholders, then
+    // append limit/offset.
+    const params: unknown[] = [];
+    const branchSqls = branches.map((branch) => {
+      const whereSql = branch.whereSql ? rebasePlaceholders(branch.whereSql, params.length) : null;
+      params.push(...branch.values);
+      return {
+        sql: `${branch.selectSql}
+        ${whereSql ? `WHERE ${whereSql}` : ''}`,
+      };
+    });
+
+    params.push(parseInt(limit as string, 10));
+    const limitParam = `$${params.length}`;
+    params.push(parseInt(offset as string, 10));
+    const offsetParam = `$${params.length}`;
+
+    const sql =
+      branches.length === 1
+        ? `${branchSqls[0].sql}
+          ORDER BY checked_in_at DESC
+          LIMIT ${limitParam} OFFSET ${offsetParam}`
+        : `${branchSqls.map((b) => `(\n${b.sql}\n)`).join('\nUNION ALL\n')}
+          ORDER BY checked_in_at DESC
+          LIMIT ${limitParam} OFFSET ${offsetParam}`;
 
     const result = await query(sql, params);
     res.json(result.rows.map(addTimezone));

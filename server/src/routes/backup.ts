@@ -2,6 +2,12 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { pool, query } from '../db';
 import { deleteStoredTrack } from '../services/trackFiles';
+import {
+  claimedLegacyKeys,
+  deletePluginData,
+  exportPluginData,
+  importPluginData,
+} from '../plugins/backup';
 
 const router = Router();
 
@@ -376,6 +382,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       mediaCheckinsResult,
       mediaListsResult,
       mediaListItemsResult,
+      pluginsData,
     ] = await Promise.all([
       query(
         `SELECT id, username, email, display_name, created_at, updated_at
@@ -516,6 +523,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         ORDER BY ml.created_at ASC, mli.position ASC`,
        [USER_ID]
      ),
+     exportPluginData(USER_ID),
    ]);
 
     const tracks = tracksResult.rows.map((row: any) => {
@@ -607,7 +615,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       : req.body;
 
     const backup = ensureV1Backup(rawPayload);
-    const counts = {
+    const counts: Record<string, { inserted: number; skipped: number }> = {
       venues: { inserted: 0, skipped: 0 },
       checkins: { inserted: 0, skipped: 0 },
       moodActivityGroups: { inserted: 0, skipped: 0 },
@@ -624,6 +632,12 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     const errors: string[] = [];
 
     await client.query('BEGIN');
+
+    // Plugins that have their own payload in this backup take over their
+    // legacy data keys (e.g. mood) and the legacy loops below are skipped.
+    const pluginsPayload = (backup.data as Record<string, any>).plugins ?? null;
+    const claimedKeys = claimedLegacyKeys(pluginsPayload);
+    const isClaimed = (key: string) => claimedKeys.has(key);
 
     if (backup.data.user?.display_name !== undefined) {
       await client.query(
@@ -812,7 +826,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
-    for (const group of backup.data.moodActivityGroups) {
+    for (const group of isClaimed('moodActivityGroups') ? [] : backup.data.moodActivityGroups) {
       if (!group?.id || !group.name) {
         counts.moodActivityGroups.skipped += 1;
         errors.push('Skipped mood activity group with missing id/name');
@@ -833,7 +847,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
-    for (const activity of backup.data.moodActivities) {
+    for (const activity of isClaimed('moodActivities') ? [] : backup.data.moodActivities) {
       if (!activity?.id || !activity.group_id || !activity.name) {
         counts.moodActivities.skipped += 1;
         errors.push('Skipped mood activity with missing id/group_id/name');
@@ -862,7 +876,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
-    for (const moodCheckin of backup.data.moodCheckins) {
+    for (const moodCheckin of isClaimed('moodCheckins') ? [] : backup.data.moodCheckins) {
       if (!moodCheckin?.id) {
         counts.moodCheckins.skipped += 1;
         errors.push('Skipped mood check-in with missing id');
@@ -910,7 +924,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
-    for (const link of backup.data.moodCheckinActivities) {
+    for (const link of isClaimed('moodCheckinActivities') ? [] : backup.data.moodCheckinActivities) {
       if (!link?.mood_checkin_id || !link.activity_id) {
         counts.moodCheckinActivities.skipped += 1;
         errors.push('Skipped mood check-in activity with missing ids');
@@ -1217,6 +1231,15 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
+    // Plugin data (generic + custom storage) — restored inside the same
+    // transaction, honoring each plugin's declared backupOrder.
+    if (pluginsPayload) {
+      const pluginCounts = await importPluginData(client, USER_ID, pluginsPayload);
+      for (const [pluginId, pc] of Object.entries(pluginCounts)) {
+        counts[`plugin:${pluginId}`] = pc;
+      }
+    }
+
     await client.query('COMMIT');
 
     res.json({
@@ -1284,8 +1307,10 @@ router.post('/start-over', async (req: Request, res: Response) => {
     }
 
     if (deleteMoodCheckins) {
-      const moodCheckinResult = await client.query('DELETE FROM mood_checkins WHERE user_id = $1', [USER_ID]);
-      counts.mood_checkins = moodCheckinResult.rowCount ?? 0;
+      // Mood is a check-in plugin: its deleteUserData hook (and cascade
+      // deletes on its activity junctions) handle the removal.
+      const moodCounts = await deletePluginData(client, USER_ID, ['mood']);
+      counts.mood_checkins = moodCounts.mood ?? 0;
     }
 
     if (deleteSleepEntries) {
