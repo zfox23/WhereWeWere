@@ -12,7 +12,7 @@
  * live in the core platform.
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { parse } from 'csv-parse/sync';
 import fs from 'fs';
 import type {
@@ -712,6 +712,18 @@ importRouter.post('/', csvUpload.single('file'), async (req: Request, res: Respo
   } finally {
     removeImportFile(file.path);
   }
+});
+
+// Surface multer/file-filter rejections (e.g. a non-CSV upload) as a 400
+// instead of letting the framework's error handler turn them into a 500.
+// Must be registered after the routes (Express error middleware only sees
+// errors that occur in middleware registered before it).
+importRouter.use((err: Error & { status?: number }, _req: Request, res: Response, next: NextFunction) => {
+  if (err?.status && err.status >= 400 && err.status < 500) {
+    res.status(err.status).json({ error: err.message });
+    return;
+  }
+  next(err);
 });
 
 // ---------------------------------------------------------------------------

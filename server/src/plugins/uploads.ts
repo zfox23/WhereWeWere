@@ -43,8 +43,15 @@ export function createImportUpload({
     storage,
     fileFilter: (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
       const error = fileFilter(file);
-      if (error) cb(new Error(error));
-      else cb(null, true);
+      if (error) {
+        // Tag the rejection with a 4xx so it surfaces as a client error
+        // (bad file type) instead of Express's default 500.
+        const err = new Error(error) as Error & { status?: number };
+        err.status = 400;
+        cb(err);
+      } else {
+        cb(null, true);
+      }
     },
     limits: { fileSize },
   });

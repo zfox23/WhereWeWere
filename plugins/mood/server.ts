@@ -1336,7 +1336,9 @@ export const server: CheckinTypeServerPlugin = {
       table: 'moodActivityGroups',
       select: `SELECT id, name, display_order, created_at, updated_at
                FROM mood_activity_groups WHERE user_id = $1 ORDER BY display_order`,
-      insert: `INSERT INTO mood_activity_groups (id, user_id, name, display_order, created_at, updated_at)
+      // userIdFirst: the framework prepends user_id as the first parameter,
+      // so user_id must be $1 here.
+      insert: `INSERT INTO mood_activity_groups (user_id, id, name, display_order, created_at, updated_at)
                VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()))
                ON CONFLICT (id) DO NOTHING`,
       userIdFirst: true,
