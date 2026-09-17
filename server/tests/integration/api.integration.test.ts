@@ -181,7 +181,7 @@ describe('API integration', () => {
     );
     expect(fallbackSuggestion.reason).toContain('sleep entry');
     expect(fallbackSuggestion.reason).toContain('No venue check-in within 24 hours');
-    expect(previewResponse.body.uninferable_mood_checkins).toEqual(
+    expect(previewResponse.body.uninferable.mood).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: uninferableMoodCheckinId,
@@ -189,7 +189,7 @@ describe('API integration', () => {
         }),
       ])
     );
-    expect(previewResponse.body.uninferable_media_checkins).toEqual(
+    expect(previewResponse.body.uninferable.media).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: uninferableMediaCheckinId,

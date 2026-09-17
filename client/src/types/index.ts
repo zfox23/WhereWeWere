@@ -138,18 +138,9 @@ export interface TimestampReconciliationSuggestion {
   reason: string;
 }
 
-export interface TimestampReconciliationUninferableMoodCheckin {
+export interface TimestampReconciliationUninferableCheckin {
   id: string;
-  type: 'mood';
-  detail_path: string;
-  original_timestamp: string;
-  original_timezone: string | null;
-  reason: string;
-}
-
-export interface TimestampReconciliationUninferableMediaCheckin {
-  id: string;
-  type: 'media';
+  type: string;
   detail_path: string;
   original_timestamp: string;
   original_timezone: string | null;
@@ -158,8 +149,8 @@ export interface TimestampReconciliationUninferableMediaCheckin {
 
 export interface TimestampReconciliationScanResult {
   suggestions: TimestampReconciliationSuggestion[];
-  uninferable_mood_checkins: TimestampReconciliationUninferableMoodCheckin[];
-  uninferable_media_checkins: TimestampReconciliationUninferableMediaCheckin[];
+  /** Uninferable check-ins grouped by type id. */
+  uninferable: Record<string, TimestampReconciliationUninferableCheckin[]>;
 }
 
 export interface TimestampReconciliationUpdate {

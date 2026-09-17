@@ -101,7 +101,7 @@ router.put('/', async (req: Request, res: Response) => {
                                   theme, system_light_theme, system_dark_theme, distance_unit, timeline_density,
                                   llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-               $11, COALESCE($12, $21), COALESCE($13, $22), $14, $23,
+               $11, COALESCE($12, $20), COALESCE($13, $21), $14, $22,
                $15, $16, $17, $18, $19)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),

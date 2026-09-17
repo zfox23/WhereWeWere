@@ -179,7 +179,8 @@ describe('Generic-storage plugin (framework defaults)', () => {
               (SELECT COUNT(*) FROM plugin_settings WHERE plugin_id = $1) AS s`,
       [PLUGIN_ID],
     );
-    expect(remaining.rows[0].c).toBe(0);
-    expect(remaining.rows[0].s).toBe(0);
+    // COUNT(*) returns int8, which the pg driver surfaces as a string.
+    expect(Number(remaining.rows[0].c)).toBe(0);
+    expect(Number(remaining.rows[0].s)).toBe(0);
   });
 });

@@ -3,8 +3,7 @@ import { Clock, Loader2, Check, AlertCircle, ChevronDown, ChevronRight } from 'l
 import { settings } from '../../api/client';
 import type {
   TimestampReconciliationSuggestion,
-  TimestampReconciliationUninferableMoodCheckin,
-  TimestampReconciliationUninferableMediaCheckin,
+  TimestampReconciliationUninferableCheckin,
   TimestampReconciliationUpdate,
 } from '../../types';
 
@@ -87,9 +86,7 @@ interface UninferableCheckin {
   reason: string;
 }
 
-type UninferableCheckinList =
-  | TimestampReconciliationUninferableMoodCheckin[]
-  | TimestampReconciliationUninferableMediaCheckin[];
+type UninferableCheckinList = TimestampReconciliationUninferableCheckin[];
 
 function UninferableCheckinGroup({
   title,
@@ -157,8 +154,8 @@ function UninferableCheckinGroup({
 
 export function TimestampReconciliationSection() {
   const [suggestions, setSuggestions] = useState<TimestampReconciliationSuggestion[]>([]);
-  const [uninferableMoodCheckins, setUninferableMoodCheckins] = useState<TimestampReconciliationUninferableMoodCheckin[]>([]);
-  const [uninferableMediaCheckins, setUninferableMediaCheckins] = useState<TimestampReconciliationUninferableMediaCheckin[]>([]);
+  const [uninferableMoodCheckins, setUninferableMoodCheckins] = useState<TimestampReconciliationUninferableCheckin[]>([]);
+  const [uninferableMediaCheckins, setUninferableMediaCheckins] = useState<TimestampReconciliationUninferableCheckin[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -211,8 +208,8 @@ export function TimestampReconciliationSection() {
     try {
       const data = await settings.timestampReconciliationPreview();
       const nextSuggestions = data.suggestions as TimestampReconciliationSuggestion[];
-      const nextUninferableMoodCheckins = data.uninferable_mood_checkins as TimestampReconciliationUninferableMoodCheckin[];
-      const nextUninferableMediaCheckins = data.uninferable_media_checkins as TimestampReconciliationUninferableMediaCheckin[];
+      const nextUninferableMoodCheckins = (data.uninferable?.mood ?? []) as TimestampReconciliationUninferableCheckin[];
+      const nextUninferableMediaCheckins = (data.uninferable?.media ?? []) as TimestampReconciliationUninferableCheckin[];
       setSuggestions(nextSuggestions);
       setUninferableMoodCheckins(nextUninferableMoodCheckins);
       setUninferableMediaCheckins(nextUninferableMediaCheckins);
