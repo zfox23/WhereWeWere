@@ -2,9 +2,10 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { query } from '../db';
 import { upsertMediaItem } from './media';
+import { latestCheckinTimezoneAsOf } from '../plugins/coreCheckins';
 
 const router = Router();
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 
 // Plex posts webhook payloads as multipart/form-data (a JSON part, sometimes
 // with an attached JPEG poster). Memory storage keeps this simple; we only
@@ -17,18 +18,9 @@ const plexUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize:
  * to 'UTC'. Same strategy as the Sleep as Android webhook.
  */
 async function inferPlexTimezone(referenceTime: Date): Promise<string> {
-  const checkinResult = await query(
-    `SELECT checkin_timezone
-     FROM checkins
-     WHERE user_id = $1
-       AND checkin_timezone IS NOT NULL
-       AND checked_in_at <= $2
-     ORDER BY checked_in_at DESC
-     LIMIT 1`,
-    [USER_ID, referenceTime.toISOString()]
-  );
-  if (checkinResult.rows[0]?.checkin_timezone) {
-    return checkinResult.rows[0].checkin_timezone as string;
+  const checkinTimezone = await latestCheckinTimezoneAsOf(referenceTime, USER_ID);
+  if (checkinTimezone) {
+    return checkinTimezone;
   }
 
   const mediaResult = await query(

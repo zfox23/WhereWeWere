@@ -256,6 +256,8 @@ export interface TimelineItem {
   checked_in_at: string;
   created_at: string;
   notes: string | null;
+  /** IANA timezone of the check-in (all check-in types). */
+  timezone?: string | null;
   // Location fields
   venue_id?: string;
   venue_name?: string;

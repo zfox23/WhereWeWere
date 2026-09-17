@@ -316,13 +316,15 @@ export interface CheckinTypeServerPlugin {
   reconcile?: PluginReconciliationHook;
 
   /**
-   * Start-over hook for this plugin's *settings* data (distinct from
-   * check-in data, which `deleteUserData` owns): e.g. delete a
-   * user-scoped lookup table and/or this plugin's `plugin_settings` rows.
-   * Must run on the provided transaction client. Returns the number of
-   * rows deleted.
+   * Start-over hook for user-scoped *auxiliary* tables this plugin owns
+   * besides its check-in data (which `deleteUserData` owns) — e.g. a
+   * user-scoped lookup table or an event log. The framework always deletes
+   * this plugin's `plugin_settings` rows itself, both when check-ins are
+   * deleted and when settings are reset on their own, so hooks should not
+   * touch `plugin_settings`. Must run on the provided transaction client.
+   * Returns the number of rows deleted.
    */
-  resetSettings?: (ctx: PluginHookContext) => Promise<number>;
+   resetSettings?: (ctx: PluginHookContext) => Promise<number>;
 
   /**
    * `user_settings` column names this plugin has migrated to

@@ -22,7 +22,7 @@
 import type { PoolClient } from 'pg';
 import { query } from '../db';
 import { allPlugins } from './registry';
-import { exportGenericCheckins, type PluginCheckinBackupRow } from './genericStore';
+import { exportGenericCheckins, importGenericCheckins, type PluginCheckinBackupRow } from './genericStore';
 
 export interface PluginBackupEntry {
   checkins: unknown;
@@ -51,9 +51,8 @@ export async function exportPluginData(user_id: string): Promise<PluginBackupPay
         ? { checkins, extra }
         : { checkins };
     } else {
-      const checkins: PluginCheckinBackupRow[] = await exportGenericCheckins(user_id);
-      // Only include the plugin's own rows (export returns all generic rows).
-      out[plugin.id] = { checkins: checkins.filter((r) => r.plugin_id === plugin.id) };
+      const checkins = await exportGenericCheckins(user_id, plugin.id);
+      out[plugin.id] = { checkins };
     }
   }
 
@@ -137,7 +136,7 @@ export async function importPluginData(
           const inserted = await plugin.server.backupImport({ user_id, client }, entry.checkins);
           pluginCounts.inserted += inserted;
         } else {
-          const result = await importGenericCheckinsOnClient(client, user_id, entry.checkins as PluginCheckinBackupRow[] | null);
+          const result = await importGenericCheckins(user_id, entry.checkins as PluginCheckinBackupRow[] | null, client);
           pluginCounts.inserted += result.inserted;
           pluginCounts.skipped += result.skipped;
         }
@@ -162,44 +161,14 @@ export async function importPluginData(
   return counts;
 }
 
-// Re-export the generic import, bound to a transaction client.
-async function importGenericCheckinsOnClient(
-  client: PoolClient,
-  user_id: string,
-  rows: PluginCheckinBackupRow[] | null,
-): Promise<{ inserted: number; skipped: number }> {
-  let inserted = 0;
-  let skipped = 0;
-  for (const row of rows ?? []) {
-    if (!row || typeof row.id !== 'string' || typeof row.plugin_id !== 'string') {
-      skipped++;
-      continue;
-    }
-    const result = await client.query(
-      `INSERT INTO plugin_checkins (id, plugin_id, user_id, checked_in_at, checkin_timezone, data, created_at, updated_at)
-       VALUES ($1, $2, $3, $4::timestamptz, $5, $6::jsonb, COALESCE($7::timestamptz, NOW()), COALESCE($8::timestamptz, NOW()))
-       ON CONFLICT (id) DO NOTHING`,
-      [
-        row.id,
-        row.plugin_id,
-        user_id,
-        row.checked_in_at,
-        row.checkin_timezone ?? null,
-        JSON.stringify(row.data ?? {}),
-        row.created_at ?? null,
-        row.updated_at ?? null,
-      ],
-    );
-    if ((result.rowCount ?? 0) > 0) inserted++;
-    else skipped++;
-  }
-  return { inserted, skipped };
-}
-
 /**
  * Start-over: delete all plugin data for the user. Returns per-plugin row
  * counts (generic rows deleted for generic plugins; deleteUserData for
- * custom plugins plus cascade-deleted extra tables).
+ * custom plugins plus cascade-deleted extra tables). The plugin's
+ * `plugin_settings` rows are always deleted as part of this — a plugin's
+ * settings belong to its check-in data, so deleting check-ins wipes them
+ * too. (Deleting settings WITHOUT check-ins is handled separately by the
+ * start-over route via the resetSettings flow.)
  */
 export async function deletePluginData(
   client: PoolClient,
@@ -211,19 +180,26 @@ export async function deletePluginData(
   const selected = pluginIds ? allPlugins().filter((p) => pluginIds.includes(p.id)) : allPlugins();
 
   for (const plugin of selected) {
+    let deleted = 0;
     if (plugin.server.storage === 'custom') {
       if (!plugin.server.deleteUserData) {
         throw new Error(`Plugin "${plugin.id}" declares custom storage but has no deleteUserData`);
       }
-      const deleted = await plugin.server.deleteUserData({ user_id, client });
-      counts[plugin.id] = deleted;
+      deleted = await plugin.server.deleteUserData({ user_id, client });
     } else {
       const result = await client.query(
         `DELETE FROM plugin_checkins WHERE user_id = $1 AND plugin_id = $2 RETURNING id`,
         [user_id, plugin.id],
       );
-      counts[plugin.id] = result.rowCount ?? 0;
+      deleted = result.rowCount ?? 0;
     }
+    // Settings belong to the plugin's data: always wipe them with it.
+    const settingsResult = await client.query(
+      `DELETE FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2`,
+      [user_id, plugin.id],
+    );
+    deleted += settingsResult.rowCount ?? 0;
+    counts[plugin.id] = deleted;
   }
 
   return counts;

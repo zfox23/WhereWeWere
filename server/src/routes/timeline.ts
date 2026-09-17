@@ -3,6 +3,8 @@ import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
 import { allPlugins } from '../plugins/registry';
 import { genericTimelineSelect, genericTimelineWhere } from '../plugins/genericStore';
+import { timelineColumnList } from '../plugins/timeline';
+import { timelineWhereConditions } from '../plugins/sql';
 import type { PluginTimelineContext } from 'wwp-shared';
 
 const router = Router();
@@ -90,154 +92,122 @@ router.get('/', async (req: Request, res: Response) => {
     // ------------------------------------------------------------------
     // Built-in branches (location, track, media). Mood and Sleep are plugins.
     // ------------------------------------------------------------------
+    const ctx = { user_id: userId, from: fromDate, to: toDate, q: searchQuery };
+
     const builtInWhereBuilders: Record<string, () => { sql: string | null; values: unknown[] }> = {
       location: () => {
-        const conditions: string[] = [];
-        const values: unknown[] = [];
-        const push = (cond: string, value: unknown) => {
-          values.push(value);
-          conditions.push(cond.replace('?', `$${values.length}`));
-        };
-        if (userId) push('c.user_id = ?', userId);
-        if (fromDate) push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= ?::date`, fromDate);
-        if (toDate) push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= ?::date`, toDate);
-        if (req.query.venue_id) push('c.venue_id = ?', String(req.query.venue_id));
-        if (req.query.category) push('vc.name = ?', String(req.query.category));
-        if (req.query.country) push('v.country = ?', String(req.query.country));
-        if (searchQuery) {
-          values.push(searchQuery, searchQuery);
-          conditions.push(
-            `(c.search_vector @@ plainto_tsquery('english', $${values.length - 1}) OR v.search_vector @@ plainto_tsquery('english', $${values.length}))`,
-          );
-        }
-        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+        const conds = timelineWhereConditions(ctx, {
+          alias: 'c',
+          timestampColumn: 'checked_in_at',
+          timezoneColumn: 'checkin_timezone',
+          search: (c, q) => c.push(
+            `(c.search_vector @@ plainto_tsquery('english', ?) OR v.search_vector @@ plainto_tsquery('english', ?))`,
+            q,
+            q,
+          ),
+        });
+        if (req.query.venue_id) conds.push('c.venue_id = ?', String(req.query.venue_id));
+        if (req.query.category) conds.push('vc.name = ?', String(req.query.category));
+        if (req.query.country) conds.push('v.country = ?', String(req.query.country));
+        return conds.build();
       },
       track: () => {
-        const conditions: string[] = [];
-        const values: unknown[] = [];
-        const push = (cond: string, value: unknown) => {
-          values.push(value);
-          conditions.push(cond.replace('?', `$${values.length}`));
-        };
-        if (userId) push('t.user_id = ?', userId);
-        if (fromDate) push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= ?::date`, fromDate);
-        if (toDate) push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date <= ?::date`, toDate);
-        if (searchQuery) push(`t.name ILIKE '%' || ? || '%'`, searchQuery);
-        if (req.query.track_activity) push(`t.activity_type ILIKE ?`, String(req.query.track_activity));
-        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+        const conds = timelineWhereConditions(ctx, {
+          alias: 't',
+          timestampColumn: 'started_at',
+          timezoneColumn: 'timezone',
+          search: (c, q) => c.push(`t.name ILIKE '%' || ? || '%'`, q),
+        });
+        if (req.query.track_activity) conds.push(`t.activity_type ILIKE ?`, String(req.query.track_activity));
+        return conds.build();
       },
       media: () => {
-        const conditions: string[] = [];
-        const values: unknown[] = [];
-        const push = (cond: string, value: unknown) => {
-          values.push(value);
-          conditions.push(cond.replace('?', `$${values.length}`));
-        };
-        if (userId) push('mmc.user_id = ?', userId);
-        if (fromDate) push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date >= ?::date`, fromDate);
-        if (toDate) push(`(mmc.checked_in_at AT TIME ZONE COALESCE(mmc.checkin_timezone, 'UTC'))::date <= ?::date`, toDate);
-        if (searchQuery) {
-          values.push(searchQuery, searchQuery);
-          conditions.push(
-            `(mi.title ILIKE '%' || $${values.length - 1} || '%' OR mmc.notes ILIKE '%' || $${values.length} || '%')`,
-          );
-        }
+        const conds = timelineWhereConditions(ctx, {
+          alias: 'mmc',
+          timestampColumn: 'checked_in_at',
+          timezoneColumn: 'checkin_timezone',
+          search: (c, q) => c.push(
+            `(mi.title ILIKE '%' || ? || '%' OR mmc.notes ILIKE '%' || ? || '%')`,
+            q,
+            q,
+          ),
+        });
         if (req.query.media_subtype) {
           const subtypes = String(req.query.media_subtype)
             .split(',')
             .map((s) => s.trim())
             .filter((s) => ['movie', 'tv_show', 'game', 'book', 'board_game'].includes(s));
           if (subtypes.length > 0) {
-            push(`mi.media_type = ANY(?::text[])`, subtypes);
+            conds.push(`mi.media_type = ANY(?::text[])`, subtypes);
           }
         }
-        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+        return conds.build();
       },
     };
 
     const builtInSelects: Record<string, string> = {
       location: `
-      SELECT 'location' AS type, c.id, c.user_id, c.venue_id, c.notes,
-             c.checked_in_at, c.created_at,
-             v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
-              c.checkin_timezone AS venue_timezone,
-             vc.name AS venue_category,
-             pv.id AS parent_venue_id, pv.name AS parent_venue_name,
-         NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-         NULL::text AS track_name,
-         NULL::numeric AS track_distance_m,
-         NULL::text AS track_timezone,
-         NULL::timestamptz AS track_started_at,
-         NULL::timestamptz AS track_ended_at,
-         NULL::bigint AS track_elapsed_time_s,
-         NULL::text AS media_type,
-         NULL::uuid AS media_item_id,
-         NULL::text AS media_title,
-         NULL::text AS media_image_url,
-         NULL::text AS media_author,
-         NULL::smallint AS media_rating,
-         NULL::text AS media_checkin_type,
-         NULL::int AS media_season_number,
-         NULL::int AS media_episode_number,
-         NULL::text AS media_episode_title,
-         NULL::text AS media_timezone,
-         NULL::jsonb AS data
+      SELECT ${timelineColumnList({
+        type: `'location'`,
+        id: 'c.id',
+        user_id: 'c.user_id',
+        venue_id: 'c.venue_id',
+        notes: 'c.notes',
+        checked_in_at: 'c.checked_in_at',
+        created_at: 'c.created_at',
+        venue_name: 'v.name',
+        venue_latitude: 'v.latitude',
+        venue_longitude: 'v.longitude',
+        venue_timezone: 'c.checkin_timezone',
+        venue_category: 'vc.name',
+        parent_venue_id: 'pv.id',
+        parent_venue_name: 'pv.name',
+        timezone: 'c.checkin_timezone',
+      })}
      FROM checkins c
      JOIN venues v ON c.venue_id = v.id
      LEFT JOIN venue_categories vc ON v.category_id = vc.id
      LEFT JOIN venues pv ON v.parent_venue_id = pv.id
    `,
-     track: `
-      SELECT 'track' AS type, t.id, t.user_id, NULL AS venue_id, t.name AS notes,
-             t.started_at AS checked_in_at, t.created_at,
-             NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
-             NULL::text AS venue_timezone,
-             NULL AS venue_category,
-             NULL AS parent_venue_id, NULL AS parent_venue_name,
-             NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-             t.name AS track_name, t.distance_m AS track_distance_m, t.timezone AS track_timezone,
-             t.started_at AS track_started_at, t.ended_at AS track_ended_at,
-             t.elapsed_time_s AS track_elapsed_time_s,
-             NULL::text AS media_type,
-             NULL::uuid AS media_item_id,
-             NULL::text AS media_title,
-             NULL::text AS media_image_url,
-             NULL::text AS media_author,
-             NULL::smallint AS media_rating,
-             NULL::text AS media_checkin_type,
-             NULL::int AS media_season_number,
-             NULL::int AS media_episode_number,
-             NULL::text AS media_episode_title,
-             NULL::text AS media_timezone,
-             NULL::jsonb AS data
+      track: `
+      SELECT ${timelineColumnList({
+        type: `'track'`,
+        id: 't.id',
+        user_id: 't.user_id',
+        notes: 't.name',
+        checked_in_at: 't.started_at',
+        created_at: 't.created_at',
+        track_name: 't.name',
+        track_distance_m: 't.distance_m',
+        track_timezone: 't.timezone',
+        track_started_at: 't.started_at',
+        track_ended_at: 't.ended_at',
+        track_elapsed_time_s: 't.elapsed_time_s',
+        timezone: 't.timezone',
+      })}
              FROM tracks t
             `,
       media: `
-            SELECT 'media' AS type, mmc.id, mmc.user_id, NULL AS venue_id, mmc.notes,
-                   mmc.checked_in_at, mmc.created_at,
-                   NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
-                   NULL::text AS venue_timezone,
-                   NULL AS venue_category,
-                   NULL AS parent_venue_id, NULL AS parent_venue_name,
-                   NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-                   NULL::text AS track_name,
-                   NULL::numeric AS track_distance_m,
-                   NULL::text AS track_timezone,
-                   NULL::timestamptz AS track_started_at,
-                   NULL::timestamptz AS track_ended_at,
-                   NULL::bigint AS track_elapsed_time_s,
-                   mi.media_type,
-                   mi.id AS media_item_id,
-                   mi.title AS media_title,
-                   mi.image_url AS media_image_url,
-                   mi.author AS media_author,
-                   mmc.rating AS media_rating,
-                   mmc.checkin_type AS media_checkin_type,
-                   mmc.season_number AS media_season_number,
-                   mmc.episode_number AS media_episode_number,
-                   mmc.episode_title AS media_episode_title,
-                   mmc.checkin_timezone AS media_timezone,
-                   NULL::jsonb AS data
+            SELECT ${timelineColumnList({
+        type: `'media'`,
+        id: 'mmc.id',
+        user_id: 'mmc.user_id',
+        notes: 'mmc.notes',
+        checked_in_at: 'mmc.checked_in_at',
+        created_at: 'mmc.created_at',
+        media_type: 'mi.media_type',
+        media_item_id: 'mi.id',
+        media_title: 'mi.title',
+        media_image_url: 'mi.image_url',
+        media_author: 'mi.author',
+        media_rating: 'mmc.rating',
+        media_checkin_type: 'mmc.checkin_type',
+        media_season_number: 'mmc.season_number',
+        media_episode_number: 'mmc.episode_number',
+        media_episode_title: 'mmc.episode_title',
+        media_timezone: 'mmc.checkin_timezone',
+        timezone: 'mmc.checkin_timezone',
+      })}
               FROM media_checkins mmc
               JOIN media_items mi ON mmc.media_item_id = mi.id
           `,

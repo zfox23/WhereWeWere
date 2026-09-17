@@ -7,7 +7,7 @@ import type {
 import { query } from '../db';
 import { allPlugins } from '../plugins/registry';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const NEARBY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_WINDOW_MS = 72 * 60 * 60 * 1000;
 

@@ -13,7 +13,7 @@ import { allPlugins } from '../plugins/registry';
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const BACKUP_FORMAT = 'wherewewere-backup';
 const LATEST_BACKUP_SCHEMA_VERSION = 1;
 const FIRST_START_OVER_CONFIRMATION = 'DELETE MY DATA';
@@ -1120,12 +1120,19 @@ router.post('/start-over', async (req: Request, res: Response) => {
     }
 
     if (selectedPluginSettingsIds.length > 0) {
-      // Check-in plugin settings (lookup tables + plugin_settings rows) are
-      // owned by each plugin's resetSettings hook.
+      // Settings reset: the framework wipes this plugin's plugin_settings rows;
+      // the plugin's resetSettings hook (when present) clears any
+      // user-scoped lookup tables it owns.
       for (const plugin of allPlugins()) {
         if (!selectedPluginSettingsIds.includes(plugin.id)) continue;
-        if (!plugin.server.resetSettings) continue;
-        const deleted = await plugin.server.resetSettings({ user_id: USER_ID, client });
+        const settingsResult = await client.query(
+          `DELETE FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2`,
+          [USER_ID, plugin.id]
+        );
+        let deleted = settingsResult.rowCount ?? 0;
+        if (plugin.server.resetSettings) {
+          deleted += await plugin.server.resetSettings({ user_id: USER_ID, client });
+        }
         counts[`plugin_settings_${plugin.id}_reset`] = deleted;
       }
     }

@@ -6,7 +6,7 @@ import { query } from '../db';
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Approximate chars-per-token for English text (conservative).

@@ -3,7 +3,7 @@ import { config } from '../../src/config';
 import { runMigrations } from '../../src/db/runMigrations';
 import { Pool } from 'pg';
 
-const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID } from '../../src/constants';
 
 function assertSafeTestDatabase() {
   const dbUrl = config.databaseUrl;

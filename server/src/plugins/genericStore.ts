@@ -10,6 +10,8 @@
 import type { CheckinTypeServer, PluginTimelineContext } from 'wwp-shared';
 import { validatePluginData } from 'wwp-shared';
 import { query, pool } from '../db';
+import { timelineColumnList } from './timeline';
+import { timelineWhereConditions } from './sql';
 
 export interface GenericCheckinRow {
   id: string;
@@ -52,26 +54,13 @@ export function genericTimelineWhere(
   plugin: CheckinTypeServer,
   ctx: PluginTimelineContext,
 ): { sql: string | null; values: unknown[] } {
-  const conditions: string[] = [];
-  const values: unknown[] = [];
-  const push = (cond: string, value: unknown) => {
-    values.push(value);
-    conditions.push(cond.replace('?', `$${values.length}`));
-  };
-
-  if (ctx.user_id) {
-    push('user_id = ?', ctx.user_id);
-  }
-  if (ctx.from) {
-    push(`(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::date >= ?::date`, ctx.from);
-  }
-  if (ctx.to) {
-    push(`(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::date <= ?::date`, ctx.to);
-  }
-  if (ctx.q) {
+  const conds = timelineWhereConditions(ctx, {
+    alias: 'pc',
+    timestampColumn: 'checked_in_at',
+    timezoneColumn: 'checkin_timezone',
     // Search free text across the whole JSONB data payload.
-    push(`(data::text ILIKE ?)`, `%${ctx.q}%`);
-  }
+    search: (c, q) => c.push(`(pc.data::text ILIKE ?)`, `%${q}%`),
+  });
 
   // Plugin-specific filters for generic storage: equality on data keys.
   // The convention is `data.<field> = value` for string values; numeric
@@ -81,29 +70,27 @@ export function genericTimelineWhere(
     const field = plugin.fields.find((f) => f.name === name);
     if (!field) continue;
     if (field.kind === 'number' || field.kind === 'integer' || field.kind === 'rating') {
-      push(`(data->>'${field.name}')::numeric = ?::numeric`, value);
+      conds.push(`(pc.data->>'${field.name}')::numeric = ?::numeric`, value);
     } else {
-      push(`data->>'${field.name}' = ?`, value);
+      conds.push(`pc.data->>'${field.name}' = ?`, value);
     }
   }
 
-  return {
-    sql: conditions.length > 0 ? conditions.join(' AND ') : null,
-    values,
-  };
+  return conds.build();
 }
 
-/** Timeline SELECT branch for generic storage. */
+/** Timeline SELECT branch for generic storage (full shared envelope). */
 export function genericTimelineSelect(pluginId: string): string {
   return `
-    SELECT '${pluginId}' AS type,
-           pc.id,
-           pc.user_id,
-           NULL AS notes,
-           pc.checked_in_at,
-           pc.created_at,
-           pc.checkin_timezone AS timezone,
-           pc.data
+    SELECT ${timelineColumnList({
+      type: `'${pluginId}'`,
+      id: 'pc.id',
+      user_id: 'pc.user_id',
+      checked_in_at: 'pc.checked_in_at',
+      created_at: 'pc.created_at',
+      data: 'pc.data',
+      timezone: 'pc.checkin_timezone',
+    })}
     FROM plugin_checkins pc
   `;
 }
@@ -139,56 +126,68 @@ export async function createGenericCheckin(
 export async function getGenericCheckin(
   id: string,
   pluginId: string,
+  user_id: string,
 ): Promise<GenericCheckinRow | null> {
   const result = await query(
-    `SELECT * FROM plugin_checkins WHERE id = $1 AND plugin_id = $2`,
-    [id, pluginId],
+    `SELECT * FROM plugin_checkins WHERE id = $1 AND plugin_id = $2 AND user_id = $3`,
+    [id, pluginId, user_id],
   );
   return result.rows[0] ?? null;
 }
 
+/**
+ * Update a generic check-in. `data` (when provided) is a SHALLOW MERGE over
+ * the stored payload: only the keys present in the input are changed, and
+ * omitted keys keep their stored values. The merged payload is validated
+ * against the plugin's field schema before it is written.
+ */
 export async function updateGenericCheckin(
   id: string,
   plugin: CheckinTypeServer,
+  user_id: string,
   input: {
     checked_in_at?: string | null;
     checkin_timezone?: string | null;
     data?: Record<string, unknown>;
   },
 ): Promise<GenericCheckinRow | null> {
+  let data: Record<string, unknown> | undefined;
   if (input.data !== undefined) {
-    const { data, errors } = normalizePluginData(plugin, input.data);
-    if (errors.length > 0) {
-      const err = new Error(`Invalid check-in data: ${errors.join('; ')}`) as Error & { status?: number };
+    const existing = await getGenericCheckin(id, plugin.id, user_id);
+    if (!existing) return null;
+    const merged = { ...(existing.data ?? {}), ...input.data };
+    const normalized = normalizePluginData(plugin, merged);
+    if (normalized.errors.length > 0) {
+      const err = new Error(`Invalid check-in data: ${normalized.errors.join('; ')}`) as Error & { status?: number };
       err.status = 400;
       throw err;
     }
-    const result = await pool.query(
-      `UPDATE plugin_checkins
-       SET data = $3::jsonb,
-           checked_in_at = COALESCE($4::timestamptz, checked_in_at),
-           checkin_timezone = COALESCE($5, checkin_timezone)
-       WHERE id = $1 AND plugin_id = $2
-       RETURNING *`,
-      [id, plugin.id, JSON.stringify(data), input.checked_in_at || null, input.checkin_timezone || null],
-    );
-    return result.rows[0] ?? null;
+    data = normalized.data;
   }
-  const result = await pool.query(
-    `UPDATE plugin_checkins
-     SET checked_in_at = COALESCE($3::timestamptz, checked_in_at),
-         checkin_timezone = COALESCE($4, checkin_timezone)
-     WHERE id = $1 AND plugin_id = $2
-     RETURNING *`,
-    [id, plugin.id, input.checked_in_at || null, input.checkin_timezone || null],
+  const result = await query(
+    data !== undefined
+      ? `UPDATE plugin_checkins
+         SET data = $4::jsonb,
+             checked_in_at = COALESCE($5::timestamptz, checked_in_at),
+             checkin_timezone = COALESCE($6, checkin_timezone)
+         WHERE id = $1 AND plugin_id = $2 AND user_id = $3
+         RETURNING *`
+      : `UPDATE plugin_checkins
+         SET checked_in_at = COALESCE($4::timestamptz, checked_in_at),
+             checkin_timezone = COALESCE($5, checkin_timezone)
+         WHERE id = $1 AND plugin_id = $2 AND user_id = $3
+         RETURNING *`,
+    data !== undefined
+      ? [id, plugin.id, user_id, JSON.stringify(data), input.checked_in_at || null, input.checkin_timezone || null]
+      : [id, plugin.id, user_id, input.checked_in_at || null, input.checkin_timezone || null],
   );
   return result.rows[0] ?? null;
 }
 
-export async function deleteGenericCheckin(id: string, pluginId: string): Promise<boolean> {
+export async function deleteGenericCheckin(id: string, pluginId: string, user_id: string): Promise<boolean> {
   const result = await query(
-    `DELETE FROM plugin_checkins WHERE id = $1 AND plugin_id = $2 RETURNING id`,
-    [id, pluginId],
+    `DELETE FROM plugin_checkins WHERE id = $1 AND plugin_id = $2 AND user_id = $3 RETURNING id`,
+    [id, pluginId, user_id],
   );
   return (result.rowCount ?? 0) > 0;
 }
@@ -222,29 +221,42 @@ export interface PluginCheckinBackupRow {
   updated_at: string;
 }
 
-export async function exportGenericCheckins(user_id: string): Promise<PluginCheckinBackupRow[]> {
+export async function exportGenericCheckins(
+  user_id: string,
+  pluginId: string,
+): Promise<PluginCheckinBackupRow[]> {
   const result = await query(
     `SELECT id, plugin_id, checked_in_at, checkin_timezone, data, created_at, updated_at
-     FROM plugin_checkins WHERE user_id = $1 ORDER BY checked_in_at ASC`,
-    [user_id],
+     FROM plugin_checkins
+     WHERE user_id = $1 AND plugin_id = $2
+     ORDER BY checked_in_at ASC`,
+    [user_id, pluginId],
   );
   return result.rows;
 }
 
+/**
+ * Re-insert backed-up generic check-in rows (idempotent, ON CONFLICT DO
+ * NOTHING). When a transaction `client` is provided the rows are restored on
+ * that client so the whole restore stays atomic; otherwise a connection is
+ * borrowed from the pool.
+ */
 export async function importGenericCheckins(
   user_id: string,
-  rows: PluginCheckinBackupRow[],
+  rows: PluginCheckinBackupRow[] | null | undefined,
+  client?: import('pg').PoolClient,
 ): Promise<{ inserted: number; skipped: number }> {
   let inserted = 0;
   let skipped = 0;
-  const client = await pool.connect();
+  const ownsClient = client == null;
+  const run = ownsClient ? (await pool.connect()) : client!;
   try {
-    for (const row of rows) {
+    for (const row of rows ?? []) {
       if (!row || typeof row.id !== 'string' || typeof row.plugin_id !== 'string') {
         skipped++;
         continue;
       }
-      const result = await client.query(
+      const result = await run.query(
         `INSERT INTO plugin_checkins (id, plugin_id, user_id, checked_in_at, checkin_timezone, data, created_at, updated_at)
          VALUES ($1, $2, $3, $4::timestamptz, $5, $6::jsonb, COALESCE($7::timestamptz, NOW()), COALESCE($8::timestamptz, NOW()))
          ON CONFLICT (id) DO NOTHING`,
@@ -263,7 +275,7 @@ export async function importGenericCheckins(
       else skipped++;
     }
   } finally {
-    client.release();
+    if (ownsClient) run.release();
   }
   return { inserted, skipped };
 }

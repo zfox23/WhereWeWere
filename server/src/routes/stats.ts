@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { allPlugins, pluginReflectionBranches } from '../plugins/registry';
+import { earliestDateSources, pluginReflectionBranches } from '../plugins/registry';
 import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
 
@@ -560,35 +560,19 @@ router.get('/earliest-dates', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
-    // Built-in types plus each plugin via its earliestDate hook (keyed by
-    // plugin id).
-    const pluginEarliestResults = await Promise.all(
-      allPlugins().map((plugin) => {
-        const hook = plugin.server.earliestDate?.();
-        if (!hook) return { id: plugin.id, date: null };
-        return query(hook.sql, [user_id])
-          .then((r) => ({ id: plugin.id, date: r.rows[0]?.date ?? null }))
-          .catch(() => ({ id: plugin.id, date: null as string | null }));
-      })
+    // Every data type — built-in checkins/tracks plus each plugin's
+    // earliestDate hook — flows through the same source list.
+    const earliestResults = await Promise.all(
+      earliestDateSources().map(({ key, sql }) =>
+        query(sql, [user_id])
+          .then((r) => ({ key, date: r.rows[0]?.date ?? null }))
+          .catch(() => ({ key, date: null as string | null })),
+      )
     );
 
-    const [checkinsResult, tracksResult] = await Promise.all([
-      query(
-        `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')))::text AS date FROM checkins WHERE user_id = $1`,
-        [user_id]
-      ),
-      query(
-        `SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(timezone, 'UTC')))::text AS date FROM tracks WHERE user_id = $1`,
-        [user_id]
-      ),
-    ]);
-
-    const response: Record<string, string | null> = {
-      checkins: checkinsResult.rows[0]?.date ?? null,
-      tracks: tracksResult.rows[0]?.date ?? null,
-    };
-    for (const { id, date } of pluginEarliestResults) {
-      response[id] = date;
+    const response: Record<string, string | null> = {};
+    for (const { key, date } of earliestResults) {
+      response[key] = date;
     }
 
     res.json(response);

@@ -2,7 +2,7 @@ import { query } from '../db';
 import { reverseGeocode } from './nominatim';
 import { searchNearbyVenues } from './overpass';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 
 // In-memory cancellation signals — checked between batches
 const cancelledJobs = new Set<string>();

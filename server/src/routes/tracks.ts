@@ -22,7 +22,7 @@ import {
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 
 const trackStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {

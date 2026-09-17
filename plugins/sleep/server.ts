@@ -13,19 +13,20 @@
  */
 
 import { Router, Request, Response } from 'express';
-import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { v4 as uuidv4 } from 'uuid';
 import type {
   CheckinTypeServerPlugin,
   PluginTimelineContext,
 } from 'wwp-shared';
+import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
+import { timelineColumnList } from '../../server/src/plugins/timeline';
+import { timelineWhereConditions } from '../../server/src/plugins/sql';
+import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
+import { latestCheckinTimezoneAsOf } from '../../server/src/plugins/coreCheckins';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
 // ---------------------------------------------------------------------------
 // Plugin-owned API: /api/v1/sleep-entries
@@ -36,13 +37,7 @@ const sleepEntriesRouter = Router();
 
 function sanitizeTimezone(value: unknown): string {
   const tz = String(value || '').trim();
-  if (!tz) return 'UTC';
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return tz;
-  } catch {
-    return 'UTC';
-  }
+  return tz && isValidTimeZone(tz) ? tz : 'UTC';
 }
 
 function normalizeRating(value: unknown): number {
@@ -399,18 +394,9 @@ function parseWebhookTimestamp(value: string | undefined): Date | null {
  *   3. 'UTC' as a last resort.
  */
 async function inferSleepTimezone(referenceTime: Date): Promise<string> {
-  const checkinResult = await query(
-    `SELECT checkin_timezone
-     FROM checkins
-     WHERE user_id = $1
-       AND checkin_timezone IS NOT NULL
-       AND checked_in_at <= $2
-     ORDER BY checked_in_at DESC
-     LIMIT 1`,
-    [USER_ID, referenceTime.toISOString()]
-  );
-  if (checkinResult.rows[0]?.checkin_timezone) {
-    return checkinResult.rows[0].checkin_timezone as string;
+  const checkinTimezone = await latestCheckinTimezoneAsOf(referenceTime, USER_ID);
+  if (checkinTimezone) {
+    return checkinTimezone;
   }
 
   const sleepResult = await query(
@@ -566,37 +552,12 @@ webhookRouter.get('/stats', async (_req: Request, res: Response) => {
 
 const importRouter = Router();
 
-const csvStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    const tmpDir = path.join(os.tmpdir(), 'wherewewere-import');
-    fs.mkdirSync(tmpDir, { recursive: true });
-    cb(null, tmpDir);
-  },
-  filename: (_req, file, cb) => {
-    cb(null, `${uuidv4()}-${file.originalname}`);
-  },
+const csvUpload = createImportUpload({
+  fileFilter: (file) =>
+    file.mimetype === 'text/csv' || file.originalname.toLowerCase().endsWith('.csv')
+      ? null
+      : 'Only CSV files are allowed',
 });
-
-const csvUpload = multer({
-  storage: csvStorage,
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'text/csv' || file.originalname.toLowerCase().endsWith('.csv')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only CSV files are allowed'));
-    }
-  },
-  limits: { fileSize: 50 * 1024 * 1024 },
-});
-
-function isValidTimeZone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function parseOffsetMinutes(offsetToken: string): number {
   if (offsetToken === 'GMT' || offsetToken === 'UTC') return 0;
@@ -749,11 +710,7 @@ importRouter.post('/', csvUpload.single('file'), async (req: Request, res: Respo
     console.error('Sleep as Android import error:', err);
     res.status(500).json({ error: 'Import failed', details: err.message || String(err) });
   } finally {
-    try {
-      fs.unlinkSync(file.path);
-    } catch {
-      // ignore cleanup failures
-    }
+    removeImportFile(file.path);
   }
 });
 
@@ -791,74 +748,46 @@ export const server: CheckinTypeServerPlugin = {
   // user woke up, matching the pre-plugin client behavior.
   buildTimelineSelect: () => ({
     sql: `
-      SELECT 'sleep' AS type, se.id, se.user_id, NULL AS venue_id, se.comment AS notes,
-             COALESCE(se.ended_at, se.started_at) AS checked_in_at, se.created_at,
-             NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
-             NULL::text AS venue_timezone,
-             NULL AS venue_category,
-             NULL AS parent_venue_id, NULL AS parent_venue_name,
-             NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-             NULL::text AS track_name,
-             NULL::numeric AS track_distance_m,
-             NULL::text AS track_timezone,
-             NULL::timestamptz AS track_started_at,
-             NULL::timestamptz AS track_ended_at,
-             NULL::bigint AS track_elapsed_time_s,
-             NULL::text AS media_type,
-             NULL::uuid AS media_item_id,
-             NULL::text AS media_title,
-             NULL::text AS media_image_url,
-             NULL::text AS media_author,
-             NULL::smallint AS media_rating,
-             NULL::text AS media_checkin_type,
-             NULL::int AS media_season_number,
-             NULL::int AS media_episode_number,
-             NULL::text AS media_episode_title,
-             NULL::text AS media_timezone,
-             json_build_object(
-               'started_at', se.started_at,
-               'ended_at', se.ended_at,
-               'sleep_timezone', se.sleep_timezone,
-               'rating', se.rating,
-               'comment', se.comment,
-               'sleep_as_android_id', se.sleep_as_android_id
-             )::jsonb AS data
+      SELECT ${timelineColumnList({
+        type: `'sleep'`,
+        id: 'se.id',
+        user_id: 'se.user_id',
+        notes: 'se.comment',
+        checked_in_at: 'COALESCE(se.ended_at, se.started_at)',
+        created_at: 'se.created_at',
+        data: `json_build_object(
+          'started_at', se.started_at,
+          'ended_at', se.ended_at,
+          'sleep_timezone', se.sleep_timezone,
+          'rating', se.rating,
+          'comment', se.comment,
+          'sleep_as_android_id', se.sleep_as_android_id
+        )::jsonb`,
+        timezone: 'se.sleep_timezone',
+      })}
       FROM sleep_entries se
     `,
   }),
 
   buildTimelineWhere: (ctx: PluginTimelineContext) => {
-    const conditions: string[] = [];
-    const values: unknown[] = [];
-    const push = (cond: string, value: unknown) => {
-      values.push(value);
-      conditions.push(cond.replace('?', `$${values.length}`));
-    };
-
-    if (ctx.user_id) {
-      push('se.user_id = ?', ctx.user_id);
-    }
-    if (ctx.from) {
-      push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= ?::date`, ctx.from);
-    }
-    if (ctx.to) {
-      push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date <= ?::date`, ctx.to);
-    }
-    if (ctx.q) {
-      push(`se.comment ILIKE '%' || ? || '%'`, ctx.q);
-    }
+    const conds = timelineWhereConditions(ctx, {
+      alias: 'se',
+      timestampColumn: 'ended_at',
+      timezoneColumn: 'sleep_timezone',
+      search: (c, q) => c.push(`se.comment ILIKE '%' || ? || '%'`, q),
+    });
 
     const durationFilter = (ctx.filterParams.sleep_duration ?? '').toLowerCase();
     if (durationFilter === 'lte6') {
-      conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) <= 21600`);
+      conds.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) <= 21600`);
     } else if (durationFilter === '6to8') {
-      conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) > 21600`);
-      conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) < 28800`);
+      conds.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) > 21600`);
+      conds.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) < 28800`);
     } else if (durationFilter === 'gte8') {
-      conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) >= 28800`);
+      conds.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) >= 28800`);
     }
 
-    return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+    return conds.build();
   },
 
   // When a backup carries a plugins.sleep payload the framework restores via
@@ -1098,24 +1027,17 @@ export const server: CheckinTypeServerPlugin = {
     },
   },
 
-  // Start-over: wipe this plugin's settings rows (entry data is handled by
-  // deleteUserData; sleep_webhook_events are per-user event logs that
-  // reference nothing persistent).
+  // Start-over: wipe the per-user webhook event log (sleep_webhook_events;
+  // entry data is handled by deleteUserData and plugin_settings rows by the
+  // framework).
   resetSettings: async ({ user_id, client: txClient }) => {
     const client = txClient ?? null;
     const run = (sql: string, values: unknown[]) =>
       client ? client.query(sql, values) : query(sql, values);
-    let deleted = 0;
     const eventsResult = await run(
       'DELETE FROM sleep_webhook_events WHERE user_id = $1 RETURNING id',
       [user_id],
     );
-    deleted += eventsResult.rowCount ?? 0;
-    const settingsResult = await run(
-      'DELETE FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2',
-      [user_id, 'sleep'],
-    );
-    deleted += settingsResult.rowCount ?? 0;
-    return deleted;
+    return eventsResult.rowCount ?? 0;
   },
 };

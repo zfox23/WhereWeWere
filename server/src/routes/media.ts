@@ -7,7 +7,7 @@ import { hardcover } from '../services/hardcover';
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 
 const MEDIA_TYPES = new Set(['movie', 'tv_show', 'game', 'book', 'board_game']);
 const CHECKIN_TYPES = new Set(['completed', 'in_progress', 'dropped']);

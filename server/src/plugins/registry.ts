@@ -44,6 +44,23 @@ export function allPlugins(): CheckinTypeServer[] {
   return registrations;
 }
 
+/**
+ * Register a plugin at runtime (tests only). Production plugins are
+ * registered statically above; this exists so test fixtures can exercise
+ * the framework without being shipped. The plugin must be created before
+ * the Express app is built (routes capture branch lists at startup).
+ */
+export function registerPlugin(plugin: CheckinTypeServer): void {
+  if (!isValidPluginId(plugin.id)) {
+    throw new Error(`Plugin id "${plugin.id}" is invalid (must match /^[a-z][a-z0-9_]*$/)`);
+  }
+  if (byId.has(plugin.id)) {
+    throw new Error(`Duplicate check-in plugin id: ${plugin.id}`);
+  }
+  registrations.push(plugin);
+  byId.set(plugin.id, plugin);
+}
+
 /** Look up a plugin by id. */
 export function getPlugin(id: string): CheckinTypeServer | undefined {
   return byId.get(id);
@@ -57,6 +74,39 @@ export function hasPlugin(id: string): boolean {
 /** All plugin ids. */
 export function pluginIds(): string[] {
   return Array.from(byId.keys());
+}
+
+/**
+ * Earliest-date hooks for the core built-in check-in types, keyed by the
+ * response key the client expects (`checkins`, `tracks`). The "all time"
+ * period selector and /stats/earliest-dates treat these exactly like the
+ * plugins' `earliestDate` hooks, so every type flows through one code path.
+ */
+export const BUILTIN_EARLIEST_DATES: Record<string, { sql: string }> = {
+  checkins: {
+    sql: `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')))::text AS date
+          FROM checkins WHERE user_id = $1`,
+  },
+  tracks: {
+    sql: `SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(timezone, 'UTC')))::text AS date
+          FROM tracks WHERE user_id = $1`,
+  },
+};
+
+/**
+ * All earliest-date sources: built-in types plus every plugin's hook.
+ * Returns `{ key, sql }` entries (entries without a hook are omitted).
+ */
+export function earliestDateSources(): { key: string; sql: string }[] {
+  const sources: { key: string; sql: string }[] = [];
+  for (const [key, hook] of Object.entries(BUILTIN_EARLIEST_DATES)) {
+    sources.push({ key, sql: hook.sql });
+  }
+  for (const plugin of allPlugins()) {
+    const hook = plugin.server.earliestDate?.();
+    if (hook) sources.push({ key: plugin.id, sql: hook.sql });
+  }
+  return sources;
 }
 
 /**

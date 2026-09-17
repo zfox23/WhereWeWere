@@ -13,20 +13,20 @@
  */
 
 import { Router, Request, Response } from 'express';
-import multer from 'multer';
 import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import crypto from 'crypto';
-import { v4 as uuidv4 } from 'uuid';
 import * as unzipper from 'unzipper';
 import type {
   CheckinTypeServerPlugin,
   PluginTimelineContext,
 } from 'wwp-shared';
+import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
+import { timelineColumnList } from '../../server/src/plugins/timeline';
+import { timelineWhereConditions } from '../../server/src/plugins/sql';
+import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
 // ---------------------------------------------------------------------------
 // Shared SQL fragments
@@ -769,27 +769,11 @@ router.get('/stats/heatmap', async (req: Request, res: Response) => {
 // (moved from server/src/routes/import-daylio.ts; behavior unchanged)
 // ---------------------------------------------------------------------------
 
-const daylioStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    const tmpDir = path.join(os.tmpdir(), 'wherewewere-import');
-    fs.mkdirSync(tmpDir, { recursive: true });
-    cb(null, tmpDir);
-  },
-  filename: (_req, file, cb) => {
-    cb(null, `${uuidv4()}-${file.originalname}`);
-  },
-});
-
-const daylioUpload = multer({
-  storage: daylioStorage,
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/zip' || file.originalname.endsWith('.daylio')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only .daylio files are allowed'));
-    }
-  },
-  limits: { fileSize: 50 * 1024 * 1024 },
+const daylioUpload = createImportUpload({
+  fileFilter: (file) =>
+    file.mimetype === 'application/zip' || file.originalname.endsWith('.daylio')
+      ? null
+      : 'Only .daylio files are allowed',
 });
 
 interface DaylioEntry {
@@ -825,15 +809,6 @@ interface DaylioBackup {
 function normalizeEpochMillis(value: number): number {
   // Daylio exports can use milliseconds, but some exports may provide seconds.
   return value < 1e12 ? value * 1000 : value;
-}
-
-function isValidTimeZone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -1255,11 +1230,7 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
     }
 
     // Clean up temp file
-    try {
-      fs.unlinkSync(file.path);
-    } catch {
-      /* ignore */
-    }
+    removeImportFile(file.path);
 
     res.json({
       imported,
@@ -1312,67 +1283,41 @@ export const server: CheckinTypeServerPlugin = {
 
   buildTimelineSelect: () => ({
     sql: `
-      SELECT 'mood' AS type, mc.id, mc.user_id, NULL AS venue_id, mc.note AS notes,
-             mc.checked_in_at, mc.created_at,
-             NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
-             NULL::text AS venue_timezone,
-             NULL AS venue_category,
-             NULL AS parent_venue_id, NULL AS parent_venue_name,
-             mc.mood, mc.mood_timezone,
-             ${ACTIVITIES_JSON} AS activities,
-             NULL::text AS track_name,
-             NULL::numeric AS track_distance_m,
-             NULL::text AS track_timezone,
-             NULL::timestamptz AS track_started_at,
-             NULL::timestamptz AS track_ended_at,
-             NULL::bigint AS track_elapsed_time_s,
-             NULL::text AS media_type,
-             NULL::uuid AS media_item_id,
-             NULL::text AS media_title,
-             NULL::text AS media_image_url,
-             NULL::text AS media_author,
-             NULL::smallint AS media_rating,
-             NULL::text AS media_checkin_type,
-             NULL::int AS media_season_number,
-             NULL::int AS media_episode_number,
-             NULL::text AS media_episode_title,
-             NULL::text AS media_timezone,
-             json_build_object(
-               'mood', mc.mood,
-               'note', mc.note,
-               'activities', ${ACTIVITIES_JSON}
-             )::jsonb AS data
+      SELECT ${timelineColumnList({
+        type: `'mood'`,
+        id: 'mc.id',
+        user_id: 'mc.user_id',
+        notes: 'mc.note',
+        checked_in_at: 'mc.checked_in_at',
+        created_at: 'mc.created_at',
+        mood: 'mc.mood',
+        mood_timezone: 'mc.mood_timezone',
+        activities: ACTIVITIES_JSON,
+        data: `json_build_object(
+          'mood', mc.mood,
+          'note', mc.note,
+          'activities', ${ACTIVITIES_JSON}
+        )::jsonb`,
+        timezone: 'mc.mood_timezone',
+      })}
       FROM mood_checkins mc
     `,
   }),
 
   buildTimelineWhere: (ctx: PluginTimelineContext) => {
-    const conditions: string[] = [];
-    const values: unknown[] = [];
-    const push = (cond: string, value: unknown) => {
-      values.push(value);
-      conditions.push(cond.replace('?', `$${values.length}`));
-    };
-
-    if (ctx.user_id) {
-      push('mc.user_id = ?', ctx.user_id);
-    }
-    if (ctx.from) {
-      push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date >= ?::date`, ctx.from);
-    }
-    if (ctx.to) {
-      push(`(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date <= ?::date`, ctx.to);
-    }
-    if (ctx.q) {
-      push(`mc.note ILIKE '%' || ? || '%'`, ctx.q);
-    }
+    const conds = timelineWhereConditions(ctx, {
+      alias: 'mc',
+      timestampColumn: 'checked_in_at',
+      timezoneColumn: 'mood_timezone',
+      search: (c, q) => c.push(`mc.note ILIKE '%' || ? || '%'`, q),
+    });
 
     const moodValue = ctx.filterParams.mood ? parseInt(ctx.filterParams.mood, 10) : NaN;
     if (moodValue >= 1 && moodValue <= 5) {
-      push('mc.mood = ?', moodValue);
+      conds.push('mc.mood = ?', moodValue);
     }
     if (ctx.filterParams.activity) {
-      push(
+      conds.push(
         `EXISTS (
           SELECT 1 FROM mood_checkin_activities mca2
           JOIN mood_activities ma2 ON mca2.activity_id = ma2.id
@@ -1383,7 +1328,7 @@ export const server: CheckinTypeServerPlugin = {
       );
     }
 
-    return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
+    return conds.build();
   },
 
   extraBackupTables: [
@@ -1722,23 +1667,17 @@ export const server: CheckinTypeServerPlugin = {
     },
   },
 
-  // Start-over: also wipe the user-scoped activity groups/activities and this
-  // plugin's settings rows (check-in data is handled by deleteUserData).
+  // Start-over: wipe the user-scoped activity groups/activities. The
+  // framework deletes plugin_checkins (deleteUserData) and plugin_settings
+  // rows on its own.
   resetSettings: async ({ user_id, client: txClient }) => {
     const client = txClient ?? null;
     const run = (sql: string, values: unknown[]) =>
       client ? client.query(sql, values) : query(sql, values);
-    let deleted = 0;
     const groupsResult = await run(
       'DELETE FROM mood_activity_groups WHERE user_id = $1 RETURNING id',
       [user_id],
     );
-    deleted += groupsResult.rowCount ?? 0;
-    const settingsResult = await run(
-      'DELETE FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2',
-      [user_id, 'mood'],
-    );
-    deleted += settingsResult.rowCount ?? 0;
-    return deleted;
+    return groupsResult.rowCount ?? 0;
   },
 };

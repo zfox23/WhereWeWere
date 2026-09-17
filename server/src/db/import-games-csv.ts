@@ -49,7 +49,7 @@ import { normalizeTitle, titleRelation } from '../services/titleMatch';
 // Re-exported for any external consumers of this module's title helpers.
 export { normalizeTitle, titleRelation };
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const TGDB_API_LIMIT_URL = 'https://api.thegamesdb.net/v1/API/Limit';
 /** Delay between consecutive TGDB API calls. */
 const TGDB_DELAY_MS = 500;

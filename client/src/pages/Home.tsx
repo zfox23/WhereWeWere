@@ -50,22 +50,11 @@ function formatDateHeader(dateStr: string) {
 
 /**
  * Get the local calendar date of a checkin in its timezone (YYYY-MM-DD).
- * Uses venue_timezone for location checkins and mood_timezone for mood checkins.
- * Falls back to browser local time if no timezone is stored.
+ * Every branch of the unified timeline emits the shared `timezone` column;
+ * falls back to browser local time when it is null.
  */
 function getLocalDateKey(item: TimelineItem): string {
-  // Plugin check-ins carry their timezone in the shared `timezone` column.
-  const pluginTz = hasClientPlugin(item.type) ? (item as unknown as PluginTimelineEntry).timezone : null;
-  const tz = pluginTz
-    ?? (item.type === 'location'
-      ? item.venue_timezone
-      : item.type === 'mood'
-        ? item.mood_timezone
-        : item.type === 'track'
-          ? item.track_timezone
-          : item.type === 'media'
-            ? item.media_timezone
-            : null);
+  const tz = item.timezone ?? null;
   return new Date(item.checked_in_at).toLocaleDateString('en-CA', {
     ...(tz ? { timeZone: tz } : {}),
   });

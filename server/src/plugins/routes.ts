@@ -30,7 +30,7 @@ import {
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 
 function publicManifest(pluginId: string) {
   const plugin = getPlugin(pluginId);
@@ -110,7 +110,7 @@ router.get('/:pluginId/checkins/:id', async (req: Request, res: Response) => {
   const plugin = await genericPluginOr404(String(req.params.pluginId), res);
   if (!plugin) return;
   try {
-    const row = await getGenericCheckin(String(req.params.id), plugin.id);
+    const row = await getGenericCheckin(String(req.params.id), plugin.id, USER_ID);
     if (!row) return res.status(404).json({ error: 'Check-in not found' });
     res.json(row);
   } catch (err) {
@@ -125,7 +125,7 @@ router.put('/:pluginId/checkins/:id', async (req: Request, res: Response) => {
   if (!plugin) return;
   try {
     const { checked_in_at, checkin_timezone, data } = req.body ?? {};
-    const row = await updateGenericCheckin(String(req.params.id), plugin, {
+    const row = await updateGenericCheckin(String(req.params.id), plugin, USER_ID, {
       checked_in_at: checked_in_at ?? undefined,
       checkin_timezone: checkin_timezone ?? undefined,
       data: data ?? undefined,
@@ -145,7 +145,7 @@ router.delete('/:pluginId/checkins/:id', async (req: Request, res: Response) => 
   if (!plugin) return;
   try {
     const id = String(req.params.id);
-    const deleted = await deleteGenericCheckin(id, plugin.id);
+    const deleted = await deleteGenericCheckin(id, plugin.id, USER_ID);
     if (!deleted) return res.status(404).json({ error: 'Check-in not found' });
     res.json({ message: 'Check-in deleted', id });
   } catch (err) {

@@ -4,7 +4,7 @@ import { pluginTimestampBranchUnion } from '../plugins/registry';
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 
 function formatMalojaDate(d: Date): string {
   const year = d.getUTCFullYear();
