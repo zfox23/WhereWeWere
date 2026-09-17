@@ -71,6 +71,19 @@ export function pluginTimestampBranches(): string[] {
 }
 
 /**
+ * Pre-joined version of {@link pluginTimestampBranches} for splicing after a
+ * core SELECT branch: returns 'UNION ALL <branch>' segments including the
+ * separator BEFORE the first branch, or '' when no plugins contribute.
+ * `indent` is applied to each continuation line.
+ */
+export function pluginTimestampBranchUnion(indent = ''): string {
+  const branches = pluginTimestampBranches();
+  if (branches.length === 0) return '';
+  const sep = `UNION ALL\n${indent}`;
+  return sep + branches.join(sep);
+}
+
+/**
  * SQL branches for the "this day in previous years" reflection list. Each
  * branch is a parenthesized SELECT matching the core reflection column shape
  * (type, id, checked_in_at, note, venue_*, reflection_year, years_ago,

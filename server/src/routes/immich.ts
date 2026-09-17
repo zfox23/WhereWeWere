@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { pluginTimestampBranches } from '../plugins/registry';
+import { pluginTimestampBranchUnion } from '../plugins/registry';
 
 const router = Router();
 
@@ -26,11 +26,11 @@ router.get('/photos/:checkinId', async (req: Request, res: Response) => {
 
     // Get anchor timestamp (location check-in, track start, or any plugin check-in)
     const checkinResult = await query(
-      `SELECT checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
+      `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
        UNION ALL
-       SELECT started_at FROM tracks WHERE id = ANY($1::uuid[])
-       ${pluginTimestampBranches().join('\n       UNION ALL\n       ')}`,
-      [[checkinId]]
+       SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])
+       ${pluginTimestampBranchUnion('       ')}`,
+       [[checkinId]]
     );
     if (checkinResult.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in not found' });
@@ -103,8 +103,8 @@ router.get('/photos', async (req: Request, res: Response) => {
       `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
        UNION ALL
        SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])
-       ${pluginTimestampBranches().join('\n       UNION ALL\n       ')}`,
-      [checkinIds]
+       ${pluginTimestampBranchUnion('       ')}`,
+       [checkinIds]
     );
 
     const checkinTimes = new Map<string, Date>();

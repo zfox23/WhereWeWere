@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { pluginTimestampBranches } from '../plugins/registry';
+import { pluginTimestampBranchUnion } from '../plugins/registry';
 
 const router = Router();
 
@@ -60,7 +60,7 @@ router.get('/', async (req: Request, res: Response) => {
         `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
          UNION ALL
          SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])
-         ${pluginTimestampBranches().join('\n         UNION ALL\n         ')}`,
+         ${pluginTimestampBranchUnion('         ')}`,
         [uncachedIds]
       );
 
