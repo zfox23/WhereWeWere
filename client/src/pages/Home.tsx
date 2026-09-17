@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Smile, Moon, Route, Clapperboard, AlignJustify, Rows3 } from 'lucide-react';
-import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, moodActivities, stats, tracks } from '../api/client';
+import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Moon, Route, Clapperboard, AlignJustify, Rows3 } from 'lucide-react';
+import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, stats, tracks } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import type { PluginTimelineEntry } from 'wwp-shared';
 import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/registry';
 import { PluginTimelineCard } from '../plugins/autoCard';
+import { plugins as pluginApi } from '../plugins/api';
 import CheckInCard from '../components/CheckInCard';
 import MediaCard from '../components/MediaCard';
 import SleepCard from '../components/SleepCard';
 import TrackCard from '../components/TrackCard';
 import Filters from '../components/filters/Filters';
-import { MOOD_LABELS } from '../components/MoodIcons';
 import { usePageTitle } from '../utils/pageTitle';
 import { MEDIA_SUBTYPES } from '../utils/media';
 import type { MediaSubtype } from '../types';
@@ -36,7 +36,7 @@ const PLUGIN_HOTKEYS: Record<string, string> = Object.fromEntries(
  * Brand-new plugins (id not in this set) get the generic plugin filter
  * section and include state automatically.
  */
-const LEGACY_TYPE_IDS = new Set(['location', 'mood', 'sleep', 'track', 'media']);
+const LEGACY_TYPE_IDS = new Set(['location', 'sleep', 'track', 'media']);
 /** Check-in plugins that are NOT legacy types (fully generic treatment). */
 const NEW_PLUGINS = allClientPlugins().filter((p) => !LEGACY_TYPE_IDS.has(p.id));
 
@@ -59,7 +59,7 @@ function getLocalDateKey(item: TimelineItem): string {
     ? item.sleep_ended_at || item.checked_in_at
     : item.checked_in_at;
   // Plugin check-ins carry their timezone in the shared `timezone` column.
-  const pluginTz = hasClientPlugin(item.type) ? (item as PluginTimelineEntry).timezone : null;
+  const pluginTz = hasClientPlugin(item.type) ? (item as unknown as PluginTimelineEntry).timezone : null;
   const tz = pluginTz
     ?? (item.type === 'location'
       ? item.venue_timezone
@@ -211,13 +211,12 @@ export default function Home() {
   const newId = (location.state as { newId?: string } | null)?.newId ?? null;
   const newIdAnimatedRef = useRef<string | null>(null);
   const typeParam = searchParams.get('type') || '';
-  const timelineType = typeParam === 'location' || typeParam === 'mood' || typeParam === 'sleep' || typeParam === 'track' || typeParam === 'media' ? typeParam : '';
+  const timelineType = typeParam === 'location' || typeParam === 'sleep' || typeParam === 'track' || typeParam === 'media' ? typeParam : '';
   const [items, setItems] = useState<TimelineItem[]>([]);
-  const [includeLocation, setIncludeLocation] = useState(() => timelineType !== 'mood' && timelineType !== 'sleep' && timelineType !== 'track');
-  const [includeMood, setIncludeMood] = useState(() => timelineType !== 'location' && timelineType !== 'sleep' && timelineType !== 'track');
-  const [includeSleep, setIncludeSleep] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'track');
-  const [includeTrack, setIncludeTrack] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'sleep');
-  const [includeMedia, setIncludeMedia] = useState(() => timelineType !== 'location' && timelineType !== 'mood' && timelineType !== 'sleep' && timelineType !== 'track');
+  const [includeLocation, setIncludeLocation] = useState(() => timelineType !== 'sleep' && timelineType !== 'track');
+  const [includeSleep, setIncludeSleep] = useState(() => timelineType !== 'location' && timelineType !== 'track');
+  const [includeTrack, setIncludeTrack] = useState(() => timelineType !== 'location' && timelineType !== 'sleep');
+  const [includeMedia, setIncludeMedia] = useState(() => timelineType !== 'location' && timelineType !== 'sleep' && timelineType !== 'track');
   // Inclusion state for NEW check-in plugin types (legacy types like mood
   // keep their built-in include state).
   const [pluginIncludes, setPluginIncludes] = useState<Record<string, boolean>>(() =>
@@ -234,7 +233,6 @@ export default function Home() {
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [trackActivityOptions, setTrackActivityOptions] = useState<string[]>([]);
-  const [activityOptions, setActivityOptions] = useState<{ id: string; name: string; groupName: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -243,7 +241,7 @@ export default function Home() {
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [openTimelineDotDate, setOpenTimelineDotDate] = useState<string | null>(null);
-  const [iconPack, setIconPack] = useState('emoji');
+  const [pluginSettings, setPluginSettings] = useState<Record<string, Record<string, unknown>>>({});
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
@@ -254,9 +252,21 @@ export default function Home() {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
       if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
       if (s.dawarich_url) setDawarichUrl(s.dawarich_url.replace(/\/+$/, ''));
-      if (s.mood_icon_pack) setIconPack(s.mood_icon_pack);
       if (s.timeline_density === 'compact' || s.timeline_density === 'comfortable') setTimelineDensity(s.timeline_density);
     }).catch(() => {});
+  }, []);
+
+  // Load each plugin's settings (e.g. the mood icon pack) for its cards.
+  useEffect(() => {
+    Promise.all(
+      allClientPlugins().map(async (plugin) => {
+        try {
+          return [plugin.id, await pluginApi.settings.get(plugin.id)] as const;
+        } catch {
+          return [plugin.id, {}] as const;
+        }
+      }),
+    ).then((entries) => setPluginSettings(Object.fromEntries(entries)));
   }, []);
 
   const toggleTimelineDensity = useCallback(() => {
@@ -267,22 +277,6 @@ export default function Home() {
     });
   }, []);
 
-  // Load all mood activities for Activity filter dropdown
-  useEffect(() => {
-    moodActivities.groups().then((groups) => {
-      const options = (groups || []).flatMap((g: any) =>
-        (g.activities || []).map((a: any) => ({
-          id: a.id,
-          name: a.name,
-          groupName: g.name,
-        }))
-      );
-      options.sort((a, b) => a.groupName.localeCompare(b.groupName) || a.name.localeCompare(b.name));
-      setActivityOptions(options);
-    }).catch(() => {
-      setActivityOptions([]);
-    });
-  }, []);
 
   // Read filters from URL params
   const searchQuery = searchParams.get('q') || '';
@@ -291,8 +285,6 @@ export default function Home() {
   const venueId = searchParams.get('venue_id') || '';
   const category = searchParams.get('category') || '';
   const country = searchParams.get('country') || '';
-  const mood = searchParams.get('mood') || '';
-  const activity = searchParams.get('activity') || '';
   const sleepDuration = searchParams.get('sleep_duration') || '';
   const trackActivity = searchParams.get('track_activity') || '';
   const mediaSubtypes = searchParams.get('media_subtype') || '';
@@ -320,22 +312,18 @@ export default function Home() {
     return null;
   }, [pluginFilterParams]);
   const hasPluginFilter = activePluginFilterId !== null;
-  const hasMoodTypeFilter = Boolean(mood || activity);
   const hasLocationTypeFilter = Boolean(venueId || category || country);
   const hasSleepTypeFilter = Boolean(sleepDuration);
   const hasTrackTypeFilter = Boolean(trackActivity);
   const hasMediaTypeFilter = Boolean(mediaSubtypes);
-  const moodFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
-  const locationFiltersDisabled = hasMoodTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
-  const sleepFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
-  const trackFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter || hasMediaTypeFilter;
-  const mediaFiltersDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
-  const moodTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
-  const locationTypeToggleDisabled = hasMoodTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
-  const sleepTypeToggleDisabled = hasMoodTypeFilter || hasLocationTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
-  const trackTypeToggleDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter || hasMediaTypeFilter;
-  const mediaTypeToggleDisabled = hasLocationTypeFilter || hasMoodTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
-  const moodSectionDisabled = moodFiltersDisabled || !includeMood;
+  const locationFiltersDisabled = hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
+  const sleepFiltersDisabled = hasLocationTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
+  const trackFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasMediaTypeFilter;
+  const mediaFiltersDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
+  const locationTypeToggleDisabled = hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
+  const sleepTypeToggleDisabled = hasLocationTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter;
+  const trackTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasMediaTypeFilter;
+  const mediaTypeToggleDisabled = hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter;
   const locationSectionDisabled = locationFiltersDisabled || !includeLocation;
   const sleepSectionDisabled = sleepFiltersDisabled;
   const trackSectionDisabled = trackFiltersDisabled || !includeTrack;
@@ -358,7 +346,6 @@ export default function Home() {
 
   function includedForType(type: string): boolean {
     if (type === 'location') return includeLocation;
-    if (type === 'mood') return includeMood;
     if (type === 'sleep') return includeSleep;
     if (type === 'track') return includeTrack;
     if (type === 'media') return includeMedia;
@@ -371,8 +358,10 @@ export default function Home() {
     setPluginIncludes((prev) => {
       const current = prev[pluginId] ?? true;
       // Keep at least one type visible.
-      const othersOn = Object.keys(prev).some((k) => k !== pluginId && (prev[k] ?? true));
-      if (current && !othersOn && includeLocation === false && includeSleep === false && includeTrack === false && includeMedia === false) {
+      const othersOn =
+        Object.keys(prev).some((k) => k !== pluginId && (prev[k] ?? true)) ||
+        includeLocation || includeSleep || includeTrack || includeMedia;
+      if (current && !othersOn) {
         return prev;
       }
       return { ...prev, [pluginId]: !current };
@@ -400,20 +389,10 @@ export default function Home() {
       setIncludeSleep(false);
       setIncludeTrack(false);
       setIncludeMedia(false);
-      setPluginIncludes(Object.fromEntries(allClientPlugins().map((p) => [p.id, p.id === pluginId])));
+      setAllPluginIncludes(false);
+      setOnlyPluginInclude(pluginId, true);
     }
   }
-
-  useEffect(() => {
-    if (hasMoodTypeFilter) {
-      setIncludeLocation(false);
-      setIncludeMood(true);
-      setIncludeSleep(false);
-      setIncludeTrack(false);
-      setIncludeMedia(false);
-      setAllPluginIncludes(false);
-    }
-  }, [hasMoodTypeFilter, setAllPluginIncludes]);
 
   // A plugin filter narrows to that one plugin type.
   useEffect(() => {
@@ -423,7 +402,6 @@ export default function Home() {
       setIncludeTrack(false);
       setIncludeMedia(false);
       if (hasClientPlugin(activePluginFilterId)) {
-        setIncludeMood(false);
         setOnlyPluginInclude(activePluginFilterId, true);
       }
     }
@@ -431,109 +409,99 @@ export default function Home() {
 
   useEffect(() => {
     if (hasLocationTypeFilter) {
-      setIncludeMood(false);
       setIncludeLocation(true);
       setIncludeSleep(false);
       setIncludeTrack(false);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
     }
-  }, [hasLocationTypeFilter]);
+  }, [hasLocationTypeFilter, setAllPluginIncludes]);
 
   useEffect(() => {
     if (hasSleepTypeFilter) {
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(true);
       setIncludeTrack(false);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
     }
-  }, [hasSleepTypeFilter]);
+  }, [hasSleepTypeFilter, setAllPluginIncludes]);
 
   useEffect(() => {
     if (hasTrackTypeFilter) {
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeTrack(true);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
     }
-  }, [hasTrackTypeFilter]);
+  }, [hasTrackTypeFilter, setAllPluginIncludes]);
 
   useEffect(() => {
     if (hasMediaTypeFilter) {
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeTrack(false);
       setIncludeMedia(true);
+      setAllPluginIncludes(false);
     }
-  }, [hasMediaTypeFilter]);
+  }, [hasMediaTypeFilter, setAllPluginIncludes]);
 
   useEffect(() => {
-    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter) return;
+    if (hasPluginFilter || hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter) return;
     if (timelineType === 'location') {
       setIncludeLocation(true);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeTrack(false);
       setIncludeMedia(false);
-      return;
-    }
-    if (timelineType === 'mood') {
-      setIncludeLocation(false);
-      setIncludeMood(true);
-      setIncludeSleep(false);
-      setIncludeTrack(false);
-      setIncludeMedia(false);
+      setAllPluginIncludes(false);
       return;
     }
     if (timelineType === 'sleep') {
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(true);
       setIncludeTrack(false);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
       return;
     }
     if (timelineType === 'track') {
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeTrack(true);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
       return;
     }
     if (timelineType === 'media') {
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeTrack(false);
       setIncludeMedia(true);
+      setAllPluginIncludes(false);
       return;
     }
     setIncludeLocation(true);
-    setIncludeMood(true);
     setIncludeSleep(true);
     setIncludeTrack(true);
     setIncludeMedia(true);
-  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, hasTrackTypeFilter, hasMediaTypeFilter, timelineType]);
+    setAllPluginIncludes(true);
+  }, [hasPluginFilter, hasLocationTypeFilter, hasSleepTypeFilter, hasTrackTypeFilter, hasMediaTypeFilter, timelineType, setAllPluginIncludes]);
 
   useEffect(() => {
-    if (hasMoodTypeFilter || hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter) return;
-    const allOn = includeLocation && includeMood && includeSleep && includeTrack && includeMedia;
+    if (hasPluginFilter || hasLocationTypeFilter || hasSleepTypeFilter || hasTrackTypeFilter || hasMediaTypeFilter) return;
+    const allOn = includeLocation && includeSleep && includeTrack && includeMedia;
     const nextType = allOn
       ? ''
-      : includeLocation && !includeMood && !includeSleep && !includeTrack && !includeMedia
+      : includeLocation && !includeSleep && !includeTrack && !includeMedia
         ? 'location'
-        : !includeLocation && includeMood && !includeSleep && !includeTrack && !includeMedia
-          ? 'mood'
-          : !includeLocation && !includeMood && includeSleep && !includeTrack && !includeMedia
-            ? 'sleep'
-            : !includeLocation && !includeMood && !includeSleep && includeTrack && !includeMedia
-              ? 'track'
-              : !includeLocation && !includeMood && !includeSleep && !includeTrack && includeMedia
-                ? 'media'
-                : '';
+        : !includeLocation && includeSleep && !includeTrack && !includeMedia
+          ? 'sleep'
+          : !includeLocation && !includeSleep && includeTrack && !includeMedia
+            ? 'track'
+            : !includeLocation && !includeSleep && !includeTrack && includeMedia
+              ? 'media'
+              : '';
     if (nextType === timelineType) return;
 
     setSearchParams((prev) => {
@@ -545,14 +513,14 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
-  }, [hasLocationTypeFilter, hasMoodTypeFilter, hasSleepTypeFilter, hasTrackTypeFilter, hasMediaTypeFilter, includeLocation, includeMood, includeSleep, includeTrack, includeMedia, setSearchParams, timelineType]);
+  }, [hasPluginFilter, hasLocationTypeFilter, hasSleepTypeFilter, hasTrackTypeFilter, hasMediaTypeFilter, includeLocation, includeSleep, includeTrack, includeMedia, setSearchParams, timelineType]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
-    if (fromDate || toDate || venueId || category || country || mood || activity || sleepDuration || trackActivity || mediaSubtypes) {
+    if (fromDate || toDate || venueId || category || country || sleepDuration || trackActivity || mediaSubtypes || hasPluginFilter) {
       setShowFilters(true);
     }
-  }, [fromDate, toDate, venueId, category, country, mood, activity, sleepDuration, trackActivity, mediaSubtypes]);
+  }, [fromDate, toDate, venueId, category, country, sleepDuration, trackActivity, mediaSubtypes, hasPluginFilter]);
 
   // Load distinct track activity types for the Track filter
   useEffect(() => {
@@ -631,38 +599,9 @@ export default function Home() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  const setMoodTypeFilter = useCallback((key: 'mood' | 'activity', value: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('venue_id');
-      next.delete('category');
-      next.delete('country');
-      next.delete('sleep_duration');
-      next.delete('track_activity');
-      next.delete('media_subtype');
-      next.delete('type');
-      if (value) {
-        next.set(key, value);
-      } else {
-        next.delete(key);
-      }
-      return next;
-    }, { replace: true });
-
-    if (value) {
-      setIncludeMood(true);
-      setIncludeLocation(false);
-      setIncludeSleep(false);
-      setIncludeTrack(false);
-      setIncludeMedia(false);
-    }
-  }, [setSearchParams]);
-
   const setLocationTypeFilter = useCallback((key: 'venue_id' | 'category' | 'country', value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      next.delete('mood');
-      next.delete('activity');
       next.delete('sleep_duration');
       next.delete('track_activity');
       next.delete('media_subtype');
@@ -677,12 +616,12 @@ export default function Home() {
 
     if (value) {
       setIncludeLocation(true);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeTrack(false);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
     }
-  }, [setSearchParams]);
+  }, [setSearchParams, setAllPluginIncludes]);
 
   const setSleepTypeFilter = useCallback((value: string) => {
     setSearchParams((prev) => {
@@ -690,8 +629,6 @@ export default function Home() {
       next.delete('venue_id');
       next.delete('category');
       next.delete('country');
-      next.delete('mood');
-      next.delete('activity');
       next.delete('track_activity');
       next.delete('media_subtype');
       next.delete('type');
@@ -705,12 +642,12 @@ export default function Home() {
 
     if (!value) {
       setIncludeLocation(true);
-      setIncludeMood(true);
       setIncludeSleep(true);
       setIncludeTrack(true);
       setIncludeMedia(true);
+      setAllPluginIncludes(true);
     }
-  }, [setSearchParams]);
+  }, [setSearchParams, setAllPluginIncludes]);
 
   const setTrackTypeFilter = useCallback((value: string) => {
     setSearchParams((prev) => {
@@ -718,8 +655,6 @@ export default function Home() {
       next.delete('venue_id');
       next.delete('category');
       next.delete('country');
-      next.delete('mood');
-      next.delete('activity');
       next.delete('sleep_duration');
       next.delete('media_subtype');
       next.delete('type');
@@ -734,11 +669,11 @@ export default function Home() {
     if (value) {
       setIncludeTrack(true);
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeMedia(false);
+      setAllPluginIncludes(false);
     }
-  }, [setSearchParams]);
+  }, [setSearchParams, setAllPluginIncludes]);
 
   const setMediaSubtypeFilter = useCallback((value: string) => {
     setSearchParams((prev) => {
@@ -746,8 +681,6 @@ export default function Home() {
       next.delete('venue_id');
       next.delete('category');
       next.delete('country');
-      next.delete('mood');
-      next.delete('activity');
       next.delete('sleep_duration');
       next.delete('track_activity');
       next.delete('type');
@@ -762,51 +695,43 @@ export default function Home() {
     if (value) {
       setIncludeMedia(true);
       setIncludeLocation(false);
-      setIncludeMood(false);
       setIncludeSleep(false);
       setIncludeTrack(false);
+      setAllPluginIncludes(false);
     }
-  }, [setSearchParams]);
+  }, [setSearchParams, setAllPluginIncludes]);
 
   const toggleLocationType = useCallback(() => {
     if (locationTypeToggleDisabled) return;
     setIncludeLocation((prev) => {
-      if (prev && !includeMood && !includeSleep && !includeTrack && !includeMedia) return prev;
+      if (prev && !includeSleep && !includeTrack && !includeMedia) return prev;
       return !prev;
     });
-  }, [includeMood, includeSleep, includeTrack, includeMedia, locationTypeToggleDisabled]);
-
-  const toggleMoodType = useCallback(() => {
-    if (moodTypeToggleDisabled) return;
-    setIncludeMood((prev) => {
-      if (prev && !includeLocation && !includeSleep && !includeTrack && !includeMedia) return prev;
-      return !prev;
-    });
-  }, [includeLocation, includeSleep, includeTrack, includeMedia, moodTypeToggleDisabled]);
+  }, [includeSleep, includeTrack, includeMedia, locationTypeToggleDisabled]);
 
   const toggleSleepType = useCallback(() => {
     if (sleepTypeToggleDisabled) return;
     setIncludeSleep((prev) => {
-      if (prev && !includeLocation && !includeMood && !includeTrack && !includeMedia) return prev;
+      if (prev && !includeLocation && !includeTrack && !includeMedia) return prev;
       return !prev;
     });
-  }, [includeLocation, includeMood, includeTrack, includeMedia, sleepTypeToggleDisabled]);
+  }, [includeLocation, includeTrack, includeMedia, sleepTypeToggleDisabled]);
 
   const toggleTrackType = useCallback(() => {
     if (trackTypeToggleDisabled) return;
     setIncludeTrack((prev) => {
-      if (prev && !includeLocation && !includeMood && !includeSleep && !includeMedia) return prev;
+      if (prev && !includeLocation && !includeSleep && !includeMedia) return prev;
       return !prev;
     });
-  }, [includeLocation, includeMood, includeSleep, includeMedia, trackTypeToggleDisabled]);
+  }, [includeLocation, includeSleep, includeMedia, trackTypeToggleDisabled]);
 
   const toggleMediaType = useCallback(() => {
     if (mediaTypeToggleDisabled) return;
     setIncludeMedia((prev) => {
-      if (prev && !includeLocation && !includeMood && !includeSleep && !includeTrack) return prev;
+      if (prev && !includeLocation && !includeSleep && !includeTrack) return prev;
       return !prev;
     });
-  }, [includeLocation, includeMood, includeSleep, includeTrack, mediaTypeToggleDisabled]);
+  }, [includeLocation, includeSleep, includeTrack, mediaTypeToggleDisabled]);
 
   const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
@@ -829,14 +754,11 @@ export default function Home() {
         if (venueId) params.venue_id = venueId;
           if (category) params.category = category;
           if (country) params.country = country;
-          if (mood) params.mood = mood;
-          if (activity) params.activity = activity;
           if (sleepDuration) params.sleep_duration = sleepDuration;
           if (trackActivity) params.track_activity = trackActivity;
           if (mediaSubtypes) params.media_subtype = mediaSubtypes;
-          // New-plugin filter params (mood/activity are already sent above).
+          // Plugin filter params.
           for (const [pluginId, pluginParams] of Object.entries(pluginFilterParams)) {
-            if (!NEW_PLUGINS.some((p) => p.id === pluginId)) continue;
             for (const [name, value] of Object.entries(pluginParams)) {
               params[name] = value;
             }
@@ -857,7 +779,7 @@ export default function Home() {
           setLoadingMore(false);
         }
       },
-      [searchQuery, fromDate, toDate, venueId, category, country, mood, activity, sleepDuration, trackActivity, mediaSubtypes]
+      [searchQuery, fromDate, toDate, venueId, category, country, sleepDuration, trackActivity, mediaSubtypes, pluginFilterParams]
     );
 
   // Initial load + reload on filter changes
@@ -982,7 +904,7 @@ export default function Home() {
 
     revealObserverRef.current = observer;
     return () => observer.disconnect();
-  }, [items, includeLocation, includeMood, includeSleep, loading, loadingMore]);
+  }, [items, includeLocation, includeSleep, loading, loadingMore]);
 
   // Scroll to and animate newly created entry
   useEffect(() => {
@@ -997,7 +919,6 @@ export default function Home() {
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
     setIncludeLocation(true);
-    setIncludeMood(true);
     setIncludeSleep(true);
     setIncludeTrack(true);
     setIncludeMedia(true);
@@ -1006,19 +927,18 @@ export default function Home() {
   };
 
   const hasNewPluginFilter = Object.keys(pluginIncludes).some((k) => !(pluginIncludes[k] ?? true));
-  const hasTypeSelectionFilter = !includeLocation || !includeMood || !includeSleep || !includeTrack || !includeMedia || hasNewPluginFilter;
-  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || mood || activity || sleepDuration || hasPluginFilter || hasTypeSelectionFilter;
+  const hasTypeSelectionFilter = !includeLocation || !includeSleep || !includeTrack || !includeMedia || hasNewPluginFilter;
+  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || sleepDuration || hasPluginFilter || hasTypeSelectionFilter;
   const visibleItems = useMemo(
     () => items.filter((item) => {
       if (item.type === 'location') return includeLocation;
-      if (item.type === 'mood') return includeMood;
       if (item.type === 'sleep') return includeSleep;
       if (item.type === 'track') return includeTrack;
       if (item.type === 'media') return includeMedia;
       if (NEW_PLUGINS.some((p) => p.id === item.type)) return pluginIncludes[item.type] ?? true;
       return false;
     }),
-    [items, includeLocation, includeMood, includeSleep, includeTrack, includeMedia, pluginIncludes]
+    [items, includeLocation, includeSleep, includeTrack, includeMedia, pluginIncludes]
   );
   const rawGrouped = groupByDate(visibleItems);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
@@ -1037,20 +957,14 @@ export default function Home() {
     if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
     if (toDate) filterPills.push({ label: `Until: ${toDate}`, key: 'to' });
   }
-  if (mood) {
-    const moodNum = parseInt(mood, 10);
-    filterPills.push({ label: `Mood: ${moodNum >= 1 && moodNum <= 5 ? MOOD_LABELS[moodNum] : mood}`, key: 'mood' });
-  }
-  if (activity) filterPills.push({ label: `Activity: ${activity}`, key: 'activity' });
   if (trackActivity) filterPills.push({ label: `Track activity: ${trackActivity}`, key: 'track_activity' });
   if (sleepDuration === 'lte6') filterPills.push({ label: 'Sleep: <=6h', key: 'sleep_duration' });
   if (sleepDuration === '6to8') filterPills.push({ label: 'Sleep: 6h-8h', key: 'sleep_duration' });
   if (sleepDuration === 'gte8') filterPills.push({ label: 'Sleep: >=8h', key: 'sleep_duration' });
-  if (includeLocation && !includeMood && !includeSleep && !includeTrack) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
-  if (!includeLocation && includeMood && !includeSleep && !includeTrack) filterPills.push({ label: 'Type: Mood only', key: 'type_mood_only' });
-  if (!includeLocation && !includeMood && includeSleep && !includeTrack) filterPills.push({ label: 'Type: Sleep only', key: 'type_sleep_only' });
-  if (!includeLocation && !includeMood && !includeSleep && includeTrack) filterPills.push({ label: 'Type: Track only', key: 'type_track_only' });
-  if (!includeLocation && !includeMood && !includeSleep && !includeTrack && includeMedia) filterPills.push({ label: 'Type: Media only', key: 'type_media_only' });
+  if (includeLocation && !includeSleep && !includeTrack) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
+  if (!includeLocation && includeSleep && !includeTrack) filterPills.push({ label: 'Type: Sleep only', key: 'type_sleep_only' });
+  if (!includeLocation && !includeSleep && includeTrack) filterPills.push({ label: 'Type: Track only', key: 'type_track_only' });
+  if (!includeLocation && !includeSleep && !includeTrack && includeMedia) filterPills.push({ label: 'Type: Media only', key: 'type_media_only' });
   if (mediaSubtypes) {
     filterPills.push({
       label: `Media: ${mediaSubtypes.split(',').map((s) => MEDIA_SUBTYPES[s.trim() as MediaSubtype]?.label || s.trim()).join(', ')}`,
@@ -1123,31 +1037,22 @@ export default function Home() {
                       return next;
                     }, { replace: true });
                   } else if (pill.key === 'type_location_only') {
-                    setIncludeMood(true);
-                    setIncludeSleep(true);
-                    setIncludeTrack(true);
-                    setIncludeMedia(true);
-                  } else if (pill.key === 'type_mood_only') {
-                    setIncludeLocation(true);
                     setIncludeSleep(true);
                     setIncludeTrack(true);
                     setIncludeMedia(true);
                   } else if (pill.key === 'type_sleep_only') {
                     setIncludeLocation(true);
-                    setIncludeMood(true);
                     setIncludeTrack(true);
                     setIncludeMedia(true);
                   } else if (pill.key === 'type_track_only') {
                     setIncludeLocation(true);
-                    setIncludeMood(true);
                     setIncludeSleep(true);
                     setIncludeMedia(true);
                   } else if (pill.key === 'type_media_only') {
-                   setIncludeLocation(true);
-                   setIncludeMood(true);
-                   setIncludeSleep(true);
-                   setIncludeTrack(true);
-                 } else if (pill.key === 'media_subtype') {
+                    setIncludeLocation(true);
+                    setIncludeSleep(true);
+                    setIncludeTrack(true);
+                  } else if (pill.key === 'media_subtype') {
                    setMediaSubtypeFilter('');
                  } else if (pill.key === 'sleep_duration') {
                     setSleepTypeFilter('');
@@ -1183,42 +1088,33 @@ export default function Home() {
             toDate={toDate}
             category={category}
             country={country}
-            mood={mood}
-            activity={activity}
             sleepDuration={sleepDuration}
             trackActivity={trackActivity}
             mediaSubtypes={mediaSubtypes}
             includeLocation={includeLocation}
-            includeMood={includeMood}
             includeSleep={includeSleep}
             includeTrack={includeTrack}
             includeMedia={includeMedia}
             categoryOptions={categoryOptions}
             countryOptions={countryOptions}
-            activityOptions={activityOptions}
             trackActivityOptions={trackActivityOptions}
-            moodTypeToggleDisabled={moodTypeToggleDisabled}
             locationTypeToggleDisabled={locationTypeToggleDisabled}
             sleepTypeToggleDisabled={sleepTypeToggleDisabled}
             trackTypeToggleDisabled={trackTypeToggleDisabled}
             mediaTypeToggleDisabled={mediaTypeToggleDisabled}
-            moodFiltersDisabled={moodFiltersDisabled}
             locationFiltersDisabled={locationFiltersDisabled}
             sleepFiltersDisabled={sleepFiltersDisabled}
             trackFiltersDisabled={trackFiltersDisabled}
             mediaFiltersDisabled={mediaFiltersDisabled}
-            moodSectionDisabled={moodSectionDisabled}
             locationSectionDisabled={locationSectionDisabled}
             sleepSectionDisabled={sleepSectionDisabled}
             trackSectionDisabled={trackSectionDisabled}
             mediaSectionDisabled={mediaSectionDisabled}
             onSetDateFilter={setFilter}
             onToggleLocationType={toggleLocationType}
-            onToggleMoodType={toggleMoodType}
             onToggleSleepType={toggleSleepType}
             onToggleTrackType={toggleTrackType}
             onToggleMediaType={toggleMediaType}
-            onSetMoodFilter={setMoodTypeFilter}
             onSetLocationFilter={setLocationTypeFilter}
             onSetSleepFilter={setSleepTypeFilter}
             onSetTrackFilter={setTrackTypeFilter}
@@ -1301,15 +1197,21 @@ export default function Home() {
                     >
                       <MapPin size={24} />
                     </Link>
-                    <Link
-                      to={`/mood-check-in?date=${encodeURIComponent(date)}`}
-                      className="p-1.5 rounded-full text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/30 transition-colors"
-                      title="Mood check-in"
-                      onClick={() => setOpenTimelineDotDate(null)}
-                      tabIndex={openTimelineDotDate === date ? 0 : -1}
-                    >
-                      <Smile size={24} />
-                    </Link>
+                    {FAB_PLUGINS.map((plugin) => {
+                      const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
+                      return (
+                        <Link
+                          key={plugin.id}
+                          to={`${plugin.client.checkInPath}?date=${encodeURIComponent(date)}`}
+                          className={`p-1.5 rounded-full transition-colors hover:bg-gray-100 dark:hover:bg-gray-800`}
+                          title={`${plugin.strings.title} check-in`}
+                          onClick={() => setOpenTimelineDotDate(null)}
+                          tabIndex={openTimelineDotDate === date ? 0 : -1}
+                        >
+                          <Icon size={24} className={plugin.client.iconColor} />
+                        </Link>
+                      );
+                    })}
                     <Link
                       to={`/sleep-check-in?date=${encodeURIComponent(date)}`}
                       className="p-1.5 rounded-full text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 transition-colors"
@@ -1354,13 +1256,13 @@ export default function Home() {
                       >
                         {hasClientPlugin(item.type) ? (
                           <PluginTimelineCard
-                            item={item as PluginTimelineEntry}
+                            item={item as unknown as PluginTimelineEntry}
                             plugin={getClientPlugin(item.type)!}
                             integrations={{ immich_url: immichUrl, maloja_url: malojaUrl }}
                             compact={timelineDensity === 'compact'}
                             photos={photosMap[item.id] ?? null}
                             scrobbles={dedupedScrobblesMap[item.id]}
-                            iconPack={iconPack}
+                            settings={pluginSettings[item.type]}
                           />
                         ) : item.type === 'sleep' ? (
                           <SleepCard

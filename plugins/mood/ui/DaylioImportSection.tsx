@@ -1,7 +1,21 @@
+/**
+ * Mood check-in type — Daylio import section (Settings > Data).
+ *
+ * Pure mood functionality: imports a Daylio backup into mood check-ins and
+ * offers a note-normalization maintenance action. Rendered by the core Data
+ * tab via this plugin's `dataSettings` hook.
+ */
+
 import { useState, useRef } from 'react';
 import { DownloadIcon, Upload, FileText, Loader2, Check, AlertCircle, Ruler } from 'lucide-react';
-import { importApi } from '../../api/client';
-import type { ImportResult } from '../../types';
+import { daylioImport } from './api';
+
+type ImportResult = {
+  imported: number;
+  skipped: number;
+  errors: string[];
+  total_errors: number;
+};
 
 export function DaylioImportSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -27,7 +41,7 @@ export function DaylioImportSection() {
     setResult(null);
     setImportError(null);
     try {
-      const data = await importApi.daylio(selectedFile);
+      const data = await daylioImport.importFile(selectedFile);
       setResult(data);
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -43,7 +57,7 @@ export function DaylioImportSection() {
     setReplaceError(null);
     setReplaceUpdatedCount(null);
     try {
-      const data = await importApi.replaceDaylioBreaks();
+      const data = await daylioImport.replaceBreaks();
       setReplaceUpdatedCount(data.updated);
     } catch (err) {
       setReplaceError(err instanceof Error ? err.message : 'Update failed');

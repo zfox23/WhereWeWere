@@ -7,7 +7,9 @@ import {
   deletePluginData,
   exportPluginData,
   importPluginData,
+  restoreLegacyPluginData,
 } from '../plugins/backup';
+import { allPlugins } from '../plugins/registry';
 
 const router = Router();
 
@@ -48,7 +50,6 @@ interface BackupSettings {
   theme: string | null;
   system_light_theme: string | null;
   system_dark_theme: string | null;
-  mood_icon_pack: string | null;
   distance_unit: string | null;
   created_at?: string;
   updated_at?: string;
@@ -90,40 +91,6 @@ interface BackupCheckin {
   created_at: string;
   updated_at: string;
   swarm_id: string | null;
-}
-
-interface BackupMoodActivityGroup {
-  id: string;
-  name: string;
-  display_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMoodActivity {
-  id: string;
-  group_id: string;
-  name: string;
-  display_order: number;
-  icon: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMoodCheckin {
-  id: string;
-  mood: number;
-  note: string | null;
-  checked_in_at: string;
-  mood_timezone: string | null;
-  created_at: string;
-  updated_at: string;
-  daylio_hash: string | null;
-}
-
-interface BackupMoodCheckinActivity {
-  mood_checkin_id: string;
-  activity_id: string;
 }
 
 interface BackupTrackPoint {
@@ -241,17 +208,20 @@ interface BackupV1 {
     venueCategories: BackupVenueCategory[];
     venues: BackupVenue[];
     checkins: BackupCheckin[];
-    moodActivityGroups: BackupMoodActivityGroup[];
-    moodActivities: BackupMoodActivity[];
-    moodCheckins: BackupMoodCheckin[];
-    moodCheckinActivities: BackupMoodCheckinActivity[];
     sleepEntries: BackupSleepEntry[];
     tracks: BackupTrack[];
     mediaItems: BackupMediaItem[];
     mediaCheckins: BackupMediaCheckin[];
     mediaLists: BackupMediaList[];
     mediaListItems: BackupMediaListItem[];
+    /** Plugin-owned data (check-in types that are plugins). */
+    plugins: Record<string, unknown>;
   };
+  /**
+   * The original `data` object as received, untyped. Legacy backup restore
+   * hooks read their type-specific keys from here (they predate `plugins`).
+   */
+  raw?: Record<string, unknown>;
 }
 
 function asArray<T>(value: unknown): T[] {
@@ -341,6 +311,7 @@ function ensureV1Backup(raw: unknown): BackupV1 {
     schemaVersion: 1,
     exportedAt: typeof migrated.exportedAt === 'string' ? migrated.exportedAt : new Date().toISOString(),
     data: {
+      plugins: (migratedData.plugins as Record<string, unknown>) ?? {},
       user,
       settings,
       venueCategories: asArray<BackupVenueCategory>(migratedData.venueCategories),
@@ -350,10 +321,6 @@ function ensureV1Backup(raw: unknown): BackupV1 {
         longitude: toNumber((venue as BackupVenue).longitude),
       })),
       checkins: asArray<BackupCheckin>(migratedData.checkins),
-      moodActivityGroups: asArray<BackupMoodActivityGroup>(migratedData.moodActivityGroups),
-      moodActivities: asArray<BackupMoodActivity>(migratedData.moodActivities),
-      moodCheckins: asArray<BackupMoodCheckin>(migratedData.moodCheckins),
-      moodCheckinActivities: asArray<BackupMoodCheckinActivity>(migratedData.moodCheckinActivities),
       sleepEntries: asArray<BackupSleepEntry>(migratedData.sleepEntries),
       tracks: asArray<BackupTrack>(migratedData.tracks),
       mediaItems: asArray<BackupMediaItem>(migratedData.mediaItems),
@@ -361,6 +328,7 @@ function ensureV1Backup(raw: unknown): BackupV1 {
       mediaLists: asArray<BackupMediaList>(migratedData.mediaLists),
       mediaListItems: asArray<BackupMediaListItem>(migratedData.mediaListItems),
     },
+    raw: migratedData,
   };
 }
 
@@ -372,10 +340,6 @@ router.get('/export', async (_req: Request, res: Response) => {
       categoriesResult,
       venuesResult,
       checkinsResult,
-      groupsResult,
-      activitiesResult,
-      moodCheckinsResult,
-      moodCheckinActivitiesResult,
       sleepEntriesResult,
       tracksResult,
       mediaItemsResult,
@@ -398,7 +362,6 @@ router.get('/export', async (_req: Request, res: Response) => {
                 theme,
                 system_light_theme,
                 system_dark_theme,
-                mood_icon_pack,
                 distance_unit,
                 created_at,
                 updated_at
@@ -430,36 +393,6 @@ router.get('/export', async (_req: Request, res: Response) => {
          FROM checkins
          WHERE user_id = $1
          ORDER BY checked_in_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT id, name, display_order, created_at, updated_at
-         FROM mood_activity_groups
-         WHERE user_id = $1
-         ORDER BY display_order ASC, created_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT ma.id, ma.group_id, ma.name, ma.display_order, ma.icon, ma.created_at, ma.updated_at
-         FROM mood_activities ma
-         JOIN mood_activity_groups mag ON mag.id = ma.group_id
-         WHERE mag.user_id = $1
-         ORDER BY mag.display_order ASC, ma.display_order ASC, ma.created_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT id, mood, note, checked_in_at, mood_timezone, created_at, updated_at, daylio_hash
-         FROM mood_checkins
-         WHERE user_id = $1
-         ORDER BY checked_in_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT mca.mood_checkin_id, mca.activity_id
-         FROM mood_checkin_activities mca
-         JOIN mood_checkins mc ON mc.id = mca.mood_checkin_id
-         WHERE mc.user_id = $1
-         ORDER BY mca.mood_checkin_id ASC`,
         [USER_ID]
       ),
       query(
@@ -585,16 +518,13 @@ router.get('/export', async (_req: Request, res: Response) => {
           longitude: toNumber(venue.longitude),
         })),
         checkins: checkinsResult.rows,
-        moodActivityGroups: groupsResult.rows,
-        moodActivities: activitiesResult.rows,
-        moodCheckins: moodCheckinsResult.rows,
-        moodCheckinActivities: moodCheckinActivitiesResult.rows,
         sleepEntries: sleepEntriesResult.rows,
         tracks,
         mediaItems: mediaItemsResult.rows,
         mediaCheckins: mediaCheckinsResult.rows,
         mediaLists: mediaListsResult.rows,
         mediaListItems: mediaListItemsResult.rows,
+        plugins: pluginsData,
       },
     };
 
@@ -618,10 +548,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     const counts: Record<string, { inserted: number; skipped: number }> = {
       venues: { inserted: 0, skipped: 0 },
       checkins: { inserted: 0, skipped: 0 },
-      moodActivityGroups: { inserted: 0, skipped: 0 },
-      moodActivities: { inserted: 0, skipped: 0 },
-      moodCheckins: { inserted: 0, skipped: 0 },
-      moodCheckinActivities: { inserted: 0, skipped: 0 },
       sleepEntries: { inserted: 0, skipped: 0 },
       tracks: { inserted: 0, skipped: 0 },
       mediaItems: { inserted: 0, skipped: 0 },
@@ -656,9 +582,9 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
            user_id, dawarich_url, dawarich_api_key,
            immich_url, immich_api_key, maloja_url, plex_usernames,
            theme, system_light_theme, system_dark_theme,
-           mood_icon_pack, distance_unit
+           distance_unit
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (user_id) DO UPDATE SET
             dawarich_url = EXCLUDED.dawarich_url,
             dawarich_api_key = EXCLUDED.dawarich_api_key,
@@ -669,7 +595,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
             theme = COALESCE(EXCLUDED.theme, user_settings.theme),
             system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
             system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
-            mood_icon_pack = COALESCE(EXCLUDED.mood_icon_pack, user_settings.mood_icon_pack),
             distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
             updated_at = NOW()`,
         [
@@ -683,10 +608,25 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
           toStringOrNull(s.theme),
           toStringOrNull(s.system_light_theme),
           toStringOrNull(s.system_dark_theme),
-          toStringOrNull(s.mood_icon_pack),
           toStringOrNull(s.distance_unit),
         ]
       );
+
+      // Legacy setting values that plugins have moved to plugin_settings
+      // (e.g. mood_icon_pack) are claimed by the declaring plugin so old
+      // backups restore into plugin_settings.
+      for (const plugin of allPlugins()) {
+        for (const key of plugin.server.legacySettingsKeys ?? []) {
+          const value = (s as unknown as Record<string, unknown>)[key];
+          if (value == null) continue;
+          await client.query(
+            `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+             VALUES ($1, $2, $3, $4::jsonb)
+             ON CONFLICT (user_id, plugin_id, key) DO UPDATE SET value = EXCLUDED.value`,
+            [USER_ID, plugin.id, key, JSON.stringify(value)]
+          );
+        }
+      }
     }
 
     const categoryIdMap = new Map<string, string>();
@@ -826,122 +766,16 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
-    for (const group of isClaimed('moodActivityGroups') ? [] : backup.data.moodActivityGroups) {
-      if (!group?.id || !group.name) {
-        counts.moodActivityGroups.skipped += 1;
-        errors.push('Skipped mood activity group with missing id/name');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_activity_groups (id, user_id, name, display_order, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()))
-         ON CONFLICT (id) DO NOTHING`,
-        [group.id, USER_ID, group.name, group.display_order ?? 0, group.created_at || null, group.updated_at || null]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodActivityGroups.inserted += 1;
-      } else {
-        counts.moodActivityGroups.skipped += 1;
-      }
-    }
-
-    for (const activity of isClaimed('moodActivities') ? [] : backup.data.moodActivities) {
-      if (!activity?.id || !activity.group_id || !activity.name) {
-        counts.moodActivities.skipped += 1;
-        errors.push('Skipped mood activity with missing id/group_id/name');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_activities (id, group_id, name, display_order, icon, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()))
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          activity.id,
-          activity.group_id,
-          activity.name,
-          activity.display_order ?? 0,
-          toStringOrNull(activity.icon),
-          activity.created_at || null,
-          activity.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodActivities.inserted += 1;
-      } else {
-        counts.moodActivities.skipped += 1;
-      }
-    }
-
-    for (const moodCheckin of isClaimed('moodCheckins') ? [] : backup.data.moodCheckins) {
-      if (!moodCheckin?.id) {
-        counts.moodCheckins.skipped += 1;
-        errors.push('Skipped mood check-in with missing id');
-        continue;
-      }
-
-      const mood = toNumber(moodCheckin.mood, 0);
-      if (mood < 1 || mood > 5) {
-        counts.moodCheckins.skipped += 1;
-        errors.push(`Skipped mood check-in ${moodCheckin.id} with invalid mood`);
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_checkins (
-           id, user_id, mood, note,
-           checked_in_at, mood_timezone, created_at, updated_at,
-           daylio_hash
-         )
-         VALUES (
-           $1, $2, $3, $4,
-           COALESCE($5::timestamptz, NOW()), $6,
-           COALESCE($7::timestamptz, NOW()),
-           COALESCE($8::timestamptz, NOW()),
-           $9
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          moodCheckin.id,
-          USER_ID,
-          mood,
-          moodCheckin.note || null,
-          moodCheckin.checked_in_at || null,
-          toStringOrNull(moodCheckin.mood_timezone),
-          moodCheckin.created_at || null,
-          moodCheckin.updated_at || null,
-          moodCheckin.daylio_hash || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodCheckins.inserted += 1;
-      } else {
-        counts.moodCheckins.skipped += 1;
-      }
-    }
-
-    for (const link of isClaimed('moodCheckinActivities') ? [] : backup.data.moodCheckinActivities) {
-      if (!link?.mood_checkin_id || !link.activity_id) {
-        counts.moodCheckinActivities.skipped += 1;
-        errors.push('Skipped mood check-in activity with missing ids');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_checkin_activities (mood_checkin_id, activity_id)
-         VALUES ($1, $2)
-         ON CONFLICT (mood_checkin_id, activity_id) DO NOTHING`,
-        [link.mood_checkin_id, link.activity_id]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodCheckinActivities.inserted += 1;
-      } else {
-        counts.moodCheckinActivities.skipped += 1;
+    // Plugin check-in types: new-format backups (with a plugins payload) are
+    // restored by importPluginData below; legacy backups are restored here via
+    // each plugin's restoreLegacyBackup hook, which also claims its legacy
+    // keys so no core loop runs for them.
+    if (pluginsPayload || allPlugins().some((p) => p.server.restoreLegacyBackup)) {
+      const legacy = await restoreLegacyPluginData(client, USER_ID, backup.raw ?? {}, pluginsPayload);
+      for (const [pluginId, pluginCounts] of Object.entries(legacy)) {
+        for (const [key, pc] of Object.entries(pluginCounts)) {
+          counts[key] = pc;
+        }
       }
     }
 
@@ -1276,15 +1110,15 @@ router.post('/start-over', async (req: Request, res: Response) => {
     const rawOptions = req.body?.options ?? {};
     const deleteAllCheckins = Boolean(rawOptions.delete_all_checkins);
     const deleteVenueCheckins = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
-    const deleteMoodCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
+    const deletePluginCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
     const deleteSleepEntries = deleteAllCheckins || Boolean(rawOptions.delete_sleep_entries);
     const deleteTracks = Boolean(rawOptions.delete_tracks);
     const deleteMediaItems = Boolean(rawOptions.delete_media_items);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
-    const resetMoodSettings = Boolean(rawOptions.reset_mood_settings);
+    const resetPluginSettings = Boolean(rawOptions.reset_mood_settings);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !deleteTracks && !deleteMediaItems && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
+    if (!deleteVenueCheckins && !deletePluginCheckins && !deleteSleepEntries && !deleteTracks && !deleteMediaItems && !resetAccountSettings && !resetPluginSettings && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -1306,11 +1140,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.checkins = checkinResult.rowCount ?? 0;
     }
 
-    if (deleteMoodCheckins) {
-      // Mood is a check-in plugin: its deleteUserData hook (and cascade
-      // deletes on its activity junctions) handle the removal.
-      const moodCounts = await deletePluginData(client, USER_ID, ['mood']);
-      counts.mood_checkins = moodCounts.mood ?? 0;
+    if (deletePluginCheckins) {
+      // Check-in plugins own their deletion via their deleteUserData hook.
+      const pluginCounts = await deletePluginData(client, USER_ID);
+      for (const [pluginId, deleted] of Object.entries(pluginCounts)) {
+        counts[`plugin_checkins_${pluginId}`] = deleted;
+      }
     }
 
     if (deleteSleepEntries) {
@@ -1354,19 +1189,14 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.media_lists = listsResult.rowCount ?? 0;
     }
 
-    if (resetMoodSettings) {
-      const groupResult = await client.query('DELETE FROM mood_activity_groups WHERE user_id = $1', [USER_ID]);
-      counts.mood_activity_groups = groupResult.rowCount ?? 0;
-
-      const moodSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, mood_icon_pack)
-         VALUES ($1, 'emoji')
-         ON CONFLICT (user_id) DO UPDATE SET
-           mood_icon_pack = EXCLUDED.mood_icon_pack,
-           updated_at = NOW()`,
-        [USER_ID]
-      );
-      counts.user_settings_mood_reset = moodSettingsResult.rowCount ?? 0;
+    if (resetPluginSettings) {
+      // Check-in plugin settings (lookup tables + plugin_settings rows) are
+      // owned by each plugin's resetSettings hook.
+      for (const plugin of allPlugins()) {
+        if (!plugin.server.resetSettings) continue;
+        const deleted = await plugin.server.resetSettings({ user_id: USER_ID, client });
+        counts[`plugin_settings_${plugin.id}_reset`] = deleted;
+      }
     }
 
     if (resetIntegrationsSettings) {

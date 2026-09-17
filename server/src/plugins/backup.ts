@@ -82,6 +82,31 @@ export interface PluginImportCounts {
 }
 
 /**
+ * Dispatch a *legacy* backup (one that predates the `plugins` section and
+ * stores check-in types under top-level keys) to the plugins that declared
+ * `restoreLegacyBackup`. A plugin is skipped when the backup already carries
+ * its `plugins.<id>` payload (that path restores it via importPluginData),
+ * which prevents double-imports. Returns a map of pluginId -> per-legacy-key
+ * counts; the caller must skip its own legacy import loops for every
+ * pluginId present in the result.
+ */
+export async function restoreLegacyPluginData(
+  client: PoolClient,
+  user_id: string,
+  data: Record<string, unknown>,
+  pluginsPayload: PluginBackupPayload | null | undefined,
+): Promise<Record<string, Record<string, { inserted: number; skipped: number }>>> {
+  const out: Record<string, Record<string, { inserted: number; skipped: number }>> = {};
+  for (const plugin of allPlugins()) {
+    const hook = plugin.server.restoreLegacyBackup;
+    if (!hook) continue;
+    if (pluginsPayload?.[plugin.id]) continue; // new-format payload handles it
+    out[plugin.id] = await hook({ user_id, client }, data);
+  }
+  return out;
+}
+
+/**
  * Restore plugin data from a backup payload. Must run inside the caller's
  * transaction (on `client`). Returns per-plugin counts.
  */

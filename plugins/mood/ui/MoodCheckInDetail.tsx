@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Clock, Pencil, Trash2, Loader2, AlertCircle, ArrowLeft, CalendarDays } from 'lucide-react';
-import { moodCheckins, settings as settingsApi } from '../api/client';
-import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from '../components/MoodIcons';
-import { resolveActivityIcon } from '../utils/icons';
-import { normalizeTimezoneForDisplay } from '../utils/checkin';
-import { usePageTitle } from '../utils/pageTitle';
+import { moodCheckins } from './api';
+import { plugins } from '../../../client/src/plugins/api';
+import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
+import { resolveActivityIcon } from '../../../client/src/utils/icons';
+import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 function formatDate(dateStr: string, timeZone?: string | null): string {
   const date = new Date(dateStr);
@@ -47,10 +48,10 @@ export default function MoodCheckInDetail() {
     setLoading(true);
     Promise.all([
       moodCheckins.get(id),
-      settingsApi.get(),
+      plugins.settings.get('mood'),
     ]).then(([mc, s]) => {
       setCheckin(mc);
-      if (s.mood_icon_pack) setIconPack(s.mood_icon_pack);
+      if (typeof s?.mood_icon_pack === 'string') setIconPack(s.mood_icon_pack);
     }).catch((err) => {
       setError(err.message || 'Failed to load mood check-in');
     }).finally(() => setLoading(false));

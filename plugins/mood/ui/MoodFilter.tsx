@@ -1,4 +1,4 @@
-import { MOOD_LABELS, MOOD_COLORS } from '../MoodIcons';
+import { MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
 
 export interface ActivityOption {
   id: string;

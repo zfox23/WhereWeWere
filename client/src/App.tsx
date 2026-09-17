@@ -11,8 +11,6 @@ import VenueDetail from './pages/VenueDetail';
 import Profile from './pages/Profile';
 import CheckInDetail from './pages/CheckInDetail';
 import Settings from './pages/Settings';
-import MoodCheckIn from './pages/MoodCheckIn';
-import MoodCheckInDetail from './pages/MoodCheckInDetail';
 import SleepCheckIn from './pages/SleepCheckIn';
 import SleepDetail from './pages/SleepDetail';
 import TrackCheckIn from './pages/TrackCheckIn';
@@ -67,12 +65,12 @@ function PluginDetailPage({ pluginId }: { pluginId: string }) {
 
 /**
  * Routes contributed by check-in plugins. Paths already registered
- * explicitly in App (e.g. /mood-check-in, /mood-checkins/:id) win, so the
- * mood plugin's identical paths are skipped here.
+ * explicitly in App (built-in types) win; a plugin whose path is already
+ * claimed here is skipped.
  */
 const EXPLICIT_PATHS = new Set([
-  '/check-in', '/mood-check-in', '/sleep-check-in', '/track-check-in',
-  '/mood-checkins/:id', '/checkins/:id',
+  '/check-in', '/sleep-check-in', '/track-check-in',
+  '/checkins/:id',
   '/sleep-entries/:id', '/tracks/:id',
 ]);
 
@@ -105,12 +103,10 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/check-in" element={<CheckIn />} />
-        <Route path="/mood-check-in" element={<MoodCheckIn />} />
         <Route path="/sleep-check-in" element={<SleepCheckIn />} />
         <Route path="/sleep-entries/:id" element={<SleepDetail />} />
         <Route path="/track-check-in" element={<TrackCheckIn />} />
         <Route path="/tracks/:id" element={<TrackDetail />} />
-        <Route path="/mood-checkins/:id" element={<MoodCheckInDetail />} />
         <Route path="/checkins/:id" element={<CheckInDetail />} />
 
         {/* Media check-ins */}

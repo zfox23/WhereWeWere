@@ -2,14 +2,14 @@ import { Check, Pencil } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
-import { resolveActivityIcon } from '../utils/icons';
-import type { TimelineItem, ImmichAsset, Scrobble } from '../types';
-import { ScrobbleList } from './ScrobbleList';
-import { CardShell } from './checkin-card/CardShell';
-import { MarkdownNote } from './checkin-card/MarkdownNote';
-import { PhotoSection } from './checkin-card/PhotoSection';
-import { TimestampLink } from './checkin-card/TimestampLink';
-import { useResolvedPhotos } from './checkin-card/useResolvedPhotos';
+import { resolveActivityIcon } from '../../../client/src/utils/icons';
+import type { TimelineItem, ImmichAsset, Scrobble } from '../../../client/src/types';
+import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
+import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
+import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
+import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
+import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
+import { useResolvedPhotos } from '../../../client/src/components/checkin-card/useResolvedPhotos';
 
 interface MoodCheckInCardProps {
   item: TimelineItem;

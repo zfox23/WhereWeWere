@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X, Check } from 'lucide-react';
 import LocationFilter from './LocationFilter';
-import MoodFilter, { ActivityOption } from './MoodFilter';
 import SleepFilter from './SleepFilter';
 import TrackFilter from './TrackFilter';
 import MediaFilter from './MediaFilter';
@@ -105,42 +104,33 @@ export interface FiltersProps {
   toDate: string;
   category: string;
   country: string;
-  mood: string;
-  activity: string;
   sleepDuration: string;
   trackActivity: string;
   mediaSubtypes: string;
   includeLocation: boolean;
-  includeMood: boolean;
   includeSleep: boolean;
   includeTrack: boolean;
   includeMedia: boolean;
   categoryOptions: string[];
   countryOptions: string[];
-  activityOptions: ActivityOption[];
   trackActivityOptions: string[];
-  moodTypeToggleDisabled: boolean;
   locationTypeToggleDisabled: boolean;
   sleepTypeToggleDisabled: boolean;
   trackTypeToggleDisabled: boolean;
   mediaTypeToggleDisabled: boolean;
-  moodFiltersDisabled: boolean;
   locationFiltersDisabled: boolean;
   sleepFiltersDisabled: boolean;
   trackFiltersDisabled: boolean;
   mediaFiltersDisabled: boolean;
-  moodSectionDisabled: boolean;
   locationSectionDisabled: boolean;
   sleepSectionDisabled: boolean;
   trackSectionDisabled: boolean;
   mediaSectionDisabled: boolean;
   onSetDateFilter: (key: 'from' | 'to', value: string) => void;
   onToggleLocationType: () => void;
-  onToggleMoodType: () => void;
   onToggleSleepType: () => void;
   onToggleTrackType: () => void;
   onToggleMediaType: () => void;
-  onSetMoodFilter: (key: 'mood' | 'activity', value: string) => void;
   onSetLocationFilter: (key: 'venue_id' | 'category' | 'country', value: string) => void;
   onSetSleepFilter: (value: string) => void;
   onSetTrackFilter: (value: string) => void;
@@ -157,42 +147,33 @@ export default function Filters(props: FiltersProps) {
     toDate,
     category,
     country,
-    mood,
-    activity,
     sleepDuration,
     trackActivity,
     includeLocation,
-    includeMood,
     includeSleep,
     includeTrack,
     includeMedia,
     mediaSubtypes,
     categoryOptions,
     countryOptions,
-    activityOptions,
     trackActivityOptions,
-    moodTypeToggleDisabled,
     locationTypeToggleDisabled,
     sleepTypeToggleDisabled,
     trackTypeToggleDisabled,
     mediaTypeToggleDisabled,
-    moodFiltersDisabled,
     locationFiltersDisabled,
     sleepFiltersDisabled,
     trackFiltersDisabled,
     mediaFiltersDisabled,
-    moodSectionDisabled,
     locationSectionDisabled,
     sleepSectionDisabled,
     trackSectionDisabled,
     mediaSectionDisabled,
     onSetDateFilter,
     onToggleLocationType,
-    onToggleMoodType,
     onToggleSleepType,
     onToggleTrackType,
     onToggleMediaType,
-    onSetMoodFilter,
     onSetLocationFilter,
     onSetSleepFilter,
     onSetTrackFilter,
@@ -302,19 +283,6 @@ export default function Filters(props: FiltersProps) {
           onToggleIncluded={onToggleLocationType}
           onSetCategory={(value) => onSetLocationFilter('category', value)}
           onSetCountry={(value) => onSetLocationFilter('country', value)}
-        />
-
-        <MoodFilter
-          included={includeMood}
-          filtersDisabled={moodFiltersDisabled}
-          sectionDisabled={moodSectionDisabled}
-          typeToggleDisabled={moodTypeToggleDisabled}
-          mood={mood}
-          activity={activity}
-          activityOptions={activityOptions}
-          onToggleIncluded={onToggleMoodType}
-          onSetMood={(value) => onSetMoodFilter('mood', value)}
-          onSetActivity={(value) => onSetMoodFilter('activity', value)}
         />
 
         <SleepFilter

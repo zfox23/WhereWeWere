@@ -1,11 +1,25 @@
 import { find as findTimezone } from 'geo-tz';
+import type {
+  CheckinTypeServer,
+  PluginReconciliationHook,
+  PluginReconciliationRow,
+} from 'wwp-shared';
 import { query } from '../db';
+import { allPlugins } from '../plugins/registry';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const NEARBY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_WINDOW_MS = 72 * 60 * 60 * 1000;
 
-type CheckinKind = 'venue' | 'mood' | 'media';
+/**
+ * Built-in types participate directly; custom-storage plugins participate
+ * via their `reconcile` hook. `type` on suggestions/uninferables is the
+ * type's id ('venue', 'media', or a plugin id like 'mood'); clients render
+ * labels from that id.
+ */
+type CheckinKind = 'venue' | 'media' | string;
+
+type FallbackKind = 'media' | 'track' | 'sleep' | string;
 
 interface VenueCheckinRow {
   id: string;
@@ -14,12 +28,6 @@ interface VenueCheckinRow {
   venue_name: string;
   latitude: number | string | null;
   longitude: number | string | null;
-}
-
-interface MoodCheckinRow {
-  id: string;
-  checked_in_at: string;
-  original_timezone: string | null;
 }
 
 interface MediaCheckinRow {
@@ -31,8 +39,6 @@ interface MediaCheckinRow {
   media_title: string;
 }
 
-type FallbackKind = 'mood' | 'media' | 'track' | 'sleep';
-
 export interface TimestampReconciliationSuggestion {
   id: string;
   type: CheckinKind;
@@ -43,18 +49,9 @@ export interface TimestampReconciliationSuggestion {
   reason: string;
 }
 
-export interface TimestampReconciliationUninferableMoodCheckin {
+export interface TimestampReconciliationUninferableCheckin {
   id: string;
-  type: 'mood';
-  detail_path: string;
-  original_timestamp: string;
-  original_timezone: string | null;
-  reason: string;
-}
-
-export interface TimestampReconciliationUninferableMediaCheckin {
-  id: string;
-  type: 'media';
+  type: CheckinKind;
   detail_path: string;
   original_timestamp: string;
   original_timezone: string | null;
@@ -63,8 +60,8 @@ export interface TimestampReconciliationUninferableMediaCheckin {
 
 export interface TimestampReconciliationScanResult {
   suggestions: TimestampReconciliationSuggestion[];
-  uninferable_mood_checkins: TimestampReconciliationUninferableMoodCheckin[];
-  uninferable_media_checkins: TimestampReconciliationUninferableMediaCheckin[];
+  /** Uninferable check-ins grouped by type id. */
+  uninferable: Record<string, TimestampReconciliationUninferableCheckin[]>;
 }
 
 export interface TimestampReconciliationUpdate {
@@ -245,20 +242,6 @@ function toVenueAnchor(row: VenueCheckinRow): AnyTimezoneAnchor | null {
   };
 }
 
-function buildUninferableMoodCheckin(
-  row: MoodCheckinRow,
-  reason: string
-): TimestampReconciliationUninferableMoodCheckin {
-  return {
-    id: row.id,
-    type: 'mood',
-    detail_path: `/mood-checkins/${row.id}`,
-    original_timestamp: row.checked_in_at,
-    original_timezone: row.original_timezone,
-    reason,
-  };
-}
-
 interface AnyTimezoneAnchor {
   id: string;
   kind: 'venue' | FallbackKind;
@@ -281,7 +264,7 @@ interface FallbackAnchorRow {
   label: string | null;
 }
 
-function toFallbackAnchors(rows: FallbackAnchorRow[], kind: FallbackKind): AnyTimezoneAnchor[] {
+function toFallbackAnchors(rows: FallbackAnchorRow[], kind: FallbackKind, label: string): AnyTimezoneAnchor[] {
   const anchors: AnyTimezoneAnchor[] = [];
   for (const row of rows) {
     if (!row.timezone || row.timezone === 'UTC' || !isValidTimeZone(row.timezone)) {
@@ -290,7 +273,7 @@ function toFallbackAnchors(rows: FallbackAnchorRow[], kind: FallbackKind): AnyTi
     anchors.push({
       id: row.id,
       kind,
-      label: row.label || 'a check-in',
+      label: row.label || label,
       checkedInAtMs: new Date(row.checked_in_at).getTime(),
       timezone: normalizeTimezone(row.timezone),
     });
@@ -333,13 +316,6 @@ function resolveTimezoneAnchor(
   return { anchor: nearestAny.anchor, diffMs: nearestAny.diffMs, windowMs: 0 };
 }
 
-const FALLBACK_KIND_LABELS: Record<FallbackKind, string> = {
-  mood: 'mood check-in',
-  media: 'media check-in',
-  track: 'track',
-  sleep: 'sleep entry',
-};
-
 function buildAnchorReason(resolved: ResolvedTimezoneAnchor): string {
   const { anchor, diffMs, windowMs } = resolved;
   const diffLabel = formatDiffFromMs(diffMs);
@@ -349,55 +325,68 @@ function buildAnchorReason(resolved: ResolvedTimezoneAnchor): string {
     return `Nearest venue check-in is ${diffLabel} away at ${anchor.label}${windowNote}, which resolves to ${anchor.timezone}.`;
   }
 
-  const labelNote = anchor.kind === 'mood' || anchor.kind === 'sleep' ? '' : ` (${anchor.label})`;
-  return `No venue check-in within 24 hours; nearest ${FALLBACK_KIND_LABELS[anchor.kind]} is ${diffLabel} away${labelNote}${windowNote}, which is stored as ${anchor.timezone}.`;
+  const labelNote = anchor.kind === 'sleep' ? '' : ` (${anchor.label})`;
+  return `No venue check-in within 24 hours; nearest ${anchor.label} is ${diffLabel} away${labelNote}${windowNote}, which is stored as ${anchor.timezone}.`;
 }
 
-function buildMoodSuggestion(
-  row: MoodCheckinRow,
-  anchors: AnyTimezoneAnchor[]
-): {
-  suggestion: TimestampReconciliationSuggestion | null;
-  uninferable: TimestampReconciliationUninferableMoodCheckin | null;
-} {
+/**
+ * Anchor-based suggestion builder shared by media check-ins and plugins
+ * whose reconcile hook declares `scanAll`.
+ */
+function buildAnchorSuggestion(input: {
+  type: CheckinKind;
+  row: { id: string; checked_in_at: string; original_timezone: string | null };
+  detailPath: (id: string) => string;
+  anchors: AnyTimezoneAnchor[];
+  /** Media-style: only scan rows stored without a timezone / UTC. */
+  needsReconciliation: boolean;
+}): { suggestion: TimestampReconciliationSuggestion | null; uninferable: TimestampReconciliationUninferableCheckin | null } {
+  const { type, row, detailPath, anchors, needsReconciliation } = input;
+  if (!needsReconciliation) {
+    return { suggestion: null, uninferable: null };
+  }
+
+  const uninferable = (reason: string): TimestampReconciliationUninferableCheckin => ({
+    id: row.id,
+    type,
+    detail_path: detailPath(row.id),
+    original_timestamp: row.checked_in_at,
+    original_timezone: row.original_timezone,
+    reason,
+  });
+
   const resolved = resolveTimezoneAnchor(new Date(row.checked_in_at).getTime(), row.id, anchors);
 
   if (!resolved) {
-    return {
-      suggestion: null,
-      uninferable: buildUninferableMoodCheckin(
-        row,
-        'No check-ins with a trustworthy timezone were found.'
-      ),
-    };
+    return { suggestion: null, uninferable: uninferable('No check-ins with a trustworthy timezone were found.') };
   }
 
   if (resolved.windowMs === 0) {
     return {
       suggestion: null,
-      uninferable: buildUninferableMoodCheckin(
-        row,
+      uninferable: uninferable(
         `Nearest check-in with a trustworthy timezone is ${formatDiffFromMs(resolved.diffMs)} away, which exceeds the 72-hour inference window.`
       ),
     };
   }
 
   if (resolved.anchor.timezone === normalizeTimezone(row.original_timezone || '')) {
-    return {
-      suggestion: null,
-      uninferable: null,
-    };
+    return { suggestion: null, uninferable: null };
   }
+
+  const prefix = row.original_timezone
+    ? 'Stored timezone is UTC. '
+    : 'Stored without timezone. ';
 
   return {
     suggestion: {
       id: row.id,
-      type: 'mood',
-      detail_path: `/mood-checkins/${row.id}`,
+      type,
+      detail_path: detailPath(row.id),
       original_timestamp: row.checked_in_at,
       original_timezone: row.original_timezone,
       suggested_timezone: resolved.anchor.timezone,
-      reason: buildAnchorReason(resolved),
+      reason: prefix + buildAnchorReason(resolved),
     },
     uninferable: null,
   };
@@ -406,7 +395,7 @@ function buildMoodSuggestion(
 function buildUninferableMediaCheckin(
   row: MediaCheckinRow,
   reason: string
-): TimestampReconciliationUninferableMediaCheckin {
+): TimestampReconciliationUninferableCheckin {
   return {
     id: row.id,
     type: 'media',
@@ -427,57 +416,6 @@ function needsTimezoneReconciliation(originalTimezone: string | null): boolean {
   return !originalTimezone || originalTimezone === 'UTC';
 }
 
-function buildMediaSuggestion(
-  row: MediaCheckinRow,
-  anchors: AnyTimezoneAnchor[]
-): {
-  suggestion: TimestampReconciliationSuggestion | null;
-  uninferable: TimestampReconciliationUninferableMediaCheckin | null;
-} {
-  if (!needsTimezoneReconciliation(row.original_timezone)) {
-    return { suggestion: null, uninferable: null };
-  }
-
-  const resolved = resolveTimezoneAnchor(new Date(row.checked_in_at).getTime(), row.id, anchors);
-
-  if (!resolved) {
-    return {
-      suggestion: null,
-      uninferable: buildUninferableMediaCheckin(
-        row,
-        'No check-ins with a trustworthy timezone were found.'
-      ),
-    };
-  }
-
-  if (resolved.windowMs === 0) {
-    return {
-      suggestion: null,
-      uninferable: buildUninferableMediaCheckin(
-        row,
-        `Nearest check-in with a trustworthy timezone is ${formatDiffFromMs(resolved.diffMs)} away, which exceeds the 72-hour inference window.`
-      ),
-    };
-  }
-
-  const prefix = row.original_timezone
-    ? 'Stored timezone is UTC. '
-    : 'Stored without timezone. ';
-
-  return {
-    suggestion: {
-      id: row.id,
-      type: 'media',
-      detail_path: buildMediaDetailPath(row),
-      original_timestamp: row.checked_in_at,
-      original_timezone: row.original_timezone,
-      suggested_timezone: resolved.anchor.timezone,
-      reason: prefix + buildAnchorReason(resolved),
-    },
-    uninferable: null,
-  };
-}
-
 async function loadVenueCheckins(userId: string): Promise<VenueCheckinRow[]> {
   const result = await query(
     `SELECT c.id,
@@ -496,20 +434,6 @@ async function loadVenueCheckins(userId: string): Promise<VenueCheckinRow[]> {
   return result.rows as VenueCheckinRow[];
 }
 
-async function loadMoodCheckins(userId: string): Promise<MoodCheckinRow[]> {
-  const result = await query(
-    `SELECT mc.id,
-            mc.checked_in_at,
-            mc.mood_timezone AS original_timezone
-     FROM mood_checkins mc
-     WHERE mc.user_id = $1
-     ORDER BY mc.checked_in_at ASC`,
-    [userId]
-  );
-
-  return result.rows as MoodCheckinRow[];
-}
-
 async function loadMediaCheckins(userId: string): Promise<MediaCheckinRow[]> {
   const result = await query(
     `SELECT mc.id,
@@ -519,7 +443,7 @@ async function loadMediaCheckins(userId: string): Promise<MediaCheckinRow[]> {
             mi.id AS media_item_id,
             mi.title AS media_title
      FROM media_checkins mc
-     JOIN media_items mi ON mi.id = mc.media_item_id
+     JOIN media_items mi ON mc.media_item_id = mi.id
      WHERE mc.user_id = $1
      ORDER BY mc.checked_in_at ASC`,
     [userId]
@@ -557,24 +481,31 @@ async function loadSleepAnchorRows(userId: string): Promise<FallbackAnchorRow[]>
 }
 
 export async function getTimestampReconciliationSuggestions(userId = USER_ID): Promise<TimestampReconciliationScanResult> {
-  const [venueRows, moodRows, mediaRows, trackRows, sleepRows] = await Promise.all([
+  interface PluginHookEntry {
+    plugin: CheckinTypeServer;
+    hook: PluginReconciliationHook;
+  }
+
+  const pluginHooks: PluginHookEntry[] = allPlugins()
+    .map((plugin): PluginHookEntry | null =>
+      plugin.server.reconcile ? { plugin, hook: plugin.server.reconcile } : null
+    )
+    .filter((entry): entry is PluginHookEntry => entry !== null);
+
+  const [venueRows, mediaRows, trackRows, sleepRows, ...pluginRowsList] = await Promise.all([
     loadVenueCheckins(userId),
-    loadMoodCheckins(userId),
     loadMediaCheckins(userId),
     loadTrackAnchorRows(userId),
     loadSleepAnchorRows(userId),
+    ...pluginHooks.map(({ plugin, hook }) => hook.loadCheckins(userId).catch((err: unknown) => {
+      console.error(`Plugin "${plugin.id}" reconcile.loadCheckins failed:`, err);
+      return [] as PluginReconciliationRow[];
+    })),
   ]);
 
   const venueSuggestions = venueRows
     .map((row) => buildVenueSuggestion(row))
     .filter((row): row is TimestampReconciliationSuggestion => row !== null);
-
-  const moodFallbackRows: FallbackAnchorRow[] = moodRows.map((row) => ({
-    id: row.id,
-    checked_in_at: row.checked_in_at,
-    timezone: row.original_timezone,
-    label: null,
-  }));
 
   const mediaFallbackRows: FallbackAnchorRow[] = mediaRows.map((row) => ({
     id: row.id,
@@ -587,62 +518,125 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
     ...venueRows
       .map((row) => toVenueAnchor(row))
       .filter((row): row is AnyTimezoneAnchor => row !== null),
-    ...toFallbackAnchors(moodFallbackRows, 'mood'),
-    ...toFallbackAnchors(mediaFallbackRows, 'media'),
-    ...toFallbackAnchors(trackRows, 'track'),
-    ...toFallbackAnchors(sleepRows, 'sleep'),
+    ...toFallbackAnchors(mediaFallbackRows, 'media', 'a media check-in'),
+    ...trackRows.flatMap((row) => toFallbackAnchors([row], 'track', 'a track')),
+    ...sleepRows.flatMap((row) => toFallbackAnchors([row], 'sleep', 'a sleep entry')),
+    ...pluginRowsList.flatMap((rows, i) =>
+      toFallbackAnchors(
+        rows.map((row) => ({
+          id: row.id,
+          checked_in_at: row.checked_in_at,
+          timezone: row.original_timezone,
+          label: null,
+        })),
+        pluginHooks[i].plugin.id,
+        pluginHooks[i].hook.anchorLabel ?? `a ${pluginHooks[i].plugin.id} check-in`,
+      )
+    ),
   ].sort((a, b) => a.checkedInAtMs - b.checkedInAtMs);
 
-  const moodAnalysis = moodRows.map((row) => buildMoodSuggestion(row, anchors));
-  const mediaAnalysis = mediaRows.map((row) => buildMediaSuggestion(row, anchors));
+  const suggestions: TimestampReconciliationSuggestion[] = [...venueSuggestions];
+  const uninferable: Record<string, TimestampReconciliationUninferableCheckin[]> = {};
 
-  const moodSuggestions = moodAnalysis
-    .map((item) => item.suggestion)
-    .filter((row): row is TimestampReconciliationSuggestion => row !== null);
+  const addUninferable = (type: CheckinKind, item: TimestampReconciliationUninferableCheckin) => {
+    (uninferable[type] ??= []).push(item);
+  };
 
-  const mediaSuggestions = mediaAnalysis
-    .map((item) => item.suggestion)
-    .filter((row): row is TimestampReconciliationSuggestion => row !== null);
+  // Media check-ins (built-in, media-style scan).
+  for (const row of mediaRows) {
+    const { suggestion, uninferable: un } = buildAnchorSuggestion({
+      type: 'media',
+      row,
+      detailPath: () => buildMediaDetailPath(row),
+      anchors,
+      needsReconciliation: needsTimezoneReconciliation(row.original_timezone),
+    });
+    if (suggestion) suggestions.push(suggestion);
+    if (un) addUninferable('media', un);
+  }
 
-  const uninferableMoodCheckins = moodAnalysis
-    .map((item) => item.uninferable)
-    .filter((row): row is TimestampReconciliationUninferableMoodCheckin => row !== null)
-    .sort((left, right) => new Date(right.original_timestamp).getTime() - new Date(left.original_timestamp).getTime());
+  // Plugin check-ins (via reconcile hooks).
+  for (let i = 0; i < pluginHooks.length; i++) {
+    const { plugin, hook } = pluginHooks[i];
+    const rows = pluginRowsList[i];
+    for (const row of rows) {
+      const scan = hook.scanAll !== false;
+      const { suggestion, uninferable: un } = buildAnchorSuggestion({
+        type: plugin.id,
+        row,
+        detailPath: hook.detailPath,
+        anchors,
+        needsReconciliation: scan || needsTimezoneReconciliation(row.original_timezone),
+      });
+      if (suggestion) suggestions.push(suggestion);
+      if (un) addUninferable(plugin.id, un);
+    }
+  }
 
-  const uninferableMediaCheckins = mediaAnalysis
-    .map((item) => item.uninferable)
-    .filter((row): row is TimestampReconciliationUninferableMediaCheckin => row !== null)
-    .sort((left, right) => new Date(right.original_timestamp).getTime() - new Date(left.original_timestamp).getTime());
+  for (const items of Object.values(uninferable)) {
+    items.sort((left, right) => new Date(right.original_timestamp).getTime() - new Date(left.original_timestamp).getTime());
+  }
 
   return {
-    suggestions: [...venueSuggestions, ...moodSuggestions, ...mediaSuggestions].sort(compareSuggestions),
-    uninferable_mood_checkins: uninferableMoodCheckins,
-    uninferable_media_checkins: uninferableMediaCheckins,
+    suggestions: suggestions.sort(compareSuggestions),
+    uninferable,
   };
 }
 
 /**
  * Reconciliation is label-only: the stored instant is the true moment the
  * event happened, so applying a suggestion only replaces the stored timezone
- * label. This validates the target timezone and that the row exists, and
- * returns the timezone to persist.
+ * label. This validates the target timezone and that the row exists.
  */
 export async function computeAppliedReconciliation(update: TimestampReconciliationUpdate): Promise<{ timeZone: string } | null> {
   if (!isValidTimeZone(update.suggested_timezone)) {
     return null;
   }
 
-  const table =
-    update.type === 'venue' ? 'checkins' : update.type === 'mood' ? 'mood_checkins' : 'media_checkins';
-
-  const result = await query(
-    `SELECT id FROM ${table} WHERE id = $1`,
-    [update.id]
-  );
-
-  if (result.rows.length === 0) {
-    return null;
+  if (update.type === 'venue') {
+    const result = await query('SELECT id FROM checkins WHERE id = $1', [update.id]);
+    return result.rows.length > 0 ? { timeZone: update.suggested_timezone } : null;
   }
 
-  return { timeZone: update.suggested_timezone };
+  if (update.type === 'media') {
+    const result = await query('SELECT id FROM media_checkins WHERE id = $1', [update.id]);
+    return result.rows.length > 0 ? { timeZone: update.suggested_timezone } : null;
+  }
+
+  // Plugin check-ins: the plugin's hook validates row existence and applies.
+  const plugin = allPlugins().find((p) => p.id === update.type);
+  if (plugin?.server.reconcile?.apply) {
+    const applied = await plugin.server.reconcile.apply(update.id, update.suggested_timezone);
+    return applied ? { timeZone: update.suggested_timezone } : null;
+  }
+
+  return null;
+}
+
+/**
+ * Apply a single reconciliation update. Venue and media are handled by the
+ * core; plugin types delegate to their reconcile hook (the core persists the
+ * label via the hook's apply, so this returns true after the hook succeeds).
+ */
+export async function applyReconciliationUpdate(client: { query: (sql: string, values: unknown[]) => Promise<{ rowCount: number | null }> }, update: TimestampReconciliationUpdate): Promise<boolean> {
+  const applied = await computeAppliedReconciliation(update);
+  if (!applied) return false;
+
+  if (update.type === 'venue') {
+    await client.query(
+      `UPDATE checkins
+       SET checkin_timezone = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [update.id, applied.timeZone]
+    );
+  } else if (update.type === 'media') {
+    await client.query(
+      `UPDATE media_checkins
+       SET checkin_timezone = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [update.id, applied.timeZone]
+    );
+  }
+  // Plugin types already persisted their label inside reconcile.apply.
+  return true;
 }

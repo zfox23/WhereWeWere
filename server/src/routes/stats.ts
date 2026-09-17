@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { allPlugins, pluginReflectionBranches } from '../plugins/registry';
 import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
 
@@ -424,12 +425,10 @@ router.get('/reflections', async (req: Request, res: Response) => {
              EXTRACT(YEAR FROM $2::date)::int
              - EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::int
            )::int AS years_ago,
-           NULL::smallint AS mood,
-           NULL::text AS mood_timezone,
-           '[]'::json AS activities,
            NULL::timestamptz AS sleep_started_at,
            NULL::timestamptz AS sleep_ended_at,
-           NULL::text AS sleep_timezone
+           NULL::text AS sleep_timezone,
+           NULL::jsonb AS data
          FROM checkins c
          JOIN venues v ON c.venue_id = v.id
          LEFT JOIN venue_categories vc ON v.category_id = vc.id
@@ -438,53 +437,8 @@ router.get('/reflections', async (req: Request, res: Response) => {
            AND EXTRACT(YEAR FROM c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))
                < EXTRACT(YEAR FROM $2::date)
        )
-       UNION ALL
-       (
-         SELECT
-           'mood' AS type,
-           mc.id,
-           mc.checked_in_at,
-           mc.note,
-           NULL::uuid AS venue_id,
-           NULL::text AS venue_name,
-           NULL::text AS city,
-           NULL::text AS country,
-           NULL::double precision AS latitude,
-           NULL::double precision AS longitude,
-           NULL::text AS venue_category,
-           NULL::text AS venue_timezone,
-           EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::int AS reflection_year,
-           (
-             EXTRACT(YEAR FROM $2::date)::int
-             - EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::int
-           )::int AS years_ago,
-           mc.mood,
-           mc.mood_timezone,
-           COALESCE(
-             (
-               SELECT json_agg(json_build_object(
-                 'id', ma.id,
-                 'name', ma.name,
-                 'group_name', mag.name,
-                 'icon', ma.icon
-               ) ORDER BY mag.display_order, ma.display_order)
-               FROM mood_checkin_activities mca
-               JOIN mood_activities ma ON mca.activity_id = ma.id
-               JOIN mood_activity_groups mag ON ma.group_id = mag.id
-               WHERE mca.mood_checkin_id = mc.id
-             ),
-             '[]'::json
-           ) AS activities,
-           NULL::timestamptz AS sleep_started_at,
-           NULL::timestamptz AS sleep_ended_at,
-           NULL::text AS sleep_timezone
-         FROM mood_checkins mc
-         WHERE mc.user_id = $1
-           AND TO_CHAR(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'), 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
-           AND EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))
-               < EXTRACT(YEAR FROM $2::date)
-       )
-       UNION ALL
+        ${pluginReflectionBranches().join('\n        UNION ALL\n        ')}
+        UNION ALL
        (
          SELECT
            'sleep' AS type,
@@ -504,12 +458,10 @@ router.get('/reflections', async (req: Request, res: Response) => {
              EXTRACT(YEAR FROM $2::date)::int
              - EXTRACT(YEAR FROM se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::int
            )::int AS years_ago,
-           NULL::smallint AS mood,
-           NULL::text AS mood_timezone,
-           '[]'::json AS activities,
            se.started_at AS sleep_started_at,
            se.ended_at AS sleep_ended_at,
-           se.sleep_timezone
+           se.sleep_timezone,
+           NULL::jsonb AS data
          FROM sleep_entries se
          WHERE se.user_id = $1
            AND TO_CHAR(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'), 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
@@ -551,10 +503,8 @@ router.get('/reflections', async (req: Request, res: Response) => {
           country: row.country,
           venue_category: row.venue_category,
           venue_timezone: venueTimezone,
-          mood: row.mood,
-          mood_timezone: row.mood_timezone,
           years_ago: Number(row.years_ago),
-          activities: row.activities || [],
+          data: row.data ?? null,
         });
       }
     }
@@ -640,262 +590,6 @@ router.get('/additional-stats', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error getting additional stats:', err);
     res.status(500).json({ error: 'Failed to get additional stats' });
-  }
-});
-
-// GET /mood-daily?user_id=&from=&to= - avg/min/max mood per day for line/span chart
-router.get('/mood-daily', async (req: Request, res: Response) => {
-  try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
-    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
-    const params = hasRange ? [user_id, from, to] : [user_id];
-
-    const result = await query(
-      `SELECT
-         TO_CHAR(DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')), 'YYYY-MM-DD') AS date,
-         ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
-         MIN(mood)::int AS min_mood,
-         MAX(mood)::int AS max_mood,
-         COUNT(*)::int AS count
-       FROM mood_checkins
-       WHERE user_id = $1
-         ${whereRange}
-       GROUP BY DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))
-       ORDER BY date ASC`,
-      params
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error getting mood-daily:', err);
-    res.status(500).json({ error: 'Failed to get mood daily stats' });
-  }
-});
-
-// GET /mood-monthly?user_id=&year= - count of each mood per month
-router.get('/mood-monthly', async (req: Request, res: Response) => {
-  try {
-    const { user_id, year } = req.query;
-    if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
-
-    const yearNum = parseInt(year as string, 10);
-
-    const result = await query(
-      `SELECT
-         TO_CHAR(DATE_TRUNC('month', checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')), 'YYYY-MM') AS month,
-         mood,
-         COUNT(*)::int AS count
-       FROM mood_checkins
-       WHERE user_id = $1
-         AND EXTRACT(YEAR FROM checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')) = $2
-       GROUP BY month, mood
-       ORDER BY month ASC, mood ASC`,
-      [user_id, yearNum]
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error getting mood-monthly:', err);
-    res.status(500).json({ error: 'Failed to get mood monthly stats' });
-  }
-});
-
-// GET /mood-by-day-of-week?user_id=&from=&to= - avg mood per day of week
-router.get('/mood-by-day-of-week', async (req: Request, res: Response) => {
-  try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
-    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
-    const params = hasRange ? [user_id, from, to] : [user_id];
-
-    const result = await query(
-      `SELECT
-         EXTRACT(DOW FROM checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::int AS dow,
-         ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
-         COUNT(*)::int AS count
-       FROM mood_checkins
-       WHERE user_id = $1
-         ${whereRange}
-       GROUP BY dow
-       ORDER BY dow`,
-      params
-    );
-
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dataMap = new Map(result.rows.map((r: any) => [r.dow, r]));
-    const data = dayNames.map((name, i) => ({
-      day: name,
-      avg_mood: (dataMap.get(i) as any)?.avg_mood ?? null,
-      count: (dataMap.get(i) as any)?.count ?? 0,
-    }));
-
-    res.json(data);
-  } catch (err) {
-    console.error('Error getting mood-by-day-of-week:', err);
-    res.status(500).json({ error: 'Failed to get mood day-of-week stats' });
-  }
-});
-
-// GET /mood-activity-correlations?user_id=&from=&to= - avg mood and impact per activity (min 2 checkins)
-router.get('/mood-activity-correlations', async (req: Request, res: Response) => {
-  try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
-    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
-    const params = hasRange ? [user_id, from, to] : [user_id];
-
-    const result = await query(
-      `WITH filtered_checkins AS (
-         SELECT id, mood
-         FROM mood_checkins
-         WHERE user_id = $1
-           ${whereRange}
-       ),
-       baseline AS (
-         SELECT AVG(mood)::numeric AS avg_mood
-         FROM filtered_checkins
-       )
-       SELECT
-         ma.id AS activity_id,
-         ma.name AS activity_name,
-         mag.name AS group_name,
-         ROUND(AVG(fc.mood)::numeric, 2)::float AS avg_mood,
-         ROUND((AVG(fc.mood) - COALESCE((SELECT avg_mood FROM baseline), AVG(fc.mood)))::numeric, 2)::float AS mood_impact,
-         COUNT(*)::int AS checkin_count
-       FROM mood_checkin_activities mca
-       JOIN mood_activities ma ON mca.activity_id = ma.id
-       JOIN mood_activity_groups mag ON ma.group_id = mag.id
-       JOIN filtered_checkins fc ON mca.mood_checkin_id = fc.id
-       GROUP BY ma.id, ma.name, mag.name
-       HAVING COUNT(*) >= 2
-       ORDER BY mood_impact DESC, avg_mood DESC, checkin_count DESC`,
-      params
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error getting mood-activity-correlations:', err);
-    res.status(500).json({ error: 'Failed to get mood activity correlations' });
-  }
-});
-
-// GET /mood-activity-combinations?user_id=&from=&to= - repeated multi-activity combinations (min 2 checkins)
-router.get('/mood-activity-combinations', async (req: Request, res: Response) => {
-  try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
-    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
-    const params = hasRange ? [user_id, from, to] : [user_id];
-
-    const result = await query(
-      `WITH filtered_checkins AS (
-         SELECT id, mood
-         FROM mood_checkins
-         WHERE user_id = $1
-           ${whereRange}
-       ),
-       baseline AS (
-         SELECT AVG(mood)::numeric AS avg_mood
-         FROM filtered_checkins
-       ),
-       exact_combinations AS (
-         SELECT
-           fc.id AS mood_checkin_id,
-           fc.mood,
-           STRING_AGG(ma.id::text, ',' ORDER BY ma.name, ma.id::text) AS combination_key,
-           STRING_AGG(ma.name, ' + ' ORDER BY ma.name, ma.id::text) AS combination_name,
-           COUNT(*)::int AS activity_count
-         FROM filtered_checkins fc
-         JOIN mood_checkin_activities mca ON mca.mood_checkin_id = fc.id
-         JOIN mood_activities ma ON ma.id = mca.activity_id
-         GROUP BY fc.id, fc.mood
-         HAVING COUNT(*) >= 2
-       )
-       SELECT
-         combination_key,
-         combination_name,
-         activity_count,
-         ROUND(AVG(mood)::numeric, 2)::float AS avg_mood,
-         ROUND((AVG(mood) - COALESCE((SELECT avg_mood FROM baseline), AVG(mood)))::numeric, 2)::float AS mood_impact,
-         COUNT(*)::int AS checkin_count
-       FROM exact_combinations
-       GROUP BY combination_key, combination_name, activity_count
-       HAVING COUNT(*) >= 2
-       ORDER BY mood_impact DESC, avg_mood DESC, checkin_count DESC, combination_name ASC`,
-      params
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error getting mood-activity-combinations:', err);
-    res.status(500).json({ error: 'Failed to get mood activity combinations' });
-  }
-});
-
-// GET /mood-count-range?user_id=&from=&to= - count of each mood level in date range
-router.get('/mood-count-range', async (req: Request, res: Response) => {
-  try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
-    const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
-    const whereRange = hasRange ? "AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date" : '';
-    const params = hasRange ? [user_id, from, to] : [user_id];
-
-    const result = await query(
-      `SELECT mood, COUNT(*)::int AS count
-       FROM mood_checkins
-       WHERE user_id = $1
-         ${whereRange}
-       GROUP BY mood
-       ORDER BY mood ASC`,
-      params
-    );
-
-    const countMap = new Map(result.rows.map((r: any) => [r.mood, r.count]));
-    const data = [1, 2, 3, 4, 5].map((mood) => ({ mood, count: countMap.get(mood) || 0 }));
-
-    res.json(data);
-  } catch (err) {
-    console.error('Error getting mood-count-range:', err);
-    res.status(500).json({ error: 'Failed to get mood count range' });
-  }
-});
-
-// GET /mood-heatmap?user_id=&year= - avg mood per day for year-in-pixels
-router.get('/mood-heatmap', async (req: Request, res: Response) => {
-  try {
-    const { user_id, year } = req.query;
-    if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
-
-    const yearNum = parseInt(year as string, 10);
-
-    const result = await query(
-      `SELECT
-         TO_CHAR(DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')), 'YYYY-MM-DD') AS date,
-         ROUND(AVG(mood)::numeric, 1)::float AS avg_mood
-       FROM mood_checkins
-       WHERE user_id = $1
-         AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date >= $2::date
-         AND (checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))::date < ($2::date + INTERVAL '1 year')
-       GROUP BY DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC'))
-       ORDER BY date ASC`,
-      [user_id, `${yearNum}-01-01`]
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error getting mood-heatmap:', err);
-    res.status(500).json({ error: 'Failed to get mood heatmap' });
   }
 });
 
@@ -1015,13 +709,21 @@ router.get('/earliest-dates', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
-    const [checkinsResult, moodResult, sleepResult, tracksResult] = await Promise.all([
+    // Built-in types plus each plugin via its earliestDate hook (keyed by id;
+    // 'mood' keeps its legacy response key so existing clients keep working).
+    const pluginEarliestResults = await Promise.all(
+      allPlugins().map((plugin) => {
+        const hook = plugin.server.earliestDate?.();
+        if (!hook) return { id: plugin.id, date: null };
+        return query(hook.sql, [user_id])
+          .then((r) => ({ id: plugin.id, date: r.rows[0]?.date ?? null }))
+          .catch(() => ({ id: plugin.id, date: null as string | null }));
+      })
+    );
+
+    const [checkinsResult, sleepResult, tracksResult] = await Promise.all([
       query(
         `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')))::text AS date FROM checkins WHERE user_id = $1`,
-        [user_id]
-      ),
-      query(
-        `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')))::text AS date FROM mood_checkins WHERE user_id = $1`,
         [user_id]
       ),
       query(
@@ -1034,12 +736,16 @@ router.get('/earliest-dates', async (req: Request, res: Response) => {
       ),
     ]);
 
-    res.json({
+    const response: Record<string, string | null> = {
       checkins: checkinsResult.rows[0]?.date ?? null,
-      mood: moodResult.rows[0]?.date ?? null,
       sleep: sleepResult.rows[0]?.date ?? null,
       tracks: tracksResult.rows[0]?.date ?? null,
-    });
+    };
+    for (const { id, date } of pluginEarliestResults) {
+      response[id] = date;
+    }
+
+    res.json(response);
   } catch (err) {
     console.error('Error getting earliest dates:', err);
     res.status(500).json({ error: 'Failed to get earliest dates' });

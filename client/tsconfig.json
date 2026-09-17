@@ -32,6 +32,7 @@
   "include": [
     "src",
     "../plugins/**/client.tsx",
-    "../plugins/**/manifest.ts"
+    "../plugins/**/manifest.ts",
+    "../plugins/**/ui/*"
   ]
 }

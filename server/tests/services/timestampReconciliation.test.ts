@@ -1,14 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+const { queryMock, moodRowsMock } = vi.hoisted(() => ({
+  queryMock: vi.fn(),
+  moodRowsMock: [] as unknown[],
+}));
 
 vi.mock('../../src/db', () => ({
   query: queryMock,
 }));
 
+// Mood check-ins are a plugin: the service loads them via the plugin
+// registry's reconcile hook, so stub the registry (not the query sequence)
+// to keep these tests focused on the anchor-resolution logic.
+vi.mock('../../src/plugins/registry', () => ({
+  allPlugins: () => [
+    {
+      id: 'mood',
+      server: {
+        reconcile: {
+          anchorLabel: 'mood check-in',
+          scanAll: true,
+          detailPath: (id: string) => `/mood-checkins/${id}`,
+          loadCheckins: async () => moodRowsMock,
+          apply: async () => true,
+        },
+      },
+    },
+  ],
+}));
+
 import { getTimestampReconciliationSuggestions } from '../../src/services/timestampReconciliation';
 
-// The scan issues five queries in this order: venues, moods, media, tracks, sleep.
+// The scan issues five queries in this order: venues, media, tracks, sleep,
+// (mood rows come from the mocked registry hook, not the query sequence).
 function mockScan(
   venueRows: unknown[],
   moodRows: unknown[],
@@ -16,9 +40,10 @@ function mockScan(
   trackRows: unknown[] = [],
   sleepRows: unknown[] = []
 ) {
+  moodRowsMock.length = 0;
+  moodRowsMock.push(...moodRows);
   queryMock
     .mockResolvedValueOnce({ rows: venueRows })
-    .mockResolvedValueOnce({ rows: moodRows })
     .mockResolvedValueOnce({ rows: mediaRows })
     .mockResolvedValueOnce({ rows: trackRows })
     .mockResolvedValueOnce({ rows: sleepRows });
@@ -84,6 +109,7 @@ describe('getTimestampReconciliationSuggestions', () => {
     const result = await getTimestampReconciliationSuggestions();
 
     expect(result.suggestions).toEqual([]);
-    expect(result.uninferable_mood_checkins).toEqual([]);
+    // No uninferable mood check-in: the key is only created when one exists.
+    expect(result.uninferable['mood'] ?? []).toEqual([]);
   });
 });

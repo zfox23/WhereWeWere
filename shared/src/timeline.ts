@@ -48,6 +48,34 @@ export interface PluginFilterContext {
 }
 
 /**
+ * A "this day in previous years" reflection entry as consumed by the client.
+ * Built-in types fill their venue/sleep columns; plugin entries carry their
+ * typed payload in `data`.
+ */
+export interface ReflectionEntry {
+  /** Built-in type id ('location', 'sleep') or a plugin id (e.g. 'mood'). */
+  type: string;
+  id: string;
+  checked_in_at: string;
+  note: string | null;
+  venue_id: string | null;
+  venue_name: string | null;
+  city: string | null;
+  country: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  venue_category: string | null;
+  venue_timezone: string | null;
+  reflection_year: number;
+  years_ago: number;
+  sleep_started_at: string | null;
+  sleep_ended_at: string | null;
+  sleep_timezone: string | null;
+  /** Plugin-typed payload for plugin reflection entries. */
+  data: Record<string, unknown>;
+}
+
+/**
  * A filter clause produced by a plugin's server half. The framework injects
  * the clause into the plugin's timeline SELECT (AND-ed with the shared
  * user/date/search conditions). Params must be positional ($1, $2, ...)

@@ -168,33 +168,6 @@ export interface TimestampReconciliationUpdate {
   suggested_timezone: string;
 }
 
-export interface MoodActivityGroup {
-  id: string;
-  name: string;
-  display_order: number;
-  activities: MoodActivity[];
-}
-
-export interface MoodActivity {
-  id: string;
-  group_id: string;
-  name: string;
-  display_order: number;
-  icon?: string | null;
-  mood_checkin_count?: number;
-}
-
-export interface MoodCheckIn {
-  id: string;
-  user_id: string;
-  mood: number;
-  note: string | null;
-  mood_timezone?: string | null;
-  activities: { id: string; name: string; group_name: string }[];
-  checked_in_at: string;
-  created_at: string;
-}
-
 export interface SleepEntry {
   id: string;
   user_id: string;
@@ -285,7 +258,8 @@ export interface SleepRatingBucket {
 }
 
 export interface ReflectionItem {
-  type: 'location' | 'mood';
+  type: 'location' | (string & {});
+  [pluginField: string]: unknown;
   id: string;
   checked_in_at: string;
   note: string | null;
@@ -307,7 +281,8 @@ export interface ReflectionYear {
 }
 
 export interface TimelineItem {
-  type: 'location' | 'mood' | 'sleep' | 'track' | 'media';
+  type: 'location' | 'sleep' | 'track' | 'media' | (string & {});
+  [pluginField: string]: unknown;
   id: string;
   user_id: string;
   checked_in_at: string;
@@ -621,7 +596,6 @@ export interface UserSettings {
   theme: StoredThemePreference;
   system_light_theme: AppThemeId;
   system_dark_theme: AppThemeId;
-  mood_icon_pack: 'emoji' | 'lucide' | 'nature';
   distance_unit: 'metric' | 'imperial';
   timeline_density: 'comfortable' | 'compact';
 }

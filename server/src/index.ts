@@ -11,9 +11,7 @@ import { importRouter } from './routes/import';
 import { jobsRouter } from './routes/jobs';
 import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
-import { moodActivitiesRouter } from './routes/mood-activities';
 import { timelineRouter } from './routes/timeline';
-import { importDaylioRouter } from './routes/import-daylio';
 import { importSleepAsAndroidRouter } from './routes/import-sleep-as-android';
 import { webhookSleepAsAndroidRouter } from './routes/webhook-sleep-as-android';
 import { webhookPlexRouter } from './routes/webhook-plex';
@@ -82,10 +80,7 @@ export function createApp() {
   app.use('/api/v1/jobs', jobsRouter);
   app.use('/api/v1/scrobbles', scrobblesRouter);
   app.use('/api/v1/immich', immichRouter);
-  // NOTE: /api/v1/mood-checkins is mounted by the mood check-in plugin below.
-  app.use('/api/v1/mood-activities', moodActivitiesRouter);
   app.use('/api/v1/timeline', timelineRouter);
-  app.use('/api/v1/import/daylio', importDaylioRouter);
   app.use('/api/v1/import/sleep-as-android', importSleepAsAndroidRouter);
   app.use('/api/v1/webhook/sleep-as-android', webhookSleepAsAndroidRouter);
   app.use('/api/v1/webhook/plex', webhookPlexRouter);

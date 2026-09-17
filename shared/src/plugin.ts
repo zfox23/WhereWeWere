@@ -26,7 +26,11 @@
  */
 
 import type { PluginField } from './fields';
-import type { PluginFilterClause, PluginTimelineEntry } from './timeline';
+import type {
+  PluginFilterClause,
+  PluginTimelineEntry,
+  ReflectionEntry,
+} from './timeline';
 
 /**
  * Structural stand-in for a React component so this shared package stays
@@ -102,6 +106,56 @@ export interface PluginTimelineContext {
   q: string | null;
   /** This plugin's active filter params (name -> value), from the URL. */
   filterParams: Record<string, string>;
+}
+
+/** A row returned by a plugin's LLM life-summary hook. */
+export interface PluginLlmRow {
+  checked_in_at: string;
+  /** IANA timezone the check-in was made in, or null. */
+  timezone: string | null;
+  /** The check-in's typed data. */
+  data: Record<string, unknown>;
+}
+
+/** Contributes this type's rows to the LLM life summary. */
+export interface PluginLlmHook {
+  /** Pool label in the prompt, e.g. 'mood check-ins'. */
+  label: string;
+  gather: (user_id: string, from: string, to: string) => Promise<PluginLlmRow[]>;
+  /** Render a row into one or more prompt lines. */
+  toLines: (row: PluginLlmRow) => string[];
+}
+
+/** A row scanned by the timestamp reconciliation tool. */
+export interface PluginReconciliationRow {
+  id: string;
+  checked_in_at: string;
+  original_timezone: string | null;
+}
+
+/**
+ * Lets this type participate in the timestamp reconciliation maintenance
+ * tool. The framework resolves a suggested timezone from the nearest
+ * trustworthy check-in anchor (same algorithm as the built-in types) and
+ * hands the result to `apply`, which persists the label-only correction.
+ */
+export interface PluginReconciliationHook {
+  /** Human label for a fallback anchor of this type, e.g. 'mood check-in'. */
+  anchorLabel?: string;
+  /**
+   * True (default): every stored row is scannable. False: only rows stored
+   * without a timezone or with a UTC timezone are scanned (media-style).
+   */
+  scanAll?: boolean;
+  /** Detail path for a check-in id, e.g. `/mood-checkins/${id}`. */
+  detailPath: (id: string) => string;
+  /** Load this plugin's check-in rows for the scan, ordered by time ASC. */
+  loadCheckins: (user_id: string) => Promise<PluginReconciliationRow[]>;
+  /**
+   * Validate and persist a suggested timezone label. Returns false when the
+   * suggestion cannot be applied (row missing, invalid timezone, ...).
+   */
+  apply: (id: string, suggested_timezone: string) => Promise<boolean>;
 }
 
 export interface CheckinTypeServerPlugin {
@@ -205,8 +259,74 @@ export interface CheckinTypeServerPlugin {
    */
   deleteUserData?: (ctx: PluginHookContext) => Promise<number>;
 
+  /**
+   * Restore this plugin's data from a *legacy* backup (one that predates the
+   * `plugins` section and stores this type under the top-level keys named in
+   * `legacyBackupKeys`). The framework only calls this when the backup has
+   * NO `plugins.<id>` payload for this plugin. Run on the provided
+   * transaction client and return per-legacy-key row counts.
+   */
+  restoreLegacyBackup?: (
+    ctx: PluginHookContext,
+    /** The full `backup.data` object; read rows under `legacyBackupKeys`. */
+    data: Record<string, unknown>,
+  ) => Promise<Record<string, { inserted: number; skipped: number }>>;
+
   /** Settings keys persisted in the generic `plugin_settings` table. */
   settingsKeys?: PluginSettingsKey[];
+
+  // -----------------------------------------------------------------
+  // Cross-cutting service hooks (all optional; built-in behavior for
+  // types that do not participate).
+  // -----------------------------------------------------------------
+
+  /**
+   * Timeline/anchor lookup used by photo (Immich) and scrobble (Maloja)
+   * enrichment: given a set of check-in ids, return their timestamps. The
+   * SQL is a single SELECT producing `(id, checked_in_at)` rows and must
+   * filter on `$1` (a `uuid[]` parameter). The framework UNIONs this with
+   * the built-in check-in/track branches.
+   */
+  resolveTimestamps?: () => { sql: string };
+
+  /**
+   * Anniversary branch for the "this day in previous years" reflection
+   * query. The SQL is a single SELECT producing the reflection column set
+   * (see the built-in branches) and must filter on `$1` (user_id) and
+   * `$2` (target date).
+   */
+  reflectionBranch?: () => { sql: string };
+
+  /**
+   * Earliest check-in date for the "all time" period selector. The SQL
+   * selects a single `date` text column (or NULL) for `$1` (user_id).
+   */
+  earliestDate?: () => { sql: string };
+
+  /** Contribute this type's check-ins to the LLM life summary. */
+  llm?: PluginLlmHook;
+
+  /** Participate in the timestamp reconciliation maintenance tool. */
+  reconcile?: PluginReconciliationHook;
+
+  /**
+   * Start-over hook for this plugin's *settings* data (distinct from
+   * check-in data, which `deleteUserData` owns): e.g. delete a
+   * user-scoped lookup table and/or this plugin's `plugin_settings` rows.
+   * Must run on the provided transaction client. Returns the number of
+   * rows deleted.
+   */
+  resetSettings?: (ctx: PluginHookContext) => Promise<number>;
+
+  /**
+   * `user_settings` column names this plugin has migrated to
+   * `plugin_settings` (same key name must be declared in `settingsKeys`).
+   * When restoring a backup whose settings object carries one of these
+   * legacy columns (and which has no `plugins.<id>` payload), the framework
+   * writes the value into `plugin_settings` for this plugin instead of
+   * `user_settings`.
+   */
+  legacySettingsKeys?: string[];
 }
 
 /** Props passed to a plugin-provided timeline card component. */
@@ -228,8 +348,12 @@ export interface CheckinCardProps {
   /** Music scrobbles associated with this check-in. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   scrobbles?: any[];
-  /** The user's icon-pack preference (e.g. 'emoji' | 'lucide' | 'nature'). */
-  iconPack?: string;
+  /**
+   * The user's effective settings for this plugin (from `plugin_settings`
+   * with declared defaults applied). Cards read type-specific preferences
+   * from here (e.g. an icon-pack key declared in `settingsKeys`).
+   */
+  settings?: Record<string, unknown>;
 }
 
 /** Props passed to a plugin-provided check-in (create + edit) page. */
@@ -267,9 +391,24 @@ export interface PluginFilterSectionProps {
   loadOptions?: () => Promise<Record<string, unknown>>;
 }
 
+/** Props passed to a plugin-provided Settings section. */
+export interface PluginSettingsProps {
+  /** The user's effective settings for this plugin (defaults applied). */
+  settings: Record<string, unknown>;
+  /** Persist an update to one or more declared settings keys. */
+  onUpdate: (updates: Record<string, unknown>) => Promise<void>;
+}
+
 /** Props passed to a plugin-provided Profile tab. */
 export interface PluginProfileTabProps {
   userId: string;
+}
+
+/** Props passed to a plugin-provided "this day in previous years" card. */
+export interface PluginReflectionCardProps {
+  item: ReflectionEntry;
+  /** The user's effective settings for this plugin. */
+  settings: Record<string, unknown>;
 }
 
 /**
@@ -307,6 +446,16 @@ export interface CheckinTypeClientPlugin {
   filterSection?: AnyComponent<PluginFilterSectionProps>;
   /** Profile tab content. Omit to get the auto check-in count tab. */
   profileTab?: AnyComponent<PluginProfileTabProps>;
+  /**
+   * Settings page section for this plugin's `settingsKeys`. Omit to get an
+   * auto-generated form for the declared keys.
+   */
+  settings?: AnyComponent<PluginSettingsProps>;
+  /**
+   * Card for this type's entries in the "this day in previous years"
+   * reflection list. Omit for a minimal generic chip.
+   */
+  reflectionCard?: AnyComponent<PluginReflectionCardProps>;
   /** Settings > Integrations section. Optional. */
   integrationsSettings?: AnyComponent<Record<string, unknown>>;
   /** Settings > Data section. Optional. */

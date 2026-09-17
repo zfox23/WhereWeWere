@@ -55,3 +55,27 @@ export function hasPlugin(id: string): boolean {
 export function pluginIds(): string[] {
   return Array.from(byId.keys());
 }
+
+/**
+ * SQL branches resolving check-in ids to anchor timestamps (id, checked_in_at)
+ * for photo/scrobble enrichment. Each branch filters on $1 (uuid[]). Core
+ * routes UNION these with their built-in branches.
+ */
+export function pluginTimestampBranches(): string[] {
+  return allPlugins()
+    .map((plugin) => plugin.server.resolveTimestamps?.().sql ?? null)
+    .filter((sql): sql is string => sql !== null);
+}
+
+/**
+ * SQL branches for the "this day in previous years" reflection list. Each
+ * branch is a parenthesized SELECT matching the core reflection column shape
+ * (type, id, checked_in_at, note, venue_*, reflection_year, years_ago,
+ * sleep_*, data jsonb) and uses $1 (user_id) and $2 (target date).
+ */
+export function pluginReflectionBranches(): string[] {
+  return allPlugins()
+    .map((plugin) => plugin.server.reflectionBranch?.().sql ?? null)
+    .filter((sql): sql is string => sql !== null)
+    .map((sql) => `(\n        ${sql.trim()}\n        )`);
+}

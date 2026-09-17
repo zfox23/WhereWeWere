@@ -1,5 +1,5 @@
 import { SwarmImportSection } from './SwarmImportSection';
-import { DaylioImportSection } from './DaylioImportSection';
+import { allClientPlugins } from '../../plugins/registry';
 import { YamtrackImportSection } from './YamtrackImportSection';
 import { SleepAsAndroidImportSection } from './SleepAsAndroidImportSection';
 import { JobsSection } from './JobsSection';
@@ -16,13 +16,24 @@ export function DataTab({ jobRefreshKey, onImportComplete }: DataTabProps) {
   return (
     <>
       <SwarmImportSection onImportComplete={onImportComplete} />
-      <DaylioImportSection />
       <SleepAsAndroidImportSection />
       <YamtrackImportSection onImportComplete={onImportComplete} />
       <JobsSection refreshKey={jobRefreshKey} />
       <TimestampReconciliationSection />
       <BackupRestoreSection />
       <StartOverSection />
+
+      {/* Data sections contributed by check-in plugins (e.g. Daylio import). */}
+      {allClientPlugins().map((plugin) => {
+        const Data = plugin.client.dataSettings;
+        return Data ? (
+          <Data
+            key={plugin.id}
+            jobRefreshKey={jobRefreshKey}
+            onImportComplete={onImportComplete}
+          />
+        ) : null;
+      })}
     </>
   );
 }

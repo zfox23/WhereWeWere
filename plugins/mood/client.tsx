@@ -18,12 +18,15 @@ import type {
 } from 'wwp-shared';
 import { Smile } from 'lucide-react';
 import { manifest } from './manifest';
-import MoodCheckInPage from '../../client/src/pages/MoodCheckIn';
-import MoodCheckInDetail from '../../client/src/pages/MoodCheckInDetail';
-import MoodCheckInCard from '../../client/src/components/MoodCheckInCard';
-import MoodFilter from '../../client/src/components/filters/MoodFilter';
-import { MoodsTab } from '../../client/src/components/MoodStats';
-import { moodActivities, settings as settingsApi } from '../../client/src/api/client';
+import MoodCheckInPage from './ui/MoodCheckIn';
+import MoodCheckInDetail from './ui/MoodCheckInDetail';
+import MoodCheckInCard from './ui/MoodCheckInCard';
+import MoodFilter from './ui/MoodFilter';
+import { MoodsTab } from './ui/MoodStats';
+import { DaylioImportSection } from './ui/DaylioImportSection';
+import { MoodTab } from './ui/MoodTab';
+import { moodActivities } from './ui/api';
+import { plugins } from '../../client/src/plugins/api';
 import type { TimelineItem } from '../../client/src/types';
 
 /** MoodCheckInCard expects the legacy TimelineItem shape. */
@@ -42,32 +45,31 @@ function toTimelineItem(props: CheckinCardProps): TimelineItem {
   } as TimelineItem;
 }
 
-/** The legacy card reads iconPack from user settings. */
-let iconPackCache: { at: number; value: string } | null = null;
-function useMoodIconPack(): string {
-  const [pack, setPack] = useState(iconPackCache?.value ?? 'emoji');
+/**
+ * The mood icon pack lives in this plugin's `plugin_settings` (key
+ * `mood_icon_pack`). The card contract passes the effective settings via
+ * `props.settings`; when rendered outside a context that provides them we
+ * fetch the plugin settings directly.
+ */
+function MoodCard(props: CheckinCardProps) {
+  const packFromProps = typeof props.settings?.mood_icon_pack === 'string' ? props.settings.mood_icon_pack : null;
+  const [fetchedPack, setFetchedPack] = useState<string | null>(null);
+
   useEffect(() => {
-    if (iconPackCache && Date.now() - iconPackCache.at < 30_000) return;
-    settingsApi
-      .get()
+    if (packFromProps) return;
+    plugins.settings
+      .get('mood')
       .then((s) => {
-        const value = s?.mood_icon_pack || 'emoji';
-        iconPackCache = { at: Date.now(), value };
-        setPack(value);
+        const value = typeof s?.mood_icon_pack === 'string' ? s.mood_icon_pack : null;
+        if (value) setFetchedPack(value);
       })
       .catch(() => {});
-  }, []);
-  return pack;
-}
+  }, [packFromProps]);
 
-function MoodCard(props: CheckinCardProps) {
-  // Home provides the user's icon pack, photos, and scrobbles via the card
-  // contract; fall back to a settings lookup when rendered elsewhere.
-  const fallbackPack = useMoodIconPack();
   return (
     <MoodCheckInCard
       item={toTimelineItem(props)}
-      iconPack={props.iconPack || fallbackPack}
+      iconPack={packFromProps || fetchedPack || 'emoji'}
       immichUrl={props.integrations.immich_url ?? null}
       photos={(props.photos as unknown as import('../../client/src/types').ImmichAsset[]) ?? null}
       scrobbles={(props.scrobbles as unknown as import('../../client/src/types').Scrobble[]) ?? []}
@@ -133,6 +135,8 @@ export const client: CheckinTypeClientPlugin = {
   timelineCard: MoodCard,
   filterSection: MoodFilterSection,
   profileTab: MoodProfileTab,
+  dataSettings: DaylioImportSection,
+  settings: MoodTab,
 };
 
 export { manifest };

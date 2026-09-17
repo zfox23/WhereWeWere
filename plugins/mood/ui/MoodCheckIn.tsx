@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, Trash2, ArrowLeft, Check, ChevronDown, Settings as SettingsIcon } from 'lucide-react';
-import { moodCheckins, moodActivities, settings as settingsApi } from '../api/client';
-import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from '../components/MoodIcons';
-import { resolveActivityIcon } from '../utils/icons';
-import type { MoodActivityGroup } from '../types';
-import { usePageTitle } from '../utils/pageTitle';
+import { moodCheckins, moodActivities } from './api';
+import { plugins } from '../../../client/src/plugins/api';
+import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
+import { resolveActivityIcon } from '../../../client/src/utils/icons';
+import type { MoodActivityGroup } from './types';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -133,8 +134,8 @@ export default function MoodCheckInPage() {
 
   useEffect(() => {
     moodActivities.groups().then(setGroups).catch(console.error);
-    settingsApi.get().then((s: any) => {
-      if (s.mood_icon_pack) setIconPack(s.mood_icon_pack);
+    plugins.settings.get('mood').then((s: any) => {
+      if (typeof s?.mood_icon_pack === 'string') setIconPack(s.mood_icon_pack);
     }).catch(console.error);
   }, []);
 

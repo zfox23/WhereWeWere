@@ -1,18 +1,31 @@
 import { useState, useEffect } from 'react';
 import { Smile, Palette, Loader2 } from 'lucide-react';
-import { settings, moodActivities } from '../../api/client';
-import { MoodIconRow } from '../../components/MoodIcons';
-import ActivityGroupManager from '../../components/ActivityGroupManager';
-import type { MoodActivityGroup, MoodActivity } from '../../types';
+import { moodActivities } from './api';
+import { plugins } from '../../../client/src/plugins/api';
+import { MoodIconRow } from './MoodIcons';
+import ActivityGroupManager from './ActivityGroupManager';
+import type { MoodActivityGroup, MoodActivity } from './types';
 
-interface MoodTabProps {
-  initialMoodIconPack: 'emoji' | 'lucide' | 'nature';
-}
-
-export function MoodTab({ initialMoodIconPack }: MoodTabProps) {
-  const [moodIconPack, setMoodIconPack] = useState(initialMoodIconPack);
+/**
+ * Mood Settings tab. The mood icon pack lives in this plugin's settings
+ * (`plugin_settings`, key `mood_icon_pack`); it is loaded and saved through
+ * the plugin settings API rather than the core user_settings.
+ */
+export function MoodTab() {
+  const [moodIconPack, setMoodIconPack] = useState<'emoji' | 'lucide' | 'nature'>('emoji');
   const [activityGroups, setActivityGroups] = useState<MoodActivityGroup[]>([]);
   const [activityGroupsLoading, setActivityGroupsLoading] = useState(false);
+
+  useEffect(() => {
+    plugins.settings
+      .get('mood')
+      .then((s) => {
+        if (s?.mood_icon_pack === 'lucide' || s?.mood_icon_pack === 'nature' || s?.mood_icon_pack === 'emoji') {
+          setMoodIconPack(s.mood_icon_pack);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     async function loadActivityGroups() {
@@ -98,7 +111,7 @@ export function MoodTab({ initialMoodIconPack }: MoodTabProps) {
             <button
               key={value}
               onClick={async () => {
-                await settings.update({ mood_icon_pack: value });
+                await plugins.settings.set('mood', { mood_icon_pack: value });
                 setMoodIconPack(value);
               }}
               className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-sm font-medium ${moodIconPack === value
@@ -126,7 +139,7 @@ export function MoodTab({ initialMoodIconPack }: MoodTabProps) {
             disabled={activityGroupsLoading || activityGroups.length === 0}
             className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Sort A&gt;Z
+            Sort A-Z
           </button>
         </div>
         {activityGroupsLoading ? (

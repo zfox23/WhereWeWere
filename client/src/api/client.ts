@@ -17,7 +17,7 @@ import type {
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
 
-function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
+export function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
   if (!API_ACCESS_TOKEN) return headers;
   return { ...headers, 'X-WhereWeWere-Token': API_ACCESS_TOKEN };
 }
@@ -160,45 +160,7 @@ export const stats = {
   additionalStats: (userId: string) =>
     request<any>(`/stats/additional-stats?user_id=${userId}`),
   earliestDates: (userId: string) =>
-    request<{ checkins: string | null; mood: string | null; sleep: string | null; tracks: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
-  moodDaily: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) { qp.set('from', from); qp.set('to', to); }
-    return request<any[]>(`/stats/mood-daily?${qp.toString()}`);
-  },
-  moodMonthly: (userId: string, year: number) =>
-    request<any[]>(`/stats/mood-monthly?user_id=${userId}&year=${year}`),
-  moodByDayOfWeek: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/mood-by-day-of-week?${qp.toString()}`);
-  },
-  moodActivityCorrelations: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/mood-activity-correlations?${qp.toString()}`);
-  },
-  moodActivityCombinations: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/mood-activity-combinations?${qp.toString()}`);
-  },
-  moodHeatmap: (userId: string, year: number) =>
-    request<any[]>(`/stats/mood-heatmap?user_id=${userId}&year=${year}`),
-  moodCountRange: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) { qp.set('from', from); qp.set('to', to); }
-    return request<any[]>(`/stats/mood-count-range?${qp.toString()}`);
-  },
+    request<{ checkins: string | null; sleep: string | null; tracks: string | null; [pluginId: string]: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
   sleepSummary: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
     if (from && to) {
@@ -246,32 +208,6 @@ export const importApi = {
       throw new Error(error.message || `Import failed: ${res.status}`);
     }
     return res.json();
-  },
-  daylio: async (file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    form.append('source_timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-    const res = await fetch(`${API_BASE}/import/daylio`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.message || `Import failed: ${res.status}`);
-    }
-    return res.json();
-  },
-  replaceDaylioBreaks: async () => {
-    const res = await fetch(`${API_BASE}/import/daylio/replace-br`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.error || error.message || `Update failed: ${res.status}`);
-    }
-    return res.json() as Promise<{ updated: number }>;
   },
   sleepAsAndroid: async (file: File) => {
     const form = new FormData();
@@ -468,41 +404,6 @@ export const scrobbles = {
     request<Record<string, any[]>>(`/scrobbles?checkin_ids=${checkinIds.join(',')}`),
   forDate: (date: string) =>
     request<any[]>(`/scrobbles/by-date?date=${encodeURIComponent(date)}`),
-};
-
-// Mood Checkins
-export const moodCheckins = {
-  list: (params?: Record<string, string>) =>
-    request<any[]>(`/mood-checkins?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/mood-checkins/${id}`),
-  create: (data: any) =>
-    request<any>('/mood-checkins', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) =>
-    request<any>(`/mood-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) =>
-    request<void>(`/mood-checkins/${id}`, { method: 'DELETE' }),
-};
-
-// Mood Activities
-export const moodActivities = {
-  groups: () => request<any[]>('/mood-activities/groups'),
-  createGroup: (data: any) =>
-    request<any>('/mood-activities/groups', { method: 'POST', body: JSON.stringify(data) }),
-  updateGroup: (id: string, data: any) =>
-    request<any>(`/mood-activities/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteGroup: (id: string) =>
-    request<void>(`/mood-activities/groups/${id}`, { method: 'DELETE' }),
-  createActivity: (data: any) =>
-    request<any>('/mood-activities/activities', { method: 'POST', body: JSON.stringify(data) }),
-  reorderActivities: (groupId: string, activityIds: string[]) =>
-    request<{ message: string; count: number }>('/mood-activities/activities/reorder', {
-      method: 'PUT',
-      body: JSON.stringify({ group_id: groupId, activity_ids: activityIds }),
-    }),
-  updateActivity: (id: string, data: any) =>
-    request<any>(`/mood-activities/activities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteActivity: (id: string) =>
-    request<void>(`/mood-activities/activities/${id}`, { method: 'DELETE' }),
 };
 
 // Timeline

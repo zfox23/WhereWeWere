@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import type { CheckinTypeServer, PluginLlmHook } from 'wwp-shared';
+import { allPlugins } from '../plugins/registry';
 import sharp from 'sharp';
 import { query } from '../db';
 
@@ -21,13 +23,6 @@ const IMAGE_TOKEN_RESERVE = 1200;
 // Fixed overhead reserve (system prompt + header), in tokens.
 const PROMPT_OVERHEAD_TOKENS = 500;
 
-const MOOD_LABELS: Record<number, string> = {
-  1: 'bad',
-  2: 'okay',
-  3: 'neutral',
-  4: 'good',
-  5: 'great',
-};
 
 interface LlmSettings {
   api_url: string;
@@ -74,12 +69,10 @@ interface CheckinRow {
   timezone: string | null;
 }
 
-interface MoodRow {
+interface PluginLlmRow {
   checked_in_at: string;
-  mood: number;
-  note: string | null;
-  activities: { name: string; group_name: string }[];
   timezone: string | null;
+  data: Record<string, unknown>;
 }
 
 interface TrackRow {
@@ -99,8 +92,21 @@ interface SleepRow {
   timezone: string | null;
 }
 
+interface LlmPluginEntry {
+  plugin: CheckinTypeServer;
+  hook: PluginLlmHook;
+}
+
+/** Plugins that contribute to the LLM life summary. */
+function allLlmPlugins(): LlmPluginEntry[] {
+  return allPlugins()
+    .map((plugin) => ({ plugin, hook: plugin.server.llm }))
+    .filter((entry): entry is LlmPluginEntry => entry.hook !== null && entry.hook !== undefined);
+}
+
 async function gatherLifeData(from: string, to: string) {
-  const [checkinsResult, moodsResult, tracksResult, sleepResult] = await Promise.all([
+  const llmPlugins = allLlmPlugins();
+  const [checkinsResult, pluginRowsList, tracksResult, sleepResult] = await Promise.all([
     query(
       `SELECT c.checked_in_at, c.notes AS note,
               v.name AS venue_name, v.city, v.country,
@@ -115,24 +121,12 @@ async function gatherLifeData(from: string, to: string) {
        ORDER BY c.checked_in_at ASC`,
       [USER_ID, from, to]
     ),
-    query(
-      `SELECT mc.checked_in_at, mc.mood, mc.note, mc.mood_timezone AS timezone,
-              COALESCE(
-                (
-                  SELECT json_agg(json_build_object('name', ma.name, 'group_name', mag.name))
-                  FROM mood_checkin_activities mca
-                  JOIN mood_activities ma ON mca.activity_id = ma.id
-                  JOIN mood_activity_groups mag ON ma.group_id = mag.id
-                  WHERE mca.mood_checkin_id = mc.id
-                ),
-                '[]'::json
-              ) AS activities
-       FROM mood_checkins mc
-       WHERE mc.user_id = $1
-         AND (mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date >= $2::date
-         AND (mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date <= $3::date
-       ORDER BY mc.checked_in_at ASC`,
-      [USER_ID, from, to]
+    // Plugin check-in types contribute via their llm hook (gather + toLines).
+    Promise.all(
+      llmPlugins.map(({ plugin, hook }) => hook.gather(USER_ID, from, to).catch((err: unknown) => {
+        console.error(`Plugin "${plugin.id}" llm.gather failed:`, err);
+        return [];
+      }))
     ),
     query(
       `SELECT name, activity_type, started_at, ended_at,
@@ -167,15 +161,21 @@ async function gatherLifeData(from: string, to: string) {
   };
 
   const checkins: CheckinRow[] = checkinsResult.rows;
-  const moods: MoodRow[] = moodsResult.rows;
   const tracks: TrackRow[] = tracksResult.rows;
   const sleep: SleepRow[] = sleepResult.rows;
 
-  const totalCheckins = checkins.length + moods.length;
+  const pluginPools: { label: string; lines: string[] }[] = allLlmPlugins().map(({ plugin, hook }, i) => {
+    const rows = (pluginRowsList[i] ?? []) as PluginLlmRow[];
+    const lines = rows.flatMap((row) => hook.toLines(row));
+    return { label: hook.label, lines };
+  });
+
+  const totalCheckins = checkins.length + pluginPools.reduce((sum, pool) => sum + pool.lines.length, 0);
   const hasAnyData = totalCheckins > 0 || tracks.length > 0 || sleep.length > 0;
 
-  return { checkins, moods, tracks, sleep, hasAnyData, formatWhen };
+  return { checkins, pluginPools, tracks, sleep, hasAnyData, formatWhen };
 }
+
 
 function formatDistance(meters: number): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
@@ -224,7 +224,7 @@ function buildLifeDataText(
   data: Awaited<ReturnType<typeof gatherLifeData>>,
   charBudget: number
 ): { text: string; skipped: SkippedType[] } {
-  const { checkins, moods, tracks, sleep, formatWhen } = data;
+  const { checkins, pluginPools, tracks, sleep, formatWhen } = data;
 
   const pools: { label: string; lines: string[] }[] = [];
 
@@ -237,12 +237,11 @@ function buildLifeDataText(
   });
   if (locationLines.length > 0) pools.push({ label: 'location check-ins', lines: locationLines });
 
-  const moodLines = moods.map((m) => {
-    const acts = m.activities?.length ? ` (activities: ${m.activities.map((a) => a.name).join(', ')})` : '';
-    const note = m.note ? ` — note: "${m.note}"` : '';
-    return `- ${formatWhen(m.checked_in_at, m.timezone)} — mood: ${MOOD_LABELS[m.mood] || m.mood}${acts}${note}`;
-  });
-  if (moodLines.length > 0) pools.push({ label: 'mood check-ins', lines: moodLines });
+  // Plugin check-in types (their hooks pre-format each line, timestamp
+  // included, so no further work is needed here).
+  for (const pool of pluginPools) {
+    if (pool.lines.length > 0) pools.push(pool);
+  }
 
   const trackLines = tracks.map((t) => {
     const type = t.activity_type ? `${t.activity_type} ` : '';

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { pool, query } from '../db';
 import {
-  computeAppliedReconciliation,
+  applyReconciliationUpdate,
   getTimestampReconciliationSuggestions,
   type TimestampReconciliationUpdate,
 } from '../services/timestampReconciliation';
@@ -29,8 +29,7 @@ router.get('/', async (_req: Request, res: Response) => {
               COALESCE(us.theme, 'system') AS theme,
                     COALESCE(us.system_light_theme, $2) AS system_light_theme,
                     COALESCE(us.system_dark_theme, $3) AS system_dark_theme,
-              COALESCE(us.mood_icon_pack, 'emoji') AS mood_icon_pack,
-              COALESCE(us.distance_unit, 'metric') AS distance_unit,
+                    COALESCE(us.distance_unit, 'metric') AS distance_unit,
               COALESCE(us.timeline_density, 'comfortable') AS timeline_density
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
@@ -67,7 +66,6 @@ router.put('/', async (req: Request, res: Response) => {
       tmdb_api_key, tgdb_api_key, hardcover_api_key,
       plex_usernames,
       theme, system_light_theme, system_dark_theme,
-      mood_icon_pack,
       distance_unit,
       timeline_density,
       llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support,
@@ -100,11 +98,11 @@ router.put('/', async (req: Request, res: Response) => {
       `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
                                   tmdb_api_key, tgdb_api_key, hardcover_api_key,
                                   plex_usernames,
-                                  theme, system_light_theme, system_dark_theme, mood_icon_pack, distance_unit, timeline_density,
+                                  theme, system_light_theme, system_dark_theme, distance_unit, timeline_density,
                                   llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-               $11, COALESCE($12, $21), COALESCE($13, $22), $14, $15, $23,
-               $16, $17, $18, $19, $20)
+               $11, COALESCE($12, $21), COALESCE($13, $22), $14, $23,
+               $15, $16, $17, $18, $19)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
@@ -118,40 +116,38 @@ router.put('/', async (req: Request, res: Response) => {
                                 WHEN $10 = '' THEN NULL
                                 ELSE $10 END,
          theme = COALESCE($11, user_settings.theme),
-         system_light_theme = COALESCE($12, user_settings.system_light_theme, $21),
-         system_dark_theme = COALESCE($13, user_settings.system_dark_theme, $22),
-         mood_icon_pack = COALESCE($14, user_settings.mood_icon_pack),
-         distance_unit = COALESCE($15, user_settings.distance_unit),
-         timeline_density = COALESCE($23, user_settings.timeline_density),
-         llm_api_url = COALESCE($16, user_settings.llm_api_url),
-         llm_model = COALESCE($17, user_settings.llm_model),
-         llm_reasoning_level = COALESCE($18, user_settings.llm_reasoning_level),
-         llm_context_window = COALESCE($19, user_settings.llm_context_window),
-         llm_image_support = COALESCE($20, user_settings.llm_image_support),
+         system_light_theme = COALESCE($12, user_settings.system_light_theme, $20),
+         system_dark_theme = COALESCE($13, user_settings.system_dark_theme, $21),
+         distance_unit = COALESCE($14, user_settings.distance_unit),
+         timeline_density = COALESCE($22, user_settings.timeline_density),
+         llm_api_url = COALESCE($15, user_settings.llm_api_url),
+         llm_model = COALESCE($16, user_settings.llm_model),
+         llm_reasoning_level = COALESCE($17, user_settings.llm_reasoning_level),
+         llm_context_window = COALESCE($18, user_settings.llm_context_window),
+         llm_image_support = COALESCE($19, user_settings.llm_image_support),
          updated_at = NOW()
        RETURNING *`,
-      [
-        USER_ID,
-        dawarich_url ?? null, dawarich_api_key ?? null,
-        immich_url ?? null, immich_api_key ?? null,
-        maloja_url ?? null,
-        tmdb_api_key ?? null, tgdb_api_key ?? null, hardcover_api_key ?? null,
-        plexUsernamesValue,
-        theme ?? null,
-        system_light_theme ?? null,
-        system_dark_theme ?? null,
-        mood_icon_pack ?? null,
-        distance_unit ?? null,
-        llm_api_url ?? null,
-        llm_model ?? null,
-        llm_reasoning_level ?? null,
-        llm_context_window ?? null,
-        llm_image_support ?? null,
-        DEFAULT_SYSTEM_LIGHT_THEME,
-        DEFAULT_SYSTEM_DARK_THEME,
-        timeline_density ?? null,
-      ]
-    );
+     [
+       USER_ID,
+       dawarich_url ?? null, dawarich_api_key ?? null,
+       immich_url ?? null, immich_api_key ?? null,
+       maloja_url ?? null,
+       tmdb_api_key ?? null, tgdb_api_key ?? null, hardcover_api_key ?? null,
+       plexUsernamesValue,
+       theme ?? null,
+       system_light_theme ?? null,
+       system_dark_theme ?? null,
+       distance_unit ?? null,
+       llm_api_url ?? null,
+       llm_model ?? null,
+       llm_reasoning_level ?? null,
+       llm_context_window ?? null,
+       llm_image_support ?? null,
+       DEFAULT_SYSTEM_LIGHT_THEME,
+       DEFAULT_SYSTEM_DARK_THEME,
+       timeline_density ?? null,
+     ]
+   );
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -174,43 +170,18 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
     let updated = 0;
 
     for (const update of updates) {
-      if (!update?.id || (update.type !== 'venue' && update.type !== 'mood' && update.type !== 'media') || !update.suggested_timezone) {
+      if (!update?.id || !update.type || !update.suggested_timezone) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Each update must include id, type, and suggested_timezone' });
       }
 
-      const applied = await computeAppliedReconciliation(update);
+      // Label-only: the stored instant is the true moment the event happened;
+      // reconciliation only corrects the stored timezone label. Built-in
+      // types are updated here; plugin types persist via their own hook.
+      const applied = await applyReconciliationUpdate(client as any, update);
       if (!applied) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: `Unable to reconcile ${update.type} check-in ${update.id}` });
-      }
-
-      // Label-only: the stored instant is the true moment the event happened;
-      // reconciliation only corrects the stored timezone label.
-      if (update.type === 'venue') {
-        await client.query(
-          `UPDATE checkins
-           SET checkin_timezone = $2,
-               updated_at = NOW()
-           WHERE id = $1`,
-          [update.id, applied.timeZone]
-        );
-      } else if (update.type === 'media') {
-        await client.query(
-          `UPDATE media_checkins
-           SET checkin_timezone = $2,
-               updated_at = NOW()
-           WHERE id = $1`,
-          [update.id, applied.timeZone]
-        );
-      } else {
-        await client.query(
-          `UPDATE mood_checkins
-           SET mood_timezone = $2,
-               updated_at = NOW()
-           WHERE id = $1`,
-          [update.id, applied.timeZone]
-        );
       }
 
       updated += 1;

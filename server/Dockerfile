@@ -4,6 +4,7 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY shared ./shared
+COPY plugins ./plugins
 COPY server ./server
 RUN npm install
 RUN npm run build --workspace=shared

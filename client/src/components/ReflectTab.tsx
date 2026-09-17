@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarDays, History, Loader2, MapPin, SmilePlus, Compass, Moon } from 'lucide-react';
 import { immich as immichApi, settings, stats, scrobbles } from '../api/client';
-import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
-import { MoodYearInPixels } from './MoodStats';
+import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from '../../../plugins/mood/ui/MoodIcons';
+import { MoodYearInPixels } from '../../../plugins/mood/ui/MoodStats';
+import { moodStats } from '../../../plugins/mood/ui/api';
+import { plugins } from '../plugins/api';
 import { PhotoStrip } from './PhotoStrip';
 import { LifeSummarySection } from './LifeSummarySection';
 import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
@@ -244,7 +246,7 @@ function OnThisDaySection({
   dawarichUrl,
 }: {
   data: ReflectionYear[];
-  moodIconPack: UserSettings['mood_icon_pack'];
+  moodIconPack: 'emoji' | 'lucide' | 'nature';
   immichUrl: string | null;
   photosByYear: Record<number, ImmichAsset[]>;
   malojaUrl: string | null;
@@ -412,7 +414,7 @@ export function ReflectTab() {
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [photosByYear, setPhotosByYear] = useState<Record<number, ImmichAsset[]>>({});
   const [scrobblesByDate, setScrobblesByDate] = useState<Record<string, Scrobble[]>>({});
-  const [moodIconPack, setMoodIconPack] = useState<UserSettings['mood_icon_pack']>('emoji');
+  const [moodIconPack, setMoodIconPack] = useState<'emoji' | 'lucide' | 'nature'>('emoji');
   const [llmConfigured, setLlmConfigured] = useState(false);
   const [llmImageSupport, setLlmImageSupport] = useState(true);
   const [reflectionsLoading, setReflectionsLoading] = useState(true);
@@ -424,6 +426,20 @@ export function ReflectTab() {
   const [hasLoadedSleep, setHasLoadedSleep] = useState(false);
   const currentYear = new Date().getFullYear();
   const heatmapsRefreshing = locationLoading || moodLoading || sleepLoading;
+
+  // Mood icon pack is a mood-plugin setting, so load it from the plugin
+  // settings store (not the core user_settings).
+  useEffect(() => {
+    plugins
+      .settings.get('mood')
+      .then((s) => {
+        if (s?.mood_icon_pack === 'emoji' || s?.mood_icon_pack === 'lucide' || s?.mood_icon_pack === 'nature') {
+          setMoodIconPack(s.mood_icon_pack);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -447,9 +463,6 @@ export function ReflectTab() {
           setDawarichUrl(userSettings.dawarich_url.replace(/\/+$/, ''));
         } else {
           setDawarichUrl(null);
-        }
-        if (userSettings?.mood_icon_pack) {
-          setMoodIconPack(userSettings.mood_icon_pack);
         }
         setLlmConfigured(Boolean(userSettings?.llm_api_url && userSettings?.llm_model));
         setLlmImageSupport(userSettings?.llm_image_support !== false);
@@ -638,7 +651,7 @@ export function ReflectTab() {
     let cancelled = false;
     setMoodLoading(true);
 
-    stats.moodHeatmap(USER_ID, selectedYear)
+    moodStats.heatmap(USER_ID, selectedYear)
       .then((data) => {
         if (!cancelled) {
           setMoodHeatmap(data);
