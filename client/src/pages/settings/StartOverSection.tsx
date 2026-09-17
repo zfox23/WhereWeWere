@@ -1,36 +1,55 @@
 import { useState } from 'react';
 import { ShieldAlert, Trash2, Loader2, Check, AlertCircle } from 'lucide-react';
 import { backupApi } from '../../api/client';
+import { allClientPlugins } from '../../plugins/registry';
+
+type StartOverOptions = {
+  delete_all_checkins: boolean;
+  delete_venue_checkins: boolean;
+  delete_tracks: boolean;
+  delete_media_items: boolean;
+  reset_account_settings: boolean;
+  reset_integrations_settings: boolean;
+  /** Per-plugin options: `delete_<pluginId>_checkins`, `reset_<pluginId>_settings`. */
+  [key: string]: boolean;
+};
+
+/** Plugin ids are stable identifiers; derive the option key names. */
+const pluginDeleteKey = (id: string) => `delete_${id}_checkins`;
+const pluginResetKey = (id: string) => `reset_${id}_settings`;
 
 export function StartOverSection() {
+  const plugins = allClientPlugins();
   const [step, setStep] = useState<1 | 2>(1);
   const [firstConfirmation, setFirstConfirmation] = useState('');
   const [secondConfirmation, setSecondConfirmation] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [options, setOptions] = useState({
+  const [options, setOptions] = useState<StartOverOptions>({
     delete_all_checkins: false,
     delete_venue_checkins: false,
-    delete_mood_checkins: false,
-    delete_sleep_entries: false,
     delete_tracks: false,
     delete_media_items: false,
     reset_account_settings: false,
-    reset_mood_settings: false,
     reset_integrations_settings: false,
+    ...Object.fromEntries(plugins.flatMap((p) => [
+      [pluginDeleteKey(p.id), false],
+      [pluginResetKey(p.id), false],
+    ])),
   });
 
   const hasAnySelection = Object.values(options).some(Boolean);
   const canAdvance = firstConfirmation.trim() === 'DELETE MY DATA' && hasAnySelection;
   const canSubmit = secondConfirmation.trim() === 'START OVER' && hasAnySelection;
 
-  const toggleOption = (key: keyof typeof options) => {
+  const toggleOption = (key: keyof StartOverOptions) => {
     setOptions((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
+      const next: StartOverOptions = { ...prev, [key]: !prev[key] };
       if (key === 'delete_all_checkins') {
         next.delete_venue_checkins = next.delete_all_checkins;
-        next.delete_mood_checkins = next.delete_all_checkins;
-        next.delete_sleep_entries = next.delete_all_checkins;
+        for (const plugin of plugins) {
+          next[pluginDeleteKey(plugin.id)] = next.delete_all_checkins;
+        }
         next.delete_tracks = next.delete_all_checkins;
       }
       return next;
@@ -70,7 +89,7 @@ export function StartOverSection() {
             checked={options.delete_all_checkins}
             onChange={() => toggleOption('delete_all_checkins')}
           />
-          <span>All Checkins (Venue and Mood)</span>
+          <span>All Checkins (all check-in types)</span>
         </label>
         <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
           <input
@@ -82,26 +101,18 @@ export function StartOverSection() {
           />
           <span>All Venue Checkins</span>
         </label>
-        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={options.delete_mood_checkins}
-            disabled={options.delete_all_checkins}
-            onChange={() => toggleOption('delete_mood_checkins')}
-          />
-          <span>All Mood Checkins</span>
-        </label>
-        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={options.delete_sleep_entries}
-            disabled={options.delete_all_checkins}
-            onChange={() => toggleOption('delete_sleep_entries')}
-          />
-          <span>All Sleep Entries</span>
-        </label>
+        {plugins.map((plugin) => (
+          <label key={plugin.id} className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={options[pluginDeleteKey(plugin.id)] ?? false}
+              disabled={options.delete_all_checkins}
+              onChange={() => toggleOption(pluginDeleteKey(plugin.id))}
+            />
+            <span>All {plugin.strings.title} {plugin.strings.plural}</span>
+          </label>
+        ))}
         <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
           <input
             type="checkbox"
@@ -130,15 +141,17 @@ export function StartOverSection() {
           />
           <span>Reset Account Settings</span>
         </label>
-        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={options.reset_mood_settings}
-            onChange={() => toggleOption('reset_mood_settings')}
-          />
-          <span>Reset Mood Settings (including Activities and Activity Groups)</span>
-        </label>
+        {plugins.map((plugin) => (
+          <label key={`reset-${plugin.id}`} className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={options[pluginResetKey(plugin.id)] ?? false}
+              onChange={() => toggleOption(pluginResetKey(plugin.id))}
+            />
+            <span>Reset {plugin.strings.title} Settings</span>
+          </label>
+        ))}
         <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
           <input
             type="checkbox"

@@ -158,24 +158,30 @@ export interface PluginReconciliationHook {
   apply: (id: string, suggested_timezone: string) => Promise<boolean>;
 }
 
+/** One plugin-owned API mount: an Express Router mounted at `/api/v1<mount>`. */
+export interface PluginApiMount {
+  mount: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  router: any;
+}
+
 export interface CheckinTypeServerPlugin {
   /** Defaults to 'generic'. */
   storage?: 'generic' | 'custom';
 
   /**
-   * Optional plugin-owned API routes. The framework mounts `router` at
+   * Optional plugin-owned API routes. The framework mounts each `router` at
    * `/api/v1<mount>` (e.g. mount '/mood-checkins' -> /api/v1/mood-checkins).
    * Custom-storage plugins typically own their CRUD routes this way;
    * generic-storage plugins use the framework's
    * /api/v1/plugins/:id/checkins instead.
    *
+   * A single mount or an array of them (plugins with several stable URL
+   * surfaces, e.g. CRUD + webhook + import, declare one entry per mount).
+   *
    * Typed loosely (an Express Router) to keep this package framework-free.
    */
-  api?: {
-    mount: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    router: any;
-  };
+  api?: PluginApiMount | PluginApiMount[];
 
   /**
    * Timeline SELECT branch for this type. The returned SQL must be a single

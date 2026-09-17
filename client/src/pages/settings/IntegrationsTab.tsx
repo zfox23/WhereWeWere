@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Link2, Moon, Sparkles, Check, AlertCircle, Loader2, Copy, Film, Gamepad2, BookOpen, Tv } from 'lucide-react';
-import { settings, sleepWebhook, plexWebhook } from '../../api/client';
+import { Link2, Sparkles, Check, AlertCircle, Loader2, Copy, Film, Gamepad2, BookOpen, Tv } from 'lucide-react';
+import { settings, plexWebhook } from '../../api/client';
+import { allClientPlugins } from '../../plugins/registry';
 
 interface IntegrationsTabProps {
   initialDawarichUrl: string;
@@ -52,29 +53,15 @@ export function IntegrationsTab({
   const [integrationSaving, setIntegrationSaving] = useState(false);
   const [integrationMsg, setIntegrationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const [webhookEventCount, setWebhookEventCount] = useState<number | null>(null);
-  const [webhookCopied, setWebhookCopied] = useState(false);
-  const webhookUrl = `${window.location.origin}/api/v1/webhook/sleep-as-android`;
-
   const [plexEventCount, setPlexEventCount] = useState<number | null>(null);
   const [plexCopied, setPlexCopied] = useState(false);
   const plexWebhookUrl = `${window.location.origin}/api/v1/webhook/plex`;
 
   useEffect(() => {
-    sleepWebhook.stats()
-      .then((data) => setWebhookEventCount(data.count))
-      .catch(() => setWebhookEventCount(null));
     plexWebhook.stats()
       .then((data) => setPlexEventCount(data.count))
       .catch(() => setPlexEventCount(null));
   }, []);
-
-  const handleWebhookCopy = () => {
-    navigator.clipboard.writeText(webhookUrl).then(() => {
-      setWebhookCopied(true);
-      setTimeout(() => setWebhookCopied(false), 2000);
-    });
-  };
 
   const handlePlexCopy = () => {
     navigator.clipboard.writeText(plexWebhookUrl).then(() => {
@@ -364,33 +351,11 @@ export function IntegrationsTab({
           </div>
         </div>
 
-        <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1.5">
-            <Moon size={14} className="text-indigo-500" />
-            Sleep as Android
-          </h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            Enter this URL in Sleep as Android under Settings → Services → Automation → Webhooks to receive live sleep tracking events.
-          </p>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 min-w-0 truncate rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-800 dark:text-gray-200">
-              {webhookUrl}
-            </code>
-            <button
-              onClick={handleWebhookCopy}
-              title={webhookCopied ? 'Copied!' : 'Copy URL'}
-              className="shrink-0 flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            >
-              {webhookCopied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
-              {webhookCopied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            {webhookEventCount === null
-              ? 'Loading webhook stats…'
-              : `${webhookEventCount} Webhook Event${webhookEventCount === 1 ? '' : 's'} Received`}
-          </p>
-        </div>
+        {/* Integration sections contributed by check-in plugins. */}
+        {allClientPlugins().map((plugin) => {
+          const Section = plugin.client.integrationsSettings;
+          return Section ? <Section key={plugin.id} /> : null;
+        })}
       </div>
 
       {integrationMsg && (

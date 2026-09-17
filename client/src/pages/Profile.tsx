@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Brain, Clapperboard, MapPin, Moon, Route } from 'lucide-react';
+import { Brain, Clapperboard, MapPin, Route } from 'lucide-react';
 import { allClientPlugins } from '../plugins/registry';
 import { AutoProfileTab } from '../plugins/autoProfileTab';
 import { MediaTab } from '../components/MediaTab';
 import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
-import { SleepTab } from '../components/SleepTab';
 import { TracksTab } from '../components/TracksTab';
 import { usePageTitle } from '../utils/pageTitle';
 import type { CheckinTypeClient } from 'wwp-shared';
@@ -22,11 +21,11 @@ function renderPluginTab(plugin: CheckinTypeClient, userId: string) {
 }
 
 export default function Profile() {
-  type ProfileTab = 'places' | 'reflect' | 'sleep' | 'tracks' | 'media' | `plugin:${string}`;
+  type ProfileTab = 'places' | 'reflect' | 'tracks' | 'media' | `plugin:${string}`;
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
     if (!value) return false;
-    if (value === 'places' || value === 'reflect' || value === 'sleep' || value === 'tracks' || value === 'media') {
+    if (value === 'places' || value === 'reflect' || value === 'tracks' || value === 'media') {
       return true;
     }
     if (value.startsWith('plugin:')) {
@@ -48,7 +47,6 @@ export default function Profile() {
 
   const tabTitleMap: Record<string, string> = {
     places: 'Profile: Places',
-    sleep: 'Profile: Sleep',
     tracks: 'Profile: Tracks',
     media: 'Profile: Media',
     reflect: 'Profile: Reflect',
@@ -106,7 +104,6 @@ export default function Profile() {
   const renderBody = () => {
     if (activeTab === 'places') return <PlacesTab />;
     if (activeTab === 'reflect') return <ReflectTab />;
-    if (activeTab === 'sleep') return <SleepTab />;
     if (activeTab === 'tracks') return <TracksTab />;
     if (activeTab === 'media') return <MediaTab />;
     const plugin = PROFILE_PLUGINS.find((p) => `plugin:${p.id}` === activeTab);
@@ -133,10 +130,6 @@ export default function Profile() {
             </button>
           );
         })}
-        <button onClick={() => setActiveTab('sleep')} className={tabButtonClass(activeTab === 'sleep')}>
-          <Moon size={14} />
-          Sleep
-        </button>
         <button onClick={() => setActiveTab('tracks')} className={tabButtonClass(activeTab === 'tracks')}>
           <Route size={14} />
           Tracks

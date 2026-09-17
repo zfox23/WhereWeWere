@@ -1,9 +1,20 @@
+/**
+ * Sleep check-in page (create + edit).
+ *
+ * Adapted from the former core page (client/src/pages/SleepCheckIn.tsx) to
+ * the plugin `CheckInFormProps` contract: the app shell passes `editId` /
+ * `dateParam` and the plugin reports back via `onCreated` / `onUpdated`.
+ * Previously the page read its own search params and called the core
+ * `sleepEntries` client; it now uses the plugin's own API helpers.
+ */
+
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Moon, Star, Trash2 } from 'lucide-react';
-import { sleepEntries } from '../api/client';
-import type { SleepEntry } from '../types';
-import { usePageTitle } from '../utils/pageTitle';
+import { sleepEntries } from './api';
+import type { SleepEntry } from './types';
+import type { CheckInFormProps } from 'wwp-shared';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -64,14 +75,12 @@ function renderStars(rating: number): string {
   return clamped === 0 ? 'Unrated' : `${'★'.repeat(clamped)} (${clamped})`;
 }
 
-export default function SleepCheckIn() {
-  const [searchParams] = useSearchParams();
+export default function SleepCheckIn({ editId, dateParam, onCreated, onUpdated }: CheckInFormProps) {
   const navigate = useNavigate();
-  const editId = searchParams.get('edit');
   usePageTitle(editId ? 'Edit Sleep Entry' : 'New Sleep Entry');
 
-  const dateParam = searchParams.get('date') || '';
-  const hasDatePrefill = DATE_ONLY_PATTERN.test(dateParam);
+  const date = (dateParam && DATE_ONLY_PATTERN.test(dateParam)) ? dateParam : '';
+  const hasDatePrefill = Boolean(date);
 
   const defaultStartedAt = toLocalDatetimeString(new Date(Date.now() - 8 * 60 * 60 * 1000));
   const defaultEndedAt = toLocalDatetimeString(new Date());
@@ -82,10 +91,10 @@ export default function SleepCheckIn() {
   const [error, setError] = useState<string | null>(null);
 
   const [startedAt, setStartedAt] = useState(
-    hasDatePrefill ? applyDateToLocalDatetime(dateParam, defaultStartedAt) : defaultStartedAt
+    hasDatePrefill ? applyDateToLocalDatetime(date, defaultStartedAt) : defaultStartedAt
   );
   const [endedAt, setEndedAt] = useState(
-    hasDatePrefill ? applyDateToLocalDatetime(dateParam, defaultEndedAt) : defaultEndedAt
+    hasDatePrefill ? applyDateToLocalDatetime(date, defaultEndedAt) : defaultEndedAt
   );
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
@@ -99,7 +108,9 @@ export default function SleepCheckIn() {
     sleepEntries.get(editId)
       .then((entry: SleepEntry) => {
         setStartedAt(toLocalDatetimeString(new Date(entry.started_at)));
-        setEndedAt(toLocalDatetimeString(new Date(entry.ended_at)));
+        if (entry.ended_at) {
+          setEndedAt(toLocalDatetimeString(new Date(entry.ended_at)));
+        }
         setRating(Math.max(0, Math.min(5, Math.round(entry.rating || 0))));
         setComment(entry.comment || '');
       })
@@ -162,7 +173,13 @@ export default function SleepCheckIn() {
     } finally {
       setSaving(false);
     }
-    if (succeeded) navigate('/', { state: editId ? undefined : { newId: createdId } });
+    if (succeeded) {
+      if (editId) {
+        onUpdated();
+      } else {
+        onCreated(createdId ?? '');
+      }
+    }
   };
 
   const handleDelete = async () => {

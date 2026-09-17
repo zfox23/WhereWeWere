@@ -1,12 +1,11 @@
-export interface SleepFilterProps {
-  included: boolean;
-  filtersDisabled: boolean;
-  sectionDisabled: boolean;
-  typeToggleDisabled: boolean;
-  sleepDuration: string;
-  onToggleIncluded: () => void;
-  onSetSleepDuration: (value: string) => void;
-}
+/**
+ * Sleep filter section for the Home timeline.
+ *
+ * Adapted from the former core component (client/src/components/filters/SleepFilter.tsx)
+ * to the plugin `PluginFilterSectionProps` contract.
+ */
+
+import type { PluginFilterSectionProps } from 'wwp-shared';
 
 const SLEEP_DURATION_BUCKETS = [
   { value: 'lte6', label: '<=6h' },
@@ -14,15 +13,17 @@ const SLEEP_DURATION_BUCKETS = [
   { value: 'gte8', label: '>=8h' },
 ];
 
-export default function SleepFilter({
+export function SleepFilter({
   included,
   filtersDisabled,
   sectionDisabled,
   typeToggleDisabled,
-  sleepDuration,
+  params,
   onToggleIncluded,
-  onSetSleepDuration,
-}: SleepFilterProps) {
+  onSetParam,
+}: PluginFilterSectionProps) {
+  const sleepDuration = params.sleep_duration ?? '';
+
   return (
     <div className={`rounded-xl border p-3 grid grid-cols-1 gap-3 ${filtersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20'}`}>
       <div>
@@ -50,7 +51,7 @@ export default function SleepFilter({
               <button
                 key={bucket.value}
                 disabled={sectionDisabled}
-                onClick={() => onSetSleepDuration(isActive ? '' : bucket.value)}
+                onClick={() => onSetParam('sleep_duration', isActive ? '' : bucket.value)}
                 className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-60 ${
                   isActive
                     ? 'bg-amber-500 text-white border-amber-500'

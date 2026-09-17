@@ -1,7 +1,6 @@
 import { SwarmImportSection } from './SwarmImportSection';
 import { allClientPlugins } from '../../plugins/registry';
 import { YamtrackImportSection } from './YamtrackImportSection';
-import { SleepAsAndroidImportSection } from './SleepAsAndroidImportSection';
 import { JobsSection } from './JobsSection';
 import { TimestampReconciliationSection } from './TimestampReconciliationSection';
 import { BackupRestoreSection } from './BackupRestoreSection';
@@ -16,7 +15,6 @@ export function DataTab({ jobRefreshKey, onImportComplete }: DataTabProps) {
   return (
     <>
       <SwarmImportSection onImportComplete={onImportComplete} />
-      <SleepAsAndroidImportSection />
       <YamtrackImportSection onImportComplete={onImportComplete} />
       <JobsSection refreshKey={jobRefreshKey} />
       <TimestampReconciliationSection />

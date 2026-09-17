@@ -1,7 +1,15 @@
+/**
+ * Sleep as Android CSV import — Settings > Data section.
+ *
+ * Adapted from the former core component
+ * (client/src/pages/settings/SleepAsAndroidImportSection.tsx) to the plugin
+ * `dataSettings` contract and the plugin's own import API helper.
+ */
+
 import { useState, useRef } from 'react';
 import { Moon, Upload, FileText, Loader2, Check, AlertCircle } from 'lucide-react';
-import { importApi } from '../../api/client';
-import type { ImportResult } from '../../types';
+import { sleepAsAndroidImport } from './api';
+import type { ImportResult } from '../../../client/src/types';
 
 export function SleepAsAndroidImportSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -24,7 +32,7 @@ export function SleepAsAndroidImportSection() {
     setResult(null);
     setImportError(null);
     try {
-      const data = await importApi.sleepAsAndroid(selectedFile);
+      const data = await sleepAsAndroidImport.importFile(selectedFile);
       setResult(data);
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';

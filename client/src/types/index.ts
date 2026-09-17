@@ -168,19 +168,6 @@ export interface TimestampReconciliationUpdate {
   suggested_timezone: string;
 }
 
-export interface SleepEntry {
-  id: string;
-  user_id: string;
-  sleep_as_android_id: number;
-  sleep_timezone: string;
-  started_at: string;
-  ended_at: string;
-  rating: number;
-  comment: string | null;
-  created_at: string;
-  updated_at?: string;
-}
-
 export interface TrackPoint {
   /** Epoch milliseconds, or null if the point had no timestamp */
   t: number | null;
@@ -236,27 +223,6 @@ export interface TrackMapEntry {
   } | null;
 }
 
-export interface SleepSummaryStats {
-  total_sleeps: number;
-  avg_duration_minutes: number | null;
-  total_sleep_minutes: number | null;
-  avg_rating: number | null;
-  rated_count: number;
-}
-
-export interface SleepDailyPoint {
-  date: string;
-  count: number;
-  avg_duration_minutes: number | null;
-  total_sleep_minutes: number | null;
-  avg_rating: number | null;
-}
-
-export interface SleepRatingBucket {
-  stars: number;
-  count: number;
-}
-
 export interface ReflectionItem {
   type: 'location' | (string & {});
   [pluginField: string]: unknown;
@@ -272,6 +238,8 @@ export interface ReflectionItem {
   mood?: number | null;
   mood_timezone?: string | null;
   activities?: { id: string; name: string; group_name: string; icon?: string | null }[];
+  /** Plugin-typed payload for plugin reflection entries. */
+  data?: Record<string, unknown> | null;
 }
 
 export interface ReflectionYear {
@@ -301,13 +269,6 @@ export interface TimelineItem {
   mood?: number;
   mood_timezone?: string | null;
   activities?: { id: string; name: string; group_name: string; icon?: string | null }[] | null;
-  // Sleep fields
-  sleep_as_android_id?: number;
-  sleep_started_at?: string;
-  sleep_ended_at?: string;
-  sleep_timezone?: string | null;
-  sleep_rating?: number;
-  sleep_comment?: string | null;
   // Track fields
   track_name?: string;
   track_distance_m?: number;

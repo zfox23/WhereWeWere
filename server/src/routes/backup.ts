@@ -122,19 +122,6 @@ interface BackupTrack {
   updated_at: string;
 }
 
-interface BackupSleepEntry {
-  id: string;
-  sleep_as_android_id: number;
-  sleep_timezone: string;
-  started_at: string;
-  ended_at: string;
-  rating: number;
-  comment: string | null;
-  is_pending: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 interface BackupMediaItem {
   id: string;
   media_type: string;
@@ -208,7 +195,6 @@ interface BackupV1 {
     venueCategories: BackupVenueCategory[];
     venues: BackupVenue[];
     checkins: BackupCheckin[];
-    sleepEntries: BackupSleepEntry[];
     tracks: BackupTrack[];
     mediaItems: BackupMediaItem[];
     mediaCheckins: BackupMediaCheckin[];
@@ -321,7 +307,6 @@ function ensureV1Backup(raw: unknown): BackupV1 {
         longitude: toNumber((venue as BackupVenue).longitude),
       })),
       checkins: asArray<BackupCheckin>(migratedData.checkins),
-      sleepEntries: asArray<BackupSleepEntry>(migratedData.sleepEntries),
       tracks: asArray<BackupTrack>(migratedData.tracks),
       mediaItems: asArray<BackupMediaItem>(migratedData.mediaItems),
       mediaCheckins: asArray<BackupMediaCheckin>(migratedData.mediaCheckins),
@@ -340,7 +325,6 @@ router.get('/export', async (_req: Request, res: Response) => {
       categoriesResult,
       venuesResult,
       checkinsResult,
-      sleepEntriesResult,
       tracksResult,
       mediaItemsResult,
       mediaCheckinsResult,
@@ -393,15 +377,6 @@ router.get('/export', async (_req: Request, res: Response) => {
          FROM checkins
          WHERE user_id = $1
          ORDER BY checked_in_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT id, sleep_as_android_id, sleep_timezone,
-                started_at, ended_at, rating, comment,
-                is_pending, created_at, updated_at
-         FROM sleep_entries
-         WHERE user_id = $1
-         ORDER BY started_at ASC`,
         [USER_ID]
       ),
       query(
@@ -518,7 +493,6 @@ router.get('/export', async (_req: Request, res: Response) => {
           longitude: toNumber(venue.longitude),
         })),
         checkins: checkinsResult.rows,
-        sleepEntries: sleepEntriesResult.rows,
         tracks,
         mediaItems: mediaItemsResult.rows,
         mediaCheckins: mediaCheckinsResult.rows,
@@ -548,7 +522,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     const counts: Record<string, { inserted: number; skipped: number }> = {
       venues: { inserted: 0, skipped: 0 },
       checkins: { inserted: 0, skipped: 0 },
-      sleepEntries: { inserted: 0, skipped: 0 },
       tracks: { inserted: 0, skipped: 0 },
       mediaItems: { inserted: 0, skipped: 0 },
       mediaCheckins: { inserted: 0, skipped: 0 },
@@ -776,49 +749,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         for (const [key, pc] of Object.entries(pluginCounts)) {
           counts[key] = pc;
         }
-      }
-    }
-
-    for (const sleepEntry of backup.data.sleepEntries) {
-      if (!sleepEntry?.id || sleepEntry.sleep_as_android_id == null) {
-        counts.sleepEntries.skipped += 1;
-        errors.push('Skipped sleep entry with missing id/sleep_as_android_id');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO sleep_entries (
-           id, user_id, sleep_as_android_id, sleep_timezone,
-           started_at, ended_at, rating, comment,
-           is_pending, created_at, updated_at
-         )
-         VALUES (
-           $1, $2, $3, $4,
-           COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()),
-           $7, $8,
-           COALESCE($9, false),
-           COALESCE($10::timestamptz, NOW()), COALESCE($11::timestamptz, NOW())
-         )
-         ON CONFLICT (user_id, sleep_as_android_id) DO NOTHING`,
-        [
-          sleepEntry.id,
-          USER_ID,
-          sleepEntry.sleep_as_android_id,
-          sleepEntry.sleep_timezone || 'UTC',
-          sleepEntry.started_at || null,
-          sleepEntry.ended_at || null,
-          toNumber(sleepEntry.rating, 0),
-          toStringOrNull(sleepEntry.comment),
-          typeof sleepEntry.is_pending === 'boolean' ? sleepEntry.is_pending : false,
-          sleepEntry.created_at || null,
-          sleepEntry.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.sleepEntries.inserted += 1;
-      } else {
-        counts.sleepEntries.skipped += 1;
       }
     }
 
@@ -1110,15 +1040,20 @@ router.post('/start-over', async (req: Request, res: Response) => {
     const rawOptions = req.body?.options ?? {};
     const deleteAllCheckins = Boolean(rawOptions.delete_all_checkins);
     const deleteVenueCheckins = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
-    const deletePluginCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
-    const deleteSleepEntries = deleteAllCheckins || Boolean(rawOptions.delete_sleep_entries);
+    // Per-plugin check-in deletion: options use `delete_<pluginId>_checkins`.
+    const selectedPluginCheckinIds = allPlugins()
+      .filter((p) => deleteAllCheckins || Boolean(rawOptions[`delete_${p.id}_checkins`]))
+      .map((p) => p.id);
     const deleteTracks = Boolean(rawOptions.delete_tracks);
     const deleteMediaItems = Boolean(rawOptions.delete_media_items);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
-    const resetPluginSettings = Boolean(rawOptions.reset_mood_settings);
+    // Per-plugin settings reset: options use `reset_<pluginId>_settings`.
+    const selectedPluginSettingsIds = allPlugins()
+      .filter((p) => Boolean(rawOptions[`reset_${p.id}_settings`]))
+      .map((p) => p.id);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && !deletePluginCheckins && !deleteSleepEntries && !deleteTracks && !deleteMediaItems && !resetAccountSettings && !resetPluginSettings && !resetIntegrationsSettings) {
+    if (!deleteVenueCheckins && selectedPluginCheckinIds.length === 0 && !deleteTracks && !deleteMediaItems && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -1140,17 +1075,12 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.checkins = checkinResult.rowCount ?? 0;
     }
 
-    if (deletePluginCheckins) {
+    if (selectedPluginCheckinIds.length > 0) {
       // Check-in plugins own their deletion via their deleteUserData hook.
-      const pluginCounts = await deletePluginData(client, USER_ID);
+      const pluginCounts = await deletePluginData(client, USER_ID, selectedPluginCheckinIds);
       for (const [pluginId, deleted] of Object.entries(pluginCounts)) {
         counts[`plugin_checkins_${pluginId}`] = deleted;
       }
-    }
-
-    if (deleteSleepEntries) {
-      const sleepEntriesResult = await client.query('DELETE FROM sleep_entries WHERE user_id = $1', [USER_ID]);
-      counts.sleep_entries = sleepEntriesResult.rowCount ?? 0;
     }
 
     if (deleteTracks) {
@@ -1189,10 +1119,11 @@ router.post('/start-over', async (req: Request, res: Response) => {
       counts.media_lists = listsResult.rowCount ?? 0;
     }
 
-    if (resetPluginSettings) {
+    if (selectedPluginSettingsIds.length > 0) {
       // Check-in plugin settings (lookup tables + plugin_settings rows) are
       // owned by each plugin's resetSettings hook.
       for (const plugin of allPlugins()) {
+        if (!selectedPluginSettingsIds.includes(plugin.id)) continue;
         if (!plugin.server.resetSettings) continue;
         const deleted = await plugin.server.resetSettings({ user_id: USER_ID, client });
         counts[`plugin_settings_${plugin.id}_reset`] = deleted;

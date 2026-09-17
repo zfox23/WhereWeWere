@@ -19,7 +19,7 @@ const FALLBACK_WINDOW_MS = 72 * 60 * 60 * 1000;
  */
 type CheckinKind = 'venue' | 'media' | string;
 
-type FallbackKind = 'media' | 'track' | 'sleep' | string;
+type FallbackKind = 'media' | 'track' | string;
 
 interface VenueCheckinRow {
   id: string;
@@ -325,8 +325,7 @@ function buildAnchorReason(resolved: ResolvedTimezoneAnchor): string {
     return `Nearest venue check-in is ${diffLabel} away at ${anchor.label}${windowNote}, which resolves to ${anchor.timezone}.`;
   }
 
-  const labelNote = anchor.kind === 'sleep' ? '' : ` (${anchor.label})`;
-  return `No venue check-in within 24 hours; nearest ${anchor.label} is ${diffLabel} away${labelNote}${windowNote}, which is stored as ${anchor.timezone}.`;
+  return `No venue check-in within 24 hours; nearest ${anchor.label} is ${diffLabel} away (${anchor.label})${windowNote}, which is stored as ${anchor.timezone}.`;
 }
 
 /**
@@ -466,20 +465,6 @@ async function loadTrackAnchorRows(userId: string): Promise<FallbackAnchorRow[]>
   return result.rows as FallbackAnchorRow[];
 }
 
-async function loadSleepAnchorRows(userId: string): Promise<FallbackAnchorRow[]> {
-  const result = await query(
-    `SELECT id,
-            started_at AS checked_in_at,
-            sleep_timezone AS timezone,
-            NULL::text AS label
-     FROM sleep_entries
-     WHERE user_id = $1`,
-    [userId]
-  );
-
-  return result.rows as FallbackAnchorRow[];
-}
-
 export async function getTimestampReconciliationSuggestions(userId = USER_ID): Promise<TimestampReconciliationScanResult> {
   interface PluginHookEntry {
     plugin: CheckinTypeServer;
@@ -492,11 +477,10 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
     )
     .filter((entry): entry is PluginHookEntry => entry !== null);
 
-  const [venueRows, mediaRows, trackRows, sleepRows, ...pluginRowsList] = await Promise.all([
+  const [venueRows, mediaRows, trackRows, ...pluginRowsList] = await Promise.all([
     loadVenueCheckins(userId),
     loadMediaCheckins(userId),
     loadTrackAnchorRows(userId),
-    loadSleepAnchorRows(userId),
     ...pluginHooks.map(({ plugin, hook }) => hook.loadCheckins(userId).catch((err: unknown) => {
       console.error(`Plugin "${plugin.id}" reconcile.loadCheckins failed:`, err);
       return [] as PluginReconciliationRow[];
@@ -520,7 +504,6 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
       .filter((row): row is AnyTimezoneAnchor => row !== null),
     ...toFallbackAnchors(mediaFallbackRows, 'media', 'a media check-in'),
     ...trackRows.flatMap((row) => toFallbackAnchors([row], 'track', 'a track')),
-    ...sleepRows.flatMap((row) => toFallbackAnchors([row], 'sleep', 'a sleep entry')),
     ...pluginRowsList.flatMap((rows, i) =>
       toFallbackAnchors(
         rows.map((row) => ({

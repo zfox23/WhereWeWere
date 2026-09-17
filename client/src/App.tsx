@@ -11,8 +11,6 @@ import VenueDetail from './pages/VenueDetail';
 import Profile from './pages/Profile';
 import CheckInDetail from './pages/CheckInDetail';
 import Settings from './pages/Settings';
-import SleepCheckIn from './pages/SleepCheckIn';
-import SleepDetail from './pages/SleepDetail';
 import TrackCheckIn from './pages/TrackCheckIn';
 import TrackDetail from './pages/TrackDetail';
 import MediaCheckInLanding from './pages/media/MediaCheckInLanding';
@@ -69,9 +67,9 @@ function PluginDetailPage({ pluginId }: { pluginId: string }) {
  * claimed here is skipped.
  */
 const EXPLICIT_PATHS = new Set([
-  '/check-in', '/sleep-check-in', '/track-check-in',
+  '/check-in', '/track-check-in',
   '/checkins/:id',
-  '/sleep-entries/:id', '/tracks/:id',
+  '/tracks/:id',
 ]);
 
 const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
@@ -103,8 +101,6 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/check-in" element={<CheckIn />} />
-        <Route path="/sleep-check-in" element={<SleepCheckIn />} />
-        <Route path="/sleep-entries/:id" element={<SleepDetail />} />
         <Route path="/track-check-in" element={<TrackCheckIn />} />
         <Route path="/tracks/:id" element={<TrackDetail />} />
         <Route path="/checkins/:id" element={<CheckInDetail />} />

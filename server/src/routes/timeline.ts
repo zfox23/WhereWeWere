@@ -68,7 +68,6 @@ router.get('/', async (req: Request, res: Response) => {
       .map((p) => p.id);
 
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
-    const hasSleepTypeFilter = Boolean(req.query.sleep_duration);
     const hasTrackTypeFilter = Boolean(req.query.track_activity);
     const hasMediaTypeFilter = Boolean(req.query.media_subtype);
 
@@ -80,18 +79,16 @@ router.get('/', async (req: Request, res: Response) => {
       includedKeys.push(`plugin:${activePluginFilterIds[0]}`);
     } else if (hasLocationTypeFilter) {
       includedKeys.push('location');
-    } else if (hasSleepTypeFilter) {
-      includedKeys.push('sleep');
     } else if (hasTrackTypeFilter) {
       includedKeys.push('track');
     } else if (hasMediaTypeFilter) {
       includedKeys.push('media');
     } else {
-      includedKeys.push('location', ...plugins.map((p) => `plugin:${p.id}`), 'sleep', 'track', 'media');
+      includedKeys.push('location', ...plugins.map((p) => `plugin:${p.id}`), 'track', 'media');
     }
 
     // ------------------------------------------------------------------
-    // Built-in branches (location, sleep, track, media). Mood is a plugin.
+    // Built-in branches (location, track, media). Mood and Sleep are plugins.
     // ------------------------------------------------------------------
     const builtInWhereBuilders: Record<string, () => { sql: string | null; values: unknown[] }> = {
       location: () => {
@@ -112,28 +109,6 @@ router.get('/', async (req: Request, res: Response) => {
           conditions.push(
             `(c.search_vector @@ plainto_tsquery('english', $${values.length - 1}) OR v.search_vector @@ plainto_tsquery('english', $${values.length}))`,
           );
-        }
-        return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
-      },
-      sleep: () => {
-        const conditions: string[] = [];
-        const values: unknown[] = [];
-        const push = (cond: string, value: unknown) => {
-          values.push(value);
-          conditions.push(cond.replace('?', `$${values.length}`));
-        };
-        if (userId) push('se.user_id = ?', userId);
-        if (fromDate) push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= ?::date`, fromDate);
-        if (toDate) push(`(se.ended_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date <= ?::date`, toDate);
-        if (searchQuery) push(`se.comment ILIKE '%' || ? || '%'`, searchQuery);
-        const durationFilter = String(req.query.sleep_duration ?? '').toLowerCase();
-        if (durationFilter === 'lte6') {
-          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) <= 21600`);
-        } else if (durationFilter === '6to8') {
-          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) > 21600`);
-          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) < 28800`);
-        } else if (durationFilter === 'gte8') {
-          conditions.push(`EXTRACT(EPOCH FROM (se.ended_at - se.started_at)) >= 28800`);
         }
         return { sql: conditions.length > 0 ? conditions.join(' AND ') : null, values };
       },
@@ -189,12 +164,6 @@ router.get('/', async (req: Request, res: Response) => {
              vc.name AS venue_category,
              pv.id AS parent_venue_id, pv.name AS parent_venue_name,
          NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-         NULL::bigint AS sleep_as_android_id,
-         NULL::timestamptz AS sleep_started_at,
-         NULL::timestamptz AS sleep_ended_at,
-         NULL::text AS sleep_timezone,
-         NULL::numeric AS sleep_rating,
-         NULL::text AS sleep_comment,
          NULL::text AS track_name,
          NULL::numeric AS track_distance_m,
          NULL::text AS track_timezone,
@@ -213,43 +182,12 @@ router.get('/', async (req: Request, res: Response) => {
          NULL::text AS media_episode_title,
          NULL::text AS media_timezone,
          NULL::jsonb AS data
-      FROM checkins c
-      JOIN venues v ON c.venue_id = v.id
-      LEFT JOIN venue_categories vc ON v.category_id = vc.id
-      LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-    `,
-      sleep: `
-      SELECT 'sleep' AS type, se.id, se.user_id, NULL AS venue_id, se.comment AS notes,
-             se.started_at AS checked_in_at, se.created_at,
-             NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
-             NULL::text AS venue_timezone,
-             NULL AS venue_category,
-             NULL AS parent_venue_id, NULL AS parent_venue_name,
-             NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-             se.sleep_as_android_id, se.started_at AS sleep_started_at,
-             se.ended_at AS sleep_ended_at, se.sleep_timezone,
-             se.rating AS sleep_rating, se.comment AS sleep_comment,
-             NULL::text AS track_name,
-             NULL::numeric AS track_distance_m,
-             NULL::text AS track_timezone,
-             NULL::timestamptz AS track_started_at,
-             NULL::timestamptz AS track_ended_at,
-             NULL::bigint AS track_elapsed_time_s,
-              NULL::text AS media_type,
-              NULL::uuid AS media_item_id,
-              NULL::text AS media_title,
-              NULL::text AS media_image_url,
-              NULL::text AS media_author,
-              NULL::smallint AS media_rating,
-              NULL::text AS media_checkin_type,
-              NULL::int AS media_season_number,
-              NULL::int AS media_episode_number,
-              NULL::text AS media_episode_title,
-              NULL::text AS media_timezone,
-              NULL::jsonb AS data
-              FROM sleep_entries se
-    `,
-      track: `
+     FROM checkins c
+     JOIN venues v ON c.venue_id = v.id
+     LEFT JOIN venue_categories vc ON v.category_id = vc.id
+     LEFT JOIN venues pv ON v.parent_venue_id = pv.id
+   `,
+     track: `
       SELECT 'track' AS type, t.id, t.user_id, NULL AS venue_id, t.name AS notes,
              t.started_at AS checked_in_at, t.created_at,
              NULL AS venue_name, NULL AS venue_latitude, NULL AS venue_longitude,
@@ -257,12 +195,6 @@ router.get('/', async (req: Request, res: Response) => {
              NULL AS venue_category,
              NULL AS parent_venue_id, NULL AS parent_venue_name,
              NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-             NULL::bigint AS sleep_as_android_id,
-             NULL::timestamptz AS sleep_started_at,
-             NULL::timestamptz AS sleep_ended_at,
-             NULL::text AS sleep_timezone,
-             NULL::numeric AS sleep_rating,
-             NULL::text AS sleep_comment,
              t.name AS track_name, t.distance_m AS track_distance_m, t.timezone AS track_timezone,
              t.started_at AS track_started_at, t.ended_at AS track_ended_at,
              t.elapsed_time_s AS track_elapsed_time_s,
@@ -288,12 +220,6 @@ router.get('/', async (req: Request, res: Response) => {
                    NULL AS venue_category,
                    NULL AS parent_venue_id, NULL AS parent_venue_name,
                    NULL::smallint AS mood, NULL::text AS mood_timezone, NULL::json AS activities,
-                   NULL::bigint AS sleep_as_android_id,
-                   NULL::timestamptz AS sleep_started_at,
-                   NULL::timestamptz AS sleep_ended_at,
-                   NULL::text AS sleep_timezone,
-                   NULL::numeric AS sleep_rating,
-                   NULL::text AS sleep_comment,
                    NULL::text AS track_name,
                    NULL::numeric AS track_distance_m,
                    NULL::text AS track_timezone,

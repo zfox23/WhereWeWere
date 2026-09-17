@@ -1,12 +1,24 @@
+/**
+ * Sleep timeline card.
+ *
+ * Adapted from the former core component (client/src/components/SleepCard.tsx)
+ * to the plugin `CheckinCardProps` contract: the typed payload now arrives in
+ * `item.data` (built by the server's `buildTimelineSelect`) instead of the
+ * legacy `sleep_*` timeline columns.
+ */
+
 import { Moon, Pencil, Star } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import type { TimelineItem } from '../types';
-import { CardShell } from './checkin-card/CardShell';
-import { normalizeTimezoneForDisplay } from '../utils/checkin';
+import type { CheckinCardProps } from 'wwp-shared';
+import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
+import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 
-interface SleepCardProps {
-  item: TimelineItem;
-  compact?: boolean;
+interface SleepData {
+  started_at?: string | null;
+  ended_at?: string | null;
+  sleep_timezone?: string | null;
+  rating?: number;
+  comment?: string | null;
 }
 
 function formatDuration(startedAt: string, endedAt: string): string {
@@ -92,12 +104,13 @@ function formatTimeWithShortDate(dateTime: string, timezone: string): string {
   }
 }
 
-export default function SleepCard({ item, compact = false }: SleepCardProps) {
-  const startedAt = item.sleep_started_at || item.checked_in_at;
-  const endedAt = item.sleep_ended_at || item.checked_in_at;
-  const timezone = item.sleep_timezone || 'UTC';
+export function SleepCard({ item, compact = false }: CheckinCardProps) {
+  const data = (item.data ?? {}) as SleepData;
+  const startedAt = data.started_at || item.checked_in_at;
+  const endedAt = data.ended_at || item.checked_in_at;
+  const timezone = data.sleep_timezone || item.timezone || 'UTC';
   const timezoneLabel = getTimezoneAbbreviation(startedAt, timezone);
-  const rating = Number(item.sleep_rating || 0);
+  const rating = Number(data.rating || 0);
 
   if (compact) {
     return (
@@ -134,14 +147,15 @@ export default function SleepCard({ item, compact = false }: SleepCardProps) {
             <span className="text-base font-semibold text-indigo-700 dark:text-indigo-300">Slept for {formatDuration(startedAt, endedAt)}</span>
             {rating > 0 && (
               <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                <Star size={12} className="fill-current" />
                 {renderStars(rating)}
               </div>
             )}
           </div>
 
-          {item.sleep_comment && (
+          {data.comment && (
             <p className="mt-2 text-xs italic text-gray-500 dark:text-gray-400">
-              {item.sleep_comment}
+              {data.comment}
             </p>
           )}
 

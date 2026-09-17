@@ -12,11 +12,8 @@ import { jobsRouter } from './routes/jobs';
 import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
 import { timelineRouter } from './routes/timeline';
-import { importSleepAsAndroidRouter } from './routes/import-sleep-as-android';
-import { webhookSleepAsAndroidRouter } from './routes/webhook-sleep-as-android';
 import { webhookPlexRouter } from './routes/webhook-plex';
 import { backupRouter } from './routes/backup';
-import { sleepEntriesRouter } from './routes/sleep-entries';
 import { tracksRouter } from './routes/tracks';
 import { llmRouter } from './routes/llm';
 import { mediaRouter } from './routes/media';
@@ -81,10 +78,7 @@ export function createApp() {
   app.use('/api/v1/scrobbles', scrobblesRouter);
   app.use('/api/v1/immich', immichRouter);
   app.use('/api/v1/timeline', timelineRouter);
-  app.use('/api/v1/import/sleep-as-android', importSleepAsAndroidRouter);
-  app.use('/api/v1/webhook/sleep-as-android', webhookSleepAsAndroidRouter);
   app.use('/api/v1/webhook/plex', webhookPlexRouter);
-  app.use('/api/v1/sleep-entries', sleepEntriesRouter);
   app.use('/api/v1/tracks', tracksRouter);
   app.use('/api/v1/backup', backupRouter);
   app.use('/api/v1/llm', llmRouter);
@@ -95,7 +89,12 @@ export function createApp() {
   // Plugin-owned API routes (custom-storage plugins mount their own CRUD).
   for (const plugin of allPlugins()) {
     if (plugin.server.api) {
-      app.use(`/api/v1${plugin.server.api.mount}`, plugin.server.api.router);
+      const mounts = Array.isArray(plugin.server.api)
+        ? plugin.server.api
+        : [plugin.server.api];
+      for (const mount of mounts) {
+        app.use(`/api/v1${mount.mount}`, mount.router);
+      }
     }
   }
 

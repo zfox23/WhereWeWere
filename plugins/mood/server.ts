@@ -1320,12 +1320,6 @@ export const server: CheckinTypeServerPlugin = {
              NULL AS parent_venue_id, NULL AS parent_venue_name,
              mc.mood, mc.mood_timezone,
              ${ACTIVITIES_JSON} AS activities,
-             NULL::bigint AS sleep_as_android_id,
-             NULL::timestamptz AS sleep_started_at,
-             NULL::timestamptz AS sleep_ended_at,
-             NULL::text AS sleep_timezone,
-             NULL::numeric AS sleep_rating,
-             NULL::text AS sleep_comment,
              NULL::text AS track_name,
              NULL::numeric AS track_distance_m,
              NULL::text AS track_timezone,
@@ -1642,9 +1636,6 @@ export const server: CheckinTypeServerPlugin = {
           EXTRACT(YEAR FROM $2::date)::int
           - EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::int
         )::int AS years_ago,
-        NULL::timestamptz AS sleep_started_at,
-        NULL::timestamptz AS sleep_ended_at,
-        NULL::text AS sleep_timezone,
         json_build_object(
           'mood', mc.mood,
           'mood_timezone', mc.mood_timezone,

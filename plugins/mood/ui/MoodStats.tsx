@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { stats } from '../../../client/src/api/client';
 import { moodStats } from './api';
+import { sleepStats } from '../../sleep/ui/api';
 import { MoodIcon } from './MoodIcons';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
@@ -1194,7 +1195,7 @@ export function MoodsTab() {
       moodStats.byDayOfWeek(USER_ID, rangeStart, rangeEnd),
       moodStats.activityCorrelations(USER_ID, rangeStart, rangeEnd),
       moodStats.activityCombinations(USER_ID, rangeStart, rangeEnd),
-      stats.sleepDaily(USER_ID, rangeStart, rangeEnd),
+      sleepStats.daily(USER_ID, rangeStart, rangeEnd),
     ])
       .then(([daily, counts, dow, corr, combos, sleepDaily]) => {
         setDailyData(daily);

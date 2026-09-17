@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X, Check } from 'lucide-react';
 import LocationFilter from './LocationFilter';
-import SleepFilter from './SleepFilter';
 import TrackFilter from './TrackFilter';
 import MediaFilter from './MediaFilter';
 import type { CheckinTypeClient, PluginFilterSectionProps } from 'wwp-shared';
@@ -104,35 +103,28 @@ export interface FiltersProps {
   toDate: string;
   category: string;
   country: string;
-  sleepDuration: string;
   trackActivity: string;
   mediaSubtypes: string;
   includeLocation: boolean;
-  includeSleep: boolean;
   includeTrack: boolean;
   includeMedia: boolean;
   categoryOptions: string[];
   countryOptions: string[];
   trackActivityOptions: string[];
   locationTypeToggleDisabled: boolean;
-  sleepTypeToggleDisabled: boolean;
   trackTypeToggleDisabled: boolean;
   mediaTypeToggleDisabled: boolean;
   locationFiltersDisabled: boolean;
-  sleepFiltersDisabled: boolean;
   trackFiltersDisabled: boolean;
   mediaFiltersDisabled: boolean;
   locationSectionDisabled: boolean;
-  sleepSectionDisabled: boolean;
   trackSectionDisabled: boolean;
   mediaSectionDisabled: boolean;
   onSetDateFilter: (key: 'from' | 'to', value: string) => void;
   onToggleLocationType: () => void;
-  onToggleSleepType: () => void;
   onToggleTrackType: () => void;
   onToggleMediaType: () => void;
   onSetLocationFilter: (key: 'venue_id' | 'category' | 'country', value: string) => void;
-  onSetSleepFilter: (value: string) => void;
   onSetTrackFilter: (value: string) => void;
   onSetMediaFilter: (value: string) => void;
   onClearAll: () => void;
@@ -147,10 +139,8 @@ export default function Filters(props: FiltersProps) {
     toDate,
     category,
     country,
-    sleepDuration,
     trackActivity,
     includeLocation,
-    includeSleep,
     includeTrack,
     includeMedia,
     mediaSubtypes,
@@ -158,24 +148,19 @@ export default function Filters(props: FiltersProps) {
     countryOptions,
     trackActivityOptions,
     locationTypeToggleDisabled,
-    sleepTypeToggleDisabled,
     trackTypeToggleDisabled,
     mediaTypeToggleDisabled,
     locationFiltersDisabled,
-    sleepFiltersDisabled,
     trackFiltersDisabled,
     mediaFiltersDisabled,
     locationSectionDisabled,
-    sleepSectionDisabled,
     trackSectionDisabled,
     mediaSectionDisabled,
     onSetDateFilter,
     onToggleLocationType,
-    onToggleSleepType,
     onToggleTrackType,
     onToggleMediaType,
     onSetLocationFilter,
-    onSetSleepFilter,
     onSetTrackFilter,
     onSetMediaFilter,
     onClearAll,
@@ -283,16 +268,6 @@ export default function Filters(props: FiltersProps) {
           onToggleIncluded={onToggleLocationType}
           onSetCategory={(value) => onSetLocationFilter('category', value)}
           onSetCountry={(value) => onSetLocationFilter('country', value)}
-        />
-
-        <SleepFilter
-          included={includeSleep}
-          filtersDisabled={sleepFiltersDisabled}
-          sectionDisabled={sleepSectionDisabled}
-          typeToggleDisabled={sleepTypeToggleDisabled}
-          sleepDuration={sleepDuration}
-          onToggleIncluded={onToggleSleepType}
-          onSetSleepDuration={onSetSleepFilter}
         />
 
         <TrackFilter

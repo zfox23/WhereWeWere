@@ -160,31 +160,7 @@ export const stats = {
   additionalStats: (userId: string) =>
     request<any>(`/stats/additional-stats?user_id=${userId}`),
   earliestDates: (userId: string) =>
-    request<{ checkins: string | null; sleep: string | null; tracks: string | null; [pluginId: string]: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
-  sleepSummary: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any>(`/stats/sleep-summary?${qp.toString()}`);
-  },
-  sleepDaily: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/sleep-daily?${qp.toString()}`);
-  },
-  sleepRatingDistribution: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/sleep-rating-distribution?${qp.toString()}`);
-  },
+    request<{ checkins: string | null; tracks: string | null; [typeId: string]: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
 };
 
 // Search
@@ -209,33 +185,6 @@ export const importApi = {
     }
     return res.json();
   },
-  sleepAsAndroid: async (file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch(`${API_BASE}/import/sleep-as-android`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.message || `Import failed: ${res.status}`);
-    }
-    return res.json();
-  },
-};
-
-// Sleep entries
-export const sleepEntries = {
-  list: (params?: Record<string, string>) =>
-    request<any[]>(`/sleep-entries?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/sleep-entries/${id}`),
-  create: (data: any) =>
-    request<any>('/sleep-entries', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) =>
-    request<any>(`/sleep-entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) =>
-    request<void>(`/sleep-entries/${id}`, { method: 'DELETE' }),
 };
 
 // Tracks
@@ -310,11 +259,6 @@ export interface DuplicateTrackError extends Error {
   duplicate: { id: string; name: string };
 }
 
-// Sleep as Android webhook
-export const sleepWebhook = {
-  stats: () => request<{ count: number }>('/webhook/sleep-as-android/stats'),
-};
-
 // Plex webhook
 export const plexWebhook = {
   stats: () => request<{ count: number }>('/webhook/plex/stats'),
@@ -354,13 +298,12 @@ export const backupApi = {
     options: {
       delete_all_checkins: boolean;
       delete_venue_checkins: boolean;
-      delete_mood_checkins: boolean;
-      delete_sleep_entries: boolean;
       delete_tracks: boolean;
       delete_media_items: boolean;
       reset_account_settings: boolean;
-      reset_mood_settings: boolean;
       reset_integrations_settings: boolean;
+      /** Per-plugin options: `delete_<pluginId>_checkins`, `reset_<pluginId>_settings`. */
+      [key: string]: boolean;
     }
   ) => {
     return request<{ message: string; counts: Record<string, number> }>('/backup/start-over', {

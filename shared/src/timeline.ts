@@ -49,11 +49,11 @@ export interface PluginFilterContext {
 
 /**
  * A "this day in previous years" reflection entry as consumed by the client.
- * Built-in types fill their venue/sleep columns; plugin entries carry their
- * typed payload in `data`.
+ * Location entries fill the venue columns; plugin entries carry their typed
+ * payload in `data`.
  */
 export interface ReflectionEntry {
-  /** Built-in type id ('location', 'sleep') or a plugin id (e.g. 'mood'). */
+  /** 'location' or a plugin id (e.g. 'mood', 'sleep'). */
   type: string;
   id: string;
   checked_in_at: string;
@@ -68,11 +68,8 @@ export interface ReflectionEntry {
   venue_timezone: string | null;
   reflection_year: number;
   years_ago: number;
-  sleep_started_at: string | null;
-  sleep_ended_at: string | null;
-  sleep_timezone: string | null;
   /** Plugin-typed payload for plugin reflection entries. */
-  data: Record<string, unknown>;
+  data: Record<string, unknown> | null;
 }
 
 /**

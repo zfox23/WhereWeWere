@@ -15,6 +15,7 @@ import type {
   CheckInFormProps,
   PluginFilterSectionProps,
   PluginProfileTabProps,
+  PluginReflectionCardProps,
 } from 'wwp-shared';
 import { Smile } from 'lucide-react';
 import { manifest } from './manifest';
@@ -25,6 +26,7 @@ import MoodFilter from './ui/MoodFilter';
 import { MoodsTab } from './ui/MoodStats';
 import { DaylioImportSection } from './ui/DaylioImportSection';
 import { MoodTab } from './ui/MoodTab';
+import { MoodReflectionCard } from './ui/MoodReflectionCard';
 import { moodActivities } from './ui/api';
 import { plugins } from '../../client/src/plugins/api';
 import type { TimelineItem } from '../../client/src/types';
@@ -135,6 +137,7 @@ export const client: CheckinTypeClientPlugin = {
   timelineCard: MoodCard,
   filterSection: MoodFilterSection,
   profileTab: MoodProfileTab,
+  reflectionCard: (props: PluginReflectionCardProps) => <MoodReflectionCard {...props} />,
   dataSettings: DaylioImportSection,
   settings: MoodTab,
 };

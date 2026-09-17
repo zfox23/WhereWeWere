@@ -19,9 +19,12 @@ import { isValidPluginId } from 'wwp-shared';
 //   import { manifest as moodManifest } from '../../../plugins/mood/manifest';
 import { server as moodServer } from '../../../plugins/mood/server';
 import { manifest as moodManifest } from '../../../plugins/mood/manifest';
+import { server as sleepServer } from '../../../plugins/sleep/server';
+import { manifest as sleepManifest } from '../../../plugins/sleep/manifest';
 
 const registrations: CheckinTypeServer[] = [
   { ...moodManifest, server: moodServer },
+  { ...sleepManifest, server: sleepServer },
 ];
 
 const byId = new Map<string, CheckinTypeServer>();
@@ -71,7 +74,7 @@ export function pluginTimestampBranches(): string[] {
  * SQL branches for the "this day in previous years" reflection list. Each
  * branch is a parenthesized SELECT matching the core reflection column shape
  * (type, id, checked_in_at, note, venue_*, reflection_year, years_ago,
- * sleep_*, data jsonb) and uses $1 (user_id) and $2 (target date).
+ * data jsonb) and uses $1 (user_id) and $2 (target date).
  */
 export function pluginReflectionBranches(): string[] {
   return allPlugins()

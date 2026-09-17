@@ -85,13 +85,6 @@ interface TrackRow {
   timezone: string;
 }
 
-interface SleepRow {
-  started_at: string;
-  ended_at: string;
-  comment: string | null;
-  timezone: string | null;
-}
-
 interface LlmPluginEntry {
   plugin: CheckinTypeServer;
   hook: PluginLlmHook;
@@ -106,7 +99,7 @@ function allLlmPlugins(): LlmPluginEntry[] {
 
 async function gatherLifeData(from: string, to: string) {
   const llmPlugins = allLlmPlugins();
-  const [checkinsResult, pluginRowsList, tracksResult, sleepResult] = await Promise.all([
+  const [checkinsResult, pluginRowsList, tracksResult] = await Promise.all([
     query(
       `SELECT c.checked_in_at, c.notes AS note,
               v.name AS venue_name, v.city, v.country,
@@ -137,17 +130,9 @@ async function gatherLifeData(from: string, to: string) {
          AND (started_at AT TIME ZONE timezone)::date <= $3::date
        ORDER BY started_at ASC`,
       [USER_ID, from, to]
-    ),
-    query(
-      `SELECT started_at, ended_at, comment, sleep_timezone AS timezone
-       FROM sleep_entries
-       WHERE user_id = $1
-         AND (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date >= $2::date
-         AND (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date <= $3::date
-       ORDER BY ended_at ASC`,
-      [USER_ID, from, to]
-    ),
-  ]);
+   ),
+ ]);
+
 
   const formatWhen = (iso: string, timezone: string | null): string => {
     const opts: Intl.DateTimeFormatOptions = {
@@ -162,7 +147,6 @@ async function gatherLifeData(from: string, to: string) {
 
   const checkins: CheckinRow[] = checkinsResult.rows;
   const tracks: TrackRow[] = tracksResult.rows;
-  const sleep: SleepRow[] = sleepResult.rows;
 
   const pluginPools: { label: string; lines: string[] }[] = allLlmPlugins().map(({ plugin, hook }, i) => {
     const rows = (pluginRowsList[i] ?? []) as PluginLlmRow[];
@@ -171,24 +155,15 @@ async function gatherLifeData(from: string, to: string) {
   });
 
   const totalCheckins = checkins.length + pluginPools.reduce((sum, pool) => sum + pool.lines.length, 0);
-  const hasAnyData = totalCheckins > 0 || tracks.length > 0 || sleep.length > 0;
+  const hasAnyData = totalCheckins > 0 || tracks.length > 0;
 
-  return { checkins, pluginPools, tracks, sleep, hasAnyData, formatWhen };
+  return { checkins, pluginPools, tracks, hasAnyData, formatWhen };
 }
 
 
 function formatDistance(meters: number): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.round(meters)} m`;
-}
-
-function formatSleepDuration(startedAt: string, endedAt: string): string {
-  const mins = Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60000));
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
 }
 
 function formatTrackDuration(seconds: number): string {
@@ -224,7 +199,7 @@ function buildLifeDataText(
   data: Awaited<ReturnType<typeof gatherLifeData>>,
   charBudget: number
 ): { text: string; skipped: SkippedType[] } {
-  const { checkins, pluginPools, tracks, sleep, formatWhen } = data;
+  const { checkins, pluginPools, tracks, formatWhen } = data;
 
   const pools: { label: string; lines: string[] }[] = [];
 
@@ -237,8 +212,8 @@ function buildLifeDataText(
   });
   if (locationLines.length > 0) pools.push({ label: 'location check-ins', lines: locationLines });
 
-  // Plugin check-in types (their hooks pre-format each line, timestamp
-  // included, so no further work is needed here).
+  // Plugin check-in types (their hooks pre-format each line, so no further
+  // work is needed here).
   for (const pool of pluginPools) {
     if (pool.lines.length > 0) pools.push(pool);
   }
@@ -248,12 +223,6 @@ function buildLifeDataText(
     return `- ${formatWhen(t.started_at, t.timezone)} — ${type}track "${t.name}": ${formatDistance(Number(t.distance_m))} in ${formatTrackDuration(Number(t.elapsed_time_s))}`;
   });
   if (trackLines.length > 0) pools.push({ label: 'tracks', lines: trackLines });
-
-  const sleepLines = sleep.map((s) => {
-    const comment = s.comment ? ` — comment: "${s.comment}"` : '';
-    return `- ${formatWhen(s.ended_at, s.timezone)} — slept ${formatSleepDuration(s.started_at, s.ended_at)}${comment}`;
-  });
-  if (sleepLines.length > 0) pools.push({ label: 'sleep entries', lines: sleepLines });
 
   const sectionCost = (lines: string[]) => (pools.length > 1 ? 2 : 0);
 

@@ -1,10 +1,18 @@
+/**
+ * Sleep detail page.
+ *
+ * Adapted from the former core page (client/src/pages/SleepDetail.tsx) to the
+ * plugin `CheckInDetailProps` contract and the plugin's own API helper.
+ */
+
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, CalendarDays, Clock, Loader2, Moon, Pencil, Star, Trash2 } from 'lucide-react';
-import { sleepEntries } from '../api/client';
-import type { SleepEntry } from '../types';
-import { normalizeTimezoneForDisplay } from '../utils/checkin';
-import { usePageTitle } from '../utils/pageTitle';
+import { sleepEntries } from './api';
+import type { SleepEntry } from './types';
+import type { CheckInDetailProps } from 'wwp-shared';
+import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 function formatDuration(startedAt: string, endedAt: string): string {
   const startMs = new Date(startedAt).getTime();
@@ -65,15 +73,15 @@ function renderStars(rating: number): string {
   return `${'★'.repeat(full)}${half ? '½' : ''}`;
 }
 
-export default function SleepDetail() {
-  const { id } = useParams<{ id: string }>();
+export default function SleepDetail({ id }: CheckInDetailProps) {
   const navigate = useNavigate();
   const [entry, setEntry] = useState<SleepEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  usePageTitle(entry ? `Sleep Entry: ${formatDuration(entry.started_at, entry.ended_at)}` : 'Sleep Entry');
+  const endedAt = entry?.ended_at ?? null;
+  usePageTitle(entry && endedAt ? `Sleep Entry: ${formatDuration(entry.started_at, endedAt)}` : 'Sleep Entry');
 
   useEffect(() => {
     if (!id) return;
@@ -117,10 +125,10 @@ export default function SleepDetail() {
     );
   }
 
+  const duration = endedAt ? formatDuration(entry.started_at, endedAt) : null;
   const timezoneLabel = getTimezoneAbbreviation(entry.started_at, entry.sleep_timezone);
-  const duration = formatDuration(entry.started_at, entry.ended_at);
-  const dayKey = getLocalDateKey(entry.ended_at, entry.sleep_timezone);
-  const dayTimelinePath = `/?from=${dayKey}&to=${dayKey}`;
+  const dayKey = endedAt ? getLocalDateKey(endedAt, entry.sleep_timezone) : null;
+  const dayTimelinePath = dayKey ? `/?from=${dayKey}&to=${dayKey}` : null;
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
@@ -132,7 +140,9 @@ export default function SleepDetail() {
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         <div className="flex items-center gap-2 flex-wrap">
           <Moon size={20} className="text-indigo-500 shrink-0" />
-          <h1 className="text-xl font-bold text-indigo-700 dark:text-indigo-300">Slept for {duration}</h1>
+          <h1 className="text-xl font-bold text-indigo-700 dark:text-indigo-300">
+            {duration ? `Slept for ${duration}` : 'Sleep in progress'}
+          </h1>
           <span className="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-900/30 px-2.5 py-0.5 text-xs font-medium text-indigo-700 dark:text-indigo-300">
             {timezoneLabel}
           </span>
@@ -155,10 +165,10 @@ export default function SleepDetail() {
             <Clock size={14} />
             <span>Start: <time dateTime={entry.started_at}>{formatDate(entry.started_at, entry.sleep_timezone)}</time></span>
           </div>
-          { entry.ended_at ? 
+          {endedAt && dayTimelinePath ? (
           <div className="flex items-center gap-2">
             <Clock size={14} />
-            <span>End: <time dateTime={entry.ended_at}>{formatDate(entry.ended_at, entry.sleep_timezone)}</time></span>
+            <span>End: <time dateTime={endedAt}>{formatDate(endedAt, entry.sleep_timezone)}</time></span>
             <Link
               to={dayTimelinePath}
               aria-label="View this day on Home"
@@ -167,7 +177,8 @@ export default function SleepDetail() {
             >
               <CalendarDays size={14} />
             </Link>
-          </div> : null}
+          </div>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
