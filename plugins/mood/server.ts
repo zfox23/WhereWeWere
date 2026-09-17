@@ -32,6 +32,11 @@ const USER_ID = '00000000-0000-0000-0000-000000000001';
 // Shared SQL fragments
 // ---------------------------------------------------------------------------
 
+/**
+ * Bare SQL expression computing the activities JSON array for a mood check-in
+ * (`mc` in scope). Keep this WITHOUT a column alias so it can be embedded both
+ * as the `activities` column and inside `json_build_object(...)` for `data`.
+ */
 const ACTIVITIES_JSON = `
   COALESCE(
     (SELECT json_agg(json_build_object(
@@ -42,8 +47,7 @@ const ACTIVITIES_JSON = `
     JOIN mood_activity_groups mag ON ma.group_id = mag.id
     WHERE mca.mood_checkin_id = mc.id),
     '[]'::json
-  ) AS activities
-`;
+  )`;
 
 // ---------------------------------------------------------------------------
 // Plugin-owned API: /api/v1/mood-checkins
@@ -94,7 +98,7 @@ router.get('/', async (req: Request, res: Response) => {
     const sql = `
       SELECT mc.id, mc.user_id, mc.mood, mc.note,
              mc.checked_in_at, mc.created_at, mc.updated_at, mc.mood_timezone,
-             ${ACTIVITIES_JSON}
+             ${ACTIVITIES_JSON} AS activities
       FROM mood_checkins mc
       ${whereClause}
       ORDER BY mc.checked_in_at DESC
@@ -117,7 +121,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT mc.id, mc.user_id, mc.mood, mc.note,
               mc.checked_in_at, mc.created_at, mc.updated_at, mc.mood_timezone,
-              ${ACTIVITIES_JSON}
+              ${ACTIVITIES_JSON} AS activities
        FROM mood_checkins mc
        WHERE mc.id = $1`,
       [id]
@@ -1315,7 +1319,7 @@ export const server: CheckinTypeServerPlugin = {
              NULL AS venue_category,
              NULL AS parent_venue_id, NULL AS parent_venue_name,
              mc.mood, mc.mood_timezone,
-             ${ACTIVITIES_JSON},
+             ${ACTIVITIES_JSON} AS activities,
              NULL::bigint AS sleep_as_android_id,
              NULL::timestamptz AS sleep_started_at,
              NULL::timestamptz AS sleep_ended_at,
@@ -1342,7 +1346,7 @@ export const server: CheckinTypeServerPlugin = {
              json_build_object(
                'mood', mc.mood,
                'note', mc.note,
-               ${ACTIVITIES_JSON.replace(/ AS activities$/, '')}
+               'activities', ${ACTIVITIES_JSON}
              )::jsonb AS data
       FROM mood_checkins mc
     `,
@@ -1644,7 +1648,7 @@ export const server: CheckinTypeServerPlugin = {
         json_build_object(
           'mood', mc.mood,
           'mood_timezone', mc.mood_timezone,
-          ${ACTIVITIES_JSON.replace(/ AS activities$/, '')}
+          'activities', ${ACTIVITIES_JSON}
         )::jsonb AS data
       FROM mood_checkins mc
       WHERE mc.user_id = $1
