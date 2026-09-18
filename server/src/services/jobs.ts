@@ -2,10 +2,46 @@ import { query } from '../db';
 import { reverseGeocode } from './nominatim';
 import { searchNearbyVenues } from './overpass';
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
-
 // In-memory cancellation signals — checked between batches
 const cancelledJobs = new Set<string>();
+
+// Run at startup: any pending/running job in the DB was started by a previous
+// process whose in-memory runner no longer exists — mark them failed so they
+// don't show as stuck "running" and block new jobs of the same type.
+export async function cleanupStaleJobs() {
+  try {
+    const result = await query(
+      `SELECT id, type, status, started_at FROM jobs WHERE status IN ('pending', 'running')`
+    );
+    if (result.rows.length > 0) {
+      console.warn(
+        `[jobs] found ${result.rows.length} stale job(s) from a previous server run — marking them failed:`
+      );
+      for (const row of result.rows) {
+        console.warn(
+          `[jobs]   stale job ${row.id} type=${row.type} status=${row.status} started_at=${row.started_at}`
+        );
+        await query(
+          `UPDATE jobs SET status = 'failed', completed_at = NOW(),
+             error = 'Server restarted while this job was running; the job was interrupted.'
+           WHERE id = $1`,
+          [row.id]
+        );
+      }
+    } else {
+      console.log('[jobs] no stale pending/running jobs found at startup');
+    }
+  } catch (err) {
+    console.warn('[jobs] failed to clean up stale jobs at startup:', err);
+  }
+}
+
+// Job ids whose runner is alive in THIS process — used to detect stale DB rows
+const localRunningJobs = new Set<string>();
+
+export function isJobRunningLocally(jobId: string): boolean {
+  return localRunningJobs.has(jobId);
+}
 
 export function requestJobCancellation(jobId: string) {
   cancelledJobs.add(jobId);
@@ -34,7 +70,11 @@ async function updateJobProgress(jobId: string, progress: JobProgress) {
   );
 }
 
-async function geocodeBatch(jobId: string): Promise<{ updated: number; remaining: number }> {
+async function geocodeBatch(
+  jobId: string,
+  remainingBefore: number,
+  totalUpdatedBefore: number
+): Promise<{ updated: number; remaining: number; failed: number; failedIds: string[] }> {
   const result = await query(
     `SELECT id, latitude, longitude FROM venues
      WHERE country IS NULL OR TRIM(country) = ''
@@ -42,12 +82,19 @@ async function geocodeBatch(jobId: string): Promise<{ updated: number; remaining
   );
 
   let updated = 0;
+  let failed = 0;
+  let processed = 0;
+  const failedIds: string[] = [];
   for (const venue of result.rows) {
     if (isJobCancelled(jobId)) throw new Error('cancelled');
     const geo = await reverseGeocode(
       parseFloat(venue.latitude),
       parseFloat(venue.longitude)
     );
+    if (!geo.country) {
+      failed++;
+      failedIds.push(venue.id);
+    }
     if (geo.country) {
       await query(
         `UPDATE venues SET
@@ -59,20 +106,35 @@ async function geocodeBatch(jobId: string): Promise<{ updated: number; remaining
       );
       updated++;
     }
+    processed++;
+    // Per-venue progress so the UI never looks frozen for minutes
+    const estRemaining = Math.max(0, remainingBefore - processed);
+    await updateJobProgress(jobId, {
+      phase: 'geocoding',
+      updated: totalUpdatedBefore + updated,
+      remaining: estRemaining,
+      message: `Geocoding: ${totalUpdatedBefore + updated} updated, ~${estRemaining} remaining (venue ${processed}/${result.rows.length} in batch)`,
+    });
   }
+
+  console.log(`[jobs] backfill ${jobId} geocode batch done: updated=${updated} failed=${failed} failedIds=${failedIds.slice(0, 5).join(',') || '(none)'}`);
 
   const remaining = await query(
     `SELECT COUNT(*)::int AS count FROM venues WHERE country IS NULL OR TRIM(country) = ''`
   );
 
-  return { updated, remaining: remaining.rows[0].count };
+  return { updated, remaining: remaining.rows[0].count, failed, failedIds };
 }
 
 function normalizeForMatch(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-async function categorizeBatch(jobId: string): Promise<{ updated: number; remaining: number }> {
+async function categorizeBatch(
+  jobId: string,
+  remainingBefore: number,
+  totalUpdatedBefore: number
+): Promise<{ updated: number; remaining: number }> {
   const result = await query(
     `SELECT id, name, latitude, longitude FROM venues
      WHERE category_id IS NULL
@@ -80,6 +142,7 @@ async function categorizeBatch(jobId: string): Promise<{ updated: number; remain
   );
 
   let updated = 0;
+  let processed = 0;
   for (const venue of result.rows) {
     if (isJobCancelled(jobId)) throw new Error('cancelled');
     try {
@@ -133,6 +196,15 @@ async function categorizeBatch(jobId: string): Promise<{ updated: number; remain
     } catch (venueErr) {
       console.error(`Failed to categorize venue ${venue.id}:`, venueErr);
     }
+    processed++;
+    // Per-venue progress so the UI never looks frozen for minutes
+    const estRemaining = Math.max(0, remainingBefore - processed);
+    await updateJobProgress(jobId, {
+      phase: 'categorizing',
+      updated: totalUpdatedBefore + updated,
+      remaining: estRemaining,
+      message: `Categorizing: ${totalUpdatedBefore + updated} updated, ~${estRemaining} remaining (venue ${processed}/${result.rows.length} in batch)`,
+    });
   }
 
   const remaining = await query(
@@ -148,39 +220,41 @@ export async function runBackfillJob(jobId: string): Promise<void> {
       `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1`,
       [jobId]
     );
+    localRunningJobs.add(jobId);
+    console.log(`[jobs] backfill ${jobId} started (local runner live)`);
 
-    // Phase 1: Geocode
+    // Phase 1: Geocode (progress is written per-venue inside geocodeBatch)
     let totalGeoUpdated = 0;
-    let geoRemaining = Infinity;
+    const geoRemainingInit = await query(
+      `SELECT COUNT(*)::int AS count FROM venues WHERE country IS NULL OR TRIM(country) = ''`
+    );
+    let geoRemaining = geoRemainingInit.rows[0].count;
     while (geoRemaining > 0) {
       if (isJobCancelled(jobId)) throw new Error('cancelled');
-      const batch = await geocodeBatch(jobId);
+      const batch = await geocodeBatch(jobId, geoRemaining, totalGeoUpdated);
       totalGeoUpdated += batch.updated;
       geoRemaining = batch.remaining;
-      if (batch.updated === 0) break;
-      await updateJobProgress(jobId, {
-        phase: 'geocoding',
-        updated: totalGeoUpdated,
-        remaining: geoRemaining,
-        message: `Geocoding: ${totalGeoUpdated} updated, ${geoRemaining} remaining`,
-      });
+      if (batch.updated === 0) {
+        console.warn(
+          `[jobs] backfill ${jobId} geocode batch made NO progress (remaining=${geoRemaining}, failed=${batch.failed}). ` +
+          `These venues likely have ungeocodable coordinates or Nominatim is failing; the loop will now exit.`
+        );
+        break;
+      }
     }
 
-    // Phase 2: Categorize
+    // Phase 2: Categorize (progress is written per-venue inside categorizeBatch)
     let totalCatUpdated = 0;
-    let catRemaining = Infinity;
+    const catRemainingInit = await query(
+      `SELECT COUNT(*)::int AS count FROM venues WHERE category_id IS NULL`
+    );
+    let catRemaining = catRemainingInit.rows[0].count;
     while (catRemaining > 0) {
       if (isJobCancelled(jobId)) throw new Error('cancelled');
-      const batch = await categorizeBatch(jobId);
+      const batch = await categorizeBatch(jobId, catRemaining, totalCatUpdated);
       totalCatUpdated += batch.updated;
       catRemaining = batch.remaining;
       if (batch.updated === 0) break;
-      await updateJobProgress(jobId, {
-        phase: 'categorizing',
-        updated: totalCatUpdated,
-        remaining: catRemaining,
-        message: `Categorizing: ${totalCatUpdated} updated, ${catRemaining} remaining`,
-      });
     }
 
     await query(
@@ -194,116 +268,9 @@ export async function runBackfillJob(jobId: string): Promise<void> {
     );
   } catch (err: any) {
     cleanupCancellation(jobId);
+    localRunningJobs.delete(jobId);
     const isCancelled = err.message === 'cancelled';
     console.error(`Job ${jobId} ${isCancelled ? 'cancelled' : 'failed'}:`, isCancelled ? '' : err);
-    await query(
-      `UPDATE jobs SET status = $1, completed_at = NOW(), error = $2 WHERE id = $3`,
-      [isCancelled ? 'cancelled' : 'failed', isCancelled ? 'Job was cancelled by user.' : (err.message || String(err)), jobId]
-    );
-  }
-}
-
-async function getDawarichSettings(): Promise<{ url: string; apiKey: string } | null> {
-  const result = await query(
-    `SELECT dawarich_url, dawarich_api_key FROM user_settings WHERE user_id = $1`,
-    [USER_ID]
-  );
-  if (result.rows.length === 0) return null;
-  const { dawarich_url, dawarich_api_key } = result.rows[0];
-  if (!dawarich_url || !dawarich_api_key) return null;
-  return { url: dawarich_url.replace(/\/+$/, ''), apiKey: dawarich_api_key };
-}
-
-export async function runDawarichExportJob(jobId: string): Promise<void> {
-  try {
-    await query(
-      `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1`,
-      [jobId]
-    );
-
-    const settings = await getDawarichSettings();
-    if (!settings) {
-      throw new Error('Dawarich URL and API key are not configured. Update them in Settings > Integrations.');
-    }
-
-    // Fetch all venues with coordinates
-    const venuesResult = await query(
-      `SELECT name, latitude, longitude FROM venues
-       WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-       ORDER BY name`
-    );
-    const allVenues = venuesResult.rows;
-
-    // Fetch existing places from Dawarich to avoid duplicates
-    const existingRes = await fetch(`${settings.url}/api/v1/places?api_key=${settings.apiKey}`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!existingRes.ok) {
-      throw new Error(`Failed to fetch existing Dawarich places: ${existingRes.status} ${existingRes.statusText}`);
-    }
-    const existingPlaces = (await existingRes.json()) as Array<{ name: string }>;
-    const existingNames = new Set(existingPlaces.map((p) => p.name.toLowerCase()));
-
-    const toExport = allVenues.filter((v: any) => !existingNames.has(v.name.toLowerCase()));
-
-    await updateJobProgress(jobId, {
-      phase: 'exporting',
-      message: `Found ${allVenues.length} venues, ${toExport.length} new to export (${existingNames.size} already exist in Dawarich).`,
-    });
-
-    let exported = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (const venue of toExport) {
-      if (isJobCancelled(jobId)) throw new Error('cancelled');
-      try {
-        const res = await fetch(`${settings.url}/api/v1/places?api_key=${settings.apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            name: venue.name,
-            latitude: parseFloat(venue.latitude),
-            longitude: parseFloat(venue.longitude),
-          }),
-        });
-
-        if (res.ok) {
-          exported++;
-        } else {
-          const errText = await res.text().catch(() => '');
-          console.error(`Dawarich export failed for "${venue.name}": ${res.status} ${errText.slice(0, 100)}`);
-          failed++;
-        }
-      } catch (venueErr) {
-        console.error(`Dawarich export error for "${venue.name}":`, venueErr);
-        failed++;
-      }
-
-      if ((exported + failed) % 10 === 0) {
-        await updateJobProgress(jobId, {
-          phase: 'exporting',
-          message: `Exporting: ${exported} created, ${failed} failed, ${toExport.length - exported - failed} remaining`,
-          exported,
-          failed,
-        });
-      }
-    }
-
-    await query(
-      `UPDATE jobs SET status = 'completed', completed_at = NOW(), progress = $1 WHERE id = $2`,
-      [JSON.stringify({
-        phase: 'done',
-        message: `Complete. Exported ${exported} places to Dawarich. ${skipped} skipped, ${failed} failed.`,
-        exported,
-        skipped: existingNames.size,
-        failed,
-      }), jobId]
-    );
-  } catch (err: any) {
-    cleanupCancellation(jobId);
-    const isCancelled = err.message === 'cancelled';
-    console.error(`Dawarich export job ${jobId} ${isCancelled ? 'cancelled' : 'failed'}:`, isCancelled ? '' : err);
     await query(
       `UPDATE jobs SET status = $1, completed_at = NOW(), error = $2 WHERE id = $3`,
       [isCancelled ? 'cancelled' : 'failed', isCancelled ? 'Job was cancelled by user.' : (err.message || String(err)), jobId]

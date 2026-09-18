@@ -102,6 +102,9 @@ export function createApp() {
 export async function startServer() {
   await runMigrations();
 
+  const { cleanupStaleJobs } = await import('./services/jobs');
+  await cleanupStaleJobs();
+
   const app = createApp();
   app.listen(config.port, () => {
     console.log(`WhereWeWere server listening on port ${config.port}`);

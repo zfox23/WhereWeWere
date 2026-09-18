@@ -5,6 +5,8 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // Track last request time to enforce 1 req/sec rate limit
 let lastRequestTime = 0;
 
+const FETCH_TIMEOUT_MS = 15000;
+
 async function rateLimitedFetch(url: string): Promise<Response> {
   const now = Date.now();
   const elapsed = now - lastRequestTime;
@@ -12,9 +14,26 @@ async function rateLimitedFetch(url: string): Promise<Response> {
     await delay(1100 - elapsed);
   }
   lastRequestTime = Date.now();
-  return fetch(url, {
-    headers: { 'User-Agent': 'WhereWeWere/1.0 (self-hosted checkin app)' },
-  });
+  const fetchStart = Date.now();
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      headers: { 'User-Agent': 'WhereWeWere/1.0 (self-hosted checkin app)' },
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Nominatim request timed out after ${FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutHandle);
+    const ms = Date.now() - fetchStart;
+    if (ms > 5000) {
+      console.warn(`[nominatim] SLOW request took ${ms}ms (possible hang): ${url.slice(0, 120)}`);
+    }
+  }
 }
 
 export interface ReverseGeocodeResult {

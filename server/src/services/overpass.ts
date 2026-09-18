@@ -205,13 +205,30 @@ function cacheKey(lat: number, lon: number, query: string | undefined, radius: n
   return `${rlat},${rlon}|${radius}|${(query || '').toLowerCase()}`;
 }
 
+// Overpass queries can legitimately take up to their [timeout:15] server-side
+// limit; give the socket a generous margin so a hung connection can't wedge a
+// backfill job forever.
+const OVERPASS_FETCH_TIMEOUT_MS = 60000;
+
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
   retries: number = 2,
 ): Promise<Response> {
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const response = await fetch(url, init);
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), OVERPASS_FETCH_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(url, { ...init, signal: controller.signal });
+    } catch (err: any) {
+      clearTimeout(timeoutHandle);
+      if (err?.name === 'AbortError') {
+        throw new Error(`Overpass request timed out after ${OVERPASS_FETCH_TIMEOUT_MS}ms`);
+      }
+      throw err;
+    }
+    clearTimeout(timeoutHandle);
 
     if (response.ok) return response;
 
