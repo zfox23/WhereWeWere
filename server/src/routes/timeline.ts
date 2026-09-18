@@ -70,7 +70,6 @@ router.get('/', async (req: Request, res: Response) => {
       .map((p) => p.id);
 
     const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
-    const hasTrackTypeFilter = Boolean(req.query.track_activity);
     const hasMediaTypeFilter = Boolean(req.query.media_subtype);
 
     // Decide which branches to include (a type filter narrows to one type;
@@ -81,16 +80,14 @@ router.get('/', async (req: Request, res: Response) => {
       includedKeys.push(`plugin:${activePluginFilterIds[0]}`);
     } else if (hasLocationTypeFilter) {
       includedKeys.push('location');
-    } else if (hasTrackTypeFilter) {
-      includedKeys.push('track');
     } else if (hasMediaTypeFilter) {
       includedKeys.push('media');
     } else {
-      includedKeys.push('location', ...plugins.map((p) => `plugin:${p.id}`), 'track', 'media');
+      includedKeys.push('location', ...plugins.map((p) => `plugin:${p.id}`), 'media');
     }
 
     // ------------------------------------------------------------------
-    // Built-in branches (location, track, media). Mood and Sleep are plugins.
+    // Built-in branches (location, media). Mood, Sleep and Tracks are plugins.
     // ------------------------------------------------------------------
     const ctx = { user_id: userId, from: fromDate, to: toDate, q: searchQuery };
 
@@ -109,16 +106,6 @@ router.get('/', async (req: Request, res: Response) => {
         if (req.query.venue_id) conds.push('c.venue_id = ?', String(req.query.venue_id));
         if (req.query.category) conds.push('vc.name = ?', String(req.query.category));
         if (req.query.country) conds.push('v.country = ?', String(req.query.country));
-        return conds.build();
-      },
-      track: () => {
-        const conds = timelineWhereConditions(ctx, {
-          alias: 't',
-          timestampColumn: 'started_at',
-          timezoneColumn: 'timezone',
-          search: (c, q) => c.push(`t.name ILIKE '%' || ? || '%'`, q),
-        });
-        if (req.query.track_activity) conds.push(`t.activity_type ILIKE ?`, String(req.query.track_activity));
         return conds.build();
       },
       media: () => {
@@ -169,24 +156,6 @@ router.get('/', async (req: Request, res: Response) => {
      LEFT JOIN venue_categories vc ON v.category_id = vc.id
      LEFT JOIN venues pv ON v.parent_venue_id = pv.id
    `,
-      track: `
-      SELECT ${timelineColumnList({
-        type: `'track'`,
-        id: 't.id',
-        user_id: 't.user_id',
-        notes: 't.name',
-        checked_in_at: 't.started_at',
-        created_at: 't.created_at',
-        track_name: 't.name',
-        track_distance_m: 't.distance_m',
-        track_timezone: 't.timezone',
-        track_started_at: 't.started_at',
-        track_ended_at: 't.ended_at',
-        track_elapsed_time_s: 't.elapsed_time_s',
-        timezone: 't.timezone',
-      })}
-             FROM tracks t
-            `,
       media: `
             SELECT ${timelineColumnList({
         type: `'media'`,

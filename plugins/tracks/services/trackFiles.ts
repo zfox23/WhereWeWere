@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { config } from '../config';
+import { config } from '../../../server/src/config';
 import type { GpxPointSeries } from './gpx';
 
 /**

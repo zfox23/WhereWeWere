@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Heart, LineChart, Mountain, Route } from 'lucide-react';
+/**
+ * Tracks check-in type — elevation / speed / heart-rate graph.
+ *
+ * Moved verbatim from the former core `components/TrackGraph`; only the
+ * relative import paths were re-pointed to the core client.
+ */
+
 import {
   formatDistance,
   formatDuration,
   formatSpeed,
   haversineDistance,
   type DistanceUnit,
-} from '../utils/geo';
-import { useTheme } from '../contexts/ThemeContext';
-import type { TrackPoint } from '../types';
+} from '../../../client/src/utils/geo';
+import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import type { TrackPoint } from './types';
 
 export type TrackGraphXAxis = 'distance' | 'time';
 export type TrackGraphSeriesKey = 'speed' | 'elevation' | 'heartRate';

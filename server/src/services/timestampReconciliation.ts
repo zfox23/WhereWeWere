@@ -19,7 +19,7 @@ const FALLBACK_WINDOW_MS = 72 * 60 * 60 * 1000;
  */
 type CheckinKind = 'venue' | 'media' | string;
 
-type FallbackKind = 'media' | 'track' | string;
+type FallbackKind = 'media' | string;
 
 interface VenueCheckinRow {
   id: string;
@@ -451,20 +451,6 @@ async function loadMediaCheckins(userId: string): Promise<MediaCheckinRow[]> {
   return result.rows as MediaCheckinRow[];
 }
 
-async function loadTrackAnchorRows(userId: string): Promise<FallbackAnchorRow[]> {
-  const result = await query(
-    `SELECT id,
-            started_at AS checked_in_at,
-            timezone,
-            name AS label
-     FROM tracks
-     WHERE user_id = $1`,
-    [userId]
-  );
-
-  return result.rows as FallbackAnchorRow[];
-}
-
 export async function getTimestampReconciliationSuggestions(userId = USER_ID): Promise<TimestampReconciliationScanResult> {
   interface PluginHookEntry {
     plugin: CheckinTypeServer;
@@ -477,10 +463,9 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
     )
     .filter((entry): entry is PluginHookEntry => entry !== null);
 
-  const [venueRows, mediaRows, trackRows, ...pluginRowsList] = await Promise.all([
+  const [venueRows, mediaRows, ...pluginRowsList] = await Promise.all([
     loadVenueCheckins(userId),
     loadMediaCheckins(userId),
-    loadTrackAnchorRows(userId),
     ...pluginHooks.map(({ plugin, hook }) => hook.loadCheckins(userId).catch((err: unknown) => {
       console.error(`Plugin "${plugin.id}" reconcile.loadCheckins failed:`, err);
       return [] as PluginReconciliationRow[];
@@ -503,7 +488,6 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
       .map((row) => toVenueAnchor(row))
       .filter((row): row is AnyTimezoneAnchor => row !== null),
     ...toFallbackAnchors(mediaFallbackRows, 'media', 'a media check-in'),
-    ...trackRows.flatMap((row) => toFallbackAnchors([row], 'track', 'a track')),
     ...pluginRowsList.flatMap((rows, i) =>
       toFallbackAnchors(
         rows.map((row) => ({

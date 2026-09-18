@@ -14,7 +14,6 @@ import { immichRouter } from './routes/immich';
 import { timelineRouter } from './routes/timeline';
 import { webhookPlexRouter } from './routes/webhook-plex';
 import { backupRouter } from './routes/backup';
-import { tracksRouter } from './routes/tracks';
 import { llmRouter } from './routes/llm';
 import { mediaRouter } from './routes/media';
 import { importYamtrackRouter } from './routes/import-yamtrack';
@@ -79,7 +78,6 @@ export function createApp() {
   app.use('/api/v1/immich', immichRouter);
   app.use('/api/v1/timeline', timelineRouter);
   app.use('/api/v1/webhook/plex', webhookPlexRouter);
-  app.use('/api/v1/tracks', tracksRouter);
   app.use('/api/v1/backup', backupRouter);
   app.use('/api/v1/llm', llmRouter);
   app.use('/api/v1/media', mediaRouter);

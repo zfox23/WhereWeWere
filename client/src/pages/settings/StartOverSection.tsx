@@ -6,7 +6,6 @@ import { allClientPlugins } from '../../plugins/registry';
 type StartOverOptions = {
   delete_all_checkins: boolean;
   delete_venue_checkins: boolean;
-  delete_tracks: boolean;
   delete_media_items: boolean;
   reset_account_settings: boolean;
   reset_integrations_settings: boolean;
@@ -28,7 +27,6 @@ export function StartOverSection() {
   const [options, setOptions] = useState<StartOverOptions>({
     delete_all_checkins: false,
     delete_venue_checkins: false,
-    delete_tracks: false,
     delete_media_items: false,
     reset_account_settings: false,
     reset_integrations_settings: false,
@@ -50,7 +48,6 @@ export function StartOverSection() {
         for (const plugin of plugins) {
           next[pluginDeleteKey(plugin.id)] = next.delete_all_checkins;
         }
-        next.delete_tracks = next.delete_all_checkins;
       }
       return next;
     });
@@ -113,16 +110,6 @@ export function StartOverSection() {
             <span>All {plugin.strings.title} {plugin.strings.plural}</span>
           </label>
         ))}
-        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={options.delete_tracks}
-            disabled={options.delete_all_checkins}
-            onChange={() => toggleOption('delete_tracks')}
-          />
-          <span>All Tracks (including uploaded track files stored on the server)</span>
-        </label>
         <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
           <input
             type="checkbox"

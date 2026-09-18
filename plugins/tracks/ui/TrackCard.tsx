@@ -1,23 +1,23 @@
+/**
+ * Tracks check-in type — timeline card.
+ *
+ * Adapted from the former core `components/TrackCard` to the plugin prop
+ * contract (`CheckinCardProps`). Reads the legacy `track_*` timeline columns
+ * off the timeline entry and integration URLs off `integrations`.
+ */
+
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Clock, Route } from 'lucide-react';
-import type { TimelineItem, ImmichAsset, Scrobble } from '../types';
-import { formatDistance, type DistanceUnit } from '../utils/geo';
-import { settings } from '../api/client';
-import { ScrobbleList } from './ScrobbleList';
-import { CardShell } from './checkin-card/CardShell';
-import { PhotoSection } from './checkin-card/PhotoSection';
-import { TimestampLink } from './checkin-card/TimestampLink';
-import { useResolvedPhotos } from './checkin-card/useResolvedPhotos';
-
-interface TrackCardProps {
-  item: TimelineItem;
-  immichUrl?: string | null;
-  photos?: ImmichAsset[] | null;
-  scrobbles?: Scrobble[];
-  malojaUrl?: string | null;
-  compact?: boolean;
-}
+import type { CheckinCardProps } from 'wwp-shared';
+import type { TrackTimelineFields } from './types';
+import { formatDistance, type DistanceUnit } from '../../../client/src/utils/geo';
+import { settings } from '../../../client/src/api/client';
+import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
+import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
+import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
+import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
+import { useResolvedPhotos } from '../../../client/src/components/checkin-card/useResolvedPhotos';
 
 function formatDuration(totalSeconds: number): string {
   const totalMinutes = Math.max(0, Math.round(totalSeconds / 60));
@@ -29,9 +29,12 @@ function formatDuration(totalSeconds: number): string {
   return `${hours}h ${minutes}m`;
 }
 
-export default function TrackCard({ item, immichUrl, photos, scrobbles, malojaUrl, compact = false }: TrackCardProps) {
+export function TrackCard({ item, integrations, photos, scrobbles, compact = false }: CheckinCardProps) {
   const { pathname } = useLocation();
-  const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos);
+  const track = item as unknown as TrackTimelineFields;
+  const immichUrl = integrations.immich_url ?? null;
+  const malojaUrl = integrations.maloja_url ?? null;
+  const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos as any[] | null);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
 
   useEffect(() => {
@@ -45,11 +48,11 @@ export default function TrackCard({ item, immichUrl, photos, scrobbles, malojaUr
       .catch(() => {});
   }, []);
 
-  const name = item.track_name || 'Track';
-  const startedAt = item.track_started_at || item.checked_in_at;
-  const timezone = item.track_timezone || 'UTC';
-  const distanceM = Number(item.track_distance_m || 0);
-  const elapsedS = Number(item.track_elapsed_time_s || 0);
+  const name = track.track_name || 'Track';
+  const startedAt = track.track_started_at || item.checked_in_at;
+  const timezone = track.track_timezone || item.timezone || 'UTC';
+  const distanceM = Number(track.track_distance_m || 0);
+  const elapsedS = Number(track.track_elapsed_time_s || 0);
 
   if (compact) {
     return (
@@ -104,7 +107,7 @@ export default function TrackCard({ item, immichUrl, photos, scrobbles, malojaUr
             checkedInAt={startedAt}
           />
 
-          {scrobbles && <ScrobbleList scrobbles={scrobbles} checkedInAt={startedAt} malojaUrl={malojaUrl} />}
+          {scrobbles && <ScrobbleList scrobbles={scrobbles as any[]} checkedInAt={startedAt} malojaUrl={malojaUrl} />}
 
           <TimestampLink
             to={`/tracks/${item.id}`}

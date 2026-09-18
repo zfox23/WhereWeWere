@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { pool, query } from '../db';
-import { deleteStoredTrack } from '../services/trackFiles';
 import {
   claimedLegacyKeys,
   deletePluginData,
@@ -93,35 +92,6 @@ interface BackupCheckin {
   swarm_id: string | null;
 }
 
-interface BackupTrackPoint {
-  t: number | null;
-  ele: number | null;
-  hr: number | null;
-}
-
-interface BackupTrack {
-  id: string;
-  name: string;
-  activity_type: string | null;
-  timezone: string;
-  started_at: string;
-  ended_at: string;
-  distance_m: number;
-  elapsed_time_s: number;
-  moving_time_s: number;
-  elevation_gain_m: number;
-  avg_speed_mps: number;
-  max_speed_mps: number;
-  avg_hr: number | null;
-  max_hr: number | null;
-  point_count: number;
-  file_hash: string | null;
-  geometry: [number, number][] | null;
-  points: BackupTrackPoint[] | null;
-  created_at: string;
-  updated_at: string;
-}
-
 interface BackupMediaItem {
   id: string;
   media_type: string;
@@ -195,7 +165,6 @@ interface BackupV1 {
     venueCategories: BackupVenueCategory[];
     venues: BackupVenue[];
     checkins: BackupCheckin[];
-    tracks: BackupTrack[];
     mediaItems: BackupMediaItem[];
     mediaCheckins: BackupMediaCheckin[];
     mediaLists: BackupMediaList[];
@@ -307,7 +276,6 @@ function ensureV1Backup(raw: unknown): BackupV1 {
         longitude: toNumber((venue as BackupVenue).longitude),
       })),
       checkins: asArray<BackupCheckin>(migratedData.checkins),
-      tracks: asArray<BackupTrack>(migratedData.tracks),
       mediaItems: asArray<BackupMediaItem>(migratedData.mediaItems),
       mediaCheckins: asArray<BackupMediaCheckin>(migratedData.mediaCheckins),
       mediaLists: asArray<BackupMediaList>(migratedData.mediaLists),
@@ -325,7 +293,6 @@ router.get('/export', async (_req: Request, res: Response) => {
       categoriesResult,
       venuesResult,
       checkinsResult,
-      tracksResult,
       mediaItemsResult,
       mediaCheckinsResult,
       mediaListsResult,
@@ -380,21 +347,7 @@ router.get('/export', async (_req: Request, res: Response) => {
         [USER_ID]
       ),
       query(
-        `SELECT t.id, t.name, t.activity_type, t.timezone,
-                t.started_at, t.ended_at,
-                t.distance_m, t.elapsed_time_s, t.moving_time_s,
-                t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
-                t.avg_hr, t.max_hr, t.point_count, t.file_hash,
-                ST_AsGeoJSON(t.path) AS geojson,
-                t.points,
-                t.created_at, t.updated_at
-         FROM tracks t
-         WHERE t.user_id = $1
-         ORDER BY t.started_at ASC`,
-       [USER_ID]
-     ),
-     query(
-       `SELECT id, media_type, external_source, external_id,
+        `SELECT id, media_type, external_source, external_id,
                title, author, release_year, image_url, external_url,
                platform, overview, content_rating, players, coop,
                genres, developers, publishers,
@@ -434,51 +387,6 @@ router.get('/export', async (_req: Request, res: Response) => {
      exportPluginData(USER_ID),
    ]);
 
-    const tracks = tracksResult.rows.map((row: any) => {
-      let geometry: [number, number][] | null = null;
-      try {
-        const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
-        if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
-          geometry = gj.coordinates;
-        }
-      } catch {
-        // leave null
-      }
-      const points = Array.isArray(row.points)
-        ? row.points
-        : row.points == null
-          ? null
-          : (() => {
-              try {
-                return JSON.parse(row.points);
-              } catch {
-                return null;
-              }
-            })();
-      return {
-        id: row.id,
-        name: row.name,
-        activity_type: row.activity_type ?? null,
-        timezone: row.timezone,
-        started_at: row.started_at,
-        ended_at: row.ended_at,
-        distance_m: Number(row.distance_m),
-        elapsed_time_s: Number(row.elapsed_time_s),
-        moving_time_s: Number(row.moving_time_s),
-        elevation_gain_m: Number(row.elevation_gain_m),
-        avg_speed_mps: Number(row.avg_speed_mps),
-        max_speed_mps: Number(row.max_speed_mps),
-        avg_hr: row.avg_hr == null ? null : Number(row.avg_hr),
-        max_hr: row.max_hr == null ? null : Number(row.max_hr),
-        point_count: Number(row.point_count),
-        file_hash: row.file_hash ?? null,
-        geometry,
-        points: Array.isArray(points) ? points : null,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      };
-    });
-
     const payload: BackupV1 = {
       format: BACKUP_FORMAT,
       schemaVersion: 1,
@@ -493,7 +401,6 @@ router.get('/export', async (_req: Request, res: Response) => {
           longitude: toNumber(venue.longitude),
         })),
         checkins: checkinsResult.rows,
-        tracks,
         mediaItems: mediaItemsResult.rows,
         mediaCheckins: mediaCheckinsResult.rows,
         mediaLists: mediaListsResult.rows,
@@ -522,7 +429,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     const counts: Record<string, { inserted: number; skipped: number }> = {
       venues: { inserted: 0, skipped: 0 },
       checkins: { inserted: 0, skipped: 0 },
-      tracks: { inserted: 0, skipped: 0 },
       mediaItems: { inserted: 0, skipped: 0 },
       mediaCheckins: { inserted: 0, skipped: 0 },
       mediaLists: { inserted: 0, skipped: 0 },
@@ -752,79 +658,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       }
     }
 
-    for (const track of backup.data.tracks) {
-      if (!track?.id || !track.name) {
-        counts.tracks.skipped += 1;
-        errors.push('Skipped track with missing id/name');
-        continue;
-      }
-
-      const coords = (Array.isArray(track.geometry) ? track.geometry : [])
-        .filter((c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]));
-      if (coords.length < 2) {
-        counts.tracks.skipped += 1;
-        errors.push(`Skipped track ${track.id} with insufficient geometry`);
-        continue;
-      }
-
-      const wktLineString = `LINESTRING(${coords.map(([lng, lat]) => `${lng} ${lat}`).join(', ')})`;
-
-      const pointsJson = Array.isArray(track.points) && track.points.length > 0
-        ? JSON.stringify(track.points)
-        : null;
-
-      const result = await client.query(
-        `INSERT INTO tracks (
-           id, user_id, name, activity_type, timezone, started_at, ended_at,
-           distance_m, elapsed_time_s, moving_time_s,
-           elevation_gain_m, avg_speed_mps, max_speed_mps,
-           avg_hr, max_hr, point_count, file_hash,
-           created_at, updated_at,
-           path, points
-         )
-         VALUES (
-           $1, $2, $3, $4, $5,
-           COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
-           $8, $9, $10,
-           $11, $12, $13,
-           $14, $15, $16, $17,
-           COALESCE($18::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()),
-           ST_SetSRID(ST_GeomFromText($20), 4326),
-           $21::jsonb
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          track.id,
-          USER_ID,
-          track.name,
-          toStringOrNull(track.activity_type),
-          track.timezone || 'UTC',
-          track.started_at || null,
-          track.ended_at || null,
-          toNumber(track.distance_m),
-          Math.round(toNumber(track.elapsed_time_s)),
-          Math.round(toNumber(track.moving_time_s)),
-          toNumber(track.elevation_gain_m),
-          toNumber(track.avg_speed_mps),
-          toNumber(track.max_speed_mps),
-          track.avg_hr == null ? null : Math.round(toNumber(track.avg_hr)),
-          track.max_hr == null ? null : Math.round(toNumber(track.max_hr)),
-          Math.round(toNumber(track.point_count)),
-          toStringOrNull(track.file_hash),
-          track.created_at || null,
-          track.updated_at || null,
-          wktLineString,
-          pointsJson,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.tracks.inserted += 1;
-      } else {
-        counts.tracks.skipped += 1;
-      }
-    }
-
     // Media: items first (so external-source dedupe is resolved before
     // check-ins and list items reference them), then check-ins, lists,
     // and finally list memberships.
@@ -1044,7 +877,6 @@ router.post('/start-over', async (req: Request, res: Response) => {
     const selectedPluginCheckinIds = allPlugins()
       .filter((p) => deleteAllCheckins || Boolean(rawOptions[`delete_${p.id}_checkins`]))
       .map((p) => p.id);
-    const deleteTracks = Boolean(rawOptions.delete_tracks);
     const deleteMediaItems = Boolean(rawOptions.delete_media_items);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
     // Per-plugin settings reset: options use `reset_<pluginId>_settings`.
@@ -1053,7 +885,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
       .map((p) => p.id);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && selectedPluginCheckinIds.length === 0 && !deleteTracks && !deleteMediaItems && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
+    if (!deleteVenueCheckins && selectedPluginCheckinIds.length === 0 && !deleteMediaItems && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -1081,19 +913,6 @@ router.post('/start-over', async (req: Request, res: Response) => {
       for (const [pluginId, deleted] of Object.entries(pluginCounts)) {
         counts[`plugin_checkins_${pluginId}`] = deleted;
       }
-    }
-
-    if (deleteTracks) {
-      const tracksResult = await client.query('DELETE FROM tracks WHERE user_id = $1 RETURNING id', [USER_ID]);
-      counts.tracks = tracksResult.rowCount ?? 0;
-
-      // Remove each deleted track's uploaded file from the user's folder on disk.
-      let trackFilesDeleted = 0;
-      for (const row of tracksResult.rows) {
-        deleteStoredTrack(USER_ID, String(row.id));
-        trackFilesDeleted++;
-      }
-      counts.track_files = trackFilesDeleted;
     }
 
     if (deleteMediaItems) {

@@ -1,4 +1,4 @@
-import { pool } from './index';
+import { pool } from '../../../server/src/db';
 import { computeTrackSegmentTotals, type GpxPoint } from '../services/gpx';
 
 /**

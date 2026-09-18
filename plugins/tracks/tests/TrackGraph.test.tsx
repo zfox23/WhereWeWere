@@ -1,7 +1,8 @@
+/// <reference types="@testing-library/jest-dom" />
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import TrackGraph from '../../src/components/TrackGraph';
+import TrackGraph from '../ui/TrackGraph';
 
 const coordinates: [number, number][] = [
   [0, 0],
@@ -123,7 +124,7 @@ describe('TrackGraph', () => {
     expect(overlay).toBeTruthy();
 
     // jsdom reports a zero rect; pointer at the left edge maps to index 0
-    overlay.dispatchEvent(
+    overlay!.dispatchEvent(
       new PointerEvent('pointermove', {
         clientX: 48,
         clientY: 10,
@@ -133,7 +134,7 @@ describe('TrackGraph', () => {
     expect(onHoverPoint).toHaveBeenCalledWith(0);
 
     // Pointer leave clears the hover (React emulates onPointerLeave from pointerout)
-    overlay.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }));
+    overlay!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }));
     expect(onHoverPoint).toHaveBeenLastCalledWith(null);
   });
 

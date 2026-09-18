@@ -24,11 +24,9 @@ router.get('/photos/:checkinId', async (req: Request, res: Response) => {
     const immich = await getImmichSettings();
     if (!immich) return res.json({ assets: [] });
 
-    // Get anchor timestamp (location check-in, track start, or any plugin check-in)
+    // Get anchor timestamp (location check-in or any plugin check-in)
     const checkinResult = await query(
       `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
-       UNION ALL
-       SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])
        ${pluginTimestampBranchUnion('       ')}`,
        [[checkinId]]
     );
@@ -98,11 +96,9 @@ router.get('/photos', async (req: Request, res: Response) => {
       return res.json(empty);
     }
 
-    // Fetch all anchor timestamps across location check-ins, tracks, and plugin check-ins
+    // Fetch all anchor timestamps across location check-ins and plugin check-ins
     const checkinsResult = await query(
       `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
-       UNION ALL
-       SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])
        ${pluginTimestampBranchUnion('       ')}`,
        [checkinIds]
     );

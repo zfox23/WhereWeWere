@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Brain, Clapperboard, MapPin, Route } from 'lucide-react';
+import { Brain, Clapperboard, MapPin } from 'lucide-react';
 import { allClientPlugins } from '../plugins/registry';
 import { AutoProfileTab } from '../plugins/autoProfileTab';
 import { MediaTab } from '../components/MediaTab';
 import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
-import { TracksTab } from '../components/TracksTab';
 import { usePageTitle } from '../utils/pageTitle';
 import type { CheckinTypeClient } from 'wwp-shared';
 
@@ -21,11 +20,11 @@ function renderPluginTab(plugin: CheckinTypeClient, userId: string) {
 }
 
 export default function Profile() {
-  type ProfileTab = 'places' | 'reflect' | 'tracks' | 'media' | `plugin:${string}`;
+  type ProfileTab = 'places' | 'reflect' | 'media' | `plugin:${string}`;
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
     if (!value) return false;
-    if (value === 'places' || value === 'reflect' || value === 'tracks' || value === 'media') {
+    if (value === 'places' || value === 'reflect' || value === 'media') {
       return true;
     }
     if (value.startsWith('plugin:')) {
@@ -47,7 +46,6 @@ export default function Profile() {
 
   const tabTitleMap: Record<string, string> = {
     places: 'Profile: Places',
-    tracks: 'Profile: Tracks',
     media: 'Profile: Media',
     reflect: 'Profile: Reflect',
     ...Object.fromEntries(PROFILE_PLUGINS.map((p) => [`plugin:${p.id}`, `Profile: ${p.strings.title}`])),
@@ -104,7 +102,6 @@ export default function Profile() {
   const renderBody = () => {
     if (activeTab === 'places') return <PlacesTab />;
     if (activeTab === 'reflect') return <ReflectTab />;
-    if (activeTab === 'tracks') return <TracksTab />;
     if (activeTab === 'media') return <MediaTab />;
     const plugin = PROFILE_PLUGINS.find((p) => `plugin:${p.id}` === activeTab);
     if (plugin) return renderPluginTab(plugin, '00000000-0000-0000-0000-000000000001');
@@ -130,10 +127,6 @@ export default function Profile() {
             </button>
           );
         })}
-        <button onClick={() => setActiveTab('tracks')} className={tabButtonClass(activeTab === 'tracks')}>
-          <Route size={14} />
-          Tracks
-        </button>
         <button onClick={() => setActiveTab('media')} className={tabButtonClass(activeTab === 'media')}>
           <Clapperboard size={14} />
           Media

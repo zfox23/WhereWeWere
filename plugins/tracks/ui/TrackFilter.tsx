@@ -1,32 +1,46 @@
+/**
+ * Tracks filter section for the Home timeline.
+ *
+ * Adapted from the former core component (client/src/components/filters/TrackFilter.tsx)
+ * to the plugin `PluginFilterSectionProps` contract. The distinct activity
+ * types are fetched lazily from the plugin's own `/tracks/activity-types`
+ * endpoint instead of being passed in as props.
+ */
+
 import { useEffect, useMemo, useState } from 'react';
-import { findExactOption } from './filterUtils';
+import type { PluginFilterSectionProps } from 'wwp-shared';
+import { findExactOption } from '../../../client/src/components/filters/filterUtils';
+import { tracks } from './api';
 
-export interface TrackFilterProps {
-  included: boolean;
-  filtersDisabled: boolean;
-  sectionDisabled: boolean;
-  typeToggleDisabled: boolean;
-  trackActivity: string;
-  trackActivityOptions: string[];
-  onToggleIncluded: () => void;
-  onSetTrackActivity: (value: string) => void;
-}
-
-export default function TrackFilter({
+export function TrackFilter({
   included,
   filtersDisabled,
   sectionDisabled,
   typeToggleDisabled,
-  trackActivity,
-  trackActivityOptions,
+  params,
   onToggleIncluded,
-  onSetTrackActivity,
-}: TrackFilterProps) {
+  onSetParam,
+}: PluginFilterSectionProps) {
+  const trackActivity = params.track_activity ?? '';
   const [trackActivityInput, setTrackActivityInput] = useState(trackActivity);
+  const [trackActivityOptions, setTrackActivityOptions] = useState<string[]>([]);
 
   useEffect(() => {
     setTrackActivityInput(trackActivity);
   }, [trackActivity]);
+
+  useEffect(() => {
+    let cancelled = false;
+    tracks
+      .activityTypes()
+      .then((types) => {
+        if (!cancelled) setTrackActivityOptions((types || []).sort((a, b) => a.localeCompare(b)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredTrackActivityOptions = useMemo(() => {
     const needle = trackActivityInput.trim().toLowerCase();
@@ -45,7 +59,7 @@ export default function TrackFilter({
             onChange={onToggleIncluded}
             className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
           />
-          <span>Track</span>
+          <span>Tracks</span>
         </label>
       </div>
       {filtersDisabled && (
@@ -64,18 +78,18 @@ export default function TrackFilter({
             const next = e.target.value;
             setTrackActivityInput(next);
             const match = findExactOption(next, trackActivityOptions);
-            if (match && trackActivity !== match) onSetTrackActivity(match);
-            if (!match && trackActivity) onSetTrackActivity('');
+            if (match && trackActivity !== match) onSetParam('track_activity', match);
+            if (!match && trackActivity) onSetParam('track_activity', '');
           }}
           onBlur={() => {
             if (!trackActivityInput.trim()) return;
             const match = findExactOption(trackActivityInput, trackActivityOptions);
             if (match) {
               setTrackActivityInput(match);
-              if (trackActivity !== match) onSetTrackActivity(match);
+              if (trackActivity !== match) onSetParam('track_activity', match);
             } else {
               setTrackActivityInput('');
-              if (trackActivity) onSetTrackActivity('');
+              if (trackActivity) onSetParam('track_activity', '');
             }
           }}
           className="input disabled:cursor-not-allowed disabled:opacity-60"

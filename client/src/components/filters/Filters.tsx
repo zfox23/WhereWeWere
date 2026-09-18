@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X, Check } from 'lucide-react';
 import LocationFilter from './LocationFilter';
-import TrackFilter from './TrackFilter';
 import MediaFilter from './MediaFilter';
 import type { CheckinTypeClient, PluginFilterSectionProps } from 'wwp-shared';
 
@@ -103,29 +102,21 @@ export interface FiltersProps {
   toDate: string;
   category: string;
   country: string;
-  trackActivity: string;
   mediaSubtypes: string;
   includeLocation: boolean;
-  includeTrack: boolean;
   includeMedia: boolean;
   categoryOptions: string[];
   countryOptions: string[];
-  trackActivityOptions: string[];
   locationTypeToggleDisabled: boolean;
-  trackTypeToggleDisabled: boolean;
   mediaTypeToggleDisabled: boolean;
   locationFiltersDisabled: boolean;
-  trackFiltersDisabled: boolean;
   mediaFiltersDisabled: boolean;
   locationSectionDisabled: boolean;
-  trackSectionDisabled: boolean;
   mediaSectionDisabled: boolean;
   onSetDateFilter: (key: 'from' | 'to', value: string) => void;
   onToggleLocationType: () => void;
-  onToggleTrackType: () => void;
   onToggleMediaType: () => void;
   onSetLocationFilter: (key: 'venue_id' | 'category' | 'country', value: string) => void;
-  onSetTrackFilter: (value: string) => void;
   onSetMediaFilter: (value: string) => void;
   onClearAll: () => void;
   /** Check-in plugin filter sections (rendered after the built-in types). */
@@ -139,29 +130,21 @@ export default function Filters(props: FiltersProps) {
     toDate,
     category,
     country,
-    trackActivity,
     includeLocation,
-    includeTrack,
     includeMedia,
     mediaSubtypes,
     categoryOptions,
     countryOptions,
-    trackActivityOptions,
     locationTypeToggleDisabled,
-    trackTypeToggleDisabled,
     mediaTypeToggleDisabled,
     locationFiltersDisabled,
-    trackFiltersDisabled,
     mediaFiltersDisabled,
     locationSectionDisabled,
-    trackSectionDisabled,
     mediaSectionDisabled,
     onSetDateFilter,
     onToggleLocationType,
-    onToggleTrackType,
     onToggleMediaType,
     onSetLocationFilter,
-    onSetTrackFilter,
     onSetMediaFilter,
     onClearAll,
     pluginFilterSpecs = [],
@@ -255,7 +238,7 @@ export default function Filters(props: FiltersProps) {
           />
         </div>
       </div>
-      <div className="grid gap-3 lg:grid-cols-3 items-start">
+      <div className="grid gap-3 lg:grid-cols-2 items-start">
         <LocationFilter
           included={includeLocation}
           filtersDisabled={locationFiltersDisabled}
@@ -268,17 +251,6 @@ export default function Filters(props: FiltersProps) {
           onToggleIncluded={onToggleLocationType}
           onSetCategory={(value) => onSetLocationFilter('category', value)}
           onSetCountry={(value) => onSetLocationFilter('country', value)}
-        />
-
-        <TrackFilter
-          included={includeTrack}
-          filtersDisabled={trackFiltersDisabled}
-          sectionDisabled={trackSectionDisabled}
-          typeToggleDisabled={trackTypeToggleDisabled}
-          trackActivity={trackActivity}
-          trackActivityOptions={trackActivityOptions}
-          onToggleIncluded={onToggleTrackType}
-          onSetTrackActivity={onSetTrackFilter}
         />
 
         <MediaFilter

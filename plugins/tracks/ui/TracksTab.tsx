@@ -1,12 +1,22 @@
+/**
+ * Tracks check-in type — Profile tab.
+ *
+ * Adapted from the former core `components/TracksTab` to the plugin prop
+ * contract (`PluginProfileTabProps`), which supplies the user id directly
+ * instead of the hard-coded constant.
+ */
+
 import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import { Clock, Gauge, Heart, Map as MapIcon, Mountain, Route, TrendingUp } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
-import { settings, stats, tracks } from '../api/client';
-import { useTheme } from '../contexts/ThemeContext';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
-import { PeriodRangeSelector } from './PeriodRangeSelector';
-import { StatCard } from './Stats';
+import type { PluginProfileTabProps } from 'wwp-shared';
+import { settings, stats } from '../../../client/src/api/client';
+import { tracks } from './api';
+import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../../client/src/utils/geo';
+import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
+import { StatCard } from '../../../client/src/components/Stats';
 import {
   PeriodMode,
   getCurrentDateIso,
@@ -15,16 +25,15 @@ import {
   isValidDateParam,
   isValidMonthParam,
   parsePeriodParam,
-} from '../utils/periodRange';
+} from '../../../client/src/utils/periodRange';
 import {
   formatDistance,
   formatDuration,
   formatSpeed,
   type DistanceUnit,
-} from '../utils/geo';
-import type { TrackEntry, TrackMapEntry } from '../types';
+} from '../../../client/src/utils/geo';
+import type { TrackEntry, TrackMapEntry } from './types';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 500;
 
 const TRACK_COLORS = [
@@ -166,11 +175,11 @@ function TracksMap({
   );
 }
 
-async function listTracksInWindow(from: string | undefined, to: string | undefined): Promise<TrackEntry[]> {
+async function listTracksInWindow(userId: string, from: string | undefined, to: string | undefined): Promise<TrackEntry[]> {
   const all: TrackEntry[] = [];
   for (let offset = 0; ; offset += PAGE_SIZE) {
     const page: TrackEntry[] = await tracks.list({
-      user_id: USER_ID,
+      user_id: userId,
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
       limit: String(PAGE_SIZE),
@@ -313,7 +322,7 @@ function ActivityBreakdown({
   );
 }
 
-export function TracksTab() {
+export function TracksTab({ userId }: PluginProfileTabProps) {
   const getTrackMonthFromLocation = (): string => {
     const monthParam = new URLSearchParams(window.location.search).get('trackMonth');
     return isValidMonthParam(monthParam) ? monthParam : getCurrentMonthIso();
@@ -350,8 +359,8 @@ export function TracksTab() {
   }, []);
 
   useEffect(() => {
-    stats.earliestDates(USER_ID).then((d) => setEarliestTrackDate(d.tracks)).catch(console.error);
-  }, []);
+    stats.earliestDates(userId).then((d) => setEarliestTrackDate(d.tracks)).catch(console.error);
+  }, [userId]);
 
   const visibleRange = useMemo(
     () => getPeriodDateRange(selectedMonth, periodMode, selectedWeek),
@@ -425,13 +434,13 @@ export function TracksTab() {
     let cancelled = false;
 
     const rangeParams = {
-      user_id: USER_ID,
+      user_id: userId,
       ...(visibleRange.from ? { from: visibleRange.from } : {}),
       ...(visibleRange.to ? { to: visibleRange.to } : {}),
     };
 
     Promise.all([
-      listTracksInWindow(visibleRange.from || undefined, visibleRange.to || undefined),
+      listTracksInWindow(userId, visibleRange.from || undefined, visibleRange.to || undefined),
       tracks.mapData(rangeParams),
     ])
       .then(([listData, mapData]) => {
@@ -452,7 +461,7 @@ export function TracksTab() {
     return () => {
       cancelled = true;
     };
-  }, [visibleRange.from, visibleRange.to]);
+  }, [userId, visibleRange.from, visibleRange.to]);
 
   useEffect(() => {
     const syncStateFromLocation = () => {

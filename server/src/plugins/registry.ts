@@ -21,10 +21,13 @@ import { server as moodServer } from '../../../plugins/mood/server';
 import { manifest as moodManifest } from '../../../plugins/mood/manifest';
 import { server as sleepServer } from '../../../plugins/sleep/server';
 import { manifest as sleepManifest } from '../../../plugins/sleep/manifest';
+import { server as tracksServer } from '../../../plugins/tracks/server';
+import { manifest as tracksManifest } from '../../../plugins/tracks/manifest';
 
 const registrations: CheckinTypeServer[] = [
   { ...moodManifest, server: moodServer },
   { ...sleepManifest, server: sleepServer },
+  { ...tracksManifest, server: tracksServer },
 ];
 
 const byId = new Map<string, CheckinTypeServer>();
@@ -78,18 +81,14 @@ export function pluginIds(): string[] {
 
 /**
  * Earliest-date hooks for the core built-in check-in types, keyed by the
- * response key the client expects (`checkins`, `tracks`). The "all time"
- * period selector and /stats/earliest-dates treat these exactly like the
- * plugins' `earliestDate` hooks, so every type flows through one code path.
+ * response key the client expects (`checkins`). Tracks and the other
+ * check-in plugins contribute their own `earliestDate` hooks (keyed by
+ * plugin id), so every type flows through one code path.
  */
 export const BUILTIN_EARLIEST_DATES: Record<string, { sql: string }> = {
   checkins: {
     sql: `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')))::text AS date
           FROM checkins WHERE user_id = $1`,
-  },
-  tracks: {
-    sql: `SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(timezone, 'UTC')))::text AS date
-          FROM tracks WHERE user_id = $1`,
   },
 };
 

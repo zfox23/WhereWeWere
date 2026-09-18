@@ -1,5 +1,14 @@
+/**
+ * Tracks check-in type — detail page.
+ *
+ * Adapted from the former core `pages/TrackDetail` to the plugin prop
+ * contract (`CheckInDetailProps`), which supplies the track id directly
+ * instead of reading `:id` from the route params.
+ */
+
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import type { CheckInDetailProps } from 'wwp-shared';
 import {
   AlertCircle,
   ArrowLeft,
@@ -22,15 +31,16 @@ import {
 import { MapContainer, Polyline, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { tracks, settings } from '../api/client';
-import type { TrackEntry } from '../types';
-import TrackGraph from '../components/TrackGraph';
-import DualRangeSlider from '../components/DualRangeSlider';
-import { formatDistance, formatSpeed, type DistanceUnit } from '../utils/geo';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
-import { useTheme } from '../contexts/ThemeContext';
-import { normalizeTimezoneForDisplay } from '../utils/checkin';
-import { usePageTitle } from '../utils/pageTitle';
+import { tracks } from './api';
+import { settings } from '../../../client/src/api/client';
+import type { TrackEntry } from './types';
+import TrackGraph from './TrackGraph';
+import DualRangeSlider from '../../../client/src/components/DualRangeSlider';
+import { formatDistance, formatSpeed, type DistanceUnit } from '../../../client/src/utils/geo';
+import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../../client/src/utils/geo';
+import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 // Fix Leaflet's default icon paths (broken by bundlers)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -255,8 +265,7 @@ function StatBox({
   );
 }
 
-export default function TrackDetail() {
-  const { id } = useParams<{ id: string }>();
+export default function TrackDetail({ id }: CheckInDetailProps) {
   const navigate = useNavigate();
   const [track, setTrack] = useState<TrackEntry | null>(null);
   const [loading, setLoading] = useState(true);

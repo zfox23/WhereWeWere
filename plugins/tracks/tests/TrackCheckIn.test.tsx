@@ -1,14 +1,15 @@
+/// <reference types="@testing-library/jest-dom" />
 import { MemoryRouter } from 'react-router-dom';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import TrackCheckIn from '../../src/pages/TrackCheckIn';
+import TrackCheckIn from '../ui/TrackCheckIn';
 
 const apiMocks = vi.hoisted(() => ({
   tracksUpload: vi.fn(),
 }));
 
-vi.mock('../../src/api/client', () => ({
+vi.mock('../ui/api', () => ({
   tracks: {
     upload: apiMocks.tracksUpload,
   },
@@ -20,7 +21,7 @@ const makeFile = (name: string, type = 'application/gpx+xml') =>
 const renderPage = () =>
   render(
     <MemoryRouter>
-      <TrackCheckIn />
+      <TrackCheckIn onCreated={vi.fn()} onUpdated={vi.fn()} />
     </MemoryRouter>,
   );
 
@@ -43,7 +44,7 @@ describe('TrackCheckIn multi-upload', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const input = document.querySelector('input[type="file"]')!;
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
     await user.upload(input, [makeFile('ride-a.gpx'), makeFile('ride-b.tcx')]);
 
     expect(screen.getByText('ride-a.gpx')).toBeTruthy();
@@ -94,7 +95,7 @@ describe('TrackCheckIn multi-upload', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const input = document.querySelector('input[type="file"]')!;
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
     await user.upload(input, [makeFile('dup.gpx')]);
     await user.click(screen.getByRole('button', { name: /save track/i }));
 
@@ -111,7 +112,7 @@ describe('TrackCheckIn multi-upload', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const input = document.querySelector('input[type="file"]')!;
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
     await user.upload(input, [makeFile('bad.gpx'), makeFile('good.gpx')]);
     await user.click(screen.getByRole('button', { name: /save 2 tracks/i }));
 

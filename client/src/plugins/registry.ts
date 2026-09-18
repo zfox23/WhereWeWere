@@ -14,10 +14,12 @@ import { isValidPluginId } from 'wwp-shared';
 //   import { client as moodClient, manifest as moodManifest } from '../../../plugins/mood/client';
 import { client as moodClient, manifest as moodManifest } from '../../../plugins/mood/client';
 import { client as sleepClient, manifest as sleepManifest } from '../../../plugins/sleep/client';
+import { client as tracksClient, manifest as tracksManifest } from '../../../plugins/tracks/client';
 
 const registrations: CheckinTypeClient[] = [
   { ...moodManifest, client: moodClient },
   { ...sleepManifest, client: sleepClient },
+  { ...tracksManifest, client: tracksClient },
 ];
 
 const byId = new Map<string, CheckinTypeClient>();
@@ -67,7 +69,6 @@ export function timelineDetailPath(item: { type: string; id: string }): string {
   // Legacy built-in routes.
   switch (item.type) {
     case 'location': return `/checkins/${item.id}`;
-    case 'track': return `/tracks/${item.id}`;
     case 'media': return `/media/checkins/${item.id}`;
     default: return `/checkins/${item.type}/${item.id}`;
   }

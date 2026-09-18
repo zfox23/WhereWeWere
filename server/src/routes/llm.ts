@@ -75,16 +75,6 @@ interface PluginLlmRow {
   data: Record<string, unknown>;
 }
 
-interface TrackRow {
-  name: string;
-  activity_type: string | null;
-  started_at: string;
-  ended_at: string;
-  distance_m: number;
-  elapsed_time_s: number;
-  timezone: string;
-}
-
 interface LlmPluginEntry {
   plugin: CheckinTypeServer;
   hook: PluginLlmHook;
@@ -99,7 +89,7 @@ function allLlmPlugins(): LlmPluginEntry[] {
 
 async function gatherLifeData(from: string, to: string) {
   const llmPlugins = allLlmPlugins();
-  const [checkinsResult, pluginRowsList, tracksResult] = await Promise.all([
+  const [checkinsResult, pluginRowsList] = await Promise.all([
     query(
       `SELECT c.checked_in_at, c.notes AS note,
               v.name AS venue_name, v.city, v.country,
@@ -121,17 +111,7 @@ async function gatherLifeData(from: string, to: string) {
         return [];
       }))
     ),
-    query(
-      `SELECT name, activity_type, started_at, ended_at,
-              distance_m::float AS distance_m, elapsed_time_s::int AS elapsed_time_s, timezone
-       FROM tracks
-       WHERE user_id = $1
-         AND (started_at AT TIME ZONE timezone)::date >= $2::date
-         AND (started_at AT TIME ZONE timezone)::date <= $3::date
-       ORDER BY started_at ASC`,
-      [USER_ID, from, to]
-   ),
- ]);
+  ]);
 
 
   const formatWhen = (iso: string, timezone: string | null): string => {
@@ -146,7 +126,6 @@ async function gatherLifeData(from: string, to: string) {
   };
 
   const checkins: CheckinRow[] = checkinsResult.rows;
-  const tracks: TrackRow[] = tracksResult.rows;
 
   const pluginPools: { label: string; lines: string[] }[] = allLlmPlugins().map(({ plugin, hook }, i) => {
     const rows = (pluginRowsList[i] ?? []) as PluginLlmRow[];
@@ -155,24 +134,15 @@ async function gatherLifeData(from: string, to: string) {
   });
 
   const totalCheckins = checkins.length + pluginPools.reduce((sum, pool) => sum + pool.lines.length, 0);
-  const hasAnyData = totalCheckins > 0 || tracks.length > 0;
+  const hasAnyData = totalCheckins > 0;
 
-  return { checkins, pluginPools, tracks, hasAnyData, formatWhen };
+  return { checkins, pluginPools, hasAnyData, formatWhen };
 }
 
 
 function formatDistance(meters: number): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.round(meters)} m`;
-}
-
-function formatTrackDuration(seconds: number): string {
-  const mins = Math.round(seconds / 60);
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
 }
 
 function fisherYatesShuffle<T>(arr: T[]): T[] {
@@ -199,7 +169,7 @@ function buildLifeDataText(
   data: Awaited<ReturnType<typeof gatherLifeData>>,
   charBudget: number
 ): { text: string; skipped: SkippedType[] } {
-  const { checkins, pluginPools, tracks, formatWhen } = data;
+  const { checkins, pluginPools, formatWhen } = data;
 
   const pools: { label: string; lines: string[] }[] = [];
 
@@ -217,12 +187,6 @@ function buildLifeDataText(
   for (const pool of pluginPools) {
     if (pool.lines.length > 0) pools.push(pool);
   }
-
-  const trackLines = tracks.map((t) => {
-    const type = t.activity_type ? `${t.activity_type} ` : '';
-    return `- ${formatWhen(t.started_at, t.timezone)} — ${type}track "${t.name}": ${formatDistance(Number(t.distance_m))} in ${formatTrackDuration(Number(t.elapsed_time_s))}`;
-  });
-  if (trackLines.length > 0) pools.push({ label: 'tracks', lines: trackLines });
 
   const sectionCost = (lines: string[]) => (pools.length > 1 ? 2 : 0);
 

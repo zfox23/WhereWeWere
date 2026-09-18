@@ -1,4 +1,4 @@
-import { pool } from './index';
+import { pool } from '../../../server/src/db';
 import { computeMaxSpeedMps } from '../services/gpx';
 
 /**

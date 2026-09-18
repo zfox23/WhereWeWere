@@ -11,8 +11,6 @@ import VenueDetail from './pages/VenueDetail';
 import Profile from './pages/Profile';
 import CheckInDetail from './pages/CheckInDetail';
 import Settings from './pages/Settings';
-import TrackCheckIn from './pages/TrackCheckIn';
-import TrackDetail from './pages/TrackDetail';
 import MediaCheckInLanding from './pages/media/MediaCheckInLanding';
 import MediaSearch from './pages/media/MediaSearch';
 import MediaCheckInForm from './pages/media/MediaCheckInForm';
@@ -67,9 +65,8 @@ function PluginDetailPage({ pluginId }: { pluginId: string }) {
  * claimed here is skipped.
  */
 const EXPLICIT_PATHS = new Set([
-  '/check-in', '/track-check-in',
+  '/check-in',
   '/checkins/:id',
-  '/tracks/:id',
 ]);
 
 const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
@@ -101,8 +98,6 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/check-in" element={<CheckIn />} />
-        <Route path="/track-check-in" element={<TrackCheckIn />} />
-        <Route path="/tracks/:id" element={<TrackDetail />} />
         <Route path="/checkins/:id" element={<CheckInDetail />} />
 
         {/* Media check-ins */}

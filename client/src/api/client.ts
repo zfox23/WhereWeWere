@@ -1,7 +1,5 @@
 import type {
   TimestampReconciliationScanResult,
-  TrackEntry,
-  TrackMapEntry,
   MediaSearchHit,
   MediaItem,
   MediaCheckIn,
@@ -187,78 +185,6 @@ export const importApi = {
   },
 };
 
-// Tracks
-export const tracks = {
-  list: (params?: Record<string, string>) =>
-    request<any[]>(`/tracks?${new URLSearchParams(params)}`),
-  mapData: (params?: Record<string, string>) =>
-    request<TrackMapEntry[]>(`/tracks/map-data?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/tracks/${id}`),
-  update: (id: string, data: { name?: string; activity_type?: string | null }) =>
-    request<TrackEntry>(`/tracks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  trim: (id: string, start_index: number, end_index: number) =>
-    request<TrackEntry>(`/tracks/${id}/trim`, {
-      method: 'POST',
-      body: JSON.stringify({ start_index, end_index }),
-    }),
-  activityTypes: () => request<string[]>('/tracks/activity-types'),
-  delete: (id: string) =>
-    request<{ message: string; id: string }>(`/tracks/${id}`, { method: 'DELETE' }),
-  download: async (id: string): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch(`${API_BASE}/tracks/${id}/download`, {
-      headers: withAuthHeader(),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({} as Record<string, unknown>));
-      throw new Error(
-        (error.message as string) || (error.error as string) || `Track download failed: ${res.status}`
-      );
-    }
-    let filename = `track-${id}.gpx`;
-    const disposition = res.headers.get('Content-Disposition') || '';
-    const match =
-      disposition.match(/filename="([^"]+)"/) || disposition.match(/filename=([^;]+)/);
-    if (match) {
-      try {
-        filename = decodeURIComponent(match[1].trim());
-      } catch {
-        // keep fallback
-      }
-    }
-    return { blob: await res.blob(), filename };
-  },
-  upload: async (file: File, timezone?: string) => {
-    const form = new FormData();
-    form.append('file', file);
-    if (timezone) form.append('timezone', timezone);
-    const res = await fetch(`${API_BASE}/tracks`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({} as Record<string, unknown>));
-      if (res.status === 409 && error.duplicate) {
-        const dup = error.duplicate as { id: string; name: string };
-        const dupError = new Error(
-          (error.message as string) || (error.error as string) || 'This track is a duplicate'
-        );
-        dupError.name = 'DuplicateTrackError';
-        (dupError as any).duplicate = dup;
-        throw dupError;
-      }
-      throw new Error(
-        (error.message as string) || (error.error as string) || `Track upload failed: ${res.status}`
-      );
-    }
-    return res.json();
-  },
-};
-
-export interface DuplicateTrackError extends Error {
-  duplicate: { id: string; name: string };
-}
-
 // Plex webhook
 export const plexWebhook = {
   stats: () => request<{ count: number }>('/webhook/plex/stats'),
@@ -298,7 +224,6 @@ export const backupApi = {
     options: {
       delete_all_checkins: boolean;
       delete_venue_checkins: boolean;
-      delete_tracks: boolean;
       delete_media_items: boolean;
       reset_account_settings: boolean;
       reset_integrations_settings: boolean;

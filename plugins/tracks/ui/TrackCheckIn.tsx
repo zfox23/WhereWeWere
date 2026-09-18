@@ -1,3 +1,12 @@
+/**
+ * Tracks check-in type — upload page.
+ *
+ * Adapted from the former core `pages/TrackCheckIn` to the plugin prop
+ * contract (`CheckInFormProps`). Track check-ins are created exclusively by
+ * uploading `.gpx` / `.tcx` files, so the "form" is a file queue; the
+ * `onCreated` callback is used to navigate home with the new track id.
+ */
+
 import { useCallback, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -8,8 +17,9 @@ import {
   Route,
   X,
 } from 'lucide-react';
-import { tracks } from '../api/client';
-import { usePageTitle } from '../utils/pageTitle';
+import type { CheckInFormProps } from 'wwp-shared';
+import { tracks } from './api';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 type UploadStatus = 'pending' | 'uploading' | 'done' | 'duplicate' | 'error';
 
@@ -35,7 +45,7 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export default function TrackCheckIn() {
+export default function TrackCheckIn({ onCreated }: CheckInFormProps) {
   const navigate = useNavigate();
   usePageTitle('Track Check In');
 
@@ -121,6 +131,13 @@ export default function TrackCheckIn() {
       })
     );
     setSubmitting(false);
+
+    // After a batch upload, send the user home so the new track(s) show up
+    // in the timeline (first new id, when there is exactly one).
+    const done = items.filter((it) => it.status === 'done' && it.trackId);
+    if (done.length === 1 && done[0].trackId) {
+      onCreated(done[0].trackId);
+    }
   };
 
   const removeItem = (id: string) => {

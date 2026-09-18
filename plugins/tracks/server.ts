@@ -1,28 +1,54 @@
+/**
+ * Tracks check-in type — server half.
+ *
+ * CUSTOM storage: Tracks keeps its pre-existing `tracks` table (PostGIS
+ * LINESTRING geometry plus a per-point JSONB series) and the on-disk
+ * originals under `<dataDir>/<userId>/uploads/gps_tracks/`. The framework
+ * uses this half for the unified timeline, backups, start-over, and mounts
+ * the plugin-owned API router at /api/v1/tracks (unchanged URL).
+ *
+ * This plugin owns ALL track-specific API surface (upload, list, map data,
+ * detail, edit, trim, GPX download, delete) — no track-specific routes or
+ * services live in the core platform. Track parsing math (GPX/TCX parsing,
+ * stats, GPX export) and file storage live in this plugin's `services/`.
+ */
+
 import { Router, Request, Response } from 'express';
-import { query, pool } from '../db';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+import type {
+  CheckinTypeServerPlugin,
+  PluginLlmRow,
+  PluginTimelineContext,
+} from 'wwp-shared';
+import { query, pool } from '../../server/src/db';
+import { timelineColumnList } from '../../server/src/plugins/timeline';
+import { timelineWhereConditions } from '../../server/src/plugins/sql';
+import { getVenueTimezone } from '../../server/src/services/timestampReconciliation';
+import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+
 import {
   computeTrackStats,
   parseTrackFile,
   type GpxPoint,
-} from '../services/gpx';
-import { getVenueTimezone } from '../services/timestampReconciliation';
+} from './services/gpx';
 import {
   buildGpx,
   deleteStoredTrack,
   deriveActivityTypeFromFilename,
   gpxDownloadFilename,
   storeUploadedTrack,
-} from '../services/trackFiles';
+} from './services/trackFiles';
 
-const router = Router();
+// ---------------------------------------------------------------------------
+// Plugin-owned API: /api/v1/tracks
+// (moved from server/src/routes/tracks.ts; behavior unchanged)
+// ---------------------------------------------------------------------------
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
+const tracksRouter = Router();
 
 const trackStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -33,7 +59,7 @@ const trackStorage = multer.diskStorage({
   filename: (_req, _file, cb) => {
     const ext =
       (path.extname(_file.originalname).toLowerCase() === '.tcx' && '.tcx') || '.gpx';
-    cb(null, `${uuidv4()}${ext}`);
+    cb(null, crypto.randomUUID() + ext);
   },
 });
 
@@ -114,7 +140,7 @@ const TRACK_LIST_FIELDS = `
   FROM tracks t`;
 
 // GET / - list tracks
-router.get('/', async (req: Request, res: Response) => {
+tracksRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { user_id, from, to, limit = '50', offset = '0' } = req.query;
 
@@ -165,7 +191,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // GET /map-data - lightweight track list with geometry for map views
-router.get('/map-data', async (req: Request, res: Response) => {
+tracksRouter.get('/map-data', async (req: Request, res: Response) => {
   try {
     const { user_id, from, to } = req.query;
 
@@ -250,7 +276,7 @@ router.get('/map-data', async (req: Request, res: Response) => {
 });
 
 // GET /activity-types - distinct activity types used across tracks, for autocomplete
-router.get('/activity-types', async (req: Request, res: Response) => {
+tracksRouter.get('/activity-types', async (req: Request, res: Response) => {
   try {
     const { user_id } = req.query;
 
@@ -318,7 +344,7 @@ async function fetchTrackFull(id: string | string[]): Promise<any | null> {
 }
 
 // GET /:id - get single track with geometry (GeoJSON coordinates)
-router.get('/:id', async (req: Request, res: Response) => {
+tracksRouter.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const track = await fetchTrackFull(id);
@@ -333,7 +359,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // POST / - upload a .gpx or .tcx file and create a track
-router.post('/', trackUpload.single('file'), async (req: Request, res: Response) => {
+tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Response) => {
   const filePath = (req.file as any)?.path;
   let tempFilePath: string | undefined = filePath;
   let fileHash = '';
@@ -343,7 +369,7 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
     }
 
     const fileBuffer = fs.readFileSync(filePath);
-    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+    fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
     const xml = fileBuffer.toString('utf-8');
     const originalName = (req.file as any).originalname;
     const ext = path.extname(originalName).toLowerCase() === '.tcx' ? '.tcx' : '.gpx';
@@ -458,7 +484,7 @@ router.post('/', trackUpload.single('file'), async (req: Request, res: Response)
 });
 
 // PUT /:id - update editable track fields (name, activity_type)
-router.put('/:id', async (req: Request, res: Response) => {
+tracksRouter.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, activity_type } = req.body ?? {};
@@ -519,7 +545,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 // POST /:id/trim - remove points from the start and/or end of the track and
 // recompute all derived stats from the remaining points. `start_index` and
 // `end_index` are inclusive, 0-based indices into the track's point array.
-router.post('/:id/trim', async (req: Request, res: Response) => {
+tracksRouter.post('/:id/trim', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const startIndex = Number(req.body?.start_index);
@@ -614,7 +640,7 @@ router.post('/:id/trim', async (req: Request, res: Response) => {
 
 // GET /:id/download - download the track as GPX, generated from the current
 // database state so it reflects any modifications to the track or details
-router.get('/:id/download', async (req: Request, res: Response) => {
+tracksRouter.get('/:id/download', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -668,7 +694,7 @@ router.get('/:id/download', async (req: Request, res: Response) => {
 });
 
 // DELETE /:id - delete track
-router.delete('/:id', async (req: Request, res: Response) => {
+tracksRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -690,4 +716,405 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-export const tracksRouter = router;
+// ---------------------------------------------------------------------------
+// Plugin hooks
+// ---------------------------------------------------------------------------
+
+/** Shared column shape for backup export/import and legacy restore. */
+interface TrackBackupRow {
+  id: string;
+  user_id: string;
+  name: string;
+  activity_type: string | null;
+  timezone: string;
+  started_at: string;
+  ended_at: string;
+  distance_m: number | string;
+  elapsed_time_s: number | string;
+  moving_time_s: number | string;
+  elevation_gain_m: number | string;
+  avg_speed_mps: number | string;
+  max_speed_mps: number | string;
+  avg_hr: number | null;
+  max_hr: number | null;
+  point_count: number | string;
+  file_hash: string | null;
+  /** [lng, lat] per point, or null for tracks without geometry */
+  geometry: [number, number][] | null;
+  /** Per-point series (t in epoch ms), or null for legacy tracks */
+  points: { t: number | null; ele: number | null; hr: number | null }[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function toNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toStringOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value);
+  return s.length > 0 ? s : null;
+}
+
+/**
+ * Parse the GeoJSON LineString stored on a track row (either as a JSON string
+ * or an already-decoded object) into [lng, lat] coordinates.
+ */
+function geojsonToCoordinates(geojson: unknown): [number, number][] | null {
+  try {
+    const gj = typeof geojson === 'string' ? JSON.parse(geojson) : geojson;
+    if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
+      return gj.coordinates as [number, number][];
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+export const server: CheckinTypeServerPlugin = {
+  storage: 'custom',
+
+  // The framework mounts this at /api/v1/tracks (the pre-plugin URL).
+  api: [{ mount: '/tracks', router: tracksRouter }],
+
+  // ------------------------------------------------------------------
+  // Unified timeline
+  // ------------------------------------------------------------------
+
+  // Keeps the pre-plugin wire shape of the old built-in 'track' branch
+  // (track_* columns consumed by the track timeline card). The `type`
+  // literal changes from 'track' to the plugin id 'tracks'.
+  buildTimelineSelect: () => ({
+    sql: `
+      SELECT ${timelineColumnList({
+        type: `'tracks'`,
+        id: 't.id',
+        user_id: 't.user_id',
+        notes: 't.name',
+        checked_in_at: 't.started_at',
+        created_at: 't.created_at',
+        track_name: 't.name',
+        track_distance_m: 't.distance_m',
+        track_timezone: 't.timezone',
+        track_started_at: 't.started_at',
+        track_ended_at: 't.ended_at',
+        track_elapsed_time_s: 't.elapsed_time_s',
+        timezone: 't.timezone',
+      })}
+      FROM tracks t
+    `,
+  }),
+
+  buildTimelineWhere: (ctx: PluginTimelineContext) => {
+    const conds = timelineWhereConditions(ctx, {
+      alias: 't',
+      timestampColumn: 'started_at',
+      timezoneColumn: 'timezone',
+      search: (c, q) => c.push(`t.name ILIKE '%' || ? || '%'`, q),
+    });
+    if (ctx.filterParams.track_activity) {
+      conds.push(`t.activity_type ILIKE ?`, ctx.filterParams.track_activity);
+    }
+    return conds.build();
+  },
+
+  // ------------------------------------------------------------------
+  // Backups
+  // ------------------------------------------------------------------
+
+  // Old backups (pre-plugin) store tracks under the top-level `tracks` key;
+  // when a backup carries a plugins.tracks payload the framework restores via
+  // backupImport and skips the legacy key.
+  legacyBackupKeys: ['tracks'],
+
+  backupExport: async ({ user_id }) => {
+    const result = await query(
+      `SELECT id, user_id, name, activity_type, timezone,
+              started_at, ended_at,
+              distance_m::float, elapsed_time_s::int, moving_time_s::int,
+              elevation_gain_m::float, avg_speed_mps::float, max_speed_mps::float,
+              avg_hr, max_hr, point_count::int, file_hash,
+              ST_AsGeoJSON(path) AS geojson,
+              points,
+              created_at, updated_at
+       FROM tracks
+       WHERE user_id = $1
+       ORDER BY started_at ASC`,
+      [user_id],
+    );
+    return result.rows.map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id,
+      name: row.name,
+      activity_type: row.activity_type ?? null,
+      timezone: row.timezone,
+      started_at: row.started_at,
+      ended_at: row.ended_at,
+      distance_m: Number(row.distance_m),
+      elapsed_time_s: Number(row.elapsed_time_s),
+      moving_time_s: Number(row.moving_time_s),
+      elevation_gain_m: Number(row.elevation_gain_m),
+      avg_speed_mps: Number(row.avg_speed_mps),
+      max_speed_mps: Number(row.max_speed_mps),
+      avg_hr: row.avg_hr == null ? null : Number(row.avg_hr),
+      max_hr: row.max_hr == null ? null : Number(row.max_hr),
+      point_count: Number(row.point_count),
+      file_hash: row.file_hash ?? null,
+      geometry: geojsonToCoordinates(row.geojson),
+      points: Array.isArray(row.points) ? row.points : null,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    }));
+  },
+
+  backupImport: async ({ user_id, client: txClient }, payload) => {
+    const rows = Array.isArray(payload) ? (payload as Record<string, any>[]) : [];
+    let inserted = 0;
+    // Use the framework's transaction client when provided so restore stays
+    // atomic; open our own connection only when running standalone.
+    const ownsClient = txClient == null;
+    const client = txClient ?? (await pool.connect());
+    try {
+      for (const row of rows) {
+        const insertedCount = await insertTrackRow(client, user_id, row);
+        if (insertedCount > 0) inserted++;
+      }
+    } finally {
+      if (ownsClient) client.release();
+    }
+    return inserted;
+  },
+
+  /**
+   * Legacy backup restore (backups without a `plugins.tracks` payload keep
+   * track rows under the top-level `tracks` key). Behavior mirrors the
+   * pre-plugin core import loop.
+   */
+  restoreLegacyBackup: async ({ user_id, client: txClient }, data) => {
+    const client = txClient ?? null;
+    const counts = { tracks: { inserted: 0, skipped: 0 } };
+    const rows = Array.isArray(data.tracks) ? (data.tracks as Record<string, any>[]) : [];
+
+    for (const row of rows) {
+      if (!row?.id || !row.name) {
+        counts.tracks.skipped += 1;
+        continue;
+      }
+      const run = (sql: string, values: unknown[]) =>
+        client ? client.query(sql, values) : query(sql, values);
+      const insertedCount = await insertTrackRow({ query: run } as never, user_id, row);
+      if (insertedCount === 1) counts.tracks.inserted += 1;
+      else counts.tracks.skipped += 1;
+    }
+
+    return counts;
+  },
+
+  deleteUserData: async ({ user_id, client: txClient }) => {
+    const client = txClient ?? null;
+    const run = (sql: string, values: unknown[]) =>
+      client ? client.query(sql, values) : query(sql, values);
+    const result = await run(
+      'DELETE FROM tracks WHERE user_id = $1 RETURNING id',
+      [user_id],
+    );
+    // Remove each deleted track's uploaded original from disk.
+    for (const row of result.rows) {
+      deleteStoredTrack(user_id, String(row.id));
+    }
+    return result.rowCount ?? 0;
+  },
+
+  // ------------------------------------------------------------------
+  // Cross-cutting service hooks
+  // ------------------------------------------------------------------
+
+  // Photo (Immich) / scrobble (Maloja) anchor timestamps: replace the
+  // hard-coded tracks UNION branches in those core routes.
+  resolveTimestamps: () => ({
+    sql: 'SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])',
+  }),
+
+  // Earliest check-in date for the "all time" period selector. Replaces the
+  // built-in `tracks` entry (same key, same SQL).
+  earliestDate: () => ({
+    sql: `SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(timezone, 'UTC')))::text AS date
+          FROM tracks WHERE user_id = $1`,
+  }),
+
+  // LLM life summary contribution (replaces the hard-coded tracks query and
+  // line formatting in the core llm route).
+  llm: {
+    label: 'tracks',
+    gather: async (user_id, from, to) => {
+      const result = await query(
+        `SELECT started_at AS checked_in_at,
+                timezone,
+                json_build_object(
+                  'name', name,
+                  'activity_type', activity_type,
+                  'started_at', started_at,
+                  'distance_m', distance_m::float,
+                  'elapsed_time_s', elapsed_time_s::int
+                )::jsonb AS data
+         FROM tracks
+         WHERE user_id = $1
+           AND (started_at AT TIME ZONE COALESCE(timezone, 'UTC'))::date >= $2::date
+           AND (started_at AT TIME ZONE COALESCE(timezone, 'UTC'))::date <= $3::date
+         ORDER BY started_at ASC`,
+        [user_id, from, to],
+      );
+      return result.rows;
+    },
+    toLines: (row: PluginLlmRow) => {
+      const d = row.data as {
+        name: string;
+        activity_type: string | null;
+        started_at: string;
+        distance_m: number;
+        elapsed_time_s: number;
+      };
+      const when = formatLlmWhen(d.started_at, row.timezone);
+      const type = d.activity_type ? `${d.activity_type} ` : '';
+      return [
+        `- ${when} — ${type}track "${d.name}": ${formatDistance(Number(d.distance_m))} in ${formatTrackDuration(Number(d.elapsed_time_s))}`,
+      ];
+    },
+  },
+
+  // Timestamp reconciliation participation. Tracks are fallback ANCHORS for
+  // other check-in types (anchorLabel); with scanAll: false only rows stored
+  // without a timezone or with a UTC label become scan candidates, matching
+  // the pre-plugin behavior where tracks were never scanned.
+  reconcile: {
+    anchorLabel: 'a track',
+    scanAll: false,
+    detailPath: (id) => `/tracks/${id}`,
+    loadCheckins: async (user_id) => {
+      const result = await query(
+        `SELECT id,
+                started_at AS checked_in_at,
+                timezone AS original_timezone
+         FROM tracks
+         WHERE user_id = $1
+         ORDER BY started_at ASC`,
+        [user_id],
+      );
+      return result.rows;
+    },
+    apply: async (id, suggested_timezone) => {
+      // Label-only: the stored instant is the true moment; reconciliation
+      // only corrects the stored timezone label.
+      const result = await query(
+        `UPDATE tracks
+         SET timezone = $2, updated_at = NOW()
+         WHERE id = $1
+         RETURNING id`,
+        [id, suggested_timezone],
+      );
+      return (result.rowCount ?? 0) > 0;
+    },
+  },
+};
+
+/**
+ * Insert one track row from a backup payload row (new-format backupImport or
+ * legacy restore share the same statement). Returns the row count (1 when the
+ * row was inserted, 0 when skipped/conflicting).
+ */
+async function insertTrackRow(
+  client: { query: (sql: string, values: unknown[]) => Promise<{ rowCount: number | null }> },
+  user_id: string,
+  row: Record<string, any>,
+): Promise<number> {
+  if (!row?.id || !row.name) return 0;
+
+  const coords = (Array.isArray(row.geometry) ? row.geometry : [])
+    .filter((c: unknown) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]));
+  if (coords.length < 2) return 0;
+
+  const wktLineString = `LINESTRING(${coords.map(([lng, lat]) => `${lng} ${lat}`).join(', ')})`;
+
+  const pointsJson =
+    Array.isArray(row.points) && row.points.length > 0
+      ? JSON.stringify(row.points)
+      : null;
+
+  const result = await client.query(
+    `INSERT INTO tracks (
+       id, user_id, name, activity_type, timezone, started_at, ended_at,
+       distance_m, elapsed_time_s, moving_time_s,
+       elevation_gain_m, avg_speed_mps, max_speed_mps,
+       avg_hr, max_hr, point_count, file_hash,
+       created_at, updated_at,
+       path, points
+     )
+     VALUES (
+       $1, $2, $3, $4, $5,
+       COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
+       $8, $9, $10,
+       $11, $12, $13,
+       $14, $15, $16, $17,
+       COALESCE($18::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()),
+       ST_SetSRID(ST_GeomFromText($20), 4326),
+       $21::jsonb
+     )
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      row.id,
+      user_id,
+      row.name,
+      toStringOrNull(row.activity_type),
+      row.timezone || 'UTC',
+      row.started_at || null,
+      row.ended_at || null,
+      toNumber(row.distance_m),
+      Math.round(toNumber(row.elapsed_time_s)),
+      Math.round(toNumber(row.moving_time_s)),
+      toNumber(row.elevation_gain_m),
+      toNumber(row.avg_speed_mps),
+      toNumber(row.max_speed_mps),
+      row.avg_hr == null ? null : Math.round(toNumber(row.avg_hr)),
+      row.max_hr == null ? null : Math.round(toNumber(row.max_hr)),
+      Math.round(toNumber(row.point_count)),
+      toStringOrNull(row.file_hash),
+      row.created_at || null,
+      row.updated_at || null,
+      wktLineString,
+      pointsJson,
+    ]
+  );
+  return result.rowCount ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// LLM line formatting (moved from server/src/routes/llm.ts)
+// ---------------------------------------------------------------------------
+
+function formatLlmWhen(iso: string, timezone: string | null): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  };
+  return new Intl.DateTimeFormat('en-US', timezone ? { ...opts, timeZone: timezone } : opts).format(new Date(iso));
+}
+
+function formatDistance(meters: number): string {
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
+  return `${Math.round(meters)} m`;
+}
+
+function formatTrackDuration(seconds: number): string {
+  const mins = Math.round(seconds / 60);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}

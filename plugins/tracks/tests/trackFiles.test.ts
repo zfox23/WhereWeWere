@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildGpx, gpxDownloadFilename, deriveActivityTypeFromFilename } from '../../src/services/trackFiles';
-import { parseGpx } from '../../src/services/gpx';
+import { buildGpx, gpxDownloadFilename, deriveActivityTypeFromFilename } from '../services/trackFiles';
+import { parseGpx } from '../services/gpx';
 
 describe('buildGpx', () => {
   const track = {

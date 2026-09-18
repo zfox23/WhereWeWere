@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseTcx, parseTrackFile } from '../../src/services/gpx';
+import { parseTcx, parseTrackFile } from '../services/gpx';
 
 const TCX = `<?xml version='1.0' encoding='UTF-8'?>
 <TrainingCenterDatabase xmlns:tpx="http://www.garmin.com/xmlschemas/ActivityExtension/v2" xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">

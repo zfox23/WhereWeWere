@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGpx, computeTrackSegmentTotals, type GpxPoint } from '../../src/services/gpx';
+import { parseGpx, computeTrackSegmentTotals, type GpxPoint } from '../services/gpx';
 
 const GPX = `<?xml version="1.0"?>
 <gpx version="1.1" creator="test">
