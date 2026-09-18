@@ -282,6 +282,9 @@ export default function Home() {
   const pluginFiltersDisabled = hasLocationTypeFilter || hasMediaTypeFilter || hasPluginFilter;
   const pluginTypeToggleDisabled = hasLocationTypeFilter || hasMediaTypeFilter || hasPluginFilter;
 
+  // Whether any plugin check-in type is currently included in the timeline.
+  const anyPluginOn = Object.entries(pluginIncludes).some(([, v]) => v ?? true);
+
   const pluginFilterSpecs = NEW_PLUGINS.map((plugin) => ({
     plugin,
     included: pluginIncludes[plugin.id] ?? true,
@@ -365,18 +368,21 @@ export default function Home() {
     }
   }, [hasMediaTypeFilter, setAllPluginIncludes]);
 
+  // Restores include state from the URL's `type` param. Single-type
+  // branches intentionally do NOT touch `pluginIncludes`: plugin sections
+  // are independent of the legacy location/media `type` selection, and
+  // unconditionally resetting them here clobbered plugin toggles whenever
+  // the URL-sync effect below wrote `type` after a normal include toggle.
   useEffect(() => {
     if (hasPluginFilter || hasLocationTypeFilter || hasMediaTypeFilter) return;
     if (timelineType === 'location') {
       setIncludeLocation(true);
       setIncludeMedia(false);
-      setAllPluginIncludes(false);
       return;
     }
     if (timelineType === 'media') {
       setIncludeLocation(false);
       setIncludeMedia(true);
-      setAllPluginIncludes(false);
       return;
     }
     setIncludeLocation(true);
@@ -384,10 +390,14 @@ export default function Home() {
     setAllPluginIncludes(true);
   }, [hasPluginFilter, hasLocationTypeFilter, hasMediaTypeFilter, timelineType, setAllPluginIncludes]);
 
+  // Syncs the legacy two-value `type` URL param from the include toggles.
+  // The param only encodes "exactly one legacy type, no plugins visible",
+  // so when any plugin type is on the selection is mixed and the param
+  // stays put instead of mislabeling the timeline.
   useEffect(() => {
     if (hasPluginFilter || hasLocationTypeFilter || hasMediaTypeFilter) return;
     const allOn = includeLocation && includeMedia;
-    const nextType = allOn ? '' : includeLocation ? 'location' : includeMedia ? 'media' : '';
+    const nextType = allOn ? '' : anyPluginOn ? timelineType : includeLocation ? 'location' : includeMedia ? 'media' : '';
     if (nextType === timelineType) return;
 
     setSearchParams((prev) => {
@@ -399,7 +409,7 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
-  }, [hasPluginFilter, hasLocationTypeFilter, hasMediaTypeFilter, includeLocation, includeMedia, setSearchParams, timelineType]);
+  }, [hasPluginFilter, hasLocationTypeFilter, hasMediaTypeFilter, includeLocation, includeMedia, anyPluginOn, setSearchParams, timelineType]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
@@ -520,18 +530,20 @@ export default function Home() {
   const toggleLocationType = useCallback(() => {
     if (locationTypeToggleDisabled) return;
     setIncludeLocation((prev) => {
-      if (prev && !includeMedia) return prev;
+      // Keep at least one type visible (media or any plugin counts).
+      if (prev && !includeMedia && !anyPluginOn) return prev;
       return !prev;
     });
-  }, [includeMedia, locationTypeToggleDisabled]);
+  }, [includeMedia, anyPluginOn, locationTypeToggleDisabled]);
 
   const toggleMediaType = useCallback(() => {
     if (mediaTypeToggleDisabled) return;
     setIncludeMedia((prev) => {
-      if (prev && !includeLocation) return prev;
+      // Keep at least one type visible (location or any plugin counts).
+      if (prev && !includeLocation && !anyPluginOn) return prev;
       return !prev;
     });
-  }, [includeLocation, mediaTypeToggleDisabled]);
+  }, [includeLocation, anyPluginOn, mediaTypeToggleDisabled]);
 
   const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
@@ -702,7 +714,10 @@ export default function Home() {
 
     revealObserverRef.current = observer;
     return () => observer.disconnect();
-  }, [items, includeLocation, loading, loadingMore]);
+    // includeMedia and pluginIncludes must retrigger this effect: when a
+    // type is re-included, React mounts fresh `motion-safe-reveal` divs
+    // that would otherwise never receive `.is-visible` and stay at opacity 0.
+  }, [items, includeLocation, includeMedia, pluginIncludes, loading, loadingMore]);
 
   // Scroll to and animate newly created entry
   useEffect(() => {
@@ -751,8 +766,10 @@ export default function Home() {
     if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
     if (toDate) filterPills.push({ label: `Until: ${toDate}`, key: 'to' });
   }
-  if (includeLocation && !includeMedia) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
-  if (!includeLocation && includeMedia) filterPills.push({ label: 'Type: Media only', key: 'type_media_only' });
+  // "X only" is only accurate when X is the sole visible type — with any
+  // plugin type also on, the timeline is mixed and no single-type pill.
+  if (includeLocation && !includeMedia && !anyPluginOn) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
+  if (!includeLocation && includeMedia && !anyPluginOn) filterPills.push({ label: 'Type: Media only', key: 'type_media_only' });
   if (mediaSubtypes) {
     filterPills.push({
       label: `Media: ${mediaSubtypes.split(',').map((s) => MEDIA_SUBTYPES[s.trim() as MediaSubtype]?.label || s.trim()).join(', ')}`,
