@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, History, Loader2, MapPin, SmilePlus, Compass } from 'lucide-react';
+import { CalendarDays, History, Loader2, Compass } from 'lucide-react';
 import { immich as immichApi, settings, stats, scrobbles } from '../api/client';
 import { MoodYearInPixels } from '../../../plugins/mood/ui/MoodStats';
 import { moodStats } from '../../../plugins/mood/ui/api';
@@ -14,7 +14,6 @@ import { LifeSummarySection } from './LifeSummarySection';
 import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
-import { resolveActivityIcon } from '../utils/icons';
 import type { HeatmapDay, ImmichAsset } from '../types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -48,16 +47,6 @@ type MoodHeatmapPoint = {
   date: string;
   avg_mood: number;
 };
-
-function formatMinutesToDuration(minutes: number): string {
-  const rounded = Math.max(0, Math.round(minutes));
-  const hours = Math.floor(rounded / 60);
-  const mins = rounded % 60;
-
-  if (hours === 0) return `${mins}m`;
-  if (mins === 0) return `${hours}h`;
-  return `${hours}h ${mins}m`;
-}
 
 /**
  * Minimal chip for plugin reflection entries whose plugin does not ship a
@@ -242,34 +231,7 @@ function OnThisDaySection({
                     <PluginReflectionFallback key={`${item.type}-${item.id}`} item={item} />
                   );
                 }
-                // Built-in location item.
-                const detailHref = `/venues/${item.venue_id}`;
-                const timeHref = `/checkins/${item.id}`;
-                return (
-                  <div key={`${item.type}-${item.id}`} className="text-xs space-y-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link to={detailHref} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-                        {item.venue_name}
-                      </Link>
-                      {item.venue_category || item.city ? (
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {item.venue_category}
-                          {item.city ? ` · ${item.city}${item.country ? `, ${item.country}` : ''}` : ''}
-                        </span>
-                      ) : null}
-                    </div>
-                    {item.note ? (
-                      <p className="text-gray-600 dark:text-gray-400 italic leading-relaxed">
-                        {`"${item.note}"`}
-                      </p>
-                    ) : null}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-                      <Link to={timeHref} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-                        {formatReflectionTime(item.checked_in_at, item.venue_timezone)}
-                      </Link>
-                    </div>
-                  </div>
-                );
+                return <PluginReflectionFallback key={`${item.type}-${item.id}`} item={item} />;
               })}
 
               {immichUrl && yearDate && yearAssets.length > 0 && (

@@ -59,16 +59,6 @@ function validateDateRange(from: unknown, to: unknown): { ok: true } | { ok: fal
   return { ok: true };
 }
 
-interface CheckinRow {
-  checked_in_at: string;
-  note: string | null;
-  venue_name: string | null;
-  city: string | null;
-  country: string | null;
-  venue_category: string | null;
-  timezone: string | null;
-}
-
 interface PluginLlmRow {
   checked_in_at: string;
   timezone: string | null;
@@ -89,54 +79,25 @@ function allLlmPlugins(): LlmPluginEntry[] {
 
 async function gatherLifeData(from: string, to: string) {
   const llmPlugins = allLlmPlugins();
-  const [checkinsResult, pluginRowsList] = await Promise.all([
-    query(
-      `SELECT c.checked_in_at, c.notes AS note,
-              v.name AS venue_name, v.city, v.country,
-              vc.name AS venue_category,
-              c.checkin_timezone AS timezone
-       FROM checkins c
-       JOIN venues v ON c.venue_id = v.id
-       LEFT JOIN venue_categories vc ON v.category_id = vc.id
-       WHERE c.user_id = $1
-         AND (c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $2::date
-         AND (c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $3::date
-       ORDER BY c.checked_in_at ASC`,
-      [USER_ID, from, to]
-    ),
-    // Plugin check-in types contribute via their llm hook (gather + toLines).
-    Promise.all(
-      llmPlugins.map(({ plugin, hook }) => hook.gather(USER_ID, from, to).catch((err: unknown) => {
-        console.error(`Plugin "${plugin.id}" llm.gather failed:`, err);
-        return [];
-      }))
-    ),
-  ]);
+  // Every check-in type (location, mood, sleep, tracks, ...) contributes via
+  // its llm hook (gather + toLines).
+  const pluginRowsList = await Promise.all(
+    llmPlugins.map(({ plugin, hook }) => hook.gather(USER_ID, from, to).catch((err: unknown) => {
+      console.error(`Plugin "${plugin.id}" llm.gather failed:`, err);
+      return [];
+    }))
+  );
 
-
-  const formatWhen = (iso: string, timezone: string | null): string => {
-    const opts: Intl.DateTimeFormatOptions = {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    };
-    return new Intl.DateTimeFormat('en-US', timezone ? { ...opts, timeZone: timezone } : opts).format(new Date(iso));
-  };
-
-  const checkins: CheckinRow[] = checkinsResult.rows;
-
-  const pluginPools: { label: string; lines: string[] }[] = allLlmPlugins().map(({ plugin, hook }, i) => {
+  const pluginPools: { label: string; lines: string[] }[] = llmPlugins.map(({ hook }, i) => {
     const rows = (pluginRowsList[i] ?? []) as PluginLlmRow[];
     const lines = rows.flatMap((row) => hook.toLines(row));
     return { label: hook.label, lines };
   });
 
-  const totalCheckins = checkins.length + pluginPools.reduce((sum, pool) => sum + pool.lines.length, 0);
-  const hasAnyData = totalCheckins > 0;
+  const totalLines = pluginPools.reduce((sum, pool) => sum + pool.lines.length, 0);
+  const hasAnyData = totalLines > 0;
 
-  return { checkins, pluginPools, hasAnyData, formatWhen };
+  return { pluginPools, hasAnyData };
 }
 
 
@@ -169,20 +130,11 @@ function buildLifeDataText(
   data: Awaited<ReturnType<typeof gatherLifeData>>,
   charBudget: number
 ): { text: string; skipped: SkippedType[] } {
-  const { checkins, pluginPools, formatWhen } = data;
+  const { pluginPools } = data;
 
   const pools: { label: string; lines: string[] }[] = [];
 
-  const locationLines = checkins.map((c) => {
-    const where = [c.venue_name, c.venue_category, [c.city, c.country].filter(Boolean).join(', ')]
-      .filter(Boolean)
-      .join(' / ');
-    const note = c.note ? ` — note: "${c.note}"` : '';
-    return `- ${formatWhen(c.checked_in_at, c.timezone)} — location check-in at ${where}${note}`;
-  });
-  if (locationLines.length > 0) pools.push({ label: 'location check-ins', lines: locationLines });
-
-  // Plugin check-in types (their hooks pre-format each line, so no further
+  // Every check-in type (their hooks pre-format each line, so no further
   // work is needed here).
   for (const pool of pluginPools) {
     if (pool.lines.length > 0) pools.push(pool);

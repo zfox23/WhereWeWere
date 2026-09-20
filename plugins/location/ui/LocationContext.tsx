@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
-import { venues } from '../api/client';
-import { haversineDistance } from '../utils/geo';
-import type { NearbyVenue } from '../types';
+import { venues } from '../../../client/src/api/client';
+import { haversineDistance } from './geo';
+import type { NearbyVenue } from '../../../client/src/types';
 
 const STALE_DISTANCE_M = 200;
 const PREFETCH_LIMIT = '20';

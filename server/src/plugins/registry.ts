@@ -23,11 +23,14 @@ import { server as sleepServer } from '../../../plugins/sleep/server';
 import { manifest as sleepManifest } from '../../../plugins/sleep/manifest';
 import { server as tracksServer } from '../../../plugins/tracks/server';
 import { manifest as tracksManifest } from '../../../plugins/tracks/manifest';
+import { server as locationServer } from '../../../plugins/location/server';
+import { manifest as locationManifest } from '../../../plugins/location/manifest';
 
 const registrations: CheckinTypeServer[] = [
   { ...moodManifest, server: moodServer },
   { ...sleepManifest, server: sleepServer },
   { ...tracksManifest, server: tracksServer },
+  { ...locationManifest, server: locationServer },
 ];
 
 const byId = new Map<string, CheckinTypeServer>();
@@ -80,17 +83,12 @@ export function pluginIds(): string[] {
 }
 
 /**
- * Earliest-date hooks for the core built-in check-in types, keyed by the
- * response key the client expects (`checkins`). Tracks and the other
- * check-in plugins contribute their own `earliestDate` hooks (keyed by
- * plugin id), so every type flows through one code path.
+ * Earliest-date hooks for core built-in check-in types, keyed by the
+ * response key the client expects. As of the location plugin migration no
+ * core built-in types remain — every check-in type (location, mood, sleep,
+ * tracks) contributes its own `earliestDate` hook (keyed by plugin id).
  */
-export const BUILTIN_EARLIEST_DATES: Record<string, { sql: string }> = {
-  checkins: {
-    sql: `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')))::text AS date
-          FROM checkins WHERE user_id = $1`,
-  },
-};
+export const BUILTIN_EARLIEST_DATES: Record<string, { sql: string }> = {};
 
 /**
  * All earliest-date sources: built-in types plus every plugin's hook.
@@ -110,8 +108,8 @@ export function earliestDateSources(): { key: string; sql: string }[] {
 
 /**
  * SQL branches resolving check-in ids to anchor timestamps (id, checked_in_at)
- * for photo/scrobble enrichment. Each branch filters on $1 (uuid[]). Core
- * routes UNION these with their built-in branches.
+ * for photo/scrobble enrichment. Each branch is a full SELECT filtering on
+ * $1 (uuid[]). Use {@link pluginTimestampUnion} to combine them.
  */
 export function pluginTimestampBranches(): string[] {
   return allPlugins()
@@ -120,16 +118,20 @@ export function pluginTimestampBranches(): string[] {
 }
 
 /**
- * Pre-joined version of {@link pluginTimestampBranches} for splicing after a
- * core SELECT branch: returns 'UNION ALL <branch>' segments including the
- * separator BEFORE the first branch, or '' when no plugins contribute.
- * `indent` is applied to each continuation line.
+ * UNION of every plugin's `resolveTimestamps` branch — the complete set of
+ * check-in anchor-timestamp lookups. Returns a single expression like
+ * `SELECT ... WHERE ... UNION ALL SELECT ... WHERE ...`, or a no-op
+ * `SELECT ... WHERE FALSE` when no plugins contribute (so callers can keep
+ * a stable (id, checked_in_at) column shape). `indent` is applied to each
+ * continuation line.
  */
-export function pluginTimestampBranchUnion(indent = ''): string {
+export function pluginTimestampUnion(indent = ''): string {
   const branches = pluginTimestampBranches();
-  if (branches.length === 0) return '';
-  const sep = `UNION ALL\n${indent}`;
-  return sep + branches.join(sep);
+  if (branches.length === 0) {
+    return `SELECT NULL::uuid AS id, NULL::timestamptz AS checked_in_at WHERE FALSE`;
+  }
+  const sep = `\n${indent}UNION ALL`;
+  return branches.map((b) => `(\n${indent}${b.trim()}\n${indent})`).join(sep);
 }
 
 /**

@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Clapperboard, AlignJustify, Rows3 } from 'lucide-react';
-import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi, stats } from '../api/client';
+import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import type { PluginTimelineEntry } from 'wwp-shared';
 import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/registry';
 import { PluginTimelineCard } from '../plugins/autoCard';
 import { plugins as pluginApi } from '../plugins/api';
-import CheckInCard from '../components/CheckInCard';
 import MediaCard from '../components/MediaCard';
 import Filters from '../components/filters/Filters';
 import { usePageTitle } from '../utils/pageTitle';
@@ -28,13 +27,12 @@ const PLUGIN_HOTKEYS: Record<string, string> = Object.fromEntries(
 
 /**
  * Timeline types that still use the legacy built-in filter panel and include
- * state (location/media). A plugin whose id is here is rendered as a plugin
- * (card/FAB/hotkey/detail) but its FILTERS + include toggle remain on the
- * legacy path so nothing is lost during transition. Brand-new plugins (id not
- * in this set) get the generic plugin filter section and include state
- * automatically.
+ * state (media). A plugin whose id is here is rendered as a plugin (card/FAB/
+ * hotkey/detail) but its FILTERS + include toggle remain on the legacy path
+ * so nothing is lost during transition. Other plugins get the generic plugin
+ * filter section and include state automatically.
  */
-const LEGACY_TYPE_IDS = new Set(['location', 'media']);
+const LEGACY_TYPE_IDS = new Set(['media']);
 /** Check-in plugins that are NOT legacy types (fully generic treatment). */
 const NEW_PLUGINS = allClientPlugins().filter((p) => !LEGACY_TYPE_IDS.has(p.id));
 
@@ -118,17 +116,6 @@ function ExpandableFAB() {
             Media
             <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">N</kbd>
           </Link>
-          <Link
-            to="/check-in"
-            onClick={() => setExpanded(false)}
-            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '40ms' : '40ms' }}
-            tabIndex={expanded ? 0 : -1}
-          >
-            <MapPin size={18} className="text-primary-500" />
-            Location
-            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">L</kbd>
-          </Link>
           {FAB_PLUGINS.map((plugin) => {
             const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
             return (
@@ -173,10 +160,9 @@ export default function Home() {
   const newId = (location.state as { newId?: string } | null)?.newId ?? null;
   const newIdAnimatedRef = useRef<string | null>(null);
   const typeParam = searchParams.get('type') || '';
-  const timelineType = typeParam === 'location' || typeParam === 'media' ? typeParam : '';
+  const timelineType = typeParam === 'media' ? typeParam : '';
   const [items, setItems] = useState<TimelineItem[]>([]);
-  const [includeLocation, setIncludeLocation] = useState(() => timelineType !== 'media');
-  const [includeMedia, setIncludeMedia] = useState(() => timelineType !== 'location');
+  const [includeMedia, setIncludeMedia] = useState(() => timelineType !== 'media');
   // Inclusion state for NEW check-in plugin types (legacy types like mood
   // keep their built-in include state).
   const [pluginIncludes, setPluginIncludes] = useState<Record<string, boolean>>(() =>
@@ -190,8 +176,6 @@ export default function Home() {
       NEW_PLUGINS.map((p) => [p.id, value && p.id === pluginId]),
     ));
   }, []);
-  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
-  const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -269,18 +253,14 @@ export default function Home() {
     return null;
   }, [pluginFilterParams]);
   const hasPluginFilter = activePluginFilterId !== null;
-  const hasLocationTypeFilter = Boolean(venueId || category || country);
   const hasMediaTypeFilter = Boolean(mediaSubtypes);
-  const locationFiltersDisabled = hasMediaTypeFilter;
-  const mediaFiltersDisabled = hasLocationTypeFilter;
-  const locationTypeToggleDisabled = hasMediaTypeFilter;
-  const mediaTypeToggleDisabled = hasLocationTypeFilter;
-  const locationSectionDisabled = locationFiltersDisabled || !includeLocation;
+  const mediaFiltersDisabled = hasPluginFilter;
+  const mediaTypeToggleDisabled = hasPluginFilter;
   const mediaSectionDisabled = mediaFiltersDisabled || !includeMedia;
 
   // Plugin filter disabled states (mutually exclusive with every other type).
-  const pluginFiltersDisabled = hasLocationTypeFilter || hasMediaTypeFilter || hasPluginFilter;
-  const pluginTypeToggleDisabled = hasLocationTypeFilter || hasMediaTypeFilter || hasPluginFilter;
+  const pluginFiltersDisabled = hasMediaTypeFilter || hasPluginFilter;
+  const pluginTypeToggleDisabled = hasMediaTypeFilter || hasPluginFilter;
 
   // Whether any plugin check-in type is currently included in the timeline.
   const anyPluginOn = Object.entries(pluginIncludes).some(([, v]) => v ?? true);
@@ -297,7 +277,6 @@ export default function Home() {
   }));
 
   function includedForType(type: string): boolean {
-    if (type === 'location') return includeLocation;
     if (type === 'media') return includeMedia;
     if (NEW_PLUGINS.some((p) => p.id === type)) return pluginIncludes[type] ?? true;
     return true;
@@ -310,7 +289,7 @@ export default function Home() {
       // Keep at least one type visible.
       const othersOn =
         Object.keys(prev).some((k) => k !== pluginId && (prev[k] ?? true)) ||
-        includeLocation || includeMedia;
+        includeMedia;
       if (current && !othersOn) {
         return prev;
       }
@@ -334,7 +313,6 @@ export default function Home() {
     }, { replace: true });
 
     if (value) {
-      setIncludeLocation(false);
       setIncludeMedia(false);
       setAllPluginIncludes(false);
       setOnlyPluginInclude(pluginId, true);
@@ -344,7 +322,6 @@ export default function Home() {
   // A plugin filter narrows to that one plugin type.
   useEffect(() => {
     if (activePluginFilterId) {
-      setIncludeLocation(false);
       setIncludeMedia(false);
       if (hasClientPlugin(activePluginFilterId)) {
         setOnlyPluginInclude(activePluginFilterId, true);
@@ -353,51 +330,34 @@ export default function Home() {
   }, [activePluginFilterId, setOnlyPluginInclude]);
 
   useEffect(() => {
-    if (hasLocationTypeFilter) {
-      setIncludeLocation(true);
-      setIncludeMedia(false);
-      setAllPluginIncludes(false);
-    }
-  }, [hasLocationTypeFilter, setAllPluginIncludes]);
-
-  useEffect(() => {
     if (hasMediaTypeFilter) {
-      setIncludeLocation(false);
       setIncludeMedia(true);
       setAllPluginIncludes(false);
     }
   }, [hasMediaTypeFilter, setAllPluginIncludes]);
 
-  // Restores include state from the URL's `type` param. Single-type
+  // Restores include state from the URL's `type` param. Plugin filter
   // branches intentionally do NOT touch `pluginIncludes`: plugin sections
-  // are independent of the legacy location/media `type` selection, and
+  // are independent of the legacy media `type` selection, and
   // unconditionally resetting them here clobbered plugin toggles whenever
   // the URL-sync effect below wrote `type` after a normal include toggle.
   useEffect(() => {
-    if (hasPluginFilter || hasLocationTypeFilter || hasMediaTypeFilter) return;
-    if (timelineType === 'location') {
-      setIncludeLocation(true);
-      setIncludeMedia(false);
-      return;
-    }
+    if (hasPluginFilter || hasMediaTypeFilter) return;
     if (timelineType === 'media') {
-      setIncludeLocation(false);
       setIncludeMedia(true);
       return;
     }
-    setIncludeLocation(true);
     setIncludeMedia(true);
     setAllPluginIncludes(true);
-  }, [hasPluginFilter, hasLocationTypeFilter, hasMediaTypeFilter, timelineType, setAllPluginIncludes]);
+  }, [hasPluginFilter, hasMediaTypeFilter, timelineType, setAllPluginIncludes]);
 
-  // Syncs the legacy two-value `type` URL param from the include toggles.
-  // The param only encodes "exactly one legacy type, no plugins visible",
-  // so when any plugin type is on the selection is mixed and the param
-  // stays put instead of mislabeling the timeline.
+  // Syncs the `type` URL param from the include toggles. The param only
+  // encodes "only media visible, no plugins visible", so when any plugin
+  // type is on the selection is mixed and the param stays put instead of
+  // mislabeling the timeline.
   useEffect(() => {
-    if (hasPluginFilter || hasLocationTypeFilter || hasMediaTypeFilter) return;
-    const allOn = includeLocation && includeMedia;
-    const nextType = allOn ? '' : anyPluginOn ? timelineType : includeLocation ? 'location' : includeMedia ? 'media' : '';
+    if (hasPluginFilter || hasMediaTypeFilter) return;
+    const nextType = anyPluginOn ? timelineType : includeMedia ? 'media' : '';
     if (nextType === timelineType) return;
 
     setSearchParams((prev) => {
@@ -409,7 +369,7 @@ export default function Home() {
       }
       return next;
     }, { replace: true });
-  }, [hasPluginFilter, hasLocationTypeFilter, hasMediaTypeFilter, includeLocation, includeMedia, anyPluginOn, setSearchParams, timelineType]);
+  }, [hasPluginFilter, hasMediaTypeFilter, includeMedia, anyPluginOn, setSearchParams, timelineType]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
@@ -417,27 +377,6 @@ export default function Home() {
       setShowFilters(true);
     }
   }, [fromDate, toDate, venueId, category, country, mediaSubtypes, hasPluginFilter]);
-
-  useEffect(() => {
-    Promise.all([
-      stats.categoryBreakdown(USER_ID),
-      stats.countries(USER_ID),
-    ]).then(([categories, countries]) => {
-      const uniqueCategories = Array.from(new Set((categories || [])
-        .map((c: any) => String(c.category_name || '').trim())
-        .filter(Boolean)))
-        .sort((a, b) => a.localeCompare(b));
-      const uniqueCountries = Array.from(new Set((countries || [])
-        .map((c: any) => String(c.country || '').trim())
-        .filter(Boolean)))
-        .sort((a, b) => a.localeCompare(b));
-      setCategoryOptions(uniqueCategories);
-      setCountryOptions(uniqueCountries);
-    }).catch(() => {
-      setCategoryOptions([]);
-      setCountryOptions([]);
-    });
-  }, []);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const feedContainerRef = useRef<HTMLDivElement>(null);
@@ -459,7 +398,6 @@ export default function Home() {
       // Built-in hotkeys plus plugin-declared hotkeys (plugins may override
       // built-in keys, e.g. mood's 'm').
       const hotkeyRoutes: Record<string, string> = {
-        l: '/check-in',
         n: '/media-check-in',
         ...PLUGIN_HOTKEYS,
       };
@@ -485,32 +423,11 @@ export default function Home() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  const setLocationTypeFilter = useCallback((key: 'venue_id' | 'category' | 'country', value: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('media_subtype');
-      next.delete('type');
-      if (value) {
-        next.set(key, value);
-      } else {
-        next.delete(key);
-      }
-      return next;
-    }, { replace: true });
-
-    if (value) {
-      setIncludeLocation(true);
-      setIncludeMedia(false);
-      setAllPluginIncludes(false);
-    }
-  }, [setSearchParams, setAllPluginIncludes]);
-
   const setMediaSubtypeFilter = useCallback((value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      next.delete('venue_id');
-      next.delete('category');
-      next.delete('country');
+      // Clear every plugin filter param (mutual exclusivity).
+      for (const key of pluginFilterKeys) next.delete(key);
       next.delete('type');
       if (value) {
         next.set('media_subtype', value);
@@ -522,28 +439,18 @@ export default function Home() {
 
     if (value) {
       setIncludeMedia(true);
-      setIncludeLocation(false);
       setAllPluginIncludes(false);
     }
-  }, [setSearchParams, setAllPluginIncludes]);
-
-  const toggleLocationType = useCallback(() => {
-    if (locationTypeToggleDisabled) return;
-    setIncludeLocation((prev) => {
-      // Keep at least one type visible (media or any plugin counts).
-      if (prev && !includeMedia && !anyPluginOn) return prev;
-      return !prev;
-    });
-  }, [includeMedia, anyPluginOn, locationTypeToggleDisabled]);
+  }, [setSearchParams, setAllPluginIncludes, pluginFilterKeys]);
 
   const toggleMediaType = useCallback(() => {
     if (mediaTypeToggleDisabled) return;
     setIncludeMedia((prev) => {
-      // Keep at least one type visible (location or any plugin counts).
-      if (prev && !includeLocation && !anyPluginOn) return prev;
+      // Keep at least one type visible (any plugin counts).
+      if (prev && !anyPluginOn) return prev;
       return !prev;
     });
-  }, [includeLocation, anyPluginOn, mediaTypeToggleDisabled]);
+  }, [anyPluginOn, mediaTypeToggleDisabled]);
 
   const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
@@ -717,7 +624,7 @@ export default function Home() {
     // includeMedia and pluginIncludes must retrigger this effect: when a
     // type is re-included, React mounts fresh `motion-safe-reveal` divs
     // that would otherwise never receive `.is-visible` and stay at opacity 0.
-  }, [items, includeLocation, includeMedia, pluginIncludes, loading, loadingMore]);
+  }, [items, includeMedia, pluginIncludes, loading, loadingMore]);
 
   // Scroll to and animate newly created entry
   useEffect(() => {
@@ -731,23 +638,21 @@ export default function Home() {
 
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
-    setIncludeLocation(true);
     setIncludeMedia(true);
     setAllPluginIncludes(true);
     setShowFilters(false);
   };
 
   const hasNewPluginFilter = Object.keys(pluginIncludes).some((k) => !(pluginIncludes[k] ?? true));
-  const hasTypeSelectionFilter = !includeLocation || !includeMedia || hasNewPluginFilter;
+  const hasTypeSelectionFilter = !includeMedia || hasNewPluginFilter;
   const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || hasPluginFilter || hasTypeSelectionFilter;
   const visibleItems = useMemo(
     () => items.filter((item) => {
-      if (item.type === 'location') return includeLocation;
       if (item.type === 'media') return includeMedia;
       if (NEW_PLUGINS.some((p) => p.id === item.type)) return pluginIncludes[item.type] ?? true;
       return false;
     }),
-    [items, includeLocation, includeMedia, pluginIncludes]
+    [items, includeMedia, pluginIncludes]
   );
   const rawGrouped = groupByDate(visibleItems);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
@@ -766,10 +671,9 @@ export default function Home() {
     if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
     if (toDate) filterPills.push({ label: `Until: ${toDate}`, key: 'to' });
   }
-  // "X only" is only accurate when X is the sole visible type — with any
-  // plugin type also on, the timeline is mixed and no single-type pill.
-  if (includeLocation && !includeMedia && !anyPluginOn) filterPills.push({ label: 'Type: Location only', key: 'type_location_only' });
-  if (!includeLocation && includeMedia && !anyPluginOn) filterPills.push({ label: 'Type: Media only', key: 'type_media_only' });
+  // "Media only" is only accurate when media is the sole visible type —
+  // with any plugin type also on, the timeline is mixed and no pill.
+  if (includeMedia && !anyPluginOn) filterPills.push({ label: 'Type: Media only', key: 'type_media_only' });
   if (mediaSubtypes) {
     filterPills.push({
       label: `Media: ${mediaSubtypes.split(',').map((s) => MEDIA_SUBTYPES[s.trim() as MediaSubtype]?.label || s.trim()).join(', ')}`,
@@ -841,15 +745,13 @@ export default function Home() {
                       next.delete('to');
                       return next;
                     }, { replace: true });
-                 } else if (pill.key === 'type_location_only') {
-                   setIncludeMedia(true);
-                 } else if (pill.key === 'type_media_only') {
-                   setIncludeLocation(true);
-                 } else if (pill.key === 'media_subtype') {
-                   setMediaSubtypeFilter('');
-                 } else {
-                   setFilter(pill.key, '');
-                 }
+                  } else if (pill.key === 'type_media_only') {
+                    setAllPluginIncludes(true);
+                  } else if (pill.key === 'media_subtype') {
+                    setMediaSubtypeFilter('');
+                  } else {
+                    setFilter(pill.key, '');
+                  }
                 }}
                 className="hover:text-primary-900 ml-0.5"
               >
@@ -875,23 +777,13 @@ export default function Home() {
             hasActiveFilters={Boolean(hasActiveFilters)}
             fromDate={fromDate}
             toDate={toDate}
-            category={category}
-            country={country}
             mediaSubtypes={mediaSubtypes}
-            includeLocation={includeLocation}
             includeMedia={includeMedia}
-            categoryOptions={categoryOptions}
-            countryOptions={countryOptions}
-            locationTypeToggleDisabled={locationTypeToggleDisabled}
             mediaTypeToggleDisabled={mediaTypeToggleDisabled}
-            locationFiltersDisabled={locationFiltersDisabled}
             mediaFiltersDisabled={mediaFiltersDisabled}
-            locationSectionDisabled={locationSectionDisabled}
             mediaSectionDisabled={mediaSectionDisabled}
             onSetDateFilter={setFilter}
-            onToggleLocationType={toggleLocationType}
             onToggleMediaType={toggleMediaType}
-            onSetLocationFilter={setLocationTypeFilter}
             onSetMediaFilter={setMediaSubtypeFilter}
             onClearAll={clearFilters}
             pluginFilterSpecs={pluginFilterSpecs}
@@ -929,8 +821,8 @@ export default function Home() {
           <p className="text-gray-500 mb-4">
             {hasActiveFilters ? 'No check-ins match your filters.' : 'No check-ins yet. Start exploring!'}
           </p>
-          {!hasActiveFilters && (
-            <Link to="/check-in" className="btn-primary">
+          {!hasActiveFilters && FAB_PLUGINS[0] && (
+            <Link to={FAB_PLUGINS[0].client.checkInPath} className="btn-primary">
               <MapPin size={18} className="mr-2" />
               First Check In
             </Link>
@@ -962,15 +854,6 @@ export default function Home() {
                       onClick={() => setOpenTimelineDotDate(null)}>
                       <Plus size={8} className={`text-white transition-opacity ${openTimelineDotDate === date ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
                     </button>
-                    <Link
-                      to={`/check-in?date=${encodeURIComponent(date)}`}
-                      className="p-1.5 ml-2 rounded-full text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/30 transition-colors"
-                      title="Location check-in"
-                      onClick={() => setOpenTimelineDotDate(null)}
-                      tabIndex={openTimelineDotDate === date ? 0 : -1}
-                    >
-                      <MapPin size={24} />
-                    </Link>
                     {FAB_PLUGINS.map((plugin) => {
                       const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
                       return (
@@ -1023,38 +906,14 @@ export default function Home() {
                           <PluginTimelineCard
                             item={item as unknown as PluginTimelineEntry}
                             plugin={getClientPlugin(item.type)!}
-                            integrations={{ immich_url: immichUrl, maloja_url: malojaUrl }}
+                            integrations={{ immich_url: immichUrl, maloja_url: malojaUrl, dawarich_url: dawarichUrl }}
                             compact={timelineDensity === 'compact'}
                             photos={photosMap[item.id] ?? null}
                             scrobbles={dedupedScrobblesMap[item.id]}
                             settings={pluginSettings[item.type]}
                           />
-                       ) : item.type === 'media' ? (
-                          <MediaCard item={item} compact={timelineDensity === 'compact'} />
                         ) : (
-                          <CheckInCard
-                            checkin={{
-                              id: item.id,
-                              user_id: item.user_id,
-                              venue_id: item.venue_id!,
-                              venue_name: item.venue_name,
-                              venue_category: item.venue_category,
-                              venue_latitude: item.venue_latitude,
-                              venue_longitude: item.venue_longitude,
-                              venue_timezone: item.venue_timezone,
-                              parent_venue_id: item.parent_venue_id,
-                              parent_venue_name: item.parent_venue_name,
-                              notes: item.notes,
-                              checked_in_at: item.checked_in_at,
-                              created_at: item.created_at,
-                            }}
-                            immichUrl={immichUrl}
-                            photos={photosMap[item.id] ?? null}
-                            scrobbles={dedupedScrobblesMap[item.id]}
-                            malojaUrl={malojaUrl}
-                            dawarichUrl={dawarichUrl}
-                            compact={timelineDensity === 'compact'}
-                          />
+                          <MediaCard item={item} compact={timelineDensity === 'compact'} />
                         )}
                       </div>
                     );

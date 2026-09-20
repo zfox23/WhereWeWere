@@ -1,5 +1,5 @@
 import { find as findTimezone } from 'geo-tz';
-import { pool } from './index';
+import { pool } from '../../../server/src/db';
 
 type VenueRow = {
   venue_id: string;

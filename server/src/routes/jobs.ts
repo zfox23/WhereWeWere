@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import {
-  runBackfillJob,
+  findPluginJob,
   requestJobCancellation,
+  runPluginJob,
+  supportedJobTypes,
   isJobRunningLocally,
 } from '../services/jobs';
 
@@ -42,14 +44,14 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// POST / - start a new job
+// POST / - start a new job (all job types are plugin-contributed)
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { type } = req.body;
 
-    const supportedTypes = ['backfill'];
-    if (!supportedTypes.includes(type)) {
-      return res.status(400).json({ error: `Unknown job type. Supported: ${supportedTypes.join(', ')}` });
+    const definition = findPluginJob(type);
+    if (!definition) {
+      return res.status(400).json({ error: `Unknown job type. Supported: ${supportedJobTypes().join(', ')}` });
     }
 
     // Check if there's already a running job of this type
@@ -71,7 +73,7 @@ router.post('/', async (req: Request, res: Response) => {
     const job = result.rows[0];
 
     // Fire and forget — run in the background
-    runBackfillJob(job.id).catch((err) => {
+    runPluginJob(job.id, definition).catch((err: unknown) => {
       console.error(`Background job ${job.id} threw:`, err);
     });
 

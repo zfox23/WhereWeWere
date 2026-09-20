@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { DownloadIcon, Upload, FileText, Loader2, Check, AlertCircle } from 'lucide-react';
-import { importApi, jobs } from '../../api/client';
-import type { ImportResult } from '../../types';
+import { importApi, jobs } from '../../../client/src/api/client';
+import type { ImportResult } from '../../../client/src/types';
 
 export function SwarmImportSection({ onImportComplete }: { onImportComplete?: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);

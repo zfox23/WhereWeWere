@@ -1,4 +1,3 @@
-import { SwarmImportSection } from './SwarmImportSection';
 import { allClientPlugins } from '../../plugins/registry';
 import { YamtrackImportSection } from './YamtrackImportSection';
 import { JobsSection } from './JobsSection';
@@ -14,7 +13,6 @@ interface DataTabProps {
 export function DataTab({ jobRefreshKey, onImportComplete }: DataTabProps) {
   return (
     <>
-      <SwarmImportSection onImportComplete={onImportComplete} />
       <YamtrackImportSection onImportComplete={onImportComplete} />
       <JobsSection refreshKey={jobRefreshKey} />
       <TimestampReconciliationSection />

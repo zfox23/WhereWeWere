@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Brain, Clapperboard, MapPin } from 'lucide-react';
+import { Brain, Clapperboard } from 'lucide-react';
 import { allClientPlugins } from '../plugins/registry';
 import { AutoProfileTab } from '../plugins/autoProfileTab';
 import { MediaTab } from '../components/MediaTab';
-import { PlacesTab } from '../components/PlacesTab';
 import { ReflectTab } from '../components/ReflectTab';
 import { usePageTitle } from '../utils/pageTitle';
 import type { CheckinTypeClient } from 'wwp-shared';
@@ -20,11 +19,11 @@ function renderPluginTab(plugin: CheckinTypeClient, userId: string) {
 }
 
 export default function Profile() {
-  type ProfileTab = 'places' | 'reflect' | 'media' | `plugin:${string}`;
+  type ProfileTab = 'reflect' | 'media' | `plugin:${string}`;
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
     if (!value) return false;
-    if (value === 'places' || value === 'reflect' || value === 'media') {
+    if (value === 'reflect' || value === 'media') {
       return true;
     }
     if (value.startsWith('plugin:')) {
@@ -35,7 +34,7 @@ export default function Profile() {
 
   const getTabFromLocation = (): ProfileTab => {
     const tabParam = new URLSearchParams(window.location.search).get('tab');
-    return isProfileTab(tabParam) ? tabParam : 'places';
+    return isProfileTab(tabParam) ? tabParam : 'plugin:location';
   };
 
   const [activeTab, setActiveTab] = useState<ProfileTab>(getTabFromLocation);
@@ -45,10 +44,9 @@ export default function Profile() {
   const didStripParamsRef = useRef(false);
 
   const tabTitleMap: Record<string, string> = {
-    places: 'Profile: Places',
     media: 'Profile: Media',
     reflect: 'Profile: Reflect',
-    ...Object.fromEntries(PROFILE_PLUGINS.map((p) => [`plugin:${p.id}`, `Profile: ${p.strings.title}`])),
+    ...Object.fromEntries(PROFILE_PLUGINS.map((p) => [`plugin:${p.id}`, `Profile: ${p.strings.profileTab}`])),
   };
   usePageTitle(tabTitleMap[activeTab] ?? 'Profile');
 
@@ -100,7 +98,6 @@ export default function Profile() {
       }`;
 
   const renderBody = () => {
-    if (activeTab === 'places') return <PlacesTab />;
     if (activeTab === 'reflect') return <ReflectTab />;
     if (activeTab === 'media') return <MediaTab />;
     const plugin = PROFILE_PLUGINS.find((p) => `plugin:${p.id}` === activeTab);
@@ -113,10 +110,6 @@ export default function Profile() {
 
       {/* Tab bar */}
       <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit max-w-full overflow-x-auto">
-        <button onClick={() => setActiveTab('places')} className={tabButtonClass(activeTab === 'places')}>
-          <MapPin size={14} />
-          Places
-        </button>
         {PROFILE_PLUGINS.map((plugin) => {
           const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
           const key = `plugin:${plugin.id}`;

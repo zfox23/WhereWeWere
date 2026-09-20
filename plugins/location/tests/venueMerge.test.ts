@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { areVenuesSimilar, calculateDistanceMeters } from '../../src/services/venueMerge';
+import { areVenuesSimilar, calculateDistanceMeters } from '../services/venueMerge';
 
 describe('calculateDistanceMeters', () => {
   it('returns zero when coordinates match', () => {

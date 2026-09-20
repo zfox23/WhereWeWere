@@ -69,10 +69,12 @@ Register each side:
 | Hook | When to add |
 |---|---|
 | `resolveTimestamps` | Photos/scrobble enrichment should anchor to this type. SQL: `(id, checked_in_at)` filtered on `$1` (`uuid[]`). |
+| `latestTimezoneAsOf` | Integrations (e.g. the Plex webhook) should infer a timezone label from this type's most recent check-in. SQL: one `timezone` text column for `$1` (referenceTime), `$2` (user_id); single NULL row when none. |
 | `reflectionBranch` | The "this day in previous years" panel. SQL filtered on `$1` user_id, `$2` date. |
 | `earliestDate` | The all-time period selector needs the first entry date. SQL: single `date` text column for `$1`. |
 | `llm` | Contribute rows + prompt lines to the LLM life summary. |
 | `reconcile` | Rows can have a missing/wrong timezone label and participate in reconciliation. |
+| `jobs` | Contribute background jobs (e.g. data backfills). The framework owns the jobs row lifecycle and dispatches `handler(jobId, { isCancelled, updateProgress })`; handlers must not write job status themselves. |
 | `resetSettings` | Start-over "reset settings only" must clear user-scoped auxiliary tables. Returns rows deleted; run on the provided transaction client. |
 | `settingsKeys` | Persist plugin settings in `plugin_settings` (framework upserts declared keys only). |
 | `legacySettingsKeys` / `legacyBackupKeys` / `restoreLegacyBackup` | **Only when migrating an existing built-in type** (see note below). |

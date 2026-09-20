@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { findExactOption } from './filterUtils';
+import { findExactOption } from '../../../client/src/components/filters/filterUtils';
 
 export interface LocationFilterProps {
   included: boolean;

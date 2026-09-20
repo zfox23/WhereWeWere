@@ -5,16 +5,16 @@ import {
   Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink,
   Navigation2
 } from 'lucide-react';
-import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
-import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../types';
-import VenueEditMap from '../components/VenueEditMap';
-import CheckInCard from '../components/CheckInCard';
-import MapView from '../components/MapView';
-import { useLocation } from '../contexts/LocationContext';
-import { buildImmichMapUrl } from '../utils/checkin';
-import { haversineDistance, getBearingDegrees, formatDistance } from '../utils/geo';
-import { usePageTitle } from '../utils/pageTitle';
-import type { DistanceUnit } from '../utils/geo';
+import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../../../client/src/api/client';
+import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../../../client/src/types';
+import VenueEditMap from './VenueEditMap';
+import CheckInCard from './LocationCard';
+import MapView from './MapView';
+import { useLocation } from './LocationContext';
+import { buildImmichMapUrl } from '../../../client/src/utils/checkin';
+import { haversineDistance, getBearingDegrees, formatDistance } from './geo';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
+import type { DistanceUnit } from './geo';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -399,7 +399,7 @@ export default function VenueDetail() {
               className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
               <Edit2 size={14} />Edit
             </button>
-            <Link to={`/check-in?venueId=${encodeURIComponent(venue.id)}&venueName=${encodeURIComponent(venue.name)}`}
+            <Link to={`/location-check-in?venueId=${encodeURIComponent(venue.id)}&venueName=${encodeURIComponent(venue.name)}`}
               className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium">
               <MapPin size={18} />Check in here
             </Link>

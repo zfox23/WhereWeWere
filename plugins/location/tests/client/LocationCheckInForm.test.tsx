@@ -2,7 +2,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import CheckInForm from '../../src/components/CheckInForm';
+import LocationCheckInForm from '../../ui/LocationCheckInForm';
 
 const apiMocks = vi.hoisted(() => ({
   checkinsCreate: vi.fn(),
@@ -12,7 +12,7 @@ const apiMocks = vi.hoisted(() => ({
   venuesDelete: vi.fn(),
 }));
 
-vi.mock('../../src/api/client', () => ({
+vi.mock('../../../../client/src/api/client', () => ({
   checkins: {
     create: apiMocks.checkinsCreate,
     update: apiMocks.checkinsUpdate,
@@ -24,7 +24,7 @@ vi.mock('../../src/api/client', () => ({
   },
 }));
 
-describe('CheckInForm', () => {
+describe('LocationCheckInForm', () => {
   beforeEach(() => {
     apiMocks.checkinsCreate.mockReset();
     apiMocks.checkinsUpdate.mockReset();
@@ -50,7 +50,7 @@ describe('CheckInForm', () => {
 
     render(
       <MemoryRouter>
-        <CheckInForm venueId="venue-1" venueName="Test Venue" onSuccess={onSuccess} />
+        <LocationCheckInForm venueId="venue-1" venueName="Test Venue" onSuccess={onSuccess} />
       </MemoryRouter>,
     );
 

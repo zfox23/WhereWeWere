@@ -2,9 +2,9 @@ import { useEffect, useMemo } from 'react';
 import { Circle, MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useTheme } from '../contexts/ThemeContext';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
-import '../utils/smoothLeafletZoom';
+import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from './geo';
+import '../../../client/src/utils/smoothLeafletZoom';
 
 // Ensure Leaflet default icons work when bundled
 delete (L.Icon.Default.prototype as any)._getIconUrl;

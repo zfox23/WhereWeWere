@@ -1,4 +1,4 @@
-import { query } from '../db';
+import { query } from '../../../server/src/db';
 
 interface Queryable {
   query: (text: string, params?: any[]) => Promise<any>;

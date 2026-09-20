@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft, CalendarDays } from 'lucide-react';
-import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
-import type { Scrobble, ImmichAsset } from '../types';
-import MapView from '../components/MapView';
-import { usePageTitle } from '../utils/pageTitle';
+import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../../../client/src/api/client';
+import type { Scrobble, ImmichAsset } from '../../../client/src/types';
+import MapView from './MapView';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 function formatDate(dateStr: string, timeZone?: string | null): string {
   const options: Intl.DateTimeFormatOptions = {
@@ -49,8 +49,11 @@ function getLocalDateKey(dateStr: string, timeZone?: string | null): string {
 
 const THUMB_SIZE = 92;
 
-export default function CheckInDetail() {
-  const { id } = useParams<{ id: string }>();
+export default function CheckInDetail(props: { id: string } = { id: '' }) {
+  // `id` is passed by the plugin route wrapper; useParams is kept as a
+  // fallback for direct deep links.
+  const paramsId = useParams<{ id: string }>()?.id;
+  const id = props.id || paramsId;
   const navigate = useNavigate();
   const [checkin, setCheckin] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -290,7 +293,7 @@ export default function CheckInDetail() {
         {/* Action buttons */}
         <div className="flex items-center gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
           <Link
-            to={`/check-in?edit=${checkin.id}`}
+            to={`/location-check-in?edit=${checkin.id}`}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
           >
             <Pencil size={14} />

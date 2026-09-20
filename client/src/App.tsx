@@ -1,15 +1,12 @@
 import { Routes, Route, useParams } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { LocationProvider } from './contexts/LocationContext';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import { allClientPlugins, getClientPlugin } from './plugins/registry';
 import { AutoCheckInForm } from './plugins/autoForm';
 import PluginCheckInDetail from './pages/PluginCheckInDetail';
-import CheckIn from './pages/CheckIn';
-import VenueDetail from './pages/VenueDetail';
+import VenueDetail from '../../plugins/location/ui/VenueDetail';
 import Profile from './pages/Profile';
-import CheckInDetail from './pages/CheckInDetail';
 import Settings from './pages/Settings';
 import MediaCheckInLanding from './pages/media/MediaCheckInLanding';
 import MediaSearch from './pages/media/MediaSearch';
@@ -59,30 +56,18 @@ function PluginDetailPage({ pluginId }: { pluginId: string }) {
   return <PluginCheckInDetail />;
 }
 
-/**
- * Routes contributed by check-in plugins. Paths already registered
- * explicitly in App (built-in types) win; a plugin whose path is already
- * claimed here is skipped.
- */
-const EXPLICIT_PATHS = new Set([
-  '/check-in',
-  '/checkins/:id',
-]);
-
+/** Routes contributed by check-in plugins. */
 const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
   const elements: React.ReactElement[] = [];
-  const formPath = plugin.client.checkInPath;
-  if (!EXPLICIT_PATHS.has(formPath)) {
-    elements.push(
-      <Route key={`form-${plugin.id}`} path={formPath} element={<PluginCheckInPage pluginId={plugin.id} />} />,
-    );
-  }
+  elements.push(
+    <Route key={`form-${plugin.id}`} path={plugin.client.checkInPath} element={<PluginCheckInPage pluginId={plugin.id} />} />,
+  );
   const detailPath = plugin.client.detailPath;
-  if (detailPath && !EXPLICIT_PATHS.has(detailPath)) {
+  if (detailPath) {
     elements.push(
       <Route key={`detail-${plugin.id}`} path={detailPath} element={<PluginDetailPage pluginId={plugin.id} />} />,
     );
-  } else if (!detailPath) {
+  } else {
     elements.push(
       <Route key={`detail-${plugin.id}`} path={`/checkins/${plugin.id}/:id`} element={<PluginCheckInDetail />} />,
     );
@@ -93,12 +78,9 @@ const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
 export default function App() {
   return (
     <ThemeProvider>
-    <LocationProvider>
     <Layout>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/check-in" element={<CheckIn />} />
-        <Route path="/checkins/:id" element={<CheckInDetail />} />
 
         {/* Media check-ins */}
         <Route path="/media-check-in" element={<MediaCheckInLanding />} />
@@ -128,7 +110,6 @@ export default function App() {
         {pluginRouteElements}
       </Routes>
     </Layout>
-    </LocationProvider>
     </ThemeProvider>
   );
 }

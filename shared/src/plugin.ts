@@ -131,6 +131,22 @@ export interface PluginReconciliationRow {
   id: string;
   checked_in_at: string;
   original_timezone: string | null;
+  /** Optional coordinates for the check-in (used by geo-aware `suggest`). */
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+}
+
+/** A suggestion produced by a plugin's own `suggest` hook. */
+export interface PluginReconciliationSuggestion {
+  id: string;
+  suggested_timezone: string;
+  reason: string;
+}
+
+/** A row a plugin's `suggest` hook reports as not inferable. */
+export interface PluginReconciliationUninferable {
+  id: string;
+  reason: string;
 }
 
 /**
@@ -152,6 +168,27 @@ export interface PluginReconciliationHook {
   /** Load this plugin's check-in rows for the scan, ordered by time ASC. */
   loadCheckins: (user_id: string) => Promise<PluginReconciliationRow[]>;
   /**
+   * Optional: the timezone a row should be treated as for ANCHOR purposes
+   * when it differs from the stored label (e.g. the location plugin resolves
+   * its venue coordinates). Returns null for rows that are not anchors.
+   * Defaults to the row's stored `original_timezone`.
+   */
+  anchorTimezone?: (row: PluginReconciliationRow) => string | null;
+  /**
+   * Optional: generate this plugin's suggestions itself (e.g. by resolving
+   * coordinates to a timezone), bypassing the framework's anchor-based
+   * pass. When present, the framework does not run anchor resolution for
+   * this plugin's rows; the hook receives the same rows `loadCheckins`
+   * returned.
+   */
+  suggest?: (
+    user_id: string,
+    rows: PluginReconciliationRow[],
+  ) => Promise<{
+    suggestions: PluginReconciliationSuggestion[];
+    uninferable: PluginReconciliationUninferable[];
+  }>;
+  /**
    * Validate and persist a suggested timezone label. Returns false when the
    * suggestion cannot be applied (row missing, invalid timezone, ...).
    */
@@ -163,6 +200,42 @@ export interface PluginApiMount {
   mount: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   router: any;
+}
+
+/** Progress payload for a plugin job (free-form, stored on the jobs row). */
+export interface PluginJobProgress {
+ phase?: string;
+ updated?: number;
+ remaining?: number;
+ message?: string;
+ [key: string]: unknown;
+}
+
+/**
+ * Everything the core jobs framework hands a plugin job handler. Handlers
+ * check `isCancelled` between work units, report `progress` so the UI never
+ * looks frozen, and must not update the jobs row status themselves — the
+ * framework marks the job completed/failed when the handler settles.
+ */
+export interface PluginJobContext {
+ jobId: string;
+ /** True once the user has cancelled; throwing any error aborts the job. */
+ isCancelled: () => boolean;
+ /** Persist a progress payload on the jobs row. */
+ updateProgress: (progress: PluginJobProgress) => Promise<void>;
+}
+
+/** A plugin-contributed background job (e.g. a data backfill). */
+export interface PluginJobDefinition {
+ /** Job type string accepted by POST /api/v1/jobs (e.g. 'venue-backfill'). */
+ jobType: string;
+ /**
+  * Runs in the background after the framework marks the job 'running'.
+  * Resolve when done (the framework writes the final 'completed' row);
+  * throw to fail the job (or throw an error whose message is 'cancelled'
+  * for user cancellations — the framework maps that to status 'cancelled').
+  */
+ handler: (ctx: PluginJobContext) => Promise<void>;
 }
 
 export interface CheckinTypeServerPlugin {
@@ -202,9 +275,15 @@ export interface CheckinTypeServerPlugin {
    * The framework appends `WHERE <where> ORDER BY checked_in_at DESC
    * LIMIT/OFFSET` (the where comes from buildTimelineWhere).
    *
+   * `postProcess` (optional) is a row-level JS hook applied to this branch's
+   * rows after the query — for post-processing SQL cannot express (e.g.
+   * inferring a missing timezone label from coordinates). It receives the
+   * branch's rows in order and must return rows in the same order (mutating
+   * and returning the same array is fine).
+   *
    * Required for custom storage; ignored for generic storage.
    */
-  buildTimelineSelect?: () => { sql: string };
+  buildTimelineSelect?: () => { sql: string; postProcess?: (rows: unknown[]) => unknown[] };
 
   /**
    * Build the WHERE clause for the timeline branch, combining the shared
@@ -296,6 +375,17 @@ export interface CheckinTypeServerPlugin {
   resolveTimestamps?: () => { sql: string };
 
   /**
+   * Timezone inference for integrations that label incoming events before
+   * the user chooses a timezone (e.g. the Plex webhook inferring a media
+   * check-in's label from the user's most recent check-in of this type).
+   * The SQL is a single SELECT producing one `timezone` text column for
+   * `$1` (referenceTime, timestamptz) and `$2` (user_id), or a single NULL
+   * row when the user has no applicable check-in. The core webhook loops
+   * the registered plugins and uses the first non-null result.
+   */
+  latestTimezoneAsOf?: () => { sql: string };
+
+  /**
    * Anniversary branch for the "this day in previous years" reflection
    * query. The SQL is a single SELECT producing the reflection column set
    * (see the built-in branches) and must filter on `$1` (user_id) and
@@ -325,6 +415,15 @@ export interface CheckinTypeServerPlugin {
    * Returns the number of rows deleted.
    */
    resetSettings?: (ctx: PluginHookContext) => Promise<number>;
+
+  /**
+   * Background jobs this plugin contributes to the core jobs framework
+   * (`POST /api/v1/jobs` with `type` = the job's `jobType`). The framework
+   * owns the jobs row lifecycle (status, progress, cancel, stale cleanup)
+   * and dispatches to the plugin's `handler`; the core never needs to know
+   * which tables a job touches.
+   */
+  jobs?: PluginJobDefinition[];
 
   /**
    * `user_settings` column names this plugin has migrated to

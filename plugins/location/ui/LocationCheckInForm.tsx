@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, MapPin, Trash2 } from 'lucide-react';
-import { checkins, venues } from '../api/client';
+import { checkins, venues } from '../../../client/src/api/client';
 import VenueSearch from './VenueSearch';
 
 const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -141,7 +141,7 @@ export default function CheckInForm({
       setVenueCheckinCount(null);
       setVenueCategoryName(null);
       setVenueAddress(null);
-      navigate('/check-in');
+      navigate('/location-check-in');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete venue.');
     } finally {

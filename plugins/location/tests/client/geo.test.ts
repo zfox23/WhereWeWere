@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, haversineDistance } from '../../src/utils/geo';
+import { formatDuration, haversineDistance } from '../../ui/geo';
 
 describe('haversineDistance', () => {
   it('returns zero for identical coordinates', () => {

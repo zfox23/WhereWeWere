@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
 import { allPlugins } from '../plugins/registry';
 import { genericTimelineSelect, genericTimelineWhere } from '../plugins/genericStore';
@@ -8,14 +7,6 @@ import { timelineWhereConditions } from '../plugins/sql';
 import type { PluginTimelineContext } from 'wwp-shared';
 
 const router = Router();
-
-function addTimezone(row: any): any {
-  if (row.type === 'location' && !row.venue_timezone && row.venue_latitude != null && row.venue_longitude != null) {
-    const tzResults = findTimezone(Number(row.venue_latitude), Number(row.venue_longitude));
-    row.venue_timezone = tzResults[0] || null;
-  }
-  return row;
-}
 
 function extractDateString(value: unknown): string | null {
   if (!value) return null;
@@ -38,6 +29,8 @@ interface TimelineBranch {
   selectSql: string;
   whereSql: string | null;
   values: unknown[];
+  /** Optional row-level post-processing for this branch's rows (plugins). */
+  postProcess?: (rows: unknown[]) => unknown[];
 }
 
 // GET / - unified timeline of all check-in types (built-ins + plugins)
@@ -69,45 +62,26 @@ router.get('/', async (req: Request, res: Response) => {
       .filter((p) => Object.keys(pluginFilterParams.get(p.id) ?? {}).length > 0)
       .map((p) => p.id);
 
-    const hasLocationTypeFilter = Boolean(req.query.venue_id || req.query.category || req.query.country);
     const hasMediaTypeFilter = Boolean(req.query.media_subtype);
 
     // Decide which branches to include (a type filter narrows to one type;
-    // plugin filters win first, mirroring the legacy behavior where the mood
-    // filter checked ahead of the location filters).
+    // plugin filters win first — the location plugin's venue_id/category/
+    // country filters flow through its declared filterParams).
     const includedKeys: string[] = [];
     if (activePluginFilterIds.length > 0) {
       includedKeys.push(`plugin:${activePluginFilterIds[0]}`);
-    } else if (hasLocationTypeFilter) {
-      includedKeys.push('location');
     } else if (hasMediaTypeFilter) {
       includedKeys.push('media');
     } else {
-      includedKeys.push('location', ...plugins.map((p) => `plugin:${p.id}`), 'media');
+      includedKeys.push(...plugins.map((p) => `plugin:${p.id}`), 'media');
     }
 
     // ------------------------------------------------------------------
-    // Built-in branches (location, media). Mood, Sleep and Tracks are plugins.
+    // Built-in branch (media). Location, Mood, Sleep and Tracks are plugins.
     // ------------------------------------------------------------------
     const ctx = { user_id: userId, from: fromDate, to: toDate, q: searchQuery };
 
     const builtInWhereBuilders: Record<string, () => { sql: string | null; values: unknown[] }> = {
-      location: () => {
-        const conds = timelineWhereConditions(ctx, {
-          alias: 'c',
-          timestampColumn: 'checked_in_at',
-          timezoneColumn: 'checkin_timezone',
-          search: (c, q) => c.push(
-            `(c.search_vector @@ plainto_tsquery('english', ?) OR v.search_vector @@ plainto_tsquery('english', ?))`,
-            q,
-            q,
-          ),
-        });
-        if (req.query.venue_id) conds.push('c.venue_id = ?', String(req.query.venue_id));
-        if (req.query.category) conds.push('vc.name = ?', String(req.query.category));
-        if (req.query.country) conds.push('v.country = ?', String(req.query.country));
-        return conds.build();
-      },
       media: () => {
         const conds = timelineWhereConditions(ctx, {
           alias: 'mmc',
@@ -133,29 +107,6 @@ router.get('/', async (req: Request, res: Response) => {
     };
 
     const builtInSelects: Record<string, string> = {
-      location: `
-      SELECT ${timelineColumnList({
-        type: `'location'`,
-        id: 'c.id',
-        user_id: 'c.user_id',
-        venue_id: 'c.venue_id',
-        notes: 'c.notes',
-        checked_in_at: 'c.checked_in_at',
-        created_at: 'c.created_at',
-        venue_name: 'v.name',
-        venue_latitude: 'v.latitude',
-        venue_longitude: 'v.longitude',
-        venue_timezone: 'c.checkin_timezone',
-        venue_category: 'vc.name',
-        parent_venue_id: 'pv.id',
-        parent_venue_name: 'pv.name',
-        timezone: 'c.checkin_timezone',
-      })}
-     FROM checkins c
-     JOIN venues v ON c.venue_id = v.id
-     LEFT JOIN venue_categories vc ON v.category_id = vc.id
-     LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-   `,
       media: `
             SELECT ${timelineColumnList({
         type: `'media'`,
@@ -204,9 +155,9 @@ router.get('/', async (req: Request, res: Response) => {
             q: searchQuery,
             filterParams: pluginFilterParams.get(plugin.id) ?? {},
           };
-          const selectSql = plugin.server.buildTimelineSelect().sql;
+          const { sql: selectSql, postProcess } = plugin.server.buildTimelineSelect();
           const clause = plugin.server.buildTimelineWhere(ctx);
-          branches.push({ key, selectSql, whereSql: clause?.sql ?? null, values: clause?.values ?? [] });
+          branches.push({ key, selectSql, whereSql: clause?.sql ?? null, values: clause?.values ?? [], postProcess });
         } else {
           const clause = genericTimelineWhere(plugin, {
             user_id: userId,
@@ -257,7 +208,24 @@ router.get('/', async (req: Request, res: Response) => {
           LIMIT ${limitParam} OFFSET ${offsetParam}`;
 
     const result = await query(sql, params);
-    res.json(result.rows.map(addTimezone));
+
+    // Row-level post-processing (plugins): slice the merged rows back into
+    // per-branch rows by their `type` column, run the branch's hook, and
+    // keep the overall order intact.
+    const postProcessors = branches.filter((b) => b.postProcess);
+    if (postProcessors.length > 0) {
+      const byBranch = new Map(postProcessors.map((b) => [b.key, [] as any[]]));
+      for (const row of result.rows) {
+        const branch = postProcessors.find((b) => b.key === `plugin:${(row as any).type}`);
+        if (branch) byBranch.get(branch.key)!.push(row);
+      }
+      for (const branch of postProcessors) {
+        const rows = byBranch.get(branch.key) ?? [];
+        if (rows.length > 0) branch.postProcess!(rows);
+      }
+    }
+
+    res.json(result.rows);
   } catch (err) {
     console.error('Error listing timeline:', err);
     res.status(500).json({ error: 'Failed to list timeline' });

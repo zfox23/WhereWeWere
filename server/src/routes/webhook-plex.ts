@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { query } from '../db';
 import { upsertMediaItem } from './media';
-import { latestCheckinTimezoneAsOf } from '../plugins/coreCheckins';
+import { allPlugins } from '../plugins/registry';
 
 const router = Router();
 import { DEFAULT_USER_ID as USER_ID } from '../constants';
@@ -18,9 +18,17 @@ const plexUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize:
  * to 'UTC'. Same strategy as the Sleep as Android webhook.
  */
 async function inferPlexTimezone(referenceTime: Date): Promise<string> {
-  const checkinTimezone = await latestCheckinTimezoneAsOf(referenceTime, USER_ID);
-  if (checkinTimezone) {
-    return checkinTimezone;
+  // Ask each registered plugin for the timezone of its most recent check-in
+  // at or before the reference time (e.g. the location plugin's hook). The
+  // first non-null result wins.
+  for (const plugin of allPlugins()) {
+    const hook = plugin.server.latestTimezoneAsOf;
+    if (!hook) continue;
+    const result = await query(hook().sql, [referenceTime.toISOString(), USER_ID]);
+    const timezone = result.rows[0]?.timezone;
+    if (timezone) {
+      return timezone as string;
+    }
   }
 
   const mediaResult = await query(

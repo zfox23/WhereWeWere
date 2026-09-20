@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Clock, Loader2, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { settings } from '../../api/client';
+import { getClientPlugin } from '../../plugins/registry';
 import type {
   TimestampReconciliationSuggestion,
   TimestampReconciliationUninferableCheckin,
@@ -38,15 +39,19 @@ interface TimestampSuggestionTimezoneGroup {
 }
 
 interface TimestampSuggestionTypeGroup {
-  key: 'venue' | 'mood' | 'media';
+  key: string;
   label: string;
   suggestions: TimestampReconciliationSuggestion[];
   timezoneGroups: TimestampSuggestionTimezoneGroup[];
 }
 
 function buildTimestampSuggestionGroups(suggestions: TimestampReconciliationSuggestion[]): TimestampSuggestionTypeGroup[] {
-  return (['venue', 'mood', 'media'] as const)
-    .map((type) => {
+  // Build the type list from the actual suggestions plus media (always present).
+  const typeSet = new Set<string>(suggestions.map((s) => s.type));
+  typeSet.add('media');
+  const types = Array.from(typeSet).sort();
+
+  return types.map((type) => {
       const typeSuggestions = suggestions.filter((suggestion) => suggestion.type === type);
       const timezoneMap = new Map<string, TimestampReconciliationSuggestion[]>();
 
@@ -71,7 +76,9 @@ function buildTimestampSuggestionGroups(suggestions: TimestampReconciliationSugg
 
       return {
         key: type,
-        label: type === 'venue' ? 'Venue Checkins' : type === 'mood' ? 'Mood Checkins' : 'Media Checkins',
+        label: type === 'media'
+          ? 'Media Checkins'
+          : `${getClientPlugin(type)?.strings.title ?? type} Checkins`,
         suggestions: typeSuggestions,
         timezoneGroups,
       };

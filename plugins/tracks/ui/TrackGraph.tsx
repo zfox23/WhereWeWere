@@ -13,7 +13,7 @@ import {
   formatSpeed,
   haversineDistance,
   type DistanceUnit,
-} from '../../../client/src/utils/geo';
+} from '../../location/ui/geo';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
 import type { TrackPoint } from './types';
 

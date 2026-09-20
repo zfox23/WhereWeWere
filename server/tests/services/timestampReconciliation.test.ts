@@ -9,9 +9,9 @@ vi.mock('../../src/db', () => ({
   query: queryMock,
 }));
 
-// Mood check-ins are a plugin: the service loads them via the plugin
-// registry's reconcile hook, so stub the registry (not the query sequence)
-// to keep these tests focused on the anchor-resolution logic.
+// Check-in plugins participate via their reconcile hook. Only mood is
+// registered here; location/sleep/tracks are out of scope for these tests,
+// which focus on the core anchor-resolution logic for media rows.
 vi.mock('../../src/plugins/registry', () => ({
   allPlugins: () => [
     {
@@ -31,22 +31,12 @@ vi.mock('../../src/plugins/registry', () => ({
 
 import { getTimestampReconciliationSuggestions } from '../../src/services/timestampReconciliation';
 
-// The scan issues five queries in this order: venues, media, tracks, sleep,
-// (mood rows come from the mocked registry hook, not the query sequence).
-function mockScan(
-  venueRows: unknown[],
-  moodRows: unknown[],
-  mediaRows: unknown[],
-  trackRows: unknown[] = [],
-  sleepRows: unknown[] = []
-) {
+// The core scan issues one direct query (media check-ins); plugin rows come
+// from their reconcile hooks (stubbed above).
+function mockScan(moodRows: unknown[], mediaRows: unknown[]) {
   moodRowsMock.length = 0;
   moodRowsMock.push(...moodRows);
-  queryMock
-    .mockResolvedValueOnce({ rows: venueRows })
-    .mockResolvedValueOnce({ rows: mediaRows })
-    .mockResolvedValueOnce({ rows: trackRows })
-    .mockResolvedValueOnce({ rows: sleepRows });
+  queryMock.mockResolvedValueOnce({ rows: mediaRows });
 }
 
 beforeEach(() => {
@@ -58,7 +48,6 @@ describe('getTimestampReconciliationSuggestions', () => {
     // A Daylio import stores fixed offsets as Etc/GMT+4 (= UTC-4, i.e. EDT).
     // The app displays those as America/New_York, so suggestions must match.
     mockScan(
-      [],
       [
         { id: 'm1', checked_in_at: '2026-06-15T12:00:00Z', original_timezone: null },
         { id: 'm2', checked_in_at: '2026-06-15T11:00:00Z', original_timezone: 'Etc/GMT+4' },
@@ -89,20 +78,13 @@ describe('getTimestampReconciliationSuggestions', () => {
   });
 
   it('does not suggest a change when the stored Etc/GMT zone is equivalent to the resolved IANA zone', async () => {
-    // Venue near New York resolves to America/New_York. A mood check-in stored
-    // as Etc/GMT+4 (UTC-4) is equivalent during EDT, so no suggestion.
+    // A mood check-in stored as America/New_York anchors a sibling stored as
+    // Etc/GMT+4 (UTC-4), which is equivalent during EDT — so no suggestion.
     mockScan(
       [
-        {
-          id: 'v1',
-          checked_in_at: '2026-06-15T12:00:00Z',
-          original_timezone: 'America/New_York',
-          venue_name: 'NY Cafe',
-          latitude: 40.7128,
-          longitude: -74.006,
-        },
+        { id: 'm0', checked_in_at: '2026-06-15T12:00:00Z', original_timezone: 'America/New_York' },
+        { id: 'm1', checked_in_at: '2026-06-15T12:05:00Z', original_timezone: 'Etc/GMT+4' },
       ],
-      [{ id: 'm1', checked_in_at: '2026-06-15T12:05:00Z', original_timezone: 'Etc/GMT+4' }],
       []
     );
 

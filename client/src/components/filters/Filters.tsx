@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X, Check } from 'lucide-react';
-import LocationFilter from './LocationFilter';
 import MediaFilter from './MediaFilter';
 import type { CheckinTypeClient, PluginFilterSectionProps } from 'wwp-shared';
 
@@ -100,23 +99,13 @@ export interface FiltersProps {
   hasActiveFilters: boolean;
   fromDate: string;
   toDate: string;
-  category: string;
-  country: string;
   mediaSubtypes: string;
-  includeLocation: boolean;
   includeMedia: boolean;
-  categoryOptions: string[];
-  countryOptions: string[];
-  locationTypeToggleDisabled: boolean;
   mediaTypeToggleDisabled: boolean;
-  locationFiltersDisabled: boolean;
   mediaFiltersDisabled: boolean;
-  locationSectionDisabled: boolean;
   mediaSectionDisabled: boolean;
   onSetDateFilter: (key: 'from' | 'to', value: string) => void;
-  onToggleLocationType: () => void;
   onToggleMediaType: () => void;
-  onSetLocationFilter: (key: 'venue_id' | 'category' | 'country', value: string) => void;
   onSetMediaFilter: (value: string) => void;
   onClearAll: () => void;
   /** Check-in plugin filter sections (rendered after the built-in types). */
@@ -128,23 +117,13 @@ export default function Filters(props: FiltersProps) {
     hasActiveFilters,
     fromDate,
     toDate,
-    category,
-    country,
-    includeLocation,
     includeMedia,
     mediaSubtypes,
-    categoryOptions,
-    countryOptions,
-    locationTypeToggleDisabled,
     mediaTypeToggleDisabled,
-    locationFiltersDisabled,
     mediaFiltersDisabled,
-    locationSectionDisabled,
     mediaSectionDisabled,
     onSetDateFilter,
-    onToggleLocationType,
     onToggleMediaType,
-    onSetLocationFilter,
     onSetMediaFilter,
     onClearAll,
     pluginFilterSpecs = [],
@@ -239,20 +218,6 @@ export default function Filters(props: FiltersProps) {
         </div>
       </div>
       <div className="grid gap-3 lg:grid-cols-2 items-start">
-        <LocationFilter
-          included={includeLocation}
-          filtersDisabled={locationFiltersDisabled}
-          sectionDisabled={locationSectionDisabled}
-          typeToggleDisabled={locationTypeToggleDisabled}
-          category={category}
-          country={country}
-          categoryOptions={categoryOptions}
-          countryOptions={countryOptions}
-          onToggleIncluded={onToggleLocationType}
-          onSetCategory={(value) => onSetLocationFilter('category', value)}
-          onSetCountry={(value) => onSetLocationFilter('country', value)}
-        />
-
         <MediaFilter
           included={includeMedia}
           filtersDisabled={mediaFiltersDisabled}

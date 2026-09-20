@@ -15,11 +15,13 @@ import { isValidPluginId } from 'wwp-shared';
 import { client as moodClient, manifest as moodManifest } from '../../../plugins/mood/client';
 import { client as sleepClient, manifest as sleepManifest } from '../../../plugins/sleep/client';
 import { client as tracksClient, manifest as tracksManifest } from '../../../plugins/tracks/client';
+import { client as locationClient, manifest as locationManifest } from '../../../plugins/location/client';
 
 const registrations: CheckinTypeClient[] = [
   { ...moodManifest, client: moodClient },
   { ...sleepManifest, client: sleepClient },
   { ...tracksManifest, client: tracksClient },
+  { ...locationManifest, client: locationClient },
 ];
 
 const byId = new Map<string, CheckinTypeClient>();

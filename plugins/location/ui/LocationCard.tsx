@@ -1,12 +1,12 @@
 import { Camera, Calendar, Map, MapPin, Pencil } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import type { CheckIn, Scrobble, ImmichAsset } from '../types';
-import { ScrobbleList } from './ScrobbleList';
-import { CardShell } from './checkin-card/CardShell';
-import { MarkdownNote } from './checkin-card/MarkdownNote';
-import { PhotoSection } from './checkin-card/PhotoSection';
-import { TimestampLink } from './checkin-card/TimestampLink';
-import { useResolvedPhotos } from './checkin-card/useResolvedPhotos';
+import type { CheckIn, Scrobble, ImmichAsset } from '../../../client/src/types';
+import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
+import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
+import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
+import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
+import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
+import { useResolvedPhotos } from '../../../client/src/components/checkin-card/useResolvedPhotos';
 
 interface CheckInCardProps {
   checkin: CheckIn;
@@ -52,7 +52,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
             </span>
           )}
           <TimestampLink
-            to={`/checkins/${checkin.id}`}
+            to={`/location-checkins/${checkin.id}`}
             checkedInAt={checkin.checked_in_at}
             timezone={checkin.venue_timezone}
             mode="time"
@@ -111,7 +111,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
 
           {/* Date/time */}
           <TimestampLink
-            to={`/checkins/${checkin.id}`}
+            to={`/location-checkins/${checkin.id}`}
             checkedInAt={checkin.checked_in_at}
             timezone={checkin.venue_timezone}
             mode={isHomePage ? 'time' : 'full'}
@@ -130,7 +130,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
             </Link>
           }
           <Link
-            to={`/check-in?edit=${checkin.id}`}
+            to={`/location-check-in?edit=${checkin.id}`}
             className="pressable p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-all opacity-0 translate-x-1 scale-95 group-hover:opacity-100 group-focus-within:opacity-100 group-hover:translate-x-0 group-focus-within:translate-x-0 group-hover:scale-100 group-focus-within:scale-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
             title="Edit"
           >

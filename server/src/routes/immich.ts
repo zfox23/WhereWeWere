@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { pluginTimestampBranchUnion } from '../plugins/registry';
+import { pluginTimestampUnion } from '../plugins/registry';
 
 const router = Router();
 
@@ -24,10 +24,10 @@ router.get('/photos/:checkinId', async (req: Request, res: Response) => {
     const immich = await getImmichSettings();
     if (!immich) return res.json({ assets: [] });
 
-    // Get anchor timestamp (location check-in or any plugin check-in)
+    // Get anchor timestamp (any check-in type — location, mood, sleep,
+    // tracks, ... — each resolves its rows via its plugin hook).
     const checkinResult = await query(
-      `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
-       ${pluginTimestampBranchUnion('       ')}`,
+      `${pluginTimestampUnion('       ')}`,
        [[checkinId]]
     );
     if (checkinResult.rows.length === 0) {
@@ -96,10 +96,10 @@ router.get('/photos', async (req: Request, res: Response) => {
       return res.json(empty);
     }
 
-    // Fetch all anchor timestamps across location check-ins and plugin check-ins
+    // Fetch all anchor timestamps across all check-in types (each resolves
+    // its rows via its plugin hook).
     const checkinsResult = await query(
-      `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
-       ${pluginTimestampBranchUnion('       ')}`,
+      `${pluginTimestampUnion('       ')}`,
        [checkinIds]
     );
 

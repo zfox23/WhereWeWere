@@ -16,14 +16,11 @@ import {
 import { CircleMarker, FeatureGroup, MapContainer, Marker, Polyline, Popup as LeafletPopup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { stats } from '../api/client';
-import { useTheme } from '../contexts/ThemeContext';
-import { PeriodRangeSelector } from './PeriodRangeSelector';
-import {
-  CategoryChart,
-  StatCard,
-  TopVenuesList,
-} from './Stats';
+import { stats } from '../../../client/src/api/client';
+import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
+import { StatCard } from '../../../client/src/components/Stats';
+import { CategoryChart, TopVenuesList } from './LocationStats';
 import {
   PeriodMode,
   getCurrentDateIso,
@@ -33,7 +30,7 @@ import {
   isValidDateParam,
   isValidMonthParam,
   parsePeriodParam,
-} from '../utils/periodRange';
+} from '../../../client/src/utils/periodRange';
 import type {
   CategoryBreakdown,
   CountryStats,
@@ -41,10 +38,10 @@ import type {
   MapDataPoint,
   Stats as StatsType,
   TopVenue,
-} from '../types';
-import { formatDate } from '../utils/checkin';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../utils/geo';
-import '../utils/smoothLeafletZoom';
+} from '../../../client/src/types';
+import { formatDate } from '../../../client/src/utils/checkin';
+import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from './geo';
+import '../../../client/src/utils/smoothLeafletZoom';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 

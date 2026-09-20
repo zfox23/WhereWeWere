@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { pluginTimestampBranchUnion } from '../plugins/registry';
+import { pluginTimestampUnion } from '../plugins/registry';
 
 const router = Router();
 
@@ -55,10 +55,10 @@ router.get('/', async (req: Request, res: Response) => {
     const uncachedIds = checkinIds.filter((id) => !cached.has(id));
 
     if (uncachedIds.length > 0) {
-      // Get anchor timestamps for uncached IDs across location check-ins and plugin check-ins
+      // Get anchor timestamps for uncached IDs across all check-in types
+      // (each resolves its rows via its plugin hook).
       const checkinsResult = await query(
-        `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
-         ${pluginTimestampBranchUnion('         ')}`,
+        `${pluginTimestampUnion('         ')}`,
         [uncachedIds]
       );
 

@@ -24,7 +24,7 @@ import { query, pool } from '../../server/src/db';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
-import { latestCheckinTimezoneAsOf } from '../../server/src/plugins/coreCheckins';
+import { allPlugins } from '../../server/src/plugins/registry';
 
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
@@ -394,9 +394,17 @@ function parseWebhookTimestamp(value: string | undefined): Date | null {
  *   3. 'UTC' as a last resort.
  */
 async function inferSleepTimezone(referenceTime: Date): Promise<string> {
-  const checkinTimezone = await latestCheckinTimezoneAsOf(referenceTime, USER_ID);
-  if (checkinTimezone) {
-    return checkinTimezone;
+  // Ask each registered plugin for the timezone of its most recent check-in
+  // at or before the reference time (e.g. the location plugin's hook). The
+  // first non-null result wins.
+  for (const plugin of allPlugins()) {
+    const hook = plugin.server.latestTimezoneAsOf;
+    if (!hook) continue;
+    const result = await query(hook().sql, [referenceTime.toISOString(), USER_ID]);
+    const timezone = result.rows[0]?.timezone;
+    if (timezone) {
+      return timezone as string;
+    }
   }
 
   const sleepResult = await query(

@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { pool, query } from '../db';
 import {
-  claimedLegacyKeys,
   deletePluginData,
   exportPluginData,
   importPluginData,
@@ -52,44 +51,6 @@ interface BackupSettings {
   distance_unit: string | null;
   created_at?: string;
   updated_at?: string;
-}
-
-interface BackupVenueCategory {
-  id: string;
-  name: string;
-  icon: string | null;
-  parent_id: string | null;
-  created_at: string;
-}
-
-interface BackupVenue {
-  id: string;
-  name: string;
-  category_id: string | null;
-  address: string | null;
-  city: string | null;
-  state: string | null;
-  country: string | null;
-  postal_code: string | null;
-  latitude: number;
-  longitude: number;
-  osm_id: string | null;
-  swarm_venue_id: string | null;
-  parent_venue_id: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupCheckin {
-  id: string;
-  venue_id: string;
-  notes: string | null;
-  checked_in_at: string;
-  checkin_timezone: string | null;
-  created_at: string;
-  updated_at: string;
-  swarm_id: string | null;
 }
 
 interface BackupMediaItem {
@@ -162,9 +123,6 @@ interface BackupV1 {
   data: {
     user: BackupUser | null;
     settings: BackupSettings | null;
-    venueCategories: BackupVenueCategory[];
-    venues: BackupVenue[];
-    checkins: BackupCheckin[];
     mediaItems: BackupMediaItem[];
     mediaCheckins: BackupMediaCheckin[];
     mediaLists: BackupMediaList[];
@@ -269,13 +227,6 @@ function ensureV1Backup(raw: unknown): BackupV1 {
       plugins: (migratedData.plugins as Record<string, unknown>) ?? {},
       user,
       settings,
-      venueCategories: asArray<BackupVenueCategory>(migratedData.venueCategories),
-      venues: asArray<BackupVenue>(migratedData.venues).map((venue) => ({
-        ...venue,
-        latitude: toNumber((venue as BackupVenue).latitude),
-        longitude: toNumber((venue as BackupVenue).longitude),
-      })),
-      checkins: asArray<BackupCheckin>(migratedData.checkins),
       mediaItems: asArray<BackupMediaItem>(migratedData.mediaItems),
       mediaCheckins: asArray<BackupMediaCheckin>(migratedData.mediaCheckins),
       mediaLists: asArray<BackupMediaList>(migratedData.mediaLists),
@@ -286,14 +237,11 @@ function ensureV1Backup(raw: unknown): BackupV1 {
 }
 
 router.get('/export', async (_req: Request, res: Response) => {
-  try {
-    const [
-      userResult,
-      settingsResult,
-      categoriesResult,
-      venuesResult,
-      checkinsResult,
-      mediaItemsResult,
+try {
+  const [
+    userResult,
+    settingsResult,
+    mediaItemsResult,
       mediaCheckinsResult,
       mediaListsResult,
       mediaListItemsResult,
@@ -318,32 +266,6 @@ router.get('/export', async (_req: Request, res: Response) => {
                 updated_at
          FROM user_settings
          WHERE user_id = $1`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT DISTINCT vc.id, vc.name, vc.icon, vc.parent_id, vc.created_at
-         FROM venue_categories vc
-         JOIN venues v ON v.category_id = vc.id
-         ORDER BY vc.name ASC`,
-        []
-      ),
-      query(
-        `SELECT DISTINCT v.id, v.name, v.category_id,
-                v.address, v.city, v.state, v.country, v.postal_code,
-                v.latitude, v.longitude,
-                v.osm_id, v.swarm_venue_id,
-                v.parent_venue_id, v.created_by,
-                v.created_at, v.updated_at
-         FROM venues v
-         ORDER BY v.created_at ASC`,
-        []
-      ),
-      query(
-        `SELECT id, venue_id, notes,
-                checked_in_at, checkin_timezone, created_at, updated_at, swarm_id
-         FROM checkins
-         WHERE user_id = $1
-         ORDER BY checked_in_at ASC`,
         [USER_ID]
       ),
       query(
@@ -394,13 +316,6 @@ router.get('/export', async (_req: Request, res: Response) => {
       data: {
         user: userResult.rows[0] ?? null,
         settings: settingsResult.rows[0] ?? null,
-        venueCategories: categoriesResult.rows,
-        venues: venuesResult.rows.map((venue) => ({
-          ...venue,
-          latitude: toNumber(venue.latitude),
-          longitude: toNumber(venue.longitude),
-        })),
-        checkins: checkinsResult.rows,
         mediaItems: mediaItemsResult.rows,
         mediaCheckins: mediaCheckinsResult.rows,
         mediaLists: mediaListsResult.rows,
@@ -427,8 +342,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
 
     const backup = ensureV1Backup(rawPayload);
     const counts: Record<string, { inserted: number; skipped: number }> = {
-      venues: { inserted: 0, skipped: 0 },
-      checkins: { inserted: 0, skipped: 0 },
       mediaItems: { inserted: 0, skipped: 0 },
       mediaCheckins: { inserted: 0, skipped: 0 },
       mediaLists: { inserted: 0, skipped: 0 },
@@ -438,11 +351,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
 
     await client.query('BEGIN');
 
-    // Plugins that have their own payload in this backup take over their
-    // legacy data keys (e.g. mood) and the legacy loops below are skipped.
     const pluginsPayload = (backup.data as Record<string, any>).plugins ?? null;
-    const claimedKeys = claimedLegacyKeys(pluginsPayload);
-    const isClaimed = (key: string) => claimedKeys.has(key);
 
     if (backup.data.user?.display_name !== undefined) {
       await client.query(
@@ -505,143 +414,6 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
             [USER_ID, plugin.id, key, JSON.stringify(value)]
           );
         }
-      }
-    }
-
-    const categoryIdMap = new Map<string, string>();
-    for (const category of backup.data.venueCategories) {
-      if (!category?.name) continue;
-
-      const result = await client.query(
-        `INSERT INTO venue_categories (id, name, icon, parent_id, created_at)
-         VALUES ($1, $2, $3, NULL, COALESCE($4::timestamptz, NOW()))
-         ON CONFLICT (name) DO UPDATE SET
-           icon = COALESCE(EXCLUDED.icon, venue_categories.icon)
-         RETURNING id`,
-        [
-          category.id,
-          category.name,
-          toStringOrNull(category.icon),
-          category.created_at || null,
-        ]
-      );
-      categoryIdMap.set(category.id, result.rows[0].id);
-    }
-
-    for (const category of backup.data.venueCategories) {
-      const localCategoryId = categoryIdMap.get(category.id);
-      const localParentId = category.parent_id ? categoryIdMap.get(category.parent_id) : null;
-      if (!localCategoryId || !localParentId || localCategoryId === localParentId) continue;
-
-      await client.query(
-        `UPDATE venue_categories
-         SET parent_id = $2
-         WHERE id = $1`,
-        [localCategoryId, localParentId]
-      );
-    }
-
-    for (const venue of backup.data.venues) {
-      if (!venue?.id || !venue.name) {
-        counts.venues.skipped += 1;
-        errors.push(`Skipped venue with missing id/name`);
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO venues (
-           id, name, category_id,
-           address, city, state, country, postal_code,
-           latitude, longitude,
-           osm_id, swarm_venue_id,
-           parent_venue_id, created_by,
-           created_at, updated_at
-         )
-         VALUES (
-           $1, $2, $3,
-           $4, $5, $6, $7, $8,
-           $9, $10,
-           $11, $12,
-           NULL, $13,
-           COALESCE($14::timestamptz, NOW()), COALESCE($15::timestamptz, NOW())
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          venue.id,
-          venue.name,
-          venue.category_id ? (categoryIdMap.get(venue.category_id) ?? null) : null,
-          toStringOrNull(venue.address),
-          toStringOrNull(venue.city),
-          toStringOrNull(venue.state),
-          toStringOrNull(venue.country),
-          toStringOrNull(venue.postal_code),
-          toNumber(venue.latitude),
-          toNumber(venue.longitude),
-          toStringOrNull(venue.osm_id),
-          toStringOrNull(venue.swarm_venue_id),
-          USER_ID,
-          venue.created_at || null,
-          venue.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.venues.inserted += 1;
-      } else {
-        counts.venues.skipped += 1;
-      }
-    }
-
-    for (const venue of backup.data.venues) {
-      if (!venue.parent_venue_id) continue;
-      await client.query(
-        `UPDATE venues
-         SET parent_venue_id = $2
-         WHERE id = $1`,
-        [venue.id, venue.parent_venue_id]
-      );
-    }
-
-    for (const checkin of backup.data.checkins) {
-      if (!checkin?.id || !checkin.venue_id) {
-        counts.checkins.skipped += 1;
-        errors.push('Skipped check-in with missing id/venue_id');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO checkins (
-           id, user_id, venue_id,
-           notes,
-           checked_in_at, checkin_timezone, created_at, updated_at,
-           swarm_id
-         )
-         VALUES (
-           $1, $2, $3,
-           $4,
-           COALESCE($5::timestamptz, NOW()), $6,
-           COALESCE($7::timestamptz, NOW()),
-           COALESCE($8::timestamptz, NOW()),
-           $9
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          checkin.id,
-          USER_ID,
-          checkin.venue_id,
-          checkin.notes || null,
-          checkin.checked_in_at || null,
-          toStringOrNull(checkin.checkin_timezone),
-          checkin.created_at || null,
-          checkin.updated_at || null,
-          checkin.swarm_id || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.checkins.inserted += 1;
-      } else {
-        counts.checkins.skipped += 1;
       }
     }
 
@@ -872,10 +644,13 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     const rawOptions = req.body?.options ?? {};
     const deleteAllCheckins = Boolean(rawOptions.delete_all_checkins);
-    const deleteVenueCheckins = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
     // Per-plugin check-in deletion: options use `delete_<pluginId>_checkins`.
+    // Legacy `delete_venue_checkins` maps to the location plugin.
+    const legacyVenueDelete = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
     const selectedPluginCheckinIds = allPlugins()
-      .filter((p) => deleteAllCheckins || Boolean(rawOptions[`delete_${p.id}_checkins`]))
+      .filter((p) => deleteAllCheckins
+        || Boolean(rawOptions[`delete_${p.id}_checkins`])
+        || (legacyVenueDelete && p.id === 'location'))
       .map((p) => p.id);
     const deleteMediaItems = Boolean(rawOptions.delete_media_items);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
@@ -885,7 +660,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
       .map((p) => p.id);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && selectedPluginCheckinIds.length === 0 && !deleteMediaItems && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
+    if (selectedPluginCheckinIds.length === 0 && !deleteMediaItems && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -894,18 +669,6 @@ router.post('/start-over', async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     const counts: Record<string, number> = {};
-
-    if (deleteVenueCheckins) {
-      const scrobbleResult = await client.query(
-        `DELETE FROM checkin_scrobbles
-         WHERE checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
-        [USER_ID]
-      );
-      counts.checkin_scrobbles = scrobbleResult.rowCount ?? 0;
-
-      const checkinResult = await client.query('DELETE FROM checkins WHERE user_id = $1', [USER_ID]);
-      counts.checkins = checkinResult.rowCount ?? 0;
-    }
 
     if (selectedPluginCheckinIds.length > 0) {
       // Check-in plugins own their deletion via their deleteUserData hook.

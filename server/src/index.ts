@@ -2,12 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import type { Request, Response, NextFunction } from 'express';
 import { config } from './config';
-import { checkinsRouter } from './routes/checkins';
-import { venuesRouter } from './routes/venues';
 import { statsRouter } from './routes/stats';
-import { searchRouter } from './routes/search';
 import { settingsRouter } from './routes/settings';
-import { importRouter } from './routes/import';
 import { jobsRouter } from './routes/jobs';
 import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
@@ -67,12 +63,8 @@ export function createApp() {
   }
 
   // API routes
-  app.use('/api/v1/checkins', checkinsRouter);
-  app.use('/api/v1/venues', venuesRouter);
   app.use('/api/v1/stats', statsRouter);
-  app.use('/api/v1/search', searchRouter);
   app.use('/api/v1/settings', settingsRouter);
-  app.use('/api/v1/import/swarm', importRouter);
   app.use('/api/v1/jobs', jobsRouter);
   app.use('/api/v1/scrobbles', scrobblesRouter);
   app.use('/api/v1/immich', immichRouter);

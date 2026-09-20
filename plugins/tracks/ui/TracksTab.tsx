@@ -14,7 +14,7 @@ import type { PluginProfileTabProps } from 'wwp-shared';
 import { settings, stats } from '../../../client/src/api/client';
 import { tracks } from './api';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../../client/src/utils/geo';
+import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../location/ui/geo';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
 import {
@@ -31,7 +31,7 @@ import {
   formatDuration,
   formatSpeed,
   type DistanceUnit,
-} from '../../../client/src/utils/geo';
+} from '../../location/ui/geo';
 import type { TrackEntry, TrackMapEntry } from './types';
 
 const PAGE_SIZE = 500;

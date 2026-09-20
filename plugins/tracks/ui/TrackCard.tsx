@@ -11,7 +11,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Clock, Route } from 'lucide-react';
 import type { CheckinCardProps } from 'wwp-shared';
 import type { TrackTimelineFields } from './types';
-import { formatDistance, type DistanceUnit } from '../../../client/src/utils/geo';
+import { formatDistance, type DistanceUnit } from '../../location/ui/geo';
 import { settings } from '../../../client/src/api/client';
 import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';

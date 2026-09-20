@@ -27,7 +27,7 @@ import type {
 import { query, pool } from '../../server/src/db';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
-import { getVenueTimezone } from '../../server/src/services/timestampReconciliation';
+import { getVenueTimezone } from '../location/services/geoTimezone';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
 import {

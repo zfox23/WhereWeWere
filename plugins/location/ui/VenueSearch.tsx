@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, MapPin, Plus, Loader2, Navigation, LocateFixed, Navigation2 } from 'lucide-react';
-import { settings, venues } from '../api/client';
-import { useLocation } from '../contexts/LocationContext';
-import { haversineDistance, getBearingDegrees, formatDistance } from '../utils/geo';
+import { settings, venues } from '../../../client/src/api/client';
+import { useLocation } from './LocationContext';
+import { haversineDistance, getBearingDegrees, formatDistance } from './geo';
 import VenueEditMap from './VenueEditMap';
-import type { NearbyVenue, VenueCategory } from '../types';
-import type { DistanceUnit } from '../utils/geo';
+import type { NearbyVenue, VenueCategory } from '../../../client/src/types';
+import type { DistanceUnit } from './geo';
 
 const NEARBY_PAGE_SIZE = 20;
 const DEFAULT_NEARBY_RADIUS_METERS = 5000;

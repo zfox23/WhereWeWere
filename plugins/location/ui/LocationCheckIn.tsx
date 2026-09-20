@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, MapPin, Loader2 } from 'lucide-react';
-import VenueSearch from '../components/VenueSearch';
-import type { SelectedVenue } from '../components/VenueSearch';
-import CheckInForm from '../components/CheckInForm';
-import MapView from '../components/MapView';
-import { venues, checkins } from '../api/client';
-import type { CheckIn as CheckInType } from '../types';
-import { useLocation as useCurrentLocation } from '../contexts/LocationContext';
-import { usePageTitle } from '../utils/pageTitle';
+import VenueSearch from './VenueSearch';
+import type { SelectedVenue } from './VenueSearch';
+import CheckInForm from './LocationCheckInForm';
+import MapView from './MapView';
+import { venues, checkins } from '../../../client/src/api/client';
+import type { CheckIn as CheckInType } from '../../../client/src/types';
+import { useLocation as useCurrentLocation } from './LocationContext';
+import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -19,15 +19,17 @@ function applyDateToIsoString(date: string, fallbackIso?: string): string {
   return `${date}T${String(timeHours).padStart(2, '0')}:${String(timeMinutes).padStart(2, '0')}:00`;
 }
 
-export default function CheckIn() {
+export default function CheckIn(props: { editId?: string | null; dateParam?: string | null } = {}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { refetch } = useCurrentLocation();
 
-  const editId = searchParams.get('edit');
+  // editId/dateParam are passed by the plugin route wrapper; the raw query
+  // params are kept as a fallback for direct deep links.
+  const editId = props.editId ?? searchParams.get('edit');
   usePageTitle(editId ? 'Edit Check-In' : 'New Check-In');
 
-  const dateParam = searchParams.get('date') || '';
+  const dateParam = props.dateParam ?? searchParams.get('date') ?? '';
   const prefillsDate = DATE_ONLY_PATTERN.test(dateParam);
   const [selectedVenue, setSelectedVenue] = useState<SelectedVenue | null>(null);
   const [selectedVenueCoords, setSelectedVenueCoords] = useState<{ lat: number; lng: number } | null>(null);

@@ -33,17 +33,17 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
   return res.json();
 }
 
-// Checkins
+// Location check-ins (location plugin)
 export const checkins = {
   list: (params?: Record<string, string>) =>
-    request<any[]>(`/checkins?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/checkins/${id}`),
+    request<any[]>(`/location-checkins?${new URLSearchParams(params)}`),
+  get: (id: string) => request<any>(`/location-checkins/${id}`),
   create: (data: any) =>
-    request<any>('/checkins', { method: 'POST', body: JSON.stringify(data) }),
+    request<any>('/location-checkins', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) =>
-    request<any>(`/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    request<any>(`/location-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
-    request<void>(`/checkins/${id}`, { method: 'DELETE' }),
+    request<void>(`/location-checkins/${id}`, { method: 'DELETE' }),
 };
 
 // Venues
@@ -80,7 +80,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any>(`/stats/summary?${qp.toString()}`);
+    return request<any>(`/location-checkins/stats/summary?${qp.toString()}`);
   },
   topVenues: (userId: string, limit = 10, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId, limit: String(limit) });
@@ -88,7 +88,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/top-venues?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/top-venues?${qp.toString()}`);
   },
   categoryBreakdown: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -96,17 +96,17 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/category-breakdown?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/category-breakdown?${qp.toString()}`);
   },
   heatmap: (userId: string, year: number) =>
-    request<any[]>(`/stats/heatmap?user_id=${userId}&year=${year}`),
+    request<any[]>(`/location-checkins/stats/heatmap?user_id=${userId}&year=${year}`),
   countries: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
     if (from && to) {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/countries?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/countries?${qp.toString()}`);
   },
   mapData: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -114,7 +114,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/map-data?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/map-data?${qp.toString()}`);
   },
   dayOfWeek: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -122,7 +122,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/day-of-week?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/day-of-week?${qp.toString()}`);
   },
   timeOfDay: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -130,7 +130,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/time-of-day?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/time-of-day?${qp.toString()}`);
   },
   busiestDays: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -138,7 +138,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/busiest-days?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/busiest-days?${qp.toString()}`);
   },
   topCities: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -146,7 +146,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/top-cities?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/top-cities?${qp.toString()}`);
   },
   reflections: (userId: string, targetDate?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -156,7 +156,7 @@ export const stats = {
     return request<any[]>(`/stats/reflections?${qp.toString()}`);
   },
   additionalStats: (userId: string) =>
-    request<any>(`/stats/additional-stats?user_id=${userId}`),
+    request<any>(`/location-checkins/stats/additional-stats?user_id=${userId}`),
   earliestDates: (userId: string) =>
     request<{ checkins: string | null; tracks: string | null; [typeId: string]: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
 };

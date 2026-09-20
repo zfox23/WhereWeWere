@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/server/src/index.js",
     "migrate": "tsx src/db/migrate.ts",
-    "backfill:checkin-timezone": "tsx src/db/backfill-checkin-timezone.ts",
+    "backfill:checkin-timezone": "tsx ../plugins/location/scripts/backfill-checkin-timezone.ts",
     "backfill:track-max-speeds": "tsx ../plugins/tracks/scripts/backfill-track-max-speeds.ts",
     "backfill:track-avg-speeds": "tsx ../plugins/tracks/scripts/backfill-track-avg-speeds.ts",
     "backfill:tgdb-external-urls": "tsx src/db/backfill-tgdb-external-urls.ts",
