@@ -6,7 +6,6 @@ import { allClientPlugins } from '../../plugins/registry';
 type StartOverOptions = {
   delete_all_checkins: boolean;
   delete_venue_checkins: boolean;
-  delete_media_items: boolean;
   reset_account_settings: boolean;
   reset_integrations_settings: boolean;
   /** Per-plugin options: `delete_<pluginId>_checkins`, `reset_<pluginId>_settings`. */
@@ -27,7 +26,6 @@ export function StartOverSection() {
   const [options, setOptions] = useState<StartOverOptions>({
     delete_all_checkins: false,
     delete_venue_checkins: false,
-    delete_media_items: false,
     reset_account_settings: false,
     reset_integrations_settings: false,
     ...Object.fromEntries(plugins.flatMap((p) => [
@@ -110,15 +108,6 @@ export function StartOverSection() {
             <span>All {plugin.strings.title} {plugin.strings.plural}</span>
           </label>
         ))}
-        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={options.delete_media_items}
-            onChange={() => toggleOption('delete_media_items')}
-          />
-          <span>All Media (locally stored media items, check-ins, and lists — e.g. before re-importing a Yamtrack export)</span>
-        </label>
         <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
           <input
             type="checkbox"

@@ -25,12 +25,15 @@ import { server as tracksServer } from '../../../plugins/tracks/server';
 import { manifest as tracksManifest } from '../../../plugins/tracks/manifest';
 import { server as locationServer } from '../../../plugins/location/server';
 import { manifest as locationManifest } from '../../../plugins/location/manifest';
+import { server as mediaServer } from '../../../plugins/media/server';
+import { manifest as mediaManifest } from '../../../plugins/media/manifest';
 
 const registrations: CheckinTypeServer[] = [
   { ...moodManifest, server: moodServer },
   { ...sleepManifest, server: sleepServer },
   { ...tracksManifest, server: tracksServer },
   { ...locationManifest, server: locationServer },
+  { ...mediaManifest, server: mediaServer },
 ];
 
 const byId = new Map<string, CheckinTypeServer>();

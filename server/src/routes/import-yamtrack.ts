@@ -6,7 +6,7 @@ import {
   countPlans,
   type YamtrackPlanItem,
 } from '../services/yamtrack';
-import { normalizeTitle, titleRelation } from '../services/titleMatch';
+import { upsertMediaItemWithClient } from '../../../plugins/media/server';
 
 const router = Router();
 
@@ -148,66 +148,6 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
   }
 
   return { results, imported_checkins: importedCheckins, created_media_items: createdMediaItems, duplicates_skipped: duplicatesSkipped };
-}
-
-/**
- * Find-or-create a media item within the caller's transaction.
- * Mirrors upsertMediaItem but takes an explicit client.
- *
- * Local-only items (no external_source/external_id — e.g. Yamtrack games,
- * which carry IGDB ids we must not store as TGDB ids, and board games) are
- * deduped by strict title match instead: exact normalized title, or a
- * same-game edition qualifier. Everything else counts as a different item,
- * so re-imports never create duplicate rows (same rules as the games-CSV
- * importer).
- */
-async function upsertMediaItemWithClient(
-  client: import('pg').PoolClient,
-  input: {
-    media_type: string;
-    external_source: string | null;
-    external_id: string | null;
-    title: string;
-    author: string | null;
-    release_year: number | null;
-    image_url: string | null;
-    external_url: string | null;
-  }
-): Promise<{ id: string; created: boolean }> {
-  if (input.external_source && input.external_id) {
-    const existing = await client.query(
-      `SELECT id FROM media_items
-       WHERE user_id = $1 AND media_type = $2 AND external_source = $3 AND external_id = $4`,
-      [USER_ID, input.media_type, input.external_source, input.external_id]
-    );
-    if (existing.rows.length > 0) {
-      return { id: existing.rows[0].id as string, created: false };
-    }
-  } else {
-    // Local-only: find an existing item of the same type by strict title.
-    const siblings = await client.query(
-      `SELECT id, title FROM media_items
-       WHERE user_id = $1 AND media_type = $2 AND external_source IS NULL`,
-      [USER_ID, input.media_type]
-    );
-    const key = normalizeTitle(input.title);
-    const match = siblings.rows.find(
-      (r) => titleRelation(key, normalizeTitle(r.title as string)) !== 'none'
-    );
-    if (match) {
-      return { id: match.id as string, created: false };
-    }
-  }
-
-  const inserted = await client.query(
-    `INSERT INTO media_items (user_id, media_type, external_source, external_id, title, author, release_year, image_url, external_url)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT (user_id, media_type, external_source, external_id) WHERE external_source IS NOT NULL AND external_id IS NOT NULL
-     DO UPDATE SET updated_at = media_items.updated_at
-     RETURNING id`,
-    [USER_ID, input.media_type, input.external_source, input.external_id, input.title, input.author, input.release_year, input.image_url, input.external_url]
-  );
-  return { id: inserted.rows[0].id as string, created: true };
 }
 
 // POST /preview - parse + classify the CSV without writing anything

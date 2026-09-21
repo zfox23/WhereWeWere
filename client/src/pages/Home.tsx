@@ -1,17 +1,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, Clapperboard, AlignJustify, Rows3 } from 'lucide-react';
+import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, AlignJustify, Rows3 } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
 import { Scrobble, ImmichAsset, TimelineItem } from '../types';
 import type { PluginTimelineEntry } from 'wwp-shared';
 import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/registry';
 import { PluginTimelineCard } from '../plugins/autoCard';
 import { plugins as pluginApi } from '../plugins/api';
-import MediaCard from '../components/MediaCard';
 import Filters from '../components/filters/Filters';
 import { usePageTitle } from '../utils/pageTitle';
-import { MEDIA_SUBTYPES } from '../utils/media';
-import type { MediaSubtype } from '../types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
@@ -25,16 +22,8 @@ const PLUGIN_HOTKEYS: Record<string, string> = Object.fromEntries(
     .map((p) => [p.client.hotkey as string, p.client.checkInPath]),
 );
 
-/**
- * Timeline types that still use the legacy built-in filter panel and include
- * state (media). A plugin whose id is here is rendered as a plugin (card/FAB/
- * hotkey/detail) but its FILTERS + include toggle remain on the legacy path
- * so nothing is lost during transition. Other plugins get the generic plugin
- * filter section and include state automatically.
- */
-const LEGACY_TYPE_IDS = new Set(['media']);
-/** Check-in plugins that are NOT legacy types (fully generic treatment). */
-const NEW_PLUGINS = allClientPlugins().filter((p) => !LEGACY_TYPE_IDS.has(p.id));
+/** All registered check-in plugins get the generic filter section + include state. */
+const NEW_PLUGINS = allClientPlugins();
 
 function formatDateHeader(dateStr: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -105,17 +94,6 @@ function ExpandableFAB() {
       />
 
       <div className={`fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end transition-all duration-200 ease-out ${expanded ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'}`} aria-hidden={!expanded}>
-          <Link
-            to="/media-check-in"
-            onClick={() => setExpanded(false)}
-            className={`flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all text-sm font-medium ${expanded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
-            style={{ transitionDelay: expanded ? '0ms' : '60ms' }}
-            tabIndex={expanded ? 0 : -1}
-          >
-            <Clapperboard size={18} className="text-violet-500" />
-            Media
-            <kbd className="ml-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">N</kbd>
-          </Link>
           {FAB_PLUGINS.map((plugin) => {
             const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
             return (
@@ -159,12 +137,8 @@ export default function Home() {
   const location = useLocation();
   const newId = (location.state as { newId?: string } | null)?.newId ?? null;
   const newIdAnimatedRef = useRef<string | null>(null);
-  const typeParam = searchParams.get('type') || '';
-  const timelineType = typeParam === 'media' ? typeParam : '';
   const [items, setItems] = useState<TimelineItem[]>([]);
-  const [includeMedia, setIncludeMedia] = useState(() => timelineType !== 'media');
-  // Inclusion state for NEW check-in plugin types (legacy types like mood
-  // keep their built-in include state).
+  // Inclusion state for each check-in plugin type.
   const [pluginIncludes, setPluginIncludes] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(NEW_PLUGINS.map((p) => [p.id, true])),
   );
@@ -228,11 +202,9 @@ export default function Home() {
   const venueId = searchParams.get('venue_id') || '';
   const category = searchParams.get('category') || '';
   const country = searchParams.get('country') || '';
-  const mediaSubtypes = searchParams.get('media_subtype') || '';
   const [showFilters, setShowFilters] = useState(false);
 
-  // Check-in plugin filter params, scoped per NEW plugin (legacy types like
-  // mood keep their built-in filter params/panel).
+  // Check-in plugin filter params, scoped per plugin.
   const pluginFilterParams = useMemo(() => {
     const out: Record<string, Record<string, string>> = {};
     for (const plugin of NEW_PLUGINS) {
@@ -253,14 +225,10 @@ export default function Home() {
     return null;
   }, [pluginFilterParams]);
   const hasPluginFilter = activePluginFilterId !== null;
-  const hasMediaTypeFilter = Boolean(mediaSubtypes);
-  const mediaFiltersDisabled = hasPluginFilter;
-  const mediaTypeToggleDisabled = hasPluginFilter;
-  const mediaSectionDisabled = mediaFiltersDisabled || !includeMedia;
 
   // Plugin filter disabled states (mutually exclusive with every other type).
-  const pluginFiltersDisabled = hasMediaTypeFilter || hasPluginFilter;
-  const pluginTypeToggleDisabled = hasMediaTypeFilter || hasPluginFilter;
+  const pluginFiltersDisabled = hasPluginFilter;
+  const pluginTypeToggleDisabled = hasPluginFilter;
 
   // Whether any plugin check-in type is currently included in the timeline.
   const anyPluginOn = Object.entries(pluginIncludes).some(([, v]) => v ?? true);
@@ -268,7 +236,7 @@ export default function Home() {
   const pluginFilterSpecs = NEW_PLUGINS.map((plugin) => ({
     plugin,
     included: pluginIncludes[plugin.id] ?? true,
-    filtersDisabled: pluginFiltersDisabled || !includedForType(plugin.id),
+    filtersDisabled: pluginFiltersDisabled || !(pluginIncludes[plugin.id] ?? true),
     sectionDisabled: pluginFiltersDisabled || !(pluginIncludes[plugin.id] ?? true),
     typeToggleDisabled: pluginTypeToggleDisabled,
     params: pluginFilterParams[plugin.id] ?? {},
@@ -277,7 +245,6 @@ export default function Home() {
   }));
 
   function includedForType(type: string): boolean {
-    if (type === 'media') return includeMedia;
     if (NEW_PLUGINS.some((p) => p.id === type)) return pluginIncludes[type] ?? true;
     return true;
   }
@@ -287,9 +254,7 @@ export default function Home() {
     setPluginIncludes((prev) => {
       const current = prev[pluginId] ?? true;
       // Keep at least one type visible.
-      const othersOn =
-        Object.keys(prev).some((k) => k !== pluginId && (prev[k] ?? true)) ||
-        includeMedia;
+      const othersOn = Object.keys(prev).some((k) => k !== pluginId && (prev[k] ?? true));
       if (current && !othersOn) {
         return prev;
       }
@@ -306,14 +271,12 @@ export default function Home() {
       next.delete('category');
       next.delete('country');
       next.delete('track_activity');
-      next.delete('media_subtype');
       next.delete('type');
       if (value) next.set(name, value);
       return next;
     }, { replace: true });
 
     if (value) {
-      setIncludeMedia(false);
       setAllPluginIncludes(false);
       setOnlyPluginInclude(pluginId, true);
     }
@@ -322,61 +285,28 @@ export default function Home() {
   // A plugin filter narrows to that one plugin type.
   useEffect(() => {
     if (activePluginFilterId) {
-      setIncludeMedia(false);
       if (hasClientPlugin(activePluginFilterId)) {
         setOnlyPluginInclude(activePluginFilterId, true);
       }
     }
   }, [activePluginFilterId, setOnlyPluginInclude]);
 
+  // Restores include state. Plugin filter branches intentionally do NOT
+  // touch `pluginIncludes`: plugin sections are independent of the legacy
+  // `type` selection, and unconditionally resetting them here clobbered
+  // plugin toggles whenever the URL-sync effect below wrote `type` after a
+  // normal include toggle.
   useEffect(() => {
-    if (hasMediaTypeFilter) {
-      setIncludeMedia(true);
-      setAllPluginIncludes(false);
-    }
-  }, [hasMediaTypeFilter, setAllPluginIncludes]);
-
-  // Restores include state from the URL's `type` param. Plugin filter
-  // branches intentionally do NOT touch `pluginIncludes`: plugin sections
-  // are independent of the legacy media `type` selection, and
-  // unconditionally resetting them here clobbered plugin toggles whenever
-  // the URL-sync effect below wrote `type` after a normal include toggle.
-  useEffect(() => {
-    if (hasPluginFilter || hasMediaTypeFilter) return;
-    if (timelineType === 'media') {
-      setIncludeMedia(true);
-      return;
-    }
-    setIncludeMedia(true);
+    if (hasPluginFilter) return;
     setAllPluginIncludes(true);
-  }, [hasPluginFilter, hasMediaTypeFilter, timelineType, setAllPluginIncludes]);
-
-  // Syncs the `type` URL param from the include toggles. The param only
-  // encodes "only media visible, no plugins visible", so when any plugin
-  // type is on the selection is mixed and the param stays put instead of
-  // mislabeling the timeline.
-  useEffect(() => {
-    if (hasPluginFilter || hasMediaTypeFilter) return;
-    const nextType = anyPluginOn ? timelineType : includeMedia ? 'media' : '';
-    if (nextType === timelineType) return;
-
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (nextType) {
-        next.set('type', nextType);
-      } else {
-        next.delete('type');
-      }
-      return next;
-    }, { replace: true });
-  }, [hasPluginFilter, hasMediaTypeFilter, includeMedia, anyPluginOn, setSearchParams, timelineType]);
+  }, [hasPluginFilter, setAllPluginIncludes]);
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
-    if (fromDate || toDate || venueId || category || country || mediaSubtypes || hasPluginFilter) {
+    if (fromDate || toDate || venueId || category || country || hasPluginFilter) {
       setShowFilters(true);
     }
-  }, [fromDate, toDate, venueId, category, country, mediaSubtypes, hasPluginFilter]);
+  }, [fromDate, toDate, venueId, category, country, hasPluginFilter]);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const feedContainerRef = useRef<HTMLDivElement>(null);
@@ -395,12 +325,8 @@ export default function Home() {
         target.isContentEditable;
       if (isEditable || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
 
-      // Built-in hotkeys plus plugin-declared hotkeys (plugins may override
-      // built-in keys, e.g. mood's 'm').
-      const hotkeyRoutes: Record<string, string> = {
-        n: '/media-check-in',
-        ...PLUGIN_HOTKEYS,
-      };
+      // Plugin-declared hotkeys (plugins may override built-in keys).
+      const hotkeyRoutes: Record<string, string> = { ...PLUGIN_HOTKEYS };
       const route = hotkeyRoutes[e.key.toLowerCase()];
       if (route) {
         e.preventDefault();
@@ -423,35 +349,6 @@ export default function Home() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  const setMediaSubtypeFilter = useCallback((value: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      // Clear every plugin filter param (mutual exclusivity).
-      for (const key of pluginFilterKeys) next.delete(key);
-      next.delete('type');
-      if (value) {
-        next.set('media_subtype', value);
-      } else {
-        next.delete('media_subtype');
-      }
-      return next;
-    }, { replace: true });
-
-    if (value) {
-      setIncludeMedia(true);
-      setAllPluginIncludes(false);
-    }
-  }, [setSearchParams, setAllPluginIncludes, pluginFilterKeys]);
-
-  const toggleMediaType = useCallback(() => {
-    if (mediaTypeToggleDisabled) return;
-    setIncludeMedia((prev) => {
-      // Keep at least one type visible (any plugin counts).
-      if (prev && !anyPluginOn) return prev;
-      return !prev;
-    });
-  }, [anyPluginOn, mediaTypeToggleDisabled]);
-
   const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
       if (append) {
@@ -471,10 +368,9 @@ export default function Home() {
         if (fromDate) params.from = fromDate;
         if (toDate) params.to = toDate;
         if (venueId) params.venue_id = venueId;
-          if (category) params.category = category;
-          if (country) params.country = country;
-          if (mediaSubtypes) params.media_subtype = mediaSubtypes;
-          // Plugin filter params.
+        if (category) params.category = category;
+        if (country) params.country = country;
+        // Plugin filter params (including the media plugin's media_subtype).
           for (const [pluginId, pluginParams] of Object.entries(pluginFilterParams)) {
             for (const [name, value] of Object.entries(pluginParams)) {
               params[name] = value;
@@ -496,7 +392,7 @@ export default function Home() {
           setLoadingMore(false);
         }
       },
-      [searchQuery, fromDate, toDate, venueId, category, country, mediaSubtypes, pluginFilterParams]
+      [searchQuery, fromDate, toDate, venueId, category, country, pluginFilterParams]
     );
 
   // Initial load + reload on filter changes
@@ -621,10 +517,10 @@ export default function Home() {
 
     revealObserverRef.current = observer;
     return () => observer.disconnect();
-    // includeMedia and pluginIncludes must retrigger this effect: when a
-    // type is re-included, React mounts fresh `motion-safe-reveal` divs
-    // that would otherwise never receive `.is-visible` and stay at opacity 0.
-  }, [items, includeMedia, pluginIncludes, loading, loadingMore]);
+    // pluginIncludes must retrigger this effect: when a type is
+    // re-included, React mounts fresh `motion-safe-reveal` divs that would
+    // otherwise never receive `.is-visible` and stay at opacity 0.
+  }, [items, pluginIncludes, loading, loadingMore]);
 
   // Scroll to and animate newly created entry
   useEffect(() => {
@@ -638,21 +534,19 @@ export default function Home() {
 
   const clearFilters = () => {
     setSearchParams({}, { replace: true });
-    setIncludeMedia(true);
     setAllPluginIncludes(true);
     setShowFilters(false);
   };
 
   const hasNewPluginFilter = Object.keys(pluginIncludes).some((k) => !(pluginIncludes[k] ?? true));
-  const hasTypeSelectionFilter = !includeMedia || hasNewPluginFilter;
+  const hasTypeSelectionFilter = hasNewPluginFilter;
   const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || hasPluginFilter || hasTypeSelectionFilter;
   const visibleItems = useMemo(
     () => items.filter((item) => {
-      if (item.type === 'media') return includeMedia;
       if (NEW_PLUGINS.some((p) => p.id === item.type)) return pluginIncludes[item.type] ?? true;
       return false;
     }),
-    [items, includeMedia, pluginIncludes]
+    [items, pluginIncludes]
   );
   const rawGrouped = groupByDate(visibleItems);
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
@@ -671,14 +565,12 @@ export default function Home() {
     if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
     if (toDate) filterPills.push({ label: `Until: ${toDate}`, key: 'to' });
   }
-  // "Media only" is only accurate when media is the sole visible type —
-  // with any plugin type also on, the timeline is mixed and no pill.
-  if (includeMedia && !anyPluginOn) filterPills.push({ label: 'Type: Media only', key: 'type_media_only' });
-  if (mediaSubtypes) {
-    filterPills.push({
-      label: `Media: ${mediaSubtypes.split(',').map((s) => MEDIA_SUBTYPES[s.trim() as MediaSubtype]?.label || s.trim()).join(', ')}`,
-      key: 'media_subtype',
-    });
+  // One pill per active plugin filter param (e.g. the media plugin's
+  // media_subtype). Generic over all check-in plugins that declare filterParams.
+  for (const plugin of NEW_PLUGINS) {
+    for (const [name, value] of Object.entries(pluginFilterParams[plugin.id] ?? {})) {
+      filterPills.push({ label: `${plugin.strings.title}: ${value}`, key: name });
+    }
   }
 
   return (
@@ -745,10 +637,6 @@ export default function Home() {
                       next.delete('to');
                       return next;
                     }, { replace: true });
-                  } else if (pill.key === 'type_media_only') {
-                    setAllPluginIncludes(true);
-                  } else if (pill.key === 'media_subtype') {
-                    setMediaSubtypeFilter('');
                   } else {
                     setFilter(pill.key, '');
                   }
@@ -777,14 +665,7 @@ export default function Home() {
             hasActiveFilters={Boolean(hasActiveFilters)}
             fromDate={fromDate}
             toDate={toDate}
-            mediaSubtypes={mediaSubtypes}
-            includeMedia={includeMedia}
-            mediaTypeToggleDisabled={mediaTypeToggleDisabled}
-            mediaFiltersDisabled={mediaFiltersDisabled}
-            mediaSectionDisabled={mediaSectionDisabled}
             onSetDateFilter={setFilter}
-            onToggleMediaType={toggleMediaType}
-            onSetMediaFilter={setMediaSubtypeFilter}
             onClearAll={clearFilters}
             pluginFilterSpecs={pluginFilterSpecs}
           />
@@ -912,9 +793,7 @@ export default function Home() {
                             scrobbles={dedupedScrobblesMap[item.id]}
                             settings={pluginSettings[item.type]}
                           />
-                        ) : (
-                          <MediaCard item={item} compact={timelineDensity === 'compact'} />
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}

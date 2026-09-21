@@ -8,12 +8,15 @@ import PluginCheckInDetail from './pages/PluginCheckInDetail';
 import VenueDetail from '../../plugins/location/ui/VenueDetail';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
-import MediaCheckInLanding from './pages/media/MediaCheckInLanding';
-import MediaSearch from './pages/media/MediaSearch';
-import MediaCheckInForm from './pages/media/MediaCheckInForm';
-import TvEpisodePicker from './pages/media/TvEpisodePicker';
-import TvEpisodeCheckInForm from './pages/media/TvEpisodeCheckInForm';
-import MediaDetail from './pages/media/MediaDetail';
+// Media plugin pages. The search-first check-in flow is multi-step with
+// per-subtype routes, so they are registered here directly from the plugin
+// (the framework's plugin route table covers the bare /media-check-in
+// landing via checkInPath).
+import MediaSearch from '../../plugins/media/ui/pages/MediaSearch';
+import MediaCheckInForm from '../../plugins/media/ui/pages/MediaCheckInForm';
+import TvEpisodePicker from '../../plugins/media/ui/pages/TvEpisodePicker';
+import TvEpisodeCheckInForm from '../../plugins/media/ui/pages/TvEpisodeCheckInForm';
+import MediaDetail from '../../plugins/media/ui/pages/MediaDetail';
 
 /** Check-in page for a specific plugin (create + edit via ?edit=<id>). */
 function PluginCheckInPage({ pluginId }: { pluginId: string }) {
@@ -82,8 +85,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
 
-        {/* Media check-ins */}
-        <Route path="/media-check-in" element={<MediaCheckInLanding />} />
+        {/* Media check-in flow (the bare /media-check-in landing comes from
+            the plugin route table via checkInPath) */}
         <Route path="/media-check-in/movie" element={<MediaSearch subtype="movie" />} />
         <Route path="/media-check-in/movie/:id/:slug" element={<MediaCheckInForm subtype="movie" />} />
         <Route path="/media-check-in/tv-episode" element={<MediaSearch subtype="tv_show" />} />

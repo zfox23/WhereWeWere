@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock, moodRowsMock } = vi.hoisted(() => ({
+const { queryMock, moodRowsMock, mediaRowsMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   moodRowsMock: [] as unknown[],
+  mediaRowsMock: [] as unknown[],
 }));
 
 vi.mock('../../src/db', () => ({
   query: queryMock,
 }));
 
-// Check-in plugins participate via their reconcile hook. Only mood is
+// Check-in plugins participate via their reconcile hooks. Mood and media are
 // registered here; location/sleep/tracks are out of scope for these tests,
 // which focus on the core anchor-resolution logic for media rows.
 vi.mock('../../src/plugins/registry', () => ({
@@ -26,17 +27,30 @@ vi.mock('../../src/plugins/registry', () => ({
         },
       },
     },
+    {
+      id: 'media',
+      server: {
+        reconcile: {
+          anchorLabel: 'a media check-in',
+          scanAll: false,
+          detailPath: (id: string) => `/media-checkins/${id}`,
+          loadCheckins: async () => mediaRowsMock,
+          apply: async () => true,
+        },
+      },
+    },
   ],
 }));
 
 import { getTimestampReconciliationSuggestions } from '../../src/services/timestampReconciliation';
 
-// The core scan issues one direct query (media check-ins); plugin rows come
-// from their reconcile hooks (stubbed above).
+// The core scan is hook-driven (no direct queries); plugin rows come from
+// their reconcile.loadCheckins hooks (stubbed above).
 function mockScan(moodRows: unknown[], mediaRows: unknown[]) {
   moodRowsMock.length = 0;
   moodRowsMock.push(...moodRows);
-  queryMock.mockResolvedValueOnce({ rows: mediaRows });
+  mediaRowsMock.length = 0;
+  mediaRowsMock.push(...mediaRows);
 }
 
 beforeEach(() => {

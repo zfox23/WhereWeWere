@@ -2,8 +2,6 @@ import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { allPlugins } from '../plugins/registry';
 import { genericTimelineSelect, genericTimelineWhere } from '../plugins/genericStore';
-import { timelineColumnList } from '../plugins/timeline';
-import { timelineWhereConditions } from '../plugins/sql';
 import type { PluginTimelineContext } from 'wwp-shared';
 
 const router = Router();
@@ -62,76 +60,15 @@ router.get('/', async (req: Request, res: Response) => {
       .filter((p) => Object.keys(pluginFilterParams.get(p.id) ?? {}).length > 0)
       .map((p) => p.id);
 
-    const hasMediaTypeFilter = Boolean(req.query.media_subtype);
-
     // Decide which branches to include (a type filter narrows to one type;
-    // plugin filters win first — the location plugin's venue_id/category/
-    // country filters flow through its declared filterParams).
+    // plugin filters win first — a plugin's declared filterParams flow
+    // through generically).
     const includedKeys: string[] = [];
     if (activePluginFilterIds.length > 0) {
       includedKeys.push(`plugin:${activePluginFilterIds[0]}`);
-    } else if (hasMediaTypeFilter) {
-      includedKeys.push('media');
     } else {
-      includedKeys.push(...plugins.map((p) => `plugin:${p.id}`), 'media');
+      includedKeys.push(...plugins.map((p) => `plugin:${p.id}`));
     }
-
-    // ------------------------------------------------------------------
-    // Built-in branch (media). Location, Mood, Sleep and Tracks are plugins.
-    // ------------------------------------------------------------------
-    const ctx = { user_id: userId, from: fromDate, to: toDate, q: searchQuery };
-
-    const builtInWhereBuilders: Record<string, () => { sql: string | null; values: unknown[] }> = {
-      media: () => {
-        const conds = timelineWhereConditions(ctx, {
-          alias: 'mmc',
-          timestampColumn: 'checked_in_at',
-          timezoneColumn: 'checkin_timezone',
-          search: (c, q) => c.push(
-            `(mi.title ILIKE '%' || ? || '%' OR mmc.notes ILIKE '%' || ? || '%')`,
-            q,
-            q,
-          ),
-        });
-        if (req.query.media_subtype) {
-          const subtypes = String(req.query.media_subtype)
-            .split(',')
-            .map((s) => s.trim())
-            .filter((s) => ['movie', 'tv_show', 'game', 'book', 'board_game'].includes(s));
-          if (subtypes.length > 0) {
-            conds.push(`mi.media_type = ANY(?::text[])`, subtypes);
-          }
-        }
-        return conds.build();
-      },
-    };
-
-    const builtInSelects: Record<string, string> = {
-      media: `
-            SELECT ${timelineColumnList({
-        type: `'media'`,
-        id: 'mmc.id',
-        user_id: 'mmc.user_id',
-        notes: 'mmc.notes',
-        checked_in_at: 'mmc.checked_in_at',
-        created_at: 'mmc.created_at',
-        media_type: 'mi.media_type',
-        media_item_id: 'mi.id',
-        media_title: 'mi.title',
-        media_image_url: 'mi.image_url',
-        media_author: 'mi.author',
-        media_rating: 'mmc.rating',
-        media_checkin_type: 'mmc.checkin_type',
-        media_season_number: 'mmc.season_number',
-        media_episode_number: 'mmc.episode_number',
-        media_episode_title: 'mmc.episode_title',
-        media_timezone: 'mmc.checkin_timezone',
-        timezone: 'mmc.checkin_timezone',
-      })}
-              FROM media_checkins mmc
-              JOIN media_items mi ON mmc.media_item_id = mi.id
-          `,
-    };
 
     // ------------------------------------------------------------------
     // Assemble branches in display order, tracking the global param offset.
@@ -168,11 +105,6 @@ router.get('/', async (req: Request, res: Response) => {
           });
           branches.push({ key, selectSql: genericTimelineSelect(plugin.id), whereSql: clause.sql, values: clause.values });
         }
-      } else {
-        const where = builtInWhereBuilders[key]?.();
-        const selectSql = builtInSelects[key];
-        if (!where || !selectSql) continue;
-        branches.push({ key, selectSql, whereSql: where.sql, values: where.values });
       }
     }
 

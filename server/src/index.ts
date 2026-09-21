@@ -8,10 +8,8 @@ import { jobsRouter } from './routes/jobs';
 import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
 import { timelineRouter } from './routes/timeline';
-import { webhookPlexRouter } from './routes/webhook-plex';
 import { backupRouter } from './routes/backup';
 import { llmRouter } from './routes/llm';
-import { mediaRouter } from './routes/media';
 import { importYamtrackRouter } from './routes/import-yamtrack';
 import { runMigrations } from './db/runMigrations';
 import { pluginsRouter } from './plugins/routes';
@@ -69,10 +67,8 @@ export function createApp() {
   app.use('/api/v1/scrobbles', scrobblesRouter);
   app.use('/api/v1/immich', immichRouter);
   app.use('/api/v1/timeline', timelineRouter);
-  app.use('/api/v1/webhook/plex', webhookPlexRouter);
   app.use('/api/v1/backup', backupRouter);
   app.use('/api/v1/llm', llmRouter);
-  app.use('/api/v1/media', mediaRouter);
   app.use('/api/v1/import/yamtrack', importYamtrackRouter);
   app.use('/api/v1/plugins', pluginsRouter);
 

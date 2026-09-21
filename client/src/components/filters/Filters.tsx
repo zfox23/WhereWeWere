@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X, Check } from 'lucide-react';
-import MediaFilter from './MediaFilter';
 import type { CheckinTypeClient, PluginFilterSectionProps } from 'wwp-shared';
 
 const COMPLETE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -99,16 +98,9 @@ export interface FiltersProps {
   hasActiveFilters: boolean;
   fromDate: string;
   toDate: string;
-  mediaSubtypes: string;
-  includeMedia: boolean;
-  mediaTypeToggleDisabled: boolean;
-  mediaFiltersDisabled: boolean;
-  mediaSectionDisabled: boolean;
   onSetDateFilter: (key: 'from' | 'to', value: string) => void;
-  onToggleMediaType: () => void;
-  onSetMediaFilter: (value: string) => void;
   onClearAll: () => void;
-  /** Check-in plugin filter sections (rendered after the built-in types). */
+  /** Check-in plugin filter sections (all check-in types are plugins). */
   pluginFilterSpecs?: PluginFilterSpec[];
 }
 
@@ -117,14 +109,7 @@ export default function Filters(props: FiltersProps) {
     hasActiveFilters,
     fromDate,
     toDate,
-    includeMedia,
-    mediaSubtypes,
-    mediaTypeToggleDisabled,
-    mediaFiltersDisabled,
-    mediaSectionDisabled,
     onSetDateFilter,
-    onToggleMediaType,
-    onSetMediaFilter,
     onClearAll,
     pluginFilterSpecs = [],
   } = props;
@@ -218,16 +203,6 @@ export default function Filters(props: FiltersProps) {
         </div>
       </div>
       <div className="grid gap-3 lg:grid-cols-2 items-start">
-        <MediaFilter
-          included={includeMedia}
-          filtersDisabled={mediaFiltersDisabled}
-          sectionDisabled={mediaSectionDisabled}
-          typeToggleDisabled={mediaTypeToggleDisabled}
-          mediaSubtypes={mediaSubtypes}
-          onToggleIncluded={onToggleMediaType}
-          onSetMediaSubtypes={onSetMediaFilter}
-        />
-
         {pluginFilterSpecs.map((spec) => (
           <div key={spec.plugin.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/40 dark:bg-gray-900/40 p-3">
             <PluginFilterSlot spec={spec} />

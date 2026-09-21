@@ -1,5 +1,4 @@
 import { allClientPlugins } from '../../plugins/registry';
-import { YamtrackImportSection } from './YamtrackImportSection';
 import { JobsSection } from './JobsSection';
 import { TimestampReconciliationSection } from './TimestampReconciliationSection';
 import { BackupRestoreSection } from './BackupRestoreSection';
@@ -13,7 +12,6 @@ interface DataTabProps {
 export function DataTab({ jobRefreshKey, onImportComplete }: DataTabProps) {
   return (
     <>
-      <YamtrackImportSection onImportComplete={onImportComplete} />
       <JobsSection refreshKey={jobRefreshKey} />
       <TimestampReconciliationSection />
       <BackupRestoreSection />

@@ -16,12 +16,14 @@ import { client as moodClient, manifest as moodManifest } from '../../../plugins
 import { client as sleepClient, manifest as sleepManifest } from '../../../plugins/sleep/client';
 import { client as tracksClient, manifest as tracksManifest } from '../../../plugins/tracks/client';
 import { client as locationClient, manifest as locationManifest } from '../../../plugins/location/client';
+import { client as mediaClient, manifest as mediaManifest } from '../../../plugins/media/client';
 
 const registrations: CheckinTypeClient[] = [
   { ...moodManifest, client: moodClient },
   { ...sleepManifest, client: sleepClient },
   { ...tracksManifest, client: tracksClient },
   { ...locationManifest, client: locationClient },
+  { ...mediaManifest, client: mediaClient },
 ];
 
 const byId = new Map<string, CheckinTypeClient>();
@@ -71,7 +73,6 @@ export function timelineDetailPath(item: { type: string; id: string }): string {
   // Legacy built-in routes.
   switch (item.type) {
     case 'location': return `/checkins/${item.id}`;
-    case 'media': return `/media/checkins/${item.id}`;
     default: return `/checkins/${item.type}/${item.id}`;
   }
 }
