@@ -3,7 +3,7 @@
  *
  * Ships full custom UIs for every integration point: check-in page, detail
  * page, timeline card, Home filter section, Profile tab, reflection card,
- * Settings > Data (CSV import) and Settings > Integrations (webhook URL).
+ * Settings > Sleep (webhook URL) and Settings > Data (CSV import).
  * The components under `ui/` were adapted from the former core components
  * (pages/SleepCheckIn, pages/SleepDetail, components/SleepCard,
  * components/SleepTab, filters/SleepFilter, settings sections) to the
@@ -27,7 +27,7 @@ import { SleepCard } from './ui/SleepCard';
 import { SleepFilter } from './ui/SleepFilter';
 import { SleepTab } from './ui/SleepStats';
 import { SleepReflectionCard } from './ui/SleepReflectionCard';
-import { SleepIntegrations } from './ui/SleepIntegrations';
+import { SleepSettings } from './ui/SleepSettings';
 import { SleepAsAndroidImportSection } from './ui/SleepAsAndroidImportSection';
 
 export const client: CheckinTypeClientPlugin = {
@@ -47,7 +47,7 @@ export const client: CheckinTypeClientPlugin = {
   reflectionCard: (props: PluginReflectionCardProps) => <SleepReflectionCard {...props} />,
 
   dataSettings: SleepAsAndroidImportSection,
-  integrationsSettings: SleepIntegrations,
+  settings: SleepSettings,
 };
 
 export { manifest };

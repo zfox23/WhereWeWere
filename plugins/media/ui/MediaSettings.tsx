@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Check, Copy, Tv, Film, Gamepad2, BookOpen } from 'lucide-react';
+import { Check, Copy, Clapperboard, Tv, Film, Gamepad2, BookOpen } from 'lucide-react';
 import { plugins } from '../../../client/src/plugins/api';
 import { plexWebhook } from './api';
 
@@ -11,12 +11,14 @@ interface MediaPluginSettings {
 }
 
 /**
- * Media plugin settings, rendered in the core Settings > Integrations page
- * via the plugin's `integrationsSettings` slot. All values live in this
- * plugin's settings store (`plugin_settings`, plugin_id = 'media') rather
- * than the core `user_settings` table.
+ * Media > Settings tab. Self-contained settings tab rendered by the core
+ * Settings page through the plugin `settings` slot. Hosts the Plex webhook
+ * section and the media-database API keys, moved out of the core Integrations
+ * tab so they live under Settings > Media. All values live in this plugin's
+ * settings store (`plugin_settings`, plugin_id = 'media') rather than the
+ * core `user_settings` table.
  */
-export function MediaIntegrationsSettings() {
+export function MediaSettings() {
   const [plexUsernames, setPlexUsernames] = useState('');
   const [tmdbApiKey, setTmdbApiKey] = useState('');
   const [tgdbApiKey, setTgdbApiKey] = useState('');
@@ -74,7 +76,12 @@ export function MediaIntegrationsSettings() {
   };
 
   return (
-    <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-4">
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+        <Clapperboard size={20} className="text-violet-500" />
+        Media
+      </h2>
+
       {/* Plex */}
       <div>
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1.5">
@@ -128,7 +135,7 @@ export function MediaIntegrationsSettings() {
       </div>
 
       {/* Media databases */}
-      <div>
+      <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1.5">
           <Film size={14} className="text-red-500" />
           Media Databases
