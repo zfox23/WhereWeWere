@@ -28,7 +28,6 @@ import { SleepFilter } from './ui/SleepFilter';
 import { SleepTab } from './ui/SleepStats';
 import { SleepReflectionCard } from './ui/SleepReflectionCard';
 import { SleepSettings } from './ui/SleepSettings';
-import { SleepAsAndroidImportSection } from './ui/SleepAsAndroidImportSection';
 
 export const client: CheckinTypeClientPlugin = {
   icon: Moon,
@@ -46,7 +45,6 @@ export const client: CheckinTypeClientPlugin = {
   profileTab: (props: PluginProfileTabProps) => <SleepTab {...props} />,
   reflectionCard: (props: PluginReflectionCardProps) => <SleepReflectionCard {...props} />,
 
-  dataSettings: SleepAsAndroidImportSection,
   settings: SleepSettings,
 };
 

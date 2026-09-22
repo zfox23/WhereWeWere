@@ -4,6 +4,7 @@ import { moodActivities } from './api';
 import { plugins } from '../../../client/src/plugins/api';
 import { MoodIconRow } from './MoodIcons';
 import ActivityGroupManager from './ActivityGroupManager';
+import { DaylioImportSection } from './DaylioImportSection';
 import type { MoodActivityGroup, MoodActivity } from './types';
 
 /**
@@ -157,6 +158,8 @@ export function MoodTab() {
           </p>
         )}
       </div>
+
+      <DaylioImportSection />
     </>
   );
 }

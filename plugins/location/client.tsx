@@ -25,7 +25,7 @@ import LocationCheckInDetail from './ui/LocationCheckInDetail';
 import LocationCard from './ui/LocationCard';
 import LocationFilter from './ui/LocationFilter';
 import { PlacesTab } from './ui/PlacesTab';
-import { SwarmImportSection } from './ui/SwarmImportSection';
+import { LocationSettings } from './ui/LocationSettings';
 import { LocationProvider } from './ui/LocationContext';
 import { LocationReflectionCard } from './ui/LocationReflectionCard';
 import { stats } from '../../client/src/api/client';
@@ -155,5 +155,5 @@ export const client: CheckinTypeClientPlugin = {
   filterSection: LocationFilterSection,
   profileTab: LocationProfileTab,
   reflectionCard: LocationReflectionCard,
-  dataSettings: SwarmImportSection,
+  settings: LocationSettings,
 };

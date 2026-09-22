@@ -24,7 +24,6 @@ import MoodCheckInDetail from './ui/MoodCheckInDetail';
 import MoodCheckInCard from './ui/MoodCheckInCard';
 import MoodFilter from './ui/MoodFilter';
 import { MoodsTab } from './ui/MoodStats';
-import { DaylioImportSection } from './ui/DaylioImportSection';
 import { MoodTab } from './ui/MoodTab';
 import { MoodReflectionCard } from './ui/MoodReflectionCard';
 import { moodActivities } from './ui/api';
@@ -138,7 +137,6 @@ export const client: CheckinTypeClientPlugin = {
   filterSection: MoodFilterSection,
   profileTab: MoodProfileTab,
   reflectionCard: (props: PluginReflectionCardProps) => <MoodReflectionCard {...props} />,
-  dataSettings: DaylioImportSection,
   settings: MoodTab,
 };
 

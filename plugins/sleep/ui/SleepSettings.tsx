@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { Moon, Check, Copy } from 'lucide-react';
 import { sleepWebhook } from './api';
+import { SleepAsAndroidImportSection } from './SleepAsAndroidImportSection';
 
 export function SleepSettings() {
   const [webhookEventCount, setWebhookEventCount] = useState<number | null>(null);
@@ -31,6 +32,7 @@ export function SleepSettings() {
   };
 
   return (
+    <>
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
         <Moon size={20} className="text-indigo-500" />
@@ -61,5 +63,8 @@ export function SleepSettings() {
           : `${webhookEventCount} Webhook Event${webhookEventCount === 1 ? '' : 's'} Received`}
       </p>
     </div>
+
+    <SleepAsAndroidImportSection />
+    </>
   );
 }

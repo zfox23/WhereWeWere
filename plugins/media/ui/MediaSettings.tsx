@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Check, Copy, Clapperboard, Tv, Film, Gamepad2, BookOpen } from 'lucide-react';
 import { plugins } from '../../../client/src/plugins/api';
 import { plexWebhook } from './api';
+import { YamtrackImportSection } from './YamtrackImportSection';
 
 interface MediaPluginSettings {
   plex_usernames?: string | null;
@@ -76,6 +77,7 @@ export function MediaSettings() {
   };
 
   return (
+    <>
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
         <Clapperboard size={20} className="text-violet-500" />
@@ -204,5 +206,8 @@ export function MediaSettings() {
         {saving ? 'Saving…' : 'Save Media Settings'}
       </button>
     </div>
+
+    <YamtrackImportSection />
+    </>
   );
 }

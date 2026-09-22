@@ -26,7 +26,6 @@ import MediaCard from './ui/MediaCard';
 import MediaFilter from './ui/MediaFilter';
 import { MediaTab } from './ui/MediaTab';
 import { MediaSettings } from './ui/MediaSettings';
-import { YamtrackImportSection } from './ui/YamtrackImportSection';
 import type { TimelineItem } from '../../client/src/types';
 
 /**
@@ -82,7 +81,6 @@ export const client: CheckinTypeClientPlugin = {
   profileTab: MediaProfileTab,
   reflectionCard: (props: PluginReflectionCardProps) => <MediaReflectionCard {...props} />,
 
-  dataSettings: YamtrackImportSection,
   settings: MediaSettings,
 };
 
