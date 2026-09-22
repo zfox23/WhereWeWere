@@ -938,6 +938,47 @@ export const server: CheckinTypeServerPlugin = {
     sql: 'SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])',
   }),
 
+  // "This day in previous years" reflection branch. Emits the shared
+  // reflection envelope (matching the location/mood/sleep branches) so the
+  // UNION in /stats/reflections lines up; the track payload lives in `data`
+  // for the plugin's reflection card.
+  reflectionBranch: () => ({
+    sql: `
+      SELECT
+        'tracks' AS type,
+        t.id,
+        t.started_at AS checked_in_at,
+        NULL::text AS note,
+        NULL::uuid AS venue_id,
+        NULL::text AS venue_name,
+        NULL::text AS city,
+        NULL::text AS country,
+        NULL::double precision AS latitude,
+        NULL::double precision AS longitude,
+        NULL::text AS venue_category,
+        NULL::text AS venue_timezone,
+        EXTRACT(YEAR FROM t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::int AS reflection_year,
+        (
+          EXTRACT(YEAR FROM $2::date)::int
+          - EXTRACT(YEAR FROM t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::int
+        )::int AS years_ago,
+        json_build_object(
+          'name', t.name,
+          'activity_type', t.activity_type,
+          'started_at', t.started_at,
+          'ended_at', t.ended_at,
+          'timezone', t.timezone,
+          'distance_m', t.distance_m::float,
+          'elapsed_time_s', t.elapsed_time_s::int
+        )::jsonb AS data
+      FROM tracks t
+      WHERE t.user_id = $1
+        AND TO_CHAR(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'), 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
+        AND EXTRACT(YEAR FROM t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))
+            < EXTRACT(YEAR FROM $2::date)
+    `,
+  }),
+
   // Earliest check-in date for the "all time" period selector. Replaces the
   // built-in `tracks` entry (same key, same SQL).
   earliestDate: () => ({

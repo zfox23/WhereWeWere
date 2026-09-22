@@ -203,6 +203,17 @@ describe('tracks plugin — core service hooks', () => {
     expect(sql).toContain('SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(timezone, \'UTC\')))');
     expect(sql).toContain('FROM tracks WHERE user_id = $1');
   });
+
+  it('contributes a reflection branch in the shared column shape', () => {
+    const { sql } = server.reflectionBranch!();
+    expect(sql).toContain("'tracks' AS type");
+    expect(sql).toContain('t.started_at AS checked_in_at');
+    expect(sql).toContain('reflection_year');
+    expect(sql).toContain('years_ago');
+    expect(sql).toContain('FROM tracks t');
+    expect(sql).toContain('MM-DD');
+    expect(sql).toContain('< EXTRACT(YEAR FROM $2::date)');
+  });
 });
 
 describe('tracks plugin — backup & cleanup hooks', () => {

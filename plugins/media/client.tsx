@@ -16,10 +16,12 @@ import type {
   CheckInFormProps,
   PluginFilterSectionProps,
   PluginProfileTabProps,
+  PluginReflectionCardProps,
 } from 'wwp-shared';
 import { Clapperboard } from 'lucide-react';
 import { manifest } from './manifest';
 import MediaCheckInLanding from './ui/pages/MediaCheckInLanding';
+import { MediaReflectionCard } from './ui/MediaReflectionCard';
 import MediaCard from './ui/MediaCard';
 import MediaFilter from './ui/MediaFilter';
 import { MediaTab } from './ui/MediaTab';
@@ -78,6 +80,7 @@ export const client: CheckinTypeClientPlugin = {
   timelineCard: MediaCardAdapter,
   filterSection: MediaFilterSection,
   profileTab: MediaProfileTab,
+  reflectionCard: (props: PluginReflectionCardProps) => <MediaReflectionCard {...props} />,
 
   integrationsSettings: MediaIntegrationsSettings,
   dataSettings: YamtrackImportSection,

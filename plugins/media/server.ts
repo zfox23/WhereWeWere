@@ -2268,6 +2268,53 @@ export const server: CheckinTypeServerPlugin = {
     sql: 'SELECT id, checked_in_at FROM media_checkins WHERE id = ANY($1::uuid[])',
   }),
 
+  // "This day in previous years" reflection branch. Emits the shared
+  // reflection envelope (matching the location/mood/sleep branches) so the
+  // UNION in /stats/reflections lines up; the media payload lives in `data`
+  // for the plugin's reflection card.
+  reflectionBranch: () => ({
+    sql: `
+      SELECT
+        'media' AS type,
+        mc.id,
+        mc.checked_in_at,
+        mc.notes AS note,
+        NULL::uuid AS venue_id,
+        NULL::text AS venue_name,
+        NULL::text AS city,
+        NULL::text AS country,
+        NULL::double precision AS latitude,
+        NULL::double precision AS longitude,
+        NULL::text AS venue_category,
+        NULL::text AS venue_timezone,
+        EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))::int AS reflection_year,
+        (
+          EXTRACT(YEAR FROM $2::date)::int
+          - EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))::int
+        )::int AS years_ago,
+        json_build_object(
+          'media_type', mi.media_type,
+          'media_item_id', mi.id,
+          'media_title', mi.title,
+          'media_image_url', mi.image_url,
+          'media_author', mi.author,
+          'rating', mc.rating,
+          'checkin_type', mc.checkin_type,
+          'season_number', mc.season_number,
+          'episode_number', mc.episode_number,
+          'episode_title', mc.episode_title,
+          'time_played_minutes', mc.time_played_minutes,
+          'checkin_timezone', mc.checkin_timezone
+        )::jsonb AS data
+      FROM media_checkins mc
+      JOIN media_items mi ON mc.media_item_id = mi.id
+      WHERE mc.user_id = $1
+        AND TO_CHAR(mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'), 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
+        AND EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))
+            < EXTRACT(YEAR FROM $2::date)
+    `,
+  }),
+
   // Timezone inference for integrations (the Plex webhook above loops every
   // plugin's hook; this one covers media check-ins).
   latestTimezoneAsOf: () => ({

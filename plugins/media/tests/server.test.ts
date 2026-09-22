@@ -233,6 +233,19 @@ describe('media plugin — cross-cutting hooks', () => {
     expect(sql).toContain('id = ANY($1::uuid[])');
   });
 
+  it('contributes a reflection branch in the shared column shape', () => {
+    const { sql } = server.reflectionBranch!();
+    expect(sql).toContain("'media' AS type");
+    expect(sql).toContain('mc.checked_in_at');
+    expect(sql).toContain('mc.notes AS note');
+    expect(sql).toContain('reflection_year');
+    expect(sql).toContain('years_ago');
+    expect(sql).toContain('FROM media_checkins mc');
+    expect(sql).toContain('JOIN media_items mi ON mc.media_item_id = mi.id');
+    expect(sql).toContain('MM-DD');
+    expect(sql).toContain('< EXTRACT(YEAR FROM $2::date)');
+  });
+
   it('resolves the latest known media timezone at or before a reference time', () => {
     const { sql } = server.latestTimezoneAsOf!();
     expect(sql).toContain('FROM media_checkins');

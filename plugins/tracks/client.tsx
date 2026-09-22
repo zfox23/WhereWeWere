@@ -16,6 +16,7 @@ import type {
   CheckInFormProps,
   PluginFilterSectionProps,
   PluginProfileTabProps,
+  PluginReflectionCardProps,
 } from 'wwp-shared';
 import { Route } from 'lucide-react';
 import { manifest } from './manifest';
@@ -24,6 +25,7 @@ import TrackDetailPage from './ui/TrackDetail';
 import { TrackCard } from './ui/TrackCard';
 import { TrackFilter } from './ui/TrackFilter';
 import { TracksTab } from './ui/TracksTab';
+import { TrackReflectionCard } from './ui/TrackReflectionCard';
 
 export const client: CheckinTypeClientPlugin = {
   icon: Route,
@@ -39,6 +41,7 @@ export const client: CheckinTypeClientPlugin = {
   timelineCard: (props: CheckinCardProps) => <TrackCard {...props} />,
   filterSection: (props: PluginFilterSectionProps) => <TrackFilter {...props} />,
   profileTab: (props: PluginProfileTabProps) => <TracksTab {...props} />,
+  reflectionCard: (props: PluginReflectionCardProps) => <TrackReflectionCard {...props} />,
 };
 
 export { manifest };
