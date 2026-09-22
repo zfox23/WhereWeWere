@@ -11,10 +11,11 @@ import type { UserSettings } from '../types';
 import type { CheckinTypeClient } from 'wwp-shared';
 
 /**
- * Settings tabs: the fixed core tabs plus one tab per check-in plugin that
- * ships a `settings` component (e.g. the mood plugin's icon pack + activities).
+ * Check-in plugins that ship a `settings` component (e.g. the mood plugin's
+ * icon pack + activities). Only these get a Settings tab; plugins without
+ * settings (e.g. tracks) are omitted from the tab bar entirely.
  */
-const SETTINGS_PLUGINS = allClientPlugins();
+const SETTINGS_PLUGINS = allClientPlugins().filter((p) => p.client.settings);
 
 type SettingsTab = 'account' | 'display' | 'integrations' | 'data' | `plugin:${string}`;
 
