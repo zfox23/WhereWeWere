@@ -28,6 +28,7 @@ import type {
   CheckinTypeServerPlugin,
   PluginTimelineContext,
   PluginReconciliationRow,
+  PluginLlmRow,
 } from 'wwp-shared';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
@@ -115,6 +116,47 @@ function slugifyTitle(title: string): string {
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+// ---------------------------------------------------------------------------
+// LLM life-summary line formatting
+// ---------------------------------------------------------------------------
+
+/** media_type -> prompt label (matches the client's manifest labels). */
+const MEDIA_LLM_TYPE_LABELS: Record<string, string> = {
+  movie: 'movie',
+  tv_show: 'TV show',
+  game: 'game',
+  book: 'book',
+  board_game: 'board game',
+};
+
+/** checkin_type -> prompt verb/label. */
+const MEDIA_LLM_CHECKIN_LABELS: Record<string, string> = {
+  completed: 'completed',
+  in_progress: 'in progress',
+  dropped: 'dropped',
+};
+
+function formatLlmWhen(iso: string, timezone: string | null): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  };
+  return new Intl.DateTimeFormat('en-US', timezone ? { ...opts, timeZone: timezone } : opts).format(new Date(iso));
+}
+
+/** e.g. 90 -> "1h 30m", 45 -> "45m". */
+function formatLlmMinutes(minutes: number): string {
+  const m = Math.round(minutes);
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  if (h === 0) return `${rest}m`;
+  if (rest === 0) return `${h}h`;
+  return `${h}h ${rest}m`;
 }
 
 
@@ -2314,6 +2356,67 @@ export const server: CheckinTypeServerPlugin = {
             < EXTRACT(YEAR FROM $2::date)
     `,
   }),
+
+  // LLM life summary contribution.
+  llm: {
+    label: 'media check-ins',
+    gather: async (user_id, from, to) => {
+      const result = await query(
+        `SELECT mc.checked_in_at, mc.checkin_timezone AS timezone,
+                json_build_object(
+                  'media_type', mi.media_type,
+                  'title', mi.title,
+                  'author', mi.author,
+                  'checkin_type', mc.checkin_type,
+                  'rating', mc.rating,
+                  'season_number', mc.season_number,
+                  'episode_number', mc.episode_number,
+                  'episode_title', mc.episode_title,
+                  'time_played_minutes', mc.time_played_minutes,
+                  'note', mc.notes
+                )::jsonb AS data
+         FROM media_checkins mc
+         JOIN media_items mi ON mc.media_item_id = mi.id
+         WHERE mc.user_id = $1
+           AND (mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))::date >= $2::date
+           AND (mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))::date <= $3::date
+         ORDER BY mc.checked_in_at ASC`,
+        [user_id, from, to],
+      );
+      return result.rows;
+    },
+    toLines: (row: PluginLlmRow) => {
+      const d = row.data as {
+        media_type: string;
+        title: string;
+        author: string | null;
+        checkin_type: string;
+        rating: number | null;
+        season_number: number | null;
+        episode_number: number | null;
+        episode_title: string | null;
+        time_played_minutes: number | null;
+        note: string | null;
+      };
+      const when = formatLlmWhen(row.checked_in_at, row.timezone);
+      const status = MEDIA_LLM_CHECKIN_LABELS[d.checkin_type] ?? d.checkin_type;
+      const typeLabel = MEDIA_LLM_TYPE_LABELS[d.media_type] ?? d.media_type;
+      const author = d.author ? ` by ${d.author}` : '';
+      const episode =
+        d.season_number != null && d.episode_number != null
+          ? ` S${d.season_number}E${d.episode_number}${d.episode_title ? ` "${d.episode_title}"` : ''}`
+          : '';
+      const rating = d.rating != null ? ` (${d.rating}/5)` : '';
+      const time =
+        d.time_played_minutes != null && d.time_played_minutes > 0
+          ? ` · ${formatLlmMinutes(Number(d.time_played_minutes))}`
+          : '';
+      const note = d.note ? ` — note: "${d.note}"` : '';
+      return [
+        `- ${when} — ${status} ${typeLabel} "${d.title}"${author}${episode}${rating}${time}${note}`,
+      ];
+    },
+  },
 
   // Timezone inference for integrations (the Plex webhook above loops every
   // plugin's hook; this one covers media check-ins).
