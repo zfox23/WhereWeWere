@@ -123,13 +123,24 @@ describe('Generic-storage plugin (framework defaults)', () => {
       });
     const originalId = created.body.id as string;
 
+    // A plugin_settings row must ride along with the check-ins (regression:
+    // settings were previously omitted from the export payload).
+    await query(
+      `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (user_id, plugin_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      [DEFAULT_USER_ID, PLUGIN_ID, 'demo', JSON.stringify('backup me too')],
+    );
+
     // Export via the framework collector.
     const payload = await exportPluginData(DEFAULT_USER_ID);
     expect(payload[PLUGIN_ID]?.checkins).toHaveLength(1);
     expect((payload[PLUGIN_ID].checkins as any[])[0].id).toBe(originalId);
+    expect(payload[PLUGIN_ID]?.settings).toEqual({ demo: 'backup me too' });
 
     // Wipe, then restore through the same transactional path the import route uses.
     await query(`DELETE FROM plugin_checkins WHERE plugin_id = $1`, [PLUGIN_ID]);
+    await query(`DELETE FROM plugin_settings WHERE plugin_id = $1`, [PLUGIN_ID]);
     const afterWipe = await request(app).get(`/api/v1/plugins/${PLUGIN_ID}/checkins`);
     expect(afterWipe.body).toHaveLength(0);
 
@@ -137,10 +148,10 @@ describe('Generic-storage plugin (framework defaults)', () => {
     try {
       await client.query('BEGIN');
       const counts = await importPluginData(client, DEFAULT_USER_ID, {
-        [PLUGIN_ID]: { checkins: payload[PLUGIN_ID].checkins },
+        [PLUGIN_ID]: { checkins: payload[PLUGIN_ID].checkins, settings: payload[PLUGIN_ID].settings },
       });
       await client.query('COMMIT');
-      expect(counts[PLUGIN_ID].inserted).toBe(1);
+      expect(counts[PLUGIN_ID].inserted).toBe(2); // 1 check-in + 1 settings row
       expect(counts[PLUGIN_ID].skipped).toBe(0);
     } finally {
       client.release();
@@ -151,6 +162,13 @@ describe('Generic-storage plugin (framework defaults)', () => {
     expect(restored.body[0].id).toBe(originalId);
     expect(restored.body[0].data.flavor).toBe('strawberry');
     expect(restored.body[0].checkin_timezone).toBe('Europe/Lisbon');
+
+    const restoredSettings = await query(
+      `SELECT value FROM plugin_settings WHERE plugin_id = $1 AND key = 'demo'`,
+      [PLUGIN_ID],
+    );
+    expect(restoredSettings.rows).toHaveLength(1);
+    expect(restoredSettings.rows[0].value).toBe('backup me too');
   });
 
   it('deletes plugin check-ins (and settings) on start-over', async () => {

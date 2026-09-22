@@ -32,5 +32,7 @@ export const genericPlugin: CheckinTypeServer = {
     confirmDelete: 'Delete this test check-in?',
   },
   // No `storage` key => 'generic'; no server hooks => framework defaults.
-  server: {},
+  server: {
+    settingsKeys: [{ name: 'demo', type: 'string', label: 'Demo setting' }],
+  },
 };

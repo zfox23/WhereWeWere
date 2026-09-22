@@ -5,7 +5,8 @@
  *   {
  *     [pluginId]: {
  *       checkins: <rows from backupExport, generic rows for generic storage>,
- *       extra: { [tableName]: rows[] }   // custom storage extraBackupTables
+ *       extra: { [tableName]: rows[] },  // custom storage extraBackupTables
+ *       settings: { [key]: value }       // plugin_settings rows (key -> value)
  *     }
  *   }
  *
@@ -15,6 +16,8 @@
  *   - custom plugins: restore steps run in `backupOrder` — 'primary' runs
  *     backupImport(payload.checkins), extra table names run the declared
  *     select/insert templates.
+ *   - `settings` are upserted into plugin_settings (only keys declared in
+ *     the plugin's settingsKeys, when the plugin declares any).
  *   - When a plugin's payload is present, its `legacyBackupKeys` are
  *     claimed: the caller must skip the corresponding legacy import loops.
  */
@@ -27,6 +30,8 @@ import { exportGenericCheckins, importGenericCheckins, type PluginCheckinBackupR
 export interface PluginBackupEntry {
   checkins: unknown;
   extra?: Record<string, Record<string, unknown>[]>;
+  /** Stored plugin settings (plugin_settings rows) keyed by setting name. */
+  settings?: Record<string, unknown>;
 }
 
 export type PluginBackupPayload = Record<string, PluginBackupEntry>;
@@ -47,15 +52,39 @@ export async function exportPluginData(user_id: string): Promise<PluginBackupPay
         const result = await query(table.select, [user_id]);
         extra[table.table] = result.rows;
       }
-      out[plugin.id] = Object.keys(extra).length > 0
+      const entry: PluginBackupEntry = Object.keys(extra).length > 0
         ? { checkins, extra }
         : { checkins };
+      const settings = await exportPluginSettings(user_id, plugin.id);
+      if (settings) entry.settings = settings;
+      out[plugin.id] = entry;
     } else {
       const checkins = await exportGenericCheckins(user_id, plugin.id);
-      out[plugin.id] = { checkins };
+      const entry: PluginBackupEntry = { checkins };
+      const settings = await exportPluginSettings(user_id, plugin.id);
+      if (settings) entry.settings = settings;
+      out[plugin.id] = entry;
     }
   }
 
+  return out;
+}
+
+/**
+ * Read the user's stored rows for a plugin from plugin_settings as a
+ * key -> value map, or `undefined` when the plugin has no stored settings.
+ */
+async function exportPluginSettings(
+  user_id: string,
+  pluginId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const result = await query(
+    `SELECT key, value FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2`,
+    [user_id, pluginId],
+  );
+  if (result.rows.length === 0) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const row of result.rows) out[row.key] = row.value;
   return out;
 }
 
@@ -152,6 +181,27 @@ export async function importPluginData(
           if ((result.rowCount ?? 0) > 0) pluginCounts.inserted += 1;
           else pluginCounts.skipped += 1;
         }
+      }
+    }
+
+    // Plugin settings (plugin_settings rows): upsert, overwriting current
+    // values. When the plugin declares settingsKeys, only declared keys are
+    // written (mirrors setPluginSettings, and keeps renamed/stale keys out
+    // of the table).
+    if (entry.settings && typeof entry.settings === 'object') {
+      const declared = new Set((plugin.server.settingsKeys ?? []).map((k) => k.name));
+      for (const [key, value] of Object.entries(entry.settings)) {
+        if (declared.size > 0 && !declared.has(key)) continue;
+        const result = await client.query(
+          `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+           VALUES ($1, $2, $3, $4::jsonb)
+           ON CONFLICT (user_id, plugin_id, key) DO UPDATE
+           SET value = EXCLUDED.value
+           WHERE plugin_settings.value IS DISTINCT FROM EXCLUDED.value`,
+          [user_id, plugin.id, key, JSON.stringify(value)],
+        );
+        if ((result.rowCount ?? 0) > 0) pluginCounts.inserted += 1;
+        else pluginCounts.skipped += 1;
       }
     }
 
