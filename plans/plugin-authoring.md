@@ -83,8 +83,13 @@ Register each side:
 
 If you don't ship components, omit them — the framework renders
 `AutoCheckInForm`, `AutoCheckInCard`, the generic detail page, and a counting
-profile tab. Custom components (`checkinForm`, `timelineCard`, `profileTab`,
-`filterSection`, `settingsSection`) slot in one at a time.
+profile tab (`AutoProfileTab`: total count + most recent entry). Custom
+components (`checkInForm`, `detailPage`, `timelineCard`, `filterSection`,
+`profileTab`, `settings`, `reflectionCard`, `integrationsSettings`,
+`dataSettings`) slot in one at a time. Note there is NO auto-generated
+settings form: a plugin that declares `settingsKeys` but ships no `settings`
+component simply gets no Settings tab (the settings component is rendered
+self-contained, without injected props).
 
 ### 5. Test
 
@@ -99,7 +104,11 @@ Run with a test database: `npm run test:integration --workspace=server`.
 - [`server/src/plugins/timeline.ts`](server/src/plugins/timeline.ts) — `TIMELINE_COLUMNS` / `timelineColumnList()`: the one authoritative envelope for every timeline UNION branch.
 - [`server/src/plugins/sql.ts`](server/src/plugins/sql.ts) — `createSqlConditions()` / `timelineWhereConditions()`: user/date-range/search WHERE building with positional `$n` placeholders.
 - [`server/src/plugins/uploads.ts`](server/src/plugins/uploads.ts) — `createImportUpload()` / `removeImportFile()`: multer disk-storage for import files.
-- [`server/src/plugins/coreCheckins.ts`](server/src/plugins/coreCheckins.ts) — `latestCheckinTimezoneAsOf()`: core check-in access for timezone inference. **Plugins must not query core tables directly** (e.g. `checkins`); route such needs through core-provided helpers so a schema rename touches one file.
+- **Plugins must not query other plugins' tables directly.** Cross-plugin
+  needs go through the shared contract hooks (e.g. timezone inference is a
+  per-plugin `latestTimezoneAsOf` hook that integrations resolve by looping
+  `allPlugins()` — see `plugins/sleep/server.ts` and
+  `plugins/location/server.ts`), so a schema rename touches one file.
 - `wwp-shared`: `isValidTimeZone()` (timezone validation), `validatePluginData()`, the full hook contract. Rebuild after edits: `npm run build --workspace=shared` (the server consumes the built CJS package; the client consumes TS source).
 - [`server/src/constants.ts`](server/src/constants.ts) — `DEFAULT_USER_ID` (single-user app; do not re-hardcode the UUID).
 
