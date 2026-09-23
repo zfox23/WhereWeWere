@@ -64,6 +64,19 @@ export interface PluginSettingsKey {
   default?: unknown;
 }
 
+/**
+ * A file that a plugin ships in a backup v2 ZIP bundle. `zipPath` is the
+ * path *inside* the ZIP relative to `plugins/<id>/` (e.g.
+ * `files/<trackId>.gpx`). `absPath` is where the framework reads it from on
+ * disk at export time.
+ */
+export interface BackupFileRef {
+  /** Path inside the ZIP, relative to the plugin's own folder. */
+  zipPath: string;
+  /** Absolute filesystem path to read from at export time. */
+  absPath: string;
+}
+
 /** Context passed to plugin delete/backup hooks. */
 export interface PluginHookContext {
   user_id: string;
@@ -77,6 +90,22 @@ export interface PluginHookContext {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client?: any;
+  /**
+   * Restore only: append-only list the framework surfaces to the user as
+   * restore warnings. Hooks should push a human-readable message for each
+   * row they had to skip (e.g. a bundled file that was missing from the
+   * bundle) instead of failing the whole restore.
+   */
+  errors?: string[];
+  /**
+   * Restore only (backup v2 file bundles): the directory where this
+   * plugin's backup files were extracted, when the restored bundle carries
+   * any. A plugin whose `backupFiles` hook contributes files to the ZIP
+   * reads them back from here during `backupImport` (paths are relative to
+   * this directory). Absent for single-JSON restores and for plugins that
+   * do not ship files.
+   */
+  filesDir?: string;
 }
 
 /**
@@ -338,9 +367,24 @@ export interface CheckinTypeServerPlugin {
 
   /**
    * Custom storage: restore rows previously produced by backupExport.
-   * Returns the number of rows restored.
+   * Returns the number of rows restored. When the bundle is a v2 file
+   * bundle, `ctx.filesDir` points at this plugin's extracted files (see
+   * `backupFiles`).
    */
   backupImport?: (ctx: PluginHookContext, payload: unknown) => Promise<number>;
+
+  /**
+   * A file the backup bundle should ship for this plugin (backup v2 ZIP
+   * bundles only). The framework reads `absPath` and stores it in the ZIP
+   * under `plugins/<id>/<zipPath>`; the row that owns the file references it
+   * via `zipPath` (relative to the plugin's own `files/`-style prefix).
+   *
+   * On restore, the framework extracts these to `ctx.filesDir` and the
+   * plugin's `backupImport` reads them back by their `zipPath`.
+   *
+   * Return an empty array (or omit the hook) when the plugin ships no files.
+   */
+  backupFiles?: (ctx: PluginHookContext) => Promise<BackupFileRef[]>;
 
   /**
    * Start-over hook: delete all of this user's data for this type. Returns

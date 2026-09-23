@@ -1,7 +1,22 @@
 import request from 'supertest';
 import { describe, expect, beforeAll, beforeEach, afterAll, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { createApp } from '../../../../server/src/index';
 import { query, pool } from '../../../../server/src/db';
+import { config } from '../../../../server/src/config';
+import {
+  extractBackupZip,
+  listBackupPluginFiles,
+  readBackupJsonFile,
+  removeBackupTempDir,
+  zipDirectory,
+} from '../../../../server/src/services/backupArchive';
+import {
+  gpsTracksDir,
+  storedTrackPath,
+  deleteStoredTrack,
+} from '../../services/trackFiles';
 import {
   DEFAULT_USER_ID,
   resetIntegrationDatabase,
@@ -401,6 +416,204 @@ describe('Tracks plugin API', () => {
 
       const remaining = await query('SELECT COUNT(*) AS c FROM tracks');
       expect(Number(remaining.rows[0].c)).toBe(0);
+    });
+
+    // -----------------------------------------------------------------
+    // Backup v2: ZIP bundle with original GPX files + trim diff
+    // -----------------------------------------------------------------
+
+    /** Fetch the /backup/export ZIP as a raw buffer. */
+    async function fetchBackupZip(): Promise<Buffer> {
+      return new Promise((resolve, reject) => {
+        request(app)
+          .get('/api/v1/backup/export')
+          .buffer(true)
+          .parse((res: any, cb: any) => {
+            const chunks: Buffer[] = [];
+            res.on('data', (c: Buffer) => chunks.push(c));
+            res.on('end', () => cb(null, Buffer.concat(chunks)));
+            res.on('error', reject);
+          })
+          .end((err: any, res: any) => {
+            if (err) return reject(err);
+            if (res.status !== 200) return reject(new Error(`export failed: ${res.status}`));
+            resolve(res.body as Buffer);
+          });
+      });
+    }
+
+    it('exports a ZIP whose tracks rows carry a file ref + trim range, and restores them from the bundle', async () => {
+      // 1. Upload a real GPX (creates the DB row + the stored original).
+      const created = await request(app)
+        .post('/api/v1/tracks')
+        .attach('file', Buffer.from(GPX_FILE), '2024-01-01_10-00-00_Ride_Cycling.gpx');
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+      const originalFile = storedTrackPath(DEFAULT_USER_ID, id);
+      expect(originalFile).not.toBeNull();
+
+      // 2. Trim both ends so the stored track differs from the original.
+      const trimmed = await request(app)
+        .post(`/api/v1/tracks/${id}/trim`)
+        .send({ start_index: 0, end_index: 1 }); // keep points 0..1 of 3? no: 3 points, keep 2
+      expect(trimmed.status).toBe(200);
+      const expectedPointCount = 2;
+
+      // 3. Export the v2 ZIP.
+      const zipBuffer = await fetchBackupZip();
+      expect(zipBuffer.subarray(0, 2).toString()).toBe('PK'); // ZIP magic
+
+      // 4. Inspect the bundle: manifest, per-plugin JSON, and the original
+      //    GPX are all present; the tracks row ships file+trim, not geometry.
+      let tempRoot: string | undefined;
+      try {
+        tempRoot = await extractBackupZip(zipBuffer);
+        const manifest = readBackupJsonFile(tempRoot, 'backup.json') as any;
+        expect(manifest.format).toBe('wherewewere-backup');
+        expect(manifest.schemaVersion).toBe(2);
+        expect(manifest.user).toMatchObject({ username: 'default' });
+
+        expect(listBackupPluginFiles(tempRoot)).toContain('tracks');
+        const tracksEntry = readBackupJsonFile(tempRoot, 'plugins/tracks.json') as any;
+        const rows = tracksEntry.checkins as Record<string, any>[];
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ id, name: created.body.name, point_count: expectedPointCount });
+        expect(rows[0].geometry).toBeUndefined();
+        expect(rows[0].points).toBeUndefined();
+        expect(rows[0].file).toBe(`files/${id}.gpx`);
+        expect(rows[0].trim).toEqual({ start_index: 0, end_index: 1 });
+
+        const bundledFile = path.join(tempRoot, 'plugins', 'tracks', 'files', `${id}.gpx`);
+        expect(fs.existsSync(bundledFile)).toBe(true);
+        expect(fs.readFileSync(bundledFile, 'utf-8')).toBe(fs.readFileSync(originalFile!, 'utf-8'));
+      } finally {
+        if (tempRoot) removeBackupTempDir(tempRoot);
+      }
+
+      // 5. Wipe the user's tracks (rows + stored originals) and restore.
+      await query('DELETE FROM tracks');
+      // Synchronous delete (deleteStoredTrack is async-fire-and-forget).
+      for (const ext of ['.gpx', '.tcx']) {
+        fs.rmSync(path.join(gpsTracksDir(DEFAULT_USER_ID), `${id}${ext}`), { force: true });
+      }
+      expect(storedTrackPath(DEFAULT_USER_ID, id)).toBeNull();
+      const empty = await request(app).get('/api/v1/tracks').query({ user_id: DEFAULT_USER_ID });
+      expect(empty.body).toHaveLength(0);
+
+      const importRes = await request(app)
+        .post('/api/v1/backup/import')
+        .attach('file', zipBuffer, `wherewewere-backup-v2.zip`)
+        .set('Content-Type', 'application/zip');
+      expect(importRes.status).toBe(200);
+      expect(importRes.body.schemaVersion).toBe(2);
+      expect(importRes.body.counts['plugin:tracks']).toMatchObject({ inserted: 1 });
+      expect(importRes.body.errors).toHaveLength(0);
+
+      // 6. The restored track matches the trimmed state and its original
+      //    file is back on disk.
+      const restored = await request(app).get(`/api/v1/tracks/${id}`);
+      expect(restored.status).toBe(200);
+      expect(restored.body.name).toBe(created.body.name);
+      expect(restored.body.activity_type).toBe('Cycling');
+      expect(restored.body.point_count).toBe(expectedPointCount);
+      expect(restored.body.geometry).toHaveLength(expectedPointCount);
+      expect(restored.body.points).toHaveLength(expectedPointCount);
+      expect(restored.body.started_at).toBe(created.body.started_at);
+      expect(storedTrackPath(DEFAULT_USER_ID, id)).toBe(path.join(gpsTracksDir(DEFAULT_USER_ID), `${id}.gpx`));
+    }, 30000);
+
+    it('restores an untrimmed track from the bundle with a null trim', async () => {
+      const created = await request(app)
+        .post('/api/v1/tracks')
+        .attach('file', Buffer.from(GPX_FILE), '2024-02-02_09-00-00_Walk_Walking.gpx');
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+
+      const zipBuffer = await fetchBackupZip();
+      let tempRoot: string | undefined;
+      try {
+        tempRoot = await extractBackupZip(zipBuffer);
+        const tracksEntry = readBackupJsonFile(tempRoot, 'plugins/tracks.json') as any;
+        const rows = tracksEntry.checkins as Record<string, any>[];
+        expect(rows).toHaveLength(1);
+        expect(rows[0].trim).toBeNull();
+        expect(rows[0].file).toBe(`files/${id}.gpx`);
+      } finally {
+        if (tempRoot) removeBackupTempDir(tempRoot);
+      }
+
+      await query('DELETE FROM tracks');
+      deleteStoredTrack(DEFAULT_USER_ID, id);
+
+      const importRes = await request(app)
+        .post('/api/v1/backup/import')
+        .attach('file', zipBuffer, 'backup.zip');
+      expect(importRes.status).toBe(200);
+      expect(importRes.body.counts['plugin:tracks']).toMatchObject({ inserted: 1 });
+
+      const restored = await request(app).get(`/api/v1/tracks/${id}`);
+      expect(restored.status).toBe(200);
+      expect(restored.body.point_count).toBe(3);
+      expect(restored.body.geometry).toHaveLength(3);
+      expect(restored.body.name).toBe(created.body.name);
+    }, 30000);
+
+    it('reports a missing bundled file as a restore warning and skips the row', async () => {
+      const created = await request(app)
+        .post('/api/v1/tracks')
+        .attach('file', Buffer.from(GPX_FILE), '2024-03-03_08-00-00_Run_Running.gpx');
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+
+      // Rebuild the ZIP without the bundled GPX (simulating a partial backup).
+      const zipBuffer = await fetchBackupZip();
+      const tempRoot = await extractBackupZip(zipBuffer);
+      fs.rmSync(path.join(tempRoot, 'plugins', 'tracks', 'files', `${id}.gpx`));
+      const partialZip = await zipDirectory(tempRoot);
+      removeBackupTempDir(tempRoot);
+
+      await query('DELETE FROM tracks');
+      deleteStoredTrack(DEFAULT_USER_ID, id);
+
+      const importRes = await request(app)
+        .post('/api/v1/backup/import')
+        .attach('file', partialZip, 'partial.zip');
+      expect(importRes.status).toBe(200);
+      expect(importRes.body.counts['plugin:tracks']).toMatchObject({ inserted: 0, skipped: 0 });
+      expect(importRes.body.errors).toHaveLength(1);
+      expect(importRes.body.errors[0]).toContain('missing from backup');
+
+      const gone = await request(app).get(`/api/v1/tracks/${id}`);
+      expect(gone.status).toBe(404);
+    }, 30000);
+
+    it('still restores legacy v1 JSON backups with inline track geometry', async () => {
+      const id = await insertTrimTestTrack();
+      const payload = await exportPluginData(DEFAULT_USER_ID);
+
+      // Assemble a v1-style single-JSON document from the framework payload.
+      const v1Doc = {
+        format: 'wherewewere-backup',
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        data: {
+          user: null,
+          settings: null,
+          plugins: { tracks: payload.tracks },
+        },
+      };
+
+      await query('DELETE FROM tracks');
+      const importRes = await request(app)
+        .post('/api/v1/backup/import')
+        .attach('file', Buffer.from(JSON.stringify(v1Doc)), 'legacy.json');
+      expect(importRes.status).toBe(200);
+      expect(importRes.body.schemaVersion).toBe(1);
+      expect(importRes.body.counts['plugin:tracks']).toMatchObject({ inserted: 1 });
+
+      const restored = await request(app).get(`/api/v1/tracks/${id}`);
+      expect(restored.status).toBe(200);
+      expect(restored.body.point_count).toBe(POINT_COUNT);
     });
   });
 });

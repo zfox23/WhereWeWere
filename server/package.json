@@ -20,6 +20,7 @@
     "test:integration:watch": "DATABASE_URL=${DATABASE_URL:-postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test} vitest -c vitest.integration.config.ts"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "cors": "^2.8.6",
     "wwp-shared": "*",
     "csv-parse": "^7.0.2",
@@ -34,6 +35,7 @@
     "uuid": "^14.0.1"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.3",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",

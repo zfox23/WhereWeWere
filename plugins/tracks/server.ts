@@ -33,7 +33,9 @@ import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 import {
   computeTrackStats,
   parseTrackFile,
+  parseTrackPoints,
   type GpxPoint,
+  type GpxPointSeries,
 } from './services/gpx';
 import {
   buildGpx,
@@ -41,7 +43,9 @@ import {
   deriveActivityTypeFromFilename,
   gpxDownloadFilename,
   storeUploadedTrack,
+  storedTrackPath,
 } from './services/trackFiles';
+import { findTrimRange, sliceTrackPoints } from './services/trackBackup';
 
 // ---------------------------------------------------------------------------
 // Plugin-owned API: /api/v1/tracks
@@ -845,46 +849,124 @@ export const server: CheckinTypeServerPlugin = {
        ORDER BY started_at ASC`,
       [user_id],
     );
-    return result.rows.map((row: any) => ({
-      id: row.id,
-      user_id: row.user_id,
-      name: row.name,
-      activity_type: row.activity_type ?? null,
-      timezone: row.timezone,
-      started_at: row.started_at,
-      ended_at: row.ended_at,
-      distance_m: Number(row.distance_m),
-      elapsed_time_s: Number(row.elapsed_time_s),
-      moving_time_s: Number(row.moving_time_s),
-      elevation_gain_m: Number(row.elevation_gain_m),
-      avg_speed_mps: Number(row.avg_speed_mps),
-      max_speed_mps: Number(row.max_speed_mps),
-      avg_hr: row.avg_hr == null ? null : Number(row.avg_hr),
-      max_hr: row.max_hr == null ? null : Number(row.max_hr),
-      point_count: Number(row.point_count),
-      file_hash: row.file_hash ?? null,
-      geometry: geojsonToCoordinates(row.geojson),
-      points: Array.isArray(row.points) ? row.points : null,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    }));
+    return result.rows.map((row: any) => {
+      const base = {
+        id: row.id,
+        user_id: row.user_id,
+        name: row.name,
+        activity_type: row.activity_type ?? null,
+        timezone: row.timezone,
+        started_at: row.started_at,
+        ended_at: row.ended_at,
+        distance_m: Number(row.distance_m),
+        elapsed_time_s: Number(row.elapsed_time_s),
+        moving_time_s: Number(row.moving_time_s),
+        elevation_gain_m: Number(row.elevation_gain_m),
+        avg_speed_mps: Number(row.avg_speed_mps),
+        max_speed_mps: Number(row.max_speed_mps),
+        avg_hr: row.avg_hr == null ? null : Number(row.avg_hr),
+        max_hr: row.max_hr == null ? null : Number(row.max_hr),
+        point_count: Number(row.point_count),
+        file_hash: row.file_hash ?? null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+
+      // Backup v2: ship the ORIGINAL uploaded file (see backupFiles) plus a
+      // trim range, instead of inlining the full geometry + per-point series.
+      // Falls back to the v1 inline shape when the original is missing or
+      // the stored points don't match the file's parsed points.
+      const storedPoints = Array.isArray(row.points) ? (row.points as GpxPointSeries[]) : null;
+      const coordinates = geojsonToCoordinates(row.geojson) ?? [];
+      const original = readStoredTrackForBackup(user_id, String(row.id));
+
+      if (original && storedPoints && storedPoints.length >= 2 && coordinates.length === storedPoints.length) {
+        const range = findTrimRange(original.points, coordinates, storedPoints);
+        if (range) {
+          const full = range.start === 0 && range.end === original.points.length - 1;
+          return {
+            ...base,
+            file: `files/${row.id}${original.ext}`,
+            trim: full ? null : { start_index: range.start, end_index: range.end },
+          };
+        }
+      }
+
+      return {
+        ...base,
+        geometry: coordinates.length > 0 ? coordinates : null,
+        points: storedPoints,
+      };
+    });
   },
 
-  backupImport: async ({ user_id, client: txClient }, payload) => {
+  /**
+   * Backup v2: the original uploaded files this user's tracks were created
+   * from. Exported verbatim; the row references them via `file`.
+   */
+  backupFiles: async ({ user_id }) => {
+    const result = await query(
+      'SELECT id FROM tracks WHERE user_id = $1',
+      [user_id],
+    );
+    const out: { zipPath: string; absPath: string }[] = [];
+    for (const row of result.rows) {
+      const path = storedTrackPath(user_id, String(row.id));
+      if (!path) continue;
+      const ext = path.slice(path.lastIndexOf('.'));
+      out.push({ zipPath: `files/${row.id}${ext}`, absPath: path });
+    }
+    return out;
+  },
+
+  backupImport: async ({ user_id, client: txClient, filesDir, errors }, payload) => {
     const rows = Array.isArray(payload) ? (payload as Record<string, any>[]) : [];
     let inserted = 0;
+    // Originals restored for file-based rows; their on-disk copies are placed
+    // only after the whole transaction commits (restoredFiles is consumed by
+    // a post-commit pass in this hook's caller — see note below).
+    const restoredFiles: { trackId: string; source: string; ext: string }[] = [];
+
     // Use the framework's transaction client when provided so restore stays
     // atomic; open our own connection only when running standalone.
     const ownsClient = txClient == null;
     const client = txClient ?? (await pool.connect());
     try {
       for (const row of rows) {
-        const insertedCount = await insertTrackRow(client, user_id, row);
+        if (!row?.id || !row.name) continue;
+
+        let insertedCount: number;
+        if (typeof row.file === 'string' && filesDir) {
+          const outcome = await insertTrackRowFromFile(client, user_id, row, filesDir, errors ?? []);
+          insertedCount = outcome.insertedCount;
+          if (outcome.insertedCount > 0) {
+            restoredFiles.push({
+              trackId: String(row.id),
+              source: path.join(filesDir, row.file),
+              ext: outcome.ext,
+            });
+          }
+        } else {
+          insertedCount = await insertTrackRow(client, user_id, row);
+        }
         if (insertedCount > 0) inserted++;
       }
     } finally {
       if (ownsClient) client.release();
     }
+
+    // Place restored originals on disk (inside the caller's transaction —
+    // file placement is inherently non-transactional, same pattern as the
+    // upload route; if a later plugin rolls the transaction back the copied
+    // files are simply orphaned and overwritten by the next restore).
+    for (const f of restoredFiles) {
+      try {
+        storeUploadedTrack(user_id, f.source, f.trackId, f.ext);
+      } catch {
+        errors?.push(`Could not restore the original file for track "${f.trackId}"`);
+      }
+    }
+
     return inserted;
   },
 
@@ -1062,6 +1144,29 @@ export const server: CheckinTypeServerPlugin = {
 };
 
 /**
+ * Read + parse a user's stored original track file for backup export.
+ * Returns the parsed points + the file extension, or null when the original
+ * is missing or unparsable (the caller falls back to inline geometry).
+ */
+function readStoredTrackForBackup(
+  userId: string,
+  trackId: string,
+): { points: GpxPoint[]; ext: string } | null {
+  const path = storedTrackPath(userId, trackId);
+  if (!path) return null;
+  const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
+  if (ext !== '.gpx' && ext !== '.tcx') return null;
+  try {
+    const xml = fs.readFileSync(path, 'utf-8');
+    const points = parseTrackPoints(xml, ext);
+    if (points.length < 2) return null;
+    return { points, ext };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Insert one track row from a backup payload row (new-format backupImport or
  * legacy restore share the same statement). Returns the row count (1 when the
  * row was inserted, 0 when skipped/conflicting).
@@ -1129,6 +1234,119 @@ async function insertTrackRow(
     ]
   );
   return result.rowCount ?? 0;
+}
+
+/**
+ * Backup v2, file-based restore of one track row: read the original
+ * GPX/TCX from the bundle, apply the trim range, recompute all derived
+ * stats, and insert the row. Derived values are always recomputed from the
+ * original file (the backup row's stats are informational only); the
+ * editable row fields (name, activity_type, timezone, file_hash,
+ * timestamps) come from the backup.
+ */
+async function insertTrackRowFromFile(
+  client: { query: (sql: string, values: unknown[]) => Promise<{ rowCount: number | null }> },
+  user_id: string,
+  row: Record<string, any>,
+  filesDir: string,
+  errors: string[],
+): Promise<{ insertedCount: number; ext: string }> {
+  const relFile: string = row.file;
+  const ext = path.extname(relFile).toLowerCase() || '.gpx';
+  const sourcePath = path.resolve(filesDir, relFile);
+
+  // Defense in depth: the file must live under the plugin's filesDir.
+  if (!sourcePath.startsWith(path.resolve(filesDir) + path.sep) || !fs.existsSync(sourcePath)) {
+    errors.push(`Track "${row.name}": original file ${relFile} missing from backup; skipped`);
+    return { insertedCount: 0, ext };
+  }
+
+  let original: GpxPoint[];
+  try {
+    original = parseTrackPoints(fs.readFileSync(sourcePath, 'utf-8'), ext);
+  } catch {
+    errors.push(`Track "${row.name}": original file ${relFile} could not be parsed; skipped`);
+    return { insertedCount: 0, ext };
+  }
+
+  const range = row.trim && typeof row.trim === 'object'
+    ? {
+        start: Math.max(0, toNumber(row.trim.start_index, 0)),
+        end: Math.min(original.length - 1, toNumber(row.trim.end_index, original.length - 1)),
+      }
+    : null;
+  const points = sliceTrackPoints(original, range);
+  if (points.length < 2) {
+    errors.push(`Track "${row.name}": trimmed range leaves fewer than 2 points; skipped`);
+    return { insertedCount: 0, ext };
+  }
+
+  let stats;
+  try {
+    stats = computeTrackStats(points, String(row.name), toStringOrNull(row.activity_type));
+  } catch {
+    errors.push(`Track "${row.name}": could not recompute stats from original file; skipped`);
+    return { insertedCount: 0, ext };
+  }
+
+  const pointsSeries: GpxPointSeries[] = points.map((p) => ({
+    t: p.time ? p.time.getTime() : null,
+    ele: p.ele,
+    hr: p.hr,
+  }));
+  const wktLineString =
+    `LINESTRING(` + stats.coordinates.map(([lng, lat]) => `${lng} ${lat}`).join(', ') + `)`;
+
+  try {
+    const result = await client.query(
+      `INSERT INTO tracks (
+         id, user_id, name, activity_type, timezone, started_at, ended_at,
+         distance_m, elapsed_time_s, moving_time_s,
+         elevation_gain_m, avg_speed_mps, max_speed_mps,
+         avg_hr, max_hr, point_count, file_hash,
+         created_at, updated_at, path, points
+       )
+       VALUES (
+         $1, $2, $3, $4, $5,
+         COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
+         $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+         COALESCE($18::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()),
+         ST_SetSRID(ST_GeomFromText($20), 4326), $21::jsonb
+       )
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        row.id,
+        user_id,
+        row.name,
+        toStringOrNull(row.activity_type),
+        row.timezone || 'UTC',
+        row.started_at || null,
+        row.ended_at || null,
+        stats.distanceM,
+        stats.elapsedTimeS,
+        stats.movingTimeS,
+        stats.elevationGainM,
+        stats.avgSpeedMps,
+        stats.maxSpeedMps,
+        stats.avgHr,
+        stats.maxHr,
+        stats.pointCount,
+        toStringOrNull(row.file_hash),
+        row.created_at || null,
+        row.updated_at || null,
+        wktLineString,
+        JSON.stringify(pointsSeries),
+      ],
+    );
+    return { insertedCount: result.rowCount ?? 0, ext };
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      // Duplicate (user_id, file_hash): the same original already exists.
+      errors.push(`Track "${row.name}": an identical track already exists; skipped`);
+      return { insertedCount: 0, ext };
+    }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

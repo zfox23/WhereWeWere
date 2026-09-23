@@ -187,7 +187,7 @@ export const backupApi = {
     const blob = await res.blob();
     const disposition = res.headers.get('Content-Disposition') || res.headers.get('content-disposition');
     const fileNameMatch = disposition?.match(/filename="?([^\"]+)"?/i);
-    const fileName = fileNameMatch?.[1] || `wherewewere-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    const fileName = fileNameMatch?.[1] || `wherewewere-backup-v2-${new Date().toISOString().slice(0, 10)}.zip`;
     return { blob, fileName };
   },
   import: async (file: File) => {

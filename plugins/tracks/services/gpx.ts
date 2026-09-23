@@ -462,3 +462,42 @@ export function parseTrackFile(
   }
   return parseGpx(xml, fallbackName);
 }
+
+/**
+ * Extract the raw per-point data from a GPX or TCX file (no stats computed).
+ * Used by the backup export to compare a track's stored points against the
+ * original uploaded file. Throws on unparsable input.
+ */
+export function parseTrackPoints(xml: string, ext: string): GpxPoint[] {
+  const parser = makeParser();
+  let doc: any;
+  try {
+    doc = parser.parse(xml);
+  } catch {
+    throw new Error('Invalid track file: could not parse XML');
+  }
+
+  const points: GpxPoint[] = [];
+  if (ext.toLowerCase() === '.tcx') {
+    const db = doc?.TrainingCenterDatabase ?? doc;
+    const activities = toNumberArray(db?.Activities?.Activity);
+    for (const activity of activities) {
+      for (const lap of toNumberArray((activity as any)?.Lap)) {
+        for (const tp of toNumberArray((lap as any)?.Track?.Trackpoint)) {
+          const p = parseTcxPoint(tp);
+          if (p) points.push(p);
+        }
+      }
+    }
+  } else {
+    const trk = doc?.gpx?.trk ?? doc?.trk;
+    if (!trk) throw new Error('Invalid GPX file: no <trk> element found');
+    for (const seg of toNumberArray(trk.trkseg)) {
+      for (const trkpt of toNumberArray((seg as any)?.trkpt)) {
+        const p = parsePoint(trkpt);
+        if (p) points.push(p);
+      }
+    }
+  }
+  return points;
+}

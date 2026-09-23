@@ -1,5 +1,7 @@
 import request from 'supertest';
 import { describe, expect, beforeAll, beforeEach, afterAll, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import app from '../../../../server/src/index';
 import { query } from '../../../../server/src/db';
 import {
@@ -7,6 +9,65 @@ import {
   setupIntegrationDatabase,
   teardownIntegrationDatabase,
 } from '../../../../server/tests/helpers/testDb';
+import {
+  extractBackupZip,
+  readBackupJsonFile,
+  removeBackupTempDir,
+} from '../../../../server/src/services/backupArchive';
+
+/**
+ * Fetch the current backup (v2 ZIP) and return both the raw buffer (for
+ * restoring) and the per-plugin JSON payloads decoded from it.
+ */
+async function fetchBackupBundle(): Promise<{
+  zip: Buffer;
+  manifest: Record<string, any>;
+  plugins: Record<string, any>;
+}> {
+  const zip = await new Promise<Buffer>((resolve, reject) => {
+    request(app)
+      .get('/api/v1/backup/export')
+      .buffer(true)
+      .parse((res: any, cb: any) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+        res.on('error', reject);
+      })
+      .end((err: any, res: any) => {
+        if (err) return reject(err);
+        if (res.status !== 200) return reject(new Error(`export failed: ${res.status}`));
+        resolve(res.body as Buffer);
+      });
+  });
+
+  const root = await extractBackupZip(zip);
+  try {
+    const manifest = readBackupJsonFile(root, 'backup.json') as Record<string, any>;
+    const plugins: Record<string, any> = {};
+    const pluginsDir = path.join(root, 'plugins');
+    for (const name of fs.readdirSync(pluginsDir)) {
+      if (!name.endsWith('.json')) continue;
+      plugins[name.slice(0, -'.json'.length)] = readBackupJsonFile(
+        root,
+        `plugins/${name}`,
+      );
+    }
+    return { zip, manifest, plugins };
+  } finally {
+    removeBackupTempDir(root);
+  }
+}
+
+/** Build a v1-style single-JSON document from bundle parts (for the legacy import path). */
+function v1Document(manifest: Record<string, any>, data: Record<string, unknown>) {
+  return {
+    format: 'wherewewere-backup',
+    schemaVersion: 1,
+    exportedAt: manifest.exportedAt,
+    data,
+  };
+}
 
 /**
  * Media backup round-trip (post-plugin).
@@ -112,12 +173,12 @@ describe('Backup export/import media round-trip', () => {
   it('survives export -> start-over -> import with all media columns intact', async () => {
     const { game, book, gameCheckin, bookCheckin } = await seed();
 
-    // 1. Export and assert the new fields are present in the plugins payload.
-    const exportRes = await request(app).get('/api/v1/backup/export');
-    expect(exportRes.status).toBe(200);
-    const payload = exportRes.body;
+    // 1. Export (v2 ZIP) and assert the new fields are present in the
+    //    per-plugin JSON payload.
+    const { zip, manifest, plugins } = await fetchBackupBundle();
+    expect(manifest.schemaVersion).toBe(2);
 
-    const mediaPayload = payload.data.plugins.media;
+    const mediaPayload = plugins.media;
     expect(mediaPayload).toBeTruthy();
 
     const exportedItems = mediaPayload.checkins as any[];
@@ -169,9 +230,13 @@ describe('Backup export/import media round-trip', () => {
     const checkinsLeft = await query('SELECT COUNT(*)::int AS n FROM media_checkins', []);
     expect(checkinsLeft.rows[0].n).toBe(0);
 
-    // 3. Re-import the export.
-    const importRes = await request(app).post('/api/v1/backup/import').send(payload);
+    // 3. Re-import the export (v2 ZIP).
+    const importRes = await request(app)
+      .post('/api/v1/backup/import')
+      .attach('file', zip, 'wherewewere-backup.zip')
+      .set('Content-Type', 'application/zip');
     expect(importRes.status).toBe(200);
+    expect(importRes.body.schemaVersion).toBe(2);
     expect(importRes.body.counts['plugin:media'].inserted).toBe(4);
 
     // 4. Re-fetch and assert every field survived.
@@ -213,10 +278,8 @@ describe('Backup export/import media round-trip', () => {
   it('imports legacy-shaped payloads (missing new keys) as nulls without error', async () => {
     const { game, book, gameCheckin, bookCheckin } = await seed();
 
-    const exportRes = await request(app).get('/api/v1/backup/export');
-    expect(exportRes.status).toBe(200);
-    const payload = exportRes.body;
-    const mediaPayload = payload.data.plugins.media;
+    const { manifest, plugins } = await fetchBackupBundle();
+    const mediaPayload = plugins.media;
 
     // Strip the new item keys to simulate a backup created before the
     // metadata columns existed. The primary items table is imported by named
@@ -249,8 +312,16 @@ describe('Backup export/import media round-trip', () => {
 
     await startOverMedia();
 
-    const importRes = await request(app).post('/api/v1/backup/import').send(payload);
+    // Restore through the legacy v1 single-JSON path: the per-plugin payload
+    // is unchanged in shape between v1 and v2, only the container differs.
+    const v1 = v1Document(manifest, {
+      user: null,
+      settings: null,
+      plugins: { media: mediaPayload },
+    });
+    const importRes = await request(app).post('/api/v1/backup/import').send(v1);
     expect(importRes.status).toBe(200);
+    expect(importRes.body.schemaVersion).toBe(1);
     expect(importRes.body.counts['plugin:media'].inserted).toBe(4);
     expect(importRes.body.errors).toHaveLength(0);
 
@@ -299,22 +370,23 @@ describe('Backup export/import media round-trip', () => {
   it('restores pre-plugin backups (top-level media keys, no plugins payload)', async () => {
     const { game, book, gameCheckin, bookCheckin } = await seed();
 
-    const exportRes = await request(app).get('/api/v1/backup/export');
-    expect(exportRes.status).toBe(200);
-    const payload = exportRes.body;
-    const mediaPayload = payload.data.plugins.media;
+    const { manifest, plugins } = await fetchBackupBundle();
+    const mediaPayload = plugins.media;
 
     // Reshape into the pre-plugin layout: rows under top-level data keys and
     // no plugins section at all.
-    payload.data.mediaItems = mediaPayload.checkins;
-    payload.data.mediaCheckins = mediaPayload.extra.mediaCheckins;
-    delete payload.data.plugins;
+    const v1 = v1Document(manifest, {
+      user: null,
+      settings: null,
+      mediaItems: mediaPayload.checkins,
+      mediaCheckins: mediaPayload.extra.mediaCheckins,
+    });
 
     await startOverMedia();
     const itemsLeft = await query('SELECT COUNT(*)::int AS n FROM media_items', []);
     expect(itemsLeft.rows[0].n).toBe(0);
 
-    const importRes = await request(app).post('/api/v1/backup/import').send(payload);
+    const importRes = await request(app).post('/api/v1/backup/import').send(v1);
     expect(importRes.status).toBe(200);
     expect(importRes.body.counts.mediaItems).toEqual({ inserted: 2, skipped: 0 });
     expect(importRes.body.counts.mediaCheckins).toEqual({ inserted: 2, skipped: 0 });

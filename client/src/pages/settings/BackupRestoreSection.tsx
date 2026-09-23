@@ -76,12 +76,12 @@ export function BackupRestoreSection() {
         >
           <Upload size={24} className="mx-auto text-gray-400 mb-2" />
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            {selectedFile ? selectedFile.name : 'Select backup .json file'}
+            {selectedFile ? selectedFile.name : 'Select backup .zip (or legacy .json) file'}
           </p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".json,application/json"
+            accept=".zip,.json,application/json,application/zip"
             onChange={(e) => {
               const file = e.target.files?.[0] || null;
               setSelectedFile(file);

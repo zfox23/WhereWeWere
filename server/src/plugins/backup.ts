@@ -20,6 +20,12 @@
  *     the plugin's settingsKeys, when the plugin declares any).
  *   - When a plugin's payload is present, its `legacyBackupKeys` are
  *     claimed: the caller must skip the corresponding legacy import loops.
+ *
+ * File bundles (backup v2 ZIPs): exportPluginFiles() collects each
+ * plugin's backupFiles so the caller can add them to the archive under
+ * plugins/<id>/<zipPath>. On restore, importPluginData passes
+ * options.filesDir (the extracted plugins/<id> directory) into the hook
+ * context so file-based plugins can read their originals back.
  */
 
 import type { PoolClient } from 'pg';
@@ -35,6 +41,18 @@ export interface PluginBackupEntry {
 }
 
 export type PluginBackupPayload = Record<string, PluginBackupEntry>;
+
+/**
+ * A plugin file to ship in a v2 ZIP bundle: the plugin id, the path inside
+ * the ZIP relative to `plugins/<id>/`, and the absolute path on disk to
+ * read from.
+ */
+export interface PluginBackupFile {
+  pluginId: string;
+  /** Relative to plugins/<id>/ inside the ZIP (e.g. "files/<id>.gpx"). */
+  zipPath: string;
+  absPath: string;
+}
 
 /** Collect all plugin data for a backup. */
 export async function exportPluginData(user_id: string): Promise<PluginBackupPayload> {
@@ -67,6 +85,25 @@ export async function exportPluginData(user_id: string): Promise<PluginBackupPay
     }
   }
 
+  return out;
+}
+
+/**
+ * Collect the files a v2 backup bundle should ship (backup v2 ZIPs only).
+ * For each custom-storage plugin that declares a `backupFiles` hook, the
+ * returned refs name the ZIP entry (`plugins/<id>/<zipPath>`) and the
+ * on-disk source. Missing source files are skipped (the plugin's
+ * backupExport must have flagged the corresponding row as inline fallback).
+ */
+export async function exportPluginFiles(user_id: string): Promise<PluginBackupFile[]> {
+  const out: PluginBackupFile[] = [];
+  for (const plugin of allPlugins()) {
+    const hook = plugin.server.backupFiles;
+    if (!hook) continue;
+    for (const ref of await hook({ user_id })) {
+      out.push({ pluginId: plugin.id, zipPath: ref.zipPath, absPath: ref.absPath });
+    }
+  }
   return out;
 }
 
@@ -123,13 +160,14 @@ export async function restoreLegacyPluginData(
   user_id: string,
   data: Record<string, unknown>,
   pluginsPayload: PluginBackupPayload | null | undefined,
+  errors?: string[],
 ): Promise<Record<string, Record<string, { inserted: number; skipped: number }>>> {
   const out: Record<string, Record<string, { inserted: number; skipped: number }>> = {};
   for (const plugin of allPlugins()) {
     const hook = plugin.server.restoreLegacyBackup;
     if (!hook) continue;
     if (pluginsPayload?.[plugin.id]) continue; // new-format payload handles it
-    out[plugin.id] = await hook({ user_id, client }, data);
+    out[plugin.id] = await hook({ user_id, client, errors }, data);
   }
   return out;
 }
@@ -137,11 +175,18 @@ export async function restoreLegacyPluginData(
 /**
  * Restore plugin data from a backup payload. Must run inside the caller's
  * transaction (on `client`). Returns per-plugin counts.
+ *
+ * `filesDirs` (backup v2 ZIP restores) maps a plugin id to the directory
+ * where that plugin's bundled files were extracted; it is passed to
+ * `backupImport` as `ctx.filesDir` so file-based plugins can read their
+ * originals back.
  */
 export async function importPluginData(
   client: PoolClient,
   user_id: string,
   pluginsPayload: PluginBackupPayload,
+  filesDirs?: Record<string, string>,
+  errors?: string[],
 ): Promise<PluginImportCounts> {
   const counts: PluginImportCounts = {};
 
@@ -162,7 +207,10 @@ export async function importPluginData(
           if (!plugin.server.backupImport) {
             throw new Error(`Plugin "${plugin.id}" declares custom storage but has no backupImport`);
           }
-          const inserted = await plugin.server.backupImport({ user_id, client }, entry.checkins);
+          const inserted = await plugin.server.backupImport(
+            { user_id, client, filesDir: filesDirs?.[plugin.id], errors },
+            entry.checkins,
+          );
           pluginCounts.inserted += inserted;
         } else {
           const result = await importGenericCheckins(user_id, entry.checkins as PluginCheckinBackupRow[] | null, client);
