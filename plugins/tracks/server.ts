@@ -25,6 +25,7 @@ import type {
   PluginTimelineContext,
 } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
+import { config } from '../../server/src/config';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { getVenueTimezone } from '../location/services/geoTimezone';
@@ -38,12 +39,14 @@ import {
   type GpxPointSeries,
 } from './services/gpx';
 import {
+  backupTrackFilename,
   buildGpx,
   deleteStoredTrack,
   deriveActivityTypeFromFilename,
   gpxDownloadFilename,
   storeUploadedTrack,
   storedTrackPath,
+  type GpxExportTrack,
 } from './services/trackFiles';
 import { findTrimRange, sliceTrackPoints } from './services/trackBackup';
 
@@ -424,15 +427,15 @@ tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Res
          user_id, name, activity_type, timezone, started_at, ended_at,
          distance_m, elapsed_time_s, moving_time_s,
          elevation_gain_m, avg_speed_mps, max_speed_mps,
-         avg_hr, max_hr, point_count, file_hash, path, points
+         avg_hr, max_hr, point_count, file_hash, source_filename, path, points
        )
        VALUES (
          $1, $2, $3, $4, $5::timestamptz, $6::timestamptz,
          $7, $8, $9,
          $10, $11, $12,
-         $13, $14, $15, $16,
-         ST_SetSRID(ST_GeomFromText($17), 4326),
-         $18::jsonb
+         $13, $14, $15, $16, $17,
+         ST_SetSRID(ST_GeomFromText($18), 4326),
+         $19::jsonb
        )
        RETURNING *`,
       [
@@ -452,6 +455,7 @@ tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Res
         stats.maxHr,
         stats.pointCount,
         fileHash,
+        path.basename(originalName) || null,
         stats.wktLineString,
         JSON.stringify(stats.points),
       ]
@@ -835,12 +839,22 @@ export const server: CheckinTypeServerPlugin = {
   legacyBackupKeys: ['tracks'],
 
   backupExport: async ({ user_id }) => {
+    // Start a fresh export plan (a stale plan from a previous export is
+    // discarded and its staged temp dir removed).
+    if (trackBackupPlan?.userId === user_id && trackBackupPlan.plan.tempDir) {
+      removeTrackBackupPlanDir(trackBackupPlan.plan);
+    }
+    trackBackupPlan = {
+      userId: user_id,
+      plan: { files: new Map<string, string>(), tempDir: null },
+    };
+
     const result = await query(
       `SELECT id, user_id, name, activity_type, timezone,
               started_at, ended_at,
               distance_m::float, elapsed_time_s::int, moving_time_s::int,
               elevation_gain_m::float, avg_speed_mps::float, max_speed_mps::float,
-              avg_hr, max_hr, point_count::int, file_hash,
+              avg_hr, max_hr, point_count::int, file_hash, source_filename,
               ST_AsGeoJSON(path) AS geojson,
               points,
               created_at, updated_at
@@ -849,6 +863,9 @@ export const server: CheckinTypeServerPlugin = {
        ORDER BY started_at ASC`,
       [user_id],
     );
+    const plan = trackBackupPlan.plan;
+    // Bundle-wide filename de-duplication (original names may collide).
+    const usedFilenames = new Set<string>();
     return result.rows.map((row: any) => {
       const base = {
         id: row.id,
@@ -868,28 +885,73 @@ export const server: CheckinTypeServerPlugin = {
         max_hr: row.max_hr == null ? null : Number(row.max_hr),
         point_count: Number(row.point_count),
         file_hash: row.file_hash ?? null,
+        source_filename: row.source_filename ?? null,
         created_at: row.created_at,
         updated_at: row.updated_at,
       };
+      const trackFilename = backupTrackFilename(
+        {
+          sourceFilename: row.source_filename ?? null,
+          name: row.name,
+          startedAt: row.started_at,
+          timezone: row.timezone,
+        },
+        usedFilenames,
+      );
 
-      // Backup v2: ship the ORIGINAL uploaded file (see backupFiles) plus a
-      // trim range, instead of inlining the full geometry + per-point series.
-      // Falls back to the v1 inline shape when the original is missing or
-      // the stored points don't match the file's parsed points.
+      // Backup v2: ship an ORIGINAL file (see backupFiles) plus a trim
+      // range, instead of inlining the full geometry + per-point series:
+      //   1. Stored upload exists and matches the stored points -> ship it
+      //      with the trim range.
+      //   2. Otherwise (v1-restored tracks, deleted originals, swapped
+      //      files) -> generate a GPX from the current DB state and ship
+      //      it with trim: null (restore re-parses + recomputes stats, so
+      //      a generated file round-trips exactly).
+      //   3. Legacy rows without per-point data cannot be expressed as a
+      //      point-based file: keep the v1 inline geometry/points shape
+      //      (restore still accepts it).
       const storedPoints = Array.isArray(row.points) ? (row.points as GpxPointSeries[]) : null;
       const coordinates = geojsonToCoordinates(row.geojson) ?? [];
-      const original = readStoredTrackForBackup(user_id, String(row.id));
 
-      if (original && storedPoints && storedPoints.length >= 2 && coordinates.length === storedPoints.length) {
-        const range = findTrimRange(original.points, coordinates, storedPoints);
-        if (range) {
-          const full = range.start === 0 && range.end === original.points.length - 1;
-          return {
-            ...base,
-            file: `files/${row.id}${original.ext}`,
-            trim: full ? null : { start_index: range.start, end_index: range.end },
-          };
+      if (
+        coordinates.length >= 2 &&
+        storedPoints &&
+        storedPoints.length === coordinates.length
+      ) {
+        const original = readStoredTrackForBackup(user_id, String(row.id));
+        if (original) {
+          const range = findTrimRange(original.points, coordinates, storedPoints);
+          if (range) {
+            const full = range.start === 0 && range.end === original.points.length - 1;
+            const zipPath = `files/${trackFilename}`;
+            plan.files.set(zipPath, original.absPath);
+            return {
+              ...base,
+              file: zipPath,
+              trim: full ? null : { start_index: range.start, end_index: range.end },
+            };
+          }
         }
+
+        // Original missing or mismatched: stage a generated GPX.
+        const zipPath = `files/${trackFilename}`;
+        const staged = stageGeneratedTrackGpx(
+          plan,
+          {
+            id: String(row.id),
+            name: row.name,
+            activityType: row.activity_type ?? null,
+            coordinates,
+            points: storedPoints,
+          },
+          trackFilename,
+        );
+        plan.files.set(zipPath, staged);
+        return {
+          ...base,
+          file: zipPath,
+          trim: null,
+        };
       }
 
       return {
@@ -901,22 +963,19 @@ export const server: CheckinTypeServerPlugin = {
   },
 
   /**
-   * Backup v2: the original uploaded files this user's tracks were created
-   * from. Exported verbatim; the row references them via `file`.
+   * Backup v2: the original files this user's tracks should ship. Returns
+   * exactly the files referenced by this export's backupExport rows (the
+   * framework runs backupExport before backupFiles), plus the staging dir
+   * for any generated files.
    */
   backupFiles: async ({ user_id }) => {
-    const result = await query(
-      'SELECT id FROM tracks WHERE user_id = $1',
-      [user_id],
-    );
-    const out: { zipPath: string; absPath: string }[] = [];
-    for (const row of result.rows) {
-      const path = storedTrackPath(user_id, String(row.id));
-      if (!path) continue;
-      const ext = path.slice(path.lastIndexOf('.'));
-      out.push({ zipPath: `files/${row.id}${ext}`, absPath: path });
+    if (!trackBackupPlan || trackBackupPlan.userId !== user_id) {
+      return { files: [], tempDir: undefined };
     }
-    return out;
+    const plan = trackBackupPlan.plan;
+    trackBackupPlan = null; // consumed by this call
+    const files = [...plan.files.entries()].map(([zipPath, absPath]) => ({ zipPath, absPath }));
+    return { files, tempDir: plan.tempDir ?? undefined };
   },
 
   backupImport: async ({ user_id, client: txClient, filesDir, errors }, payload) => {
@@ -1145,13 +1204,14 @@ export const server: CheckinTypeServerPlugin = {
 
 /**
  * Read + parse a user's stored original track file for backup export.
- * Returns the parsed points + the file extension, or null when the original
- * is missing or unparsable (the caller falls back to inline geometry).
+ * Returns the parsed points + the file extension + the path, or null when
+ * the original is missing or unparsable (the caller generates a GPX from
+ * the current database state instead).
  */
 function readStoredTrackForBackup(
   userId: string,
   trackId: string,
-): { points: GpxPoint[]; ext: string } | null {
+): { points: GpxPoint[]; ext: string; absPath: string } | null {
   const path = storedTrackPath(userId, trackId);
   if (!path) return null;
   const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
@@ -1160,10 +1220,60 @@ function readStoredTrackForBackup(
     const xml = fs.readFileSync(path, 'utf-8');
     const points = parseTrackPoints(xml, ext);
     if (points.length < 2) return null;
-    return { points, ext };
+    return { points, ext, absPath: path };
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Backup v2 file staging
+//
+// backupExport decides, per row, which file to ship; backupFiles (run by the
+// framework immediately afterwards) returns the accumulated file list. The
+// plan is module state keyed by user (the framework calls the hooks
+// sequentially per export).
+// ---------------------------------------------------------------------------
+
+interface TrackBackupFilePlan {
+  /** zipPath (e.g. "files/<id>.gpx") -> absolute source path */
+  files: Map<string, string>;
+  /** Staging dir for generated files, or null when none were generated. */
+  tempDir: string | null;
+}
+
+let trackBackupPlan: { userId: string; plan: TrackBackupFilePlan } | null = null;
+
+function removeTrackBackupPlanDir(plan: TrackBackupFilePlan): void {
+  if (plan.tempDir) {
+    try {
+      fs.rmSync(plan.tempDir, { recursive: true, force: true });
+    } catch {
+      // Best effort; the export route's finally-block also cleans up.
+    }
+    plan.tempDir = null;
+  }
+}
+
+/**
+ * Generate a GPX from the track's current database state and stage it for
+ * the backup bundle. Used when the original uploaded file is missing or no
+ * longer matches the stored points (e.g. tracks restored from a v1 backup,
+ * which never shipped originals). The restore side re-parses the file and
+ * recomputes stats, so a generated file round-trips the current state
+ * exactly.
+ */
+function stageGeneratedTrackGpx(
+  plan: TrackBackupFilePlan,
+  track: GpxExportTrack,
+  filename: string,
+): string {
+  if (!plan.tempDir) {
+    plan.tempDir = fs.mkdtempSync(path.join(config.dataDir, 'tracks-backup-'));
+  }
+  const absPath = path.join(plan.tempDir, filename);
+  fs.writeFileSync(absPath, buildGpx(track));
+  return absPath;
 }
 
 /**
@@ -1194,7 +1304,7 @@ async function insertTrackRow(
        id, user_id, name, activity_type, timezone, started_at, ended_at,
        distance_m, elapsed_time_s, moving_time_s,
        elevation_gain_m, avg_speed_mps, max_speed_mps,
-       avg_hr, max_hr, point_count, file_hash,
+       avg_hr, max_hr, point_count, file_hash, source_filename,
        created_at, updated_at,
        path, points
      )
@@ -1203,10 +1313,10 @@ async function insertTrackRow(
        COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
        $8, $9, $10,
        $11, $12, $13,
-       $14, $15, $16, $17,
-       COALESCE($18::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()),
-       ST_SetSRID(ST_GeomFromText($20), 4326),
-       $21::jsonb
+       $14, $15, $16, $17, $18,
+       COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()),
+       ST_SetSRID(ST_GeomFromText($21), 4326),
+       $22::jsonb
      )
      ON CONFLICT (id) DO NOTHING`,
     [
@@ -1227,6 +1337,7 @@ async function insertTrackRow(
       row.max_hr == null ? null : Math.round(toNumber(row.max_hr)),
       Math.round(toNumber(row.point_count)),
       toStringOrNull(row.file_hash),
+      toStringOrNull(row.source_filename),
       row.created_at || null,
       row.updated_at || null,
       wktLineString,
@@ -1303,15 +1414,15 @@ async function insertTrackRowFromFile(
          id, user_id, name, activity_type, timezone, started_at, ended_at,
          distance_m, elapsed_time_s, moving_time_s,
          elevation_gain_m, avg_speed_mps, max_speed_mps,
-         avg_hr, max_hr, point_count, file_hash,
+         avg_hr, max_hr, point_count, file_hash, source_filename,
          created_at, updated_at, path, points
        )
        VALUES (
          $1, $2, $3, $4, $5,
          COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
-         $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-         COALESCE($18::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()),
-         ST_SetSRID(ST_GeomFromText($20), 4326), $21::jsonb
+         $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+         COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()),
+         ST_SetSRID(ST_GeomFromText($21), 4326), $22::jsonb
        )
        ON CONFLICT (id) DO NOTHING`,
       [
@@ -1332,6 +1443,7 @@ async function insertTrackRowFromFile(
         stats.maxHr,
         stats.pointCount,
         toStringOrNull(row.file_hash),
+        toStringOrNull(row.source_filename),
         row.created_at || null,
         row.updated_at || null,
         wktLineString,

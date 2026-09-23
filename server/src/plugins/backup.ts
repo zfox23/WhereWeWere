@@ -92,19 +92,28 @@ export async function exportPluginData(user_id: string): Promise<PluginBackupPay
  * Collect the files a v2 backup bundle should ship (backup v2 ZIPs only).
  * For each custom-storage plugin that declares a `backupFiles` hook, the
  * returned refs name the ZIP entry (`plugins/<id>/<zipPath>`) and the
- * on-disk source. Missing source files are skipped (the plugin's
- * backupExport must have flagged the corresponding row as inline fallback).
+ * on-disk source. Plugins that stage generated files may also return a
+ * `tempDir`, which the caller must remove after the archive is complete
+ * (collected in `tempDirs`).
+ *
+ * NOTE: callers must run exportPluginData FIRST — hooks like tracks'
+ * backupFiles depend on decisions made during backupExport.
  */
-export async function exportPluginFiles(user_id: string): Promise<PluginBackupFile[]> {
+export async function exportPluginFiles(
+  user_id: string,
+): Promise<{ files: PluginBackupFile[]; tempDirs: string[] }> {
   const out: PluginBackupFile[] = [];
+  const tempDirs: string[] = [];
   for (const plugin of allPlugins()) {
     const hook = plugin.server.backupFiles;
     if (!hook) continue;
-    for (const ref of await hook({ user_id })) {
+    const result = await hook({ user_id });
+    for (const ref of result.files) {
       out.push({ pluginId: plugin.id, zipPath: ref.zipPath, absPath: ref.absPath });
     }
+    if (result.tempDir) tempDirs.push(result.tempDir);
   }
-  return out;
+  return { files: out, tempDirs };
 }
 
 /**

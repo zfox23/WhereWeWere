@@ -14,7 +14,10 @@ v2 changes:
 3. **Tracks no longer inline geometry/points.** The ZIP ships the *original
    uploaded GPX/TCX file* verbatim plus a small **diff** (trim range) and the
    editable row fields (name, activity_type, timezone, ...). Restore re-parses
-   the original, applies the trim, and recomputes all derived stats.
+   the file, applies the trim, and recomputes all derived stats. When no
+   original is on disk (e.g. tracks restored from a v1 backup, which never
+   shipped originals), the export **generates a GPX from the current database
+   state** and ships that instead.
 4. The metadata version is bumped to `schemaVersion: 2` in the manifest.
    v1 single-JSON uploads keep working for restore.
 
@@ -30,10 +33,14 @@ wherewewere-backup-v2-YYYY-MM-DD.zip
 │   ├── sleep.json
 │   ├── mood.json
 │   └── tracks.json                # rows without geometry/points, plus:
-│   │                              #   file:  "files/<trackId>.gpx" | ".tcx"
+│   │                              #   file:  "files/<trackFilename>"
 │   │                              #   trim:  { start_index, end_index } | null
+│   │                              #   source_filename: <orig>.gpx | null
 │   └── tracks/
-│       └── files/<trackId>.gpx    # the ORIGINAL uploaded file, verbatim
+│       └── files/<trackFilename>  # the ORIGINAL uploaded file, verbatim (under
+│                                  # its original filename); or a GPX generated
+│                                  # from DB state when the original is missing
+│                                  # (trim: null)
 ```
 
 ### `backup.json` manifest
@@ -67,9 +74,9 @@ Identical shape to the v1 `data.plugins[<id>]` entry:
 {
   "id": "…", "user_id": "…",
   "name": "Morning Ride", "activity_type": "Cycling", "timezone": "America/Los_Angeles",
-  "file_hash": "sha256…",
+  "file_hash": "sha256…", "source_filename": "2024-06-01_07-30-00_Morning Ride_Running.gpx",
   "started_at": "…", "ended_at": "…", "created_at": "…", "updated_at": "…",
-  "file": "files/<trackId>.gpx",
+  "file": "files/2024-06-01_07-30-00_Morning Ride_Running.gpx",
   "trim": { "start_index": 12, "end_index": 3480 },
   "distance_m": 8123, "elapsed_time_s": 3100, "moving_time_s": 3050,
   "elevation_gain_m": 96, "avg_speed_mps": 2.66, "max_speed_mps": 7.1,
@@ -77,11 +84,37 @@ Identical shape to the v1 `data.plugins[<id>]` entry:
 }
 ```
 
-- `file`/`trim` are present when the original file is on disk at export time.
-  `trim` is `null` when the stored points are the full file (no trimming).
-- **Fallback:** if the original file is missing on disk (or the row has no
-  per-point series to match), the row falls back to the v1 inline shape
-  (`geometry` + `points` arrays, no `file`/`trim`).
+- `file`/`trim` are present for every row with a per-point series. `trim` is
+  `null` when the stored points are the full file (no trimming) — which also
+  includes generated files.
+- **Generated files:** if the original is missing on disk (or was swapped out
+  so it no longer matches the stored points), the export generates a GPX from
+  the current DB state (via `buildGpx`, the same builder as the GPX download
+  route), stages it in a temp dir, and ships it with `trim: null`. Restore
+  re-parses + recomputes stats, so a generated file round-trips the current
+  state exactly — and the track now has an on-disk original again.
+- **Inline fallback (rare):** only rows without a per-point series (legacy
+  pre-trim-data tracks) fall back to the v1 inline shape (`geometry` +
+  `points`, no `file`/`trim`).
+
+### Bundle file naming
+
+Files are named for the user, not for storage:
+
+1. **Original upload name** (`tracks.source_filename`, persisted at upload
+   time in migration 045) is used when known — preserving the original
+   `.gpx`/`.tcx` extension.
+2. **Fallback** when the original name is unknown (v1-restored tracks,
+   pre-migration rows): `YYYY-MM-DD_HH-mm-SS_<track title>.gpx`, where the
+   timestamp is the track's `started_at` rendered in the track's own
+   `timezone`.
+3. **De-duplication:** two different tracks that resolve to the same name
+   get ` (2)`, ` (3)`, ... before the extension within one bundle.
+
+Names are sanitized of filesystem-unsafe characters. On-disk storage
+(`<dataDir>/<uid>/uploads/gps_tracks/<trackId>.<ext>`) is deliberately
+unchanged — the friendly name only affects the bundle. Restore reads files by
+the `file` reference, so naming is round-trip safe.
 
 ## Trim diff derivation (export)
 
@@ -91,16 +124,24 @@ always a contiguous subsequence of the original file's parsed points.
 
 Export algorithm per track:
 
-1. Read + parse the stored original (`parseTrackFile`) → `originalPoints`.
+1. Read + parse the stored original (`parseTrackPoints`) → `originalPoints`.
 2. Take the stored `points` series (`t`, `ele`, `hr` per index).
 3. Find the first index `s` in `originalPoints` whose `(t, ele, hr)` triple
    equals the stored first point. Verify the stored series matches
    `originalPoints[s..s+len-1]` exactly (with a coordinate match as a
-   tie-breaker).
-4. If matched: `trim = { start_index: s, end_index: s + len - 1 }`
+   tie-breaker, `COORD_EPSILON = 1e-6`).
+4. If matched: ship the original with
+   `trim = { start_index: s, end_index: s + len - 1 }`
    (`null` when `s === 0 && end === original.length - 1`).
-5. If not matched (file was manually swapped, or parse produced a different
-   point count): fall back to inline geometry + points.
+5. If the original is missing or not matched (file swapped, unparseable):
+   generate a GPX from the current DB state and ship it with `trim: null`.
+6. Only rows without a per-point series fall back to inline geometry/points.
+
+The per-row decisions are collected during `backupExport` in a module-level
+"export plan"; the framework runs `exportPluginData` BEFORE `backupFiles`, and
+the tracks plugin's `backupFiles` returns the accumulated file list (plus the
+staging temp dir). The export route removes the temp dir once the ZIP stream
+completes.
 
 ## Restore (import)
 
@@ -148,7 +189,9 @@ Export algorithm per track:
 | `server/src/plugins/backup.ts` | `exportPluginData`/`importPluginData` thread `filesDir`; collect `backupFiles` |
 | `server/src/routes/backup.ts` | v2 manifest, ZIP export via `archiver`, ZIP import via `unzipper`, schema bump |
 | `server/src/services/backupArchive.ts` | (new) ZIP build/extract helpers shared by the route |
-| `plugins/tracks/server.ts` | `backupExport` diff + `backupFiles`; `backupImport` file-based restore |
+| `plugins/tracks/server.ts` | `backupExport` diff + `backupFiles`; `backupImport` file-based restore; persists `source_filename` on upload |
+| `plugins/tracks/services/trackFiles.ts` | `backupTrackFilename` bundle-naming helper |
+| `server/src/db/migrations/045_track_source_filename.sql` | (new) persist the originally-uploaded filename |
 | `client/src/pages/settings/BackupRestoreSection.tsx` | accept `.zip`, updated copy |
 | `server/package.json` | add `archiver` |
-| tests | ZIP round-trip, trim diff, v1 regression |
+| tests | ZIP round-trip, trim diff, v1 regression, bundle naming |

@@ -212,3 +212,86 @@ export function gpxDownloadFilename(track: GpxExportTrack): string {
   const base = (track.name || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '').trim();
   return `${base || `track-${track.id}`}.gpx`;
 }
+
+// ---------------------------------------------------------------------------
+// Backup v2 bundle file naming
+// ---------------------------------------------------------------------------
+
+/** Strip filesystem-unsafe characters from a filename (extension preserved). */
+function sanitizeBackupFilename(value: string): string {
+  return value.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '').replace(/^\.+/, '').trim();
+}
+
+/**
+ * Format a date as `YYYY-MM-DD_HH-mm-ss` in the given IANA timezone
+ * (falls back to UTC when the timezone is invalid).
+ */
+function formatTimestampForFilename(date: Date, timezone: string | null): string {
+  // Invalid timezone -> fall back to UTC (same behavior as the rest of the
+  // app's display formatting).
+  let tz = timezone || 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+  } catch {
+    tz = 'UTC';
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  // Some engines emit "24" for midnight with hour12: false.
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')}_${hour}-${get('minute')}-${get('second')}`;
+}
+
+export interface BackupTrackNaming {
+  /** The originally-uploaded filename (basename, with extension), or null. */
+  sourceFilename: string | null;
+  /** Current track title (used for the fallback name). */
+  name: string;
+  /** Track start instant (Date or ISO string). */
+  startedAt: string | Date;
+  /** IANA timezone the track's start should be displayed in. */
+  timezone: string | null;
+}
+
+/**
+ * Name a track's file inside a backup bundle:
+ *   1. The originally-uploaded filename, when it is known (preserving the
+ *      original extension — .gpx or .tcx).
+ *   2. Otherwise `YYYY-MM-DD_HH-mm-SS_<track title>.gpx`, where the date
+ *      time is the track's start in its own timezone.
+ *
+ * `usedFilenames` deduplicates names within one bundle (two different
+ * uploads may share a display name): a second track with the same name gets
+ * ` (2)`, ` (3)`, ... before the extension.
+ */
+export function backupTrackFilename(naming: BackupTrackNaming, usedFilenames: Set<string>): string {
+  let desired = sanitizeBackupFilename(naming.sourceFilename ?? '');
+  if (!desired) {
+    const stamp = formatTimestampForFilename(new Date(naming.startedAt), naming.timezone);
+    const title = (naming.name || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '').trim();
+    desired = `${stamp}_${title || 'Track'}.gpx`;
+  }
+  if (!usedFilenames.has(desired)) {
+    usedFilenames.add(desired);
+    return desired;
+  }
+  const dot = desired.lastIndexOf('.');
+  const stem = dot > 0 ? desired.slice(0, dot) : desired;
+  const ext = dot > 0 ? desired.slice(dot) : '';
+  for (let i = 2; ; i++) {
+    const candidate = `${stem} (${i})${ext}`;
+    if (!usedFilenames.has(candidate)) {
+      usedFilenames.add(candidate);
+      return candidate;
+    }
+  }
+}

@@ -77,6 +77,16 @@ export interface BackupFileRef {
   absPath: string;
 }
 
+/**
+ * Result of a plugin's `backupFiles` hook. `files` are the entries to add to
+ * the bundle; `tempDir` (optional) is a directory the plugin created for
+ * generated files — the framework removes it once the archive is complete.
+ */
+export interface BackupFilesResult {
+  files: BackupFileRef[];
+  tempDir?: string;
+}
+
 /** Context passed to plugin delete/backup hooks. */
 export interface PluginHookContext {
   user_id: string;
@@ -382,9 +392,15 @@ export interface CheckinTypeServerPlugin {
    * On restore, the framework extracts these to `ctx.filesDir` and the
    * plugin's `backupImport` reads them back by their `zipPath`.
    *
-   * Return an empty array (or omit the hook) when the plugin ships no files.
+   * IMPORTANT: the framework runs `backupExport` (via exportPluginData)
+   * BEFORE `backupFiles`, so hooks that need per-row context (e.g. a file
+   * reference per exported row) should make their decisions in
+   * `backupExport` and list the results here.
+   *
+   * Return an empty file list (or omit the hook) when the plugin ships no
+   * files.
    */
-  backupFiles?: (ctx: PluginHookContext) => Promise<BackupFileRef[]>;
+  backupFiles?: (ctx: PluginHookContext) => Promise<BackupFilesResult>;
 
   /**
    * Start-over hook: delete all of this user's data for this type. Returns

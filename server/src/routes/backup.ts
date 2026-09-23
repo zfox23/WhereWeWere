@@ -307,12 +307,12 @@ async function runRestore(
 }
 
 router.get('/export', async (_req: Request, res: Response) => {
+  let fileTempDirs: string[] = [];
   try {
     const [
       userResult,
       settingsResult,
       pluginsData,
-      pluginFiles,
     ] = await Promise.all([
         query(
           `SELECT id, username, email, display_name, created_at, updated_at
@@ -335,8 +335,13 @@ router.get('/export', async (_req: Request, res: Response) => {
           [USER_ID]
         ),
         exportPluginData(USER_ID),
-        exportPluginFiles(USER_ID),
       ]);
+
+    // File collection runs AFTER the data export: a plugin's backupFiles may
+    // stage generated files whose contents depend on its backupExport output
+    // (e.g. tracks generates a GPX for rows whose original is missing).
+    const { files: pluginFiles, tempDirs } = await exportPluginFiles(USER_ID);
+    fileTempDirs = tempDirs;
 
     const manifest: import('../services/backupArchive').BackupManifest = {
       format: BACKUP_FORMAT,
@@ -359,6 +364,8 @@ router.get('/export', async (_req: Request, res: Response) => {
     } else {
       res.destroy();
     }
+  } finally {
+    for (const dir of fileTempDirs) removeBackupTempDir(dir);
   }
 });
 

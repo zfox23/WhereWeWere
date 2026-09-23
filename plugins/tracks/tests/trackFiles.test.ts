@@ -1,6 +1,100 @@
 import { describe, it, expect } from 'vitest';
-import { buildGpx, gpxDownloadFilename, deriveActivityTypeFromFilename } from '../services/trackFiles';
+import {
+  backupTrackFilename,
+  buildGpx,
+  gpxDownloadFilename,
+  deriveActivityTypeFromFilename,
+} from '../services/trackFiles';
 import { parseGpx } from '../services/gpx';
+
+describe('backupTrackFilename', () => {
+  it('prefers the original uploaded filename', () => {
+    const name = backupTrackFilename(
+      {
+        sourceFilename: '2024-06-01_07-30-00_Morning Ride_Running.gpx',
+        name: 'Renamed Later',
+        startedAt: '2024-06-01T07:30:00Z',
+        timezone: 'UTC',
+      },
+      new Set(),
+    );
+    expect(name).toBe('2024-06-01_07-30-00_Morning Ride_Running.gpx');
+  });
+
+  it('keeps the original extension for .tcx uploads', () => {
+    const name = backupTrackFilename(
+      {
+        sourceFilename: '2024-06-01_07-30-00_Morning Ride_Running.tcx',
+        name: 'Morning Ride',
+        startedAt: '2024-06-01T07:30:00Z',
+        timezone: 'UTC',
+      },
+      new Set(),
+    );
+    expect(name).toBe('2024-06-01_07-30-00_Morning Ride_Running.tcx');
+  });
+
+  it('falls back to YYYY-MM-DD_HH-mm-SS_<title>.gpx in the track timezone', () => {
+    const name = backupTrackFilename(
+      {
+        sourceFilename: null,
+        name: 'Evening Spin',
+        // 2024-06-01T12:00:00Z is 08:00 in America/New_York
+        startedAt: '2024-06-01T12:00:00Z',
+        timezone: 'America/New_York',
+      },
+      new Set(),
+    );
+    expect(name).toBe('2024-06-01_08-00-00_Evening Spin.gpx');
+  });
+
+  it('falls back to UTC when the timezone is invalid', () => {
+    const name = backupTrackFilename(
+      {
+        sourceFilename: null,
+        name: 'UTC Fallback',
+        startedAt: '2024-06-01T12:30:45Z',
+        timezone: 'Not/AZone',
+      },
+      new Set(),
+    );
+    expect(name).toBe('2024-06-01_12-30-45_UTC Fallback.gpx');
+  });
+
+  it('sanitizes filesystem-unsafe characters from names and titles', () => {
+    const name = backupTrackFilename(
+      {
+        sourceFilename: null,
+        name: 'Bad/Name*With?"Chars',
+        startedAt: '2024-06-01T12:00:00Z',
+        timezone: 'UTC',
+      },
+      new Set(),
+    );
+    expect(name).toBe('2024-06-01_12-00-00_BadNameWithChars.gpx');
+  });
+
+  it('uses Track as the title when the name is empty', () => {
+    const name = backupTrackFilename(
+      { sourceFilename: null, name: '   ', startedAt: '2024-06-01T12:00:00Z', timezone: 'UTC' },
+      new Set(),
+    );
+    expect(name).toBe('2024-06-01_12-00-00_Track.gpx');
+  });
+
+  it('deduplicates names within one bundle', () => {
+    const used = new Set<string>();
+    const base = {
+      sourceFilename: 'Ride.gpx',
+      name: 'Ride',
+      startedAt: '2024-06-01T12:00:00Z',
+      timezone: 'UTC',
+    };
+    expect(backupTrackFilename(base, used)).toBe('Ride.gpx');
+    expect(backupTrackFilename(base, used)).toBe('Ride (2).gpx');
+    expect(backupTrackFilename(base, used)).toBe('Ride (3).gpx');
+  });
+});
 
 describe('buildGpx', () => {
   const track = {
