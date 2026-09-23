@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Clock, Loader2, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { settings } from '../../api/client';
+import { getClientPlugin } from '../../plugins/registry';
 import type {
   TimestampReconciliationSuggestion,
-  TimestampReconciliationUninferableMoodCheckin,
-  TimestampReconciliationUninferableMediaCheckin,
+  TimestampReconciliationUninferableCheckin,
   TimestampReconciliationUpdate,
 } from '../../types';
 
@@ -39,15 +39,19 @@ interface TimestampSuggestionTimezoneGroup {
 }
 
 interface TimestampSuggestionTypeGroup {
-  key: 'venue' | 'mood' | 'media';
+  key: string;
   label: string;
   suggestions: TimestampReconciliationSuggestion[];
   timezoneGroups: TimestampSuggestionTimezoneGroup[];
 }
 
 function buildTimestampSuggestionGroups(suggestions: TimestampReconciliationSuggestion[]): TimestampSuggestionTypeGroup[] {
-  return (['venue', 'mood', 'media'] as const)
-    .map((type) => {
+  // Build the type list from the actual suggestions plus media (always present).
+  const typeSet = new Set<string>(suggestions.map((s) => s.type));
+  typeSet.add('media');
+  const types = Array.from(typeSet).sort();
+
+  return types.map((type) => {
       const typeSuggestions = suggestions.filter((suggestion) => suggestion.type === type);
       const timezoneMap = new Map<string, TimestampReconciliationSuggestion[]>();
 
@@ -72,7 +76,9 @@ function buildTimestampSuggestionGroups(suggestions: TimestampReconciliationSugg
 
       return {
         key: type,
-        label: type === 'venue' ? 'Venue Checkins' : type === 'mood' ? 'Mood Checkins' : 'Media Checkins',
+        label: type === 'media'
+          ? 'Media Checkins'
+          : `${getClientPlugin(type)?.strings.title ?? type} Checkins`,
         suggestions: typeSuggestions,
         timezoneGroups,
       };
@@ -87,9 +93,7 @@ interface UninferableCheckin {
   reason: string;
 }
 
-type UninferableCheckinList =
-  | TimestampReconciliationUninferableMoodCheckin[]
-  | TimestampReconciliationUninferableMediaCheckin[];
+type UninferableCheckinList = TimestampReconciliationUninferableCheckin[];
 
 function UninferableCheckinGroup({
   title,
@@ -157,8 +161,8 @@ function UninferableCheckinGroup({
 
 export function TimestampReconciliationSection() {
   const [suggestions, setSuggestions] = useState<TimestampReconciliationSuggestion[]>([]);
-  const [uninferableMoodCheckins, setUninferableMoodCheckins] = useState<TimestampReconciliationUninferableMoodCheckin[]>([]);
-  const [uninferableMediaCheckins, setUninferableMediaCheckins] = useState<TimestampReconciliationUninferableMediaCheckin[]>([]);
+  const [uninferableMoodCheckins, setUninferableMoodCheckins] = useState<TimestampReconciliationUninferableCheckin[]>([]);
+  const [uninferableMediaCheckins, setUninferableMediaCheckins] = useState<TimestampReconciliationUninferableCheckin[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -211,8 +215,8 @@ export function TimestampReconciliationSection() {
     try {
       const data = await settings.timestampReconciliationPreview();
       const nextSuggestions = data.suggestions as TimestampReconciliationSuggestion[];
-      const nextUninferableMoodCheckins = data.uninferable_mood_checkins as TimestampReconciliationUninferableMoodCheckin[];
-      const nextUninferableMediaCheckins = data.uninferable_media_checkins as TimestampReconciliationUninferableMediaCheckin[];
+      const nextUninferableMoodCheckins = (data.uninferable?.mood ?? []) as TimestampReconciliationUninferableCheckin[];
+      const nextUninferableMediaCheckins = (data.uninferable?.media ?? []) as TimestampReconciliationUninferableCheckin[];
       setSuggestions(nextSuggestions);
       setUninferableMoodCheckins(nextUninferableMoodCheckins);
       setUninferableMediaCheckins(nextUninferableMediaCheckins);

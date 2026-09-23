@@ -25,7 +25,14 @@ interface LifeSummaryResult {
   summary: string;
   images_included: number;
   images_skipped: number;
-  skipped: SkippedEntry[];
+  /** 'single' = full data in one LLM call, 'map-reduce' = chunked + condensed. */
+  mode?: 'single' | 'map-reduce';
+  /** Number of chunks condensed during the map phase (0 for single). */
+  chunks?: number;
+  /** Number of recursive reduction levels applied to the digests. */
+  digest_levels?: number;
+  /** Always empty on the server (kept for backward compatibility). */
+  skipped?: SkippedEntry[];
 }
 
 const MIN_IMAGES = 3;
@@ -364,12 +371,22 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
 
           {result && !summarizing && (
             <div className="space-y-2">
-              {(result.skipped.length > 0 || result.images_included > 0 || result.images_skipped > 0) && (
+              {(result.mode === 'map-reduce' || (result.skipped?.length ?? 0) > 0 || result.images_included > 0 || result.images_skipped > 0) && (
                 <div className="space-y-1">
-                  {result.skipped.length > 0 && (
+                  {result.mode === 'map-reduce' && (
+                    <p className="text-xs text-purple-600 dark:text-purple-400">
+                      Large period — all check-ins were included, condensed into a{' '}
+                      {(result.chunks ?? 0)}-chunk digest
+                      {(result.digest_levels ?? 0) > 0
+                        ? ` (then re-condensed over ${result.digest_levels} additional level${(result.digest_levels ?? 0) === 1 ? '' : 's'})`
+                        : ''}{' '}
+                      before summarizing.
+                    </p>
+                  )}
+                  {(result.skipped ?? []).length > 0 && (
                     <p className="text-xs text-amber-600 dark:text-amber-400">
                       Context limit reached — only a random sample was included:{' '}
-                      {result.skipped
+                      {result.skipped!
                         .map((s) => `${s.included} of ${s.total} ${s.type}`)
                         .join(', ')}
                       .

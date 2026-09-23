@@ -2,29 +2,18 @@ import express from 'express';
 import cors from 'cors';
 import type { Request, Response, NextFunction } from 'express';
 import { config } from './config';
-import { checkinsRouter } from './routes/checkins';
-import { venuesRouter } from './routes/venues';
 import { statsRouter } from './routes/stats';
-import { searchRouter } from './routes/search';
 import { settingsRouter } from './routes/settings';
-import { importRouter } from './routes/import';
 import { jobsRouter } from './routes/jobs';
 import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
-import { moodCheckinsRouter } from './routes/mood-checkins';
-import { moodActivitiesRouter } from './routes/mood-activities';
 import { timelineRouter } from './routes/timeline';
-import { importDaylioRouter } from './routes/import-daylio';
-import { importSleepAsAndroidRouter } from './routes/import-sleep-as-android';
-import { webhookSleepAsAndroidRouter } from './routes/webhook-sleep-as-android';
-import { webhookPlexRouter } from './routes/webhook-plex';
 import { backupRouter } from './routes/backup';
-import { sleepEntriesRouter } from './routes/sleep-entries';
-import { tracksRouter } from './routes/tracks';
 import { llmRouter } from './routes/llm';
-import { mediaRouter } from './routes/media';
 import { importYamtrackRouter } from './routes/import-yamtrack';
 import { runMigrations } from './db/runMigrations';
+import { pluginsRouter } from './plugins/routes';
+import { allPlugins } from './plugins/registry';
 
 export function createApp() {
   const app = express();
@@ -72,34 +61,37 @@ export function createApp() {
   }
 
   // API routes
-  app.use('/api/v1/checkins', checkinsRouter);
-  app.use('/api/v1/venues', venuesRouter);
   app.use('/api/v1/stats', statsRouter);
-  app.use('/api/v1/search', searchRouter);
   app.use('/api/v1/settings', settingsRouter);
-  app.use('/api/v1/import/swarm', importRouter);
   app.use('/api/v1/jobs', jobsRouter);
   app.use('/api/v1/scrobbles', scrobblesRouter);
   app.use('/api/v1/immich', immichRouter);
-  app.use('/api/v1/mood-checkins', moodCheckinsRouter);
-  app.use('/api/v1/mood-activities', moodActivitiesRouter);
   app.use('/api/v1/timeline', timelineRouter);
-  app.use('/api/v1/import/daylio', importDaylioRouter);
-  app.use('/api/v1/import/sleep-as-android', importSleepAsAndroidRouter);
-  app.use('/api/v1/webhook/sleep-as-android', webhookSleepAsAndroidRouter);
-  app.use('/api/v1/webhook/plex', webhookPlexRouter);
-  app.use('/api/v1/sleep-entries', sleepEntriesRouter);
-  app.use('/api/v1/tracks', tracksRouter);
   app.use('/api/v1/backup', backupRouter);
   app.use('/api/v1/llm', llmRouter);
-  app.use('/api/v1/media', mediaRouter);
   app.use('/api/v1/import/yamtrack', importYamtrackRouter);
+  app.use('/api/v1/plugins', pluginsRouter);
+
+  // Plugin-owned API routes (custom-storage plugins mount their own CRUD).
+  for (const plugin of allPlugins()) {
+    if (plugin.server.api) {
+      const mounts = Array.isArray(plugin.server.api)
+        ? plugin.server.api
+        : [plugin.server.api];
+      for (const mount of mounts) {
+        app.use(`/api/v1${mount.mount}`, mount.router);
+      }
+    }
+  }
 
   return app;
 }
 
 export async function startServer() {
   await runMigrations();
+
+  const { cleanupStaleJobs } = await import('./services/jobs');
+  await cleanupStaleJobs();
 
   const app = createApp();
   app.listen(config.port, () => {

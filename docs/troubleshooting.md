@@ -43,3 +43,12 @@ docker compose config
 ```
 
 Use this to verify resolved env values and volume mappings.
+
+## Server fails to start with a PostGIS/extension error
+
+Cause: the database is plain Postgres without the PostGIS extension. Migrations create PostGIS types (e.g. for GPS tracks), so the server will not start against a non-PostGIS database.
+
+Fix:
+
+1. Use the stock Compose stack, which runs `postgis/postgis:16-3.4`.
+2. If using an external database, enable the PostGIS extension: `CREATE EXTENSION IF NOT EXISTS postgis;`.

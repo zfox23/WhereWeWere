@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cog, Clock, Loader2, AlertCircle, CheckCircle2, XCircle, Ban, Play, Send, StopCircle } from 'lucide-react';
+import { Cog, Clock, Loader2, AlertCircle, CheckCircle2, XCircle, Ban, Play, StopCircle } from 'lucide-react';
 import { jobs } from '../../api/client';
 import type { Job } from '../../types';
 
@@ -120,17 +120,6 @@ export function JobsSection({ refreshKey }: { refreshKey: number }) {
             )}
           </button>
           <p className="text-xs text-gray-400 mt-1">Reverse geocode and categorize venues</p>
-        </div>
-        <div className='flex flex-col'>
-          <button
-            onClick={() => startJob('dawarich-export')}
-            disabled={true || starting || hasActiveJob}
-            className="btn-secondary"
-          >
-            <Send size={16} className="mr-2" />
-            Export to Dawarich
-          </button>
-          <p className="text-xs text-gray-400 mt-1">Export Places to Dawarich (disabled; untested)</p>
         </div>
       </div>
 

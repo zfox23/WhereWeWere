@@ -5,14 +5,14 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/server/src/index.js",
     "migrate": "tsx src/db/migrate.ts",
-    "backfill:checkin-timezone": "tsx src/db/backfill-checkin-timezone.ts",
-    "backfill:track-max-speeds": "tsx src/db/backfill-track-max-speeds.ts",
-    "backfill:track-avg-speeds": "tsx src/db/backfill-track-avg-speeds.ts",
-    "backfill:tgdb-external-urls": "tsx src/db/backfill-tgdb-external-urls.ts",
-    "backfill:games-external-ids": "tsx src/db/backfill-games-external-ids.ts",
-    "import:games": "tsx src/db/import-games-csv.ts",
+    "backfill:checkin-timezone": "tsx ../plugins/location/scripts/backfill-checkin-timezone.ts",
+    "backfill:track-max-speeds": "tsx ../plugins/tracks/scripts/backfill-track-max-speeds.ts",
+    "backfill:track-avg-speeds": "tsx ../plugins/tracks/scripts/backfill-track-avg-speeds.ts",
+    "backfill:tgdb-external-urls": "tsx ../plugins/media/scripts/backfill-tgdb-external-urls.ts",
+    "backfill:games-external-ids": "tsx ../plugins/media/scripts/backfill-games-external-ids.ts",
+    "import:games": "tsx ../plugins/media/scripts/import-games-csv.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -20,7 +20,9 @@
     "test:integration:watch": "DATABASE_URL=${DATABASE_URL:-postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test} vitest -c vitest.integration.config.ts"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "cors": "^2.8.6",
+    "wwp-shared": "*",
     "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -33,6 +35,7 @@
     "uuid": "^14.0.1"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.3",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",

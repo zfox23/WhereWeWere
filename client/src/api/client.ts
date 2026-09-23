@@ -1,23 +1,11 @@
 import type {
   TimestampReconciliationScanResult,
-  TrackEntry,
-  TrackMapEntry,
-  MediaSearchHit,
-  MediaItem,
-  MediaCheckIn,
-  MediaLibraryItem,
-  MediaList,
-  MediaStats,
-  MediaTvSeason,
-  YamtrackPreview,
-  YamtrackImportResult,
-  MediaSubtype,
 } from '../types';
 
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
 
-function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
+export function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
   if (!API_ACCESS_TOKEN) return headers;
   return { ...headers, 'X-WhereWeWere-Token': API_ACCESS_TOKEN };
 }
@@ -35,17 +23,17 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
   return res.json();
 }
 
-// Checkins
+// Location check-ins (location plugin)
 export const checkins = {
   list: (params?: Record<string, string>) =>
-    request<any[]>(`/checkins?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/checkins/${id}`),
+    request<any[]>(`/location-checkins?${new URLSearchParams(params)}`),
+  get: (id: string) => request<any>(`/location-checkins/${id}`),
   create: (data: any) =>
-    request<any>('/checkins', { method: 'POST', body: JSON.stringify(data) }),
+    request<any>('/location-checkins', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) =>
-    request<any>(`/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    request<any>(`/location-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
-    request<void>(`/checkins/${id}`, { method: 'DELETE' }),
+    request<void>(`/location-checkins/${id}`, { method: 'DELETE' }),
 };
 
 // Venues
@@ -82,7 +70,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any>(`/stats/summary?${qp.toString()}`);
+    return request<any>(`/location-checkins/stats/summary?${qp.toString()}`);
   },
   topVenues: (userId: string, limit = 10, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId, limit: String(limit) });
@@ -90,7 +78,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/top-venues?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/top-venues?${qp.toString()}`);
   },
   categoryBreakdown: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -98,17 +86,17 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/category-breakdown?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/category-breakdown?${qp.toString()}`);
   },
   heatmap: (userId: string, year: number) =>
-    request<any[]>(`/stats/heatmap?user_id=${userId}&year=${year}`),
+    request<any[]>(`/location-checkins/stats/heatmap?user_id=${userId}&year=${year}`),
   countries: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
     if (from && to) {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/countries?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/countries?${qp.toString()}`);
   },
   mapData: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -116,7 +104,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/map-data?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/map-data?${qp.toString()}`);
   },
   dayOfWeek: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -124,7 +112,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/day-of-week?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/day-of-week?${qp.toString()}`);
   },
   timeOfDay: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -132,7 +120,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/time-of-day?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/time-of-day?${qp.toString()}`);
   },
   busiestDays: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -140,7 +128,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/busiest-days?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/busiest-days?${qp.toString()}`);
   },
   topCities: (userId: string, from?: string, to?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -148,7 +136,7 @@ export const stats = {
       qp.set('from', from);
       qp.set('to', to);
     }
-    return request<any[]>(`/stats/top-cities?${qp.toString()}`);
+    return request<any[]>(`/location-checkins/stats/top-cities?${qp.toString()}`);
   },
   reflections: (userId: string, targetDate?: string) => {
     const qp = new URLSearchParams({ user_id: userId });
@@ -158,71 +146,9 @@ export const stats = {
     return request<any[]>(`/stats/reflections?${qp.toString()}`);
   },
   additionalStats: (userId: string) =>
-    request<any>(`/stats/additional-stats?user_id=${userId}`),
+    request<any>(`/location-checkins/stats/additional-stats?user_id=${userId}`),
   earliestDates: (userId: string) =>
-    request<{ checkins: string | null; mood: string | null; sleep: string | null; tracks: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
-  moodDaily: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) { qp.set('from', from); qp.set('to', to); }
-    return request<any[]>(`/stats/mood-daily?${qp.toString()}`);
-  },
-  moodMonthly: (userId: string, year: number) =>
-    request<any[]>(`/stats/mood-monthly?user_id=${userId}&year=${year}`),
-  moodByDayOfWeek: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/mood-by-day-of-week?${qp.toString()}`);
-  },
-  moodActivityCorrelations: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/mood-activity-correlations?${qp.toString()}`);
-  },
-  moodActivityCombinations: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/mood-activity-combinations?${qp.toString()}`);
-  },
-  moodHeatmap: (userId: string, year: number) =>
-    request<any[]>(`/stats/mood-heatmap?user_id=${userId}&year=${year}`),
-  moodCountRange: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) { qp.set('from', from); qp.set('to', to); }
-    return request<any[]>(`/stats/mood-count-range?${qp.toString()}`);
-  },
-  sleepSummary: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any>(`/stats/sleep-summary?${qp.toString()}`);
-  },
-  sleepDaily: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/sleep-daily?${qp.toString()}`);
-  },
-  sleepRatingDistribution: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/stats/sleep-rating-distribution?${qp.toString()}`);
-  },
+    request<{ checkins: string | null; tracks: string | null; [typeId: string]: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
 };
 
 // Search
@@ -247,141 +173,6 @@ export const importApi = {
     }
     return res.json();
   },
-  daylio: async (file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    form.append('source_timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-    const res = await fetch(`${API_BASE}/import/daylio`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.message || `Import failed: ${res.status}`);
-    }
-    return res.json();
-  },
-  replaceDaylioBreaks: async () => {
-    const res = await fetch(`${API_BASE}/import/daylio/replace-br`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.error || error.message || `Update failed: ${res.status}`);
-    }
-    return res.json() as Promise<{ updated: number }>;
-  },
-  sleepAsAndroid: async (file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch(`${API_BASE}/import/sleep-as-android`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.message || `Import failed: ${res.status}`);
-    }
-    return res.json();
-  },
-};
-
-// Sleep entries
-export const sleepEntries = {
-  list: (params?: Record<string, string>) =>
-    request<any[]>(`/sleep-entries?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/sleep-entries/${id}`),
-  create: (data: any) =>
-    request<any>('/sleep-entries', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) =>
-    request<any>(`/sleep-entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) =>
-    request<void>(`/sleep-entries/${id}`, { method: 'DELETE' }),
-};
-
-// Tracks
-export const tracks = {
-  list: (params?: Record<string, string>) =>
-    request<any[]>(`/tracks?${new URLSearchParams(params)}`),
-  mapData: (params?: Record<string, string>) =>
-    request<TrackMapEntry[]>(`/tracks/map-data?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/tracks/${id}`),
-  update: (id: string, data: { name?: string; activity_type?: string | null }) =>
-    request<TrackEntry>(`/tracks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  trim: (id: string, start_index: number, end_index: number) =>
-    request<TrackEntry>(`/tracks/${id}/trim`, {
-      method: 'POST',
-      body: JSON.stringify({ start_index, end_index }),
-    }),
-  activityTypes: () => request<string[]>('/tracks/activity-types'),
-  delete: (id: string) =>
-    request<{ message: string; id: string }>(`/tracks/${id}`, { method: 'DELETE' }),
-  download: async (id: string): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch(`${API_BASE}/tracks/${id}/download`, {
-      headers: withAuthHeader(),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({} as Record<string, unknown>));
-      throw new Error(
-        (error.message as string) || (error.error as string) || `Track download failed: ${res.status}`
-      );
-    }
-    let filename = `track-${id}.gpx`;
-    const disposition = res.headers.get('Content-Disposition') || '';
-    const match =
-      disposition.match(/filename="([^"]+)"/) || disposition.match(/filename=([^;]+)/);
-    if (match) {
-      try {
-        filename = decodeURIComponent(match[1].trim());
-      } catch {
-        // keep fallback
-      }
-    }
-    return { blob: await res.blob(), filename };
-  },
-  upload: async (file: File, timezone?: string) => {
-    const form = new FormData();
-    form.append('file', file);
-    if (timezone) form.append('timezone', timezone);
-    const res = await fetch(`${API_BASE}/tracks`, {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({} as Record<string, unknown>));
-      if (res.status === 409 && error.duplicate) {
-        const dup = error.duplicate as { id: string; name: string };
-        const dupError = new Error(
-          (error.message as string) || (error.error as string) || 'This track is a duplicate'
-        );
-        dupError.name = 'DuplicateTrackError';
-        (dupError as any).duplicate = dup;
-        throw dupError;
-      }
-      throw new Error(
-        (error.message as string) || (error.error as string) || `Track upload failed: ${res.status}`
-      );
-    }
-    return res.json();
-  },
-};
-
-export interface DuplicateTrackError extends Error {
-  duplicate: { id: string; name: string };
-}
-
-// Sleep as Android webhook
-export const sleepWebhook = {
-  stats: () => request<{ count: number }>('/webhook/sleep-as-android/stats'),
-};
-
-// Plex webhook
-export const plexWebhook = {
-  stats: () => request<{ count: number }>('/webhook/plex/stats'),
 };
 
 // Backup / Restore
@@ -396,7 +187,7 @@ export const backupApi = {
     const blob = await res.blob();
     const disposition = res.headers.get('Content-Disposition') || res.headers.get('content-disposition');
     const fileNameMatch = disposition?.match(/filename="?([^\"]+)"?/i);
-    const fileName = fileNameMatch?.[1] || `wherewewere-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    const fileName = fileNameMatch?.[1] || `wherewewere-backup-v2-${new Date().toISOString().slice(0, 10)}.zip`;
     return { blob, fileName };
   },
   import: async (file: File) => {
@@ -418,13 +209,10 @@ export const backupApi = {
     options: {
       delete_all_checkins: boolean;
       delete_venue_checkins: boolean;
-      delete_mood_checkins: boolean;
-      delete_sleep_entries: boolean;
-      delete_tracks: boolean;
-      delete_media_items: boolean;
       reset_account_settings: boolean;
-      reset_mood_settings: boolean;
       reset_integrations_settings: boolean;
+      /** Per-plugin options: `delete_<pluginId>_checkins`, `reset_<pluginId>_settings`. */
+      [key: string]: boolean;
     }
   ) => {
     return request<{ message: string; counts: Record<string, number> }>('/backup/start-over', {
@@ -470,41 +258,6 @@ export const scrobbles = {
     request<any[]>(`/scrobbles/by-date?date=${encodeURIComponent(date)}`),
 };
 
-// Mood Checkins
-export const moodCheckins = {
-  list: (params?: Record<string, string>) =>
-    request<any[]>(`/mood-checkins?${new URLSearchParams(params)}`),
-  get: (id: string) => request<any>(`/mood-checkins/${id}`),
-  create: (data: any) =>
-    request<any>('/mood-checkins', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) =>
-    request<any>(`/mood-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) =>
-    request<void>(`/mood-checkins/${id}`, { method: 'DELETE' }),
-};
-
-// Mood Activities
-export const moodActivities = {
-  groups: () => request<any[]>('/mood-activities/groups'),
-  createGroup: (data: any) =>
-    request<any>('/mood-activities/groups', { method: 'POST', body: JSON.stringify(data) }),
-  updateGroup: (id: string, data: any) =>
-    request<any>(`/mood-activities/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteGroup: (id: string) =>
-    request<void>(`/mood-activities/groups/${id}`, { method: 'DELETE' }),
-  createActivity: (data: any) =>
-    request<any>('/mood-activities/activities', { method: 'POST', body: JSON.stringify(data) }),
-  reorderActivities: (groupId: string, activityIds: string[]) =>
-    request<{ message: string; count: number }>('/mood-activities/activities/reorder', {
-      method: 'PUT',
-      body: JSON.stringify({ group_id: groupId, activity_ids: activityIds }),
-    }),
-  updateActivity: (id: string, data: any) =>
-    request<any>(`/mood-activities/activities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteActivity: (id: string) =>
-    request<void>(`/mood-activities/activities/${id}`, { method: 'DELETE' }),
-};
-
 // Timeline
 export const timeline = {
   list: (params?: Record<string, string>) =>
@@ -527,144 +280,6 @@ export const settings = {
     }),
 };
 
-// Media check-ins
-export const media = {
-  search: (type: MediaSubtype, q: string) =>
-    request<{ results: MediaSearchHit[]; degraded: boolean }>(
-      `/media/search?${new URLSearchParams({ type, q })}`
-    ),
-  createItem: (data: {
-    media_type: MediaSubtype;
-    external_source?: string | null;
-    external_id?: string | null;
-    title: string;
-    author?: string | null;
-    release_year?: number | null;
-    image_url?: string | null;
-    external_url?: string | null;
-    platform?: string | null;
-    /** Book: page count of the default physical edition. */
-    page_count?: number | null;
-    /** Book: series name, if applicable. */
-    series_name?: string | null;
-    /** Book: this book's number within its series. */
-    series_position?: number | null;
-    /** Book: total number of books in its series. */
-    series_count?: number | null;
-  }) => request<MediaItem>('/media/items', { method: 'POST', body: JSON.stringify(data) }),
-  getItem: (id: string) => request<MediaItem>(`/media/items/${id}`),
-  updateItem: (id: string, data: {
-    title?: string;
-    author?: string | null;
-    release_year?: number | null;
-    image_url?: string | null;
-    external_url?: string | null;
-    platform?: string | null;
-    /** Book: page count of the default physical edition. */
-    page_count?: number | null;
-    /** Book: series name, if applicable. */
-    series_name?: string | null;
-    /** Book: this book's number within its series. */
-    series_position?: number | null;
-    /** Book: total number of books in the series. */
-    series_count?: number | null;
-    /** Set the provider's ID for this item (derives external_source from media_type). */
-    external_id?: string | null;
-  }) => request<MediaItem>(`/media/items/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  /**
-   * Fetch the latest provider metadata; returns a diff-ready payload. For
-   * local-only games the server may re-key the item by title instead (writes
-   * the external id, signals it via `rekeyed: true`).
-   */
-  syncItem: (id: string) =>
-    request<{ provider: string; found: boolean; rekeyed?: boolean; metadata: Record<string, string | number | null> }>(
-      `/media/items/${id}/sync`, { method: 'POST' }
-    ),
-  listCheckins: (itemId: string) => request<MediaCheckIn[]>(`/media/items/${itemId}/checkins`),
-  createCheckin: (itemId: string, data: {
-    season_number?: number | null;
-    episode_number?: number | null;
-    episode_title?: string | null;
-    checkin_type: 'completed' | 'in_progress' | 'dropped';
-    rating?: number | null;
-    raw_score?: number | null;
-    notes?: string | null;
-    checked_in_at?: string | null;
-    timezone: string;
-    /** Total time played in minutes (games only). */
-    time_played_minutes?: number | null;
-  }) => request<MediaCheckIn>(`/media/items/${itemId}/checkins`, { method: 'POST', body: JSON.stringify(data) }),
-  updateCheckin: (id: string, data: Partial<{
-    season_number: number | null;
-    episode_number: number | null;
-    episode_title: string | null;
-    checkin_type: string;
-    rating: number | null;
-    raw_score: number | null;
-    notes: string | null;
-    checked_in_at: string | null;
-    timezone: string;
-    time_played_minutes: number | null;
-  }>) => request<MediaCheckIn>(`/media/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteCheckin: (id: string) =>
-    request<{ message: string; id: string }>(`/media/checkins/${id}`, { method: 'DELETE' }),
-  tvSeasons: (itemId: string) =>
-    request<{ seasons: MediaTvSeason[]; cached: boolean }>(`/media/tv/${itemId}/seasons`),
-  stats: (from?: string, to?: string) => {
-    const qp = new URLSearchParams();
-    if (from) qp.set('from', from);
-    if (to) qp.set('to', to);
-    return request<MediaStats>(`/media/stats?${qp.toString()}`);
-  },
-  library: (from?: string, to?: string, types?: MediaSubtype[]) => {
-    const qp = new URLSearchParams();
-    if (from) qp.set('from', from);
-    if (to) qp.set('to', to);
-    if (types && types.length > 0) qp.set('types', types.join(','));
-    const qs = qp.toString();
-    return request<MediaLibraryItem[]>(`/media/library${qs ? `?${qs}` : ''}`);
-  },
-  lists: () => request<MediaList[]>('/media/lists'),
-  createList: (name: string) =>
-    request<MediaList>('/media/lists', { method: 'POST', body: JSON.stringify({ name }) }),
-  renameList: (id: string, name: string) =>
-    request<MediaList>(`/media/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
-  deleteList: (id: string) =>
-    request<{ message: string; id: string }>(`/media/lists/${id}`, { method: 'DELETE' }),
-  addItemToList: (listId: string, mediaItemId: string) =>
-    request<{ message: string }>(`/media/lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: mediaItemId }) }),
-  removeItemFromList: (listId: string, mediaItemId: string) =>
-    request<{ message: string }>(`/media/lists/${listId}/items/${mediaItemId}`, { method: 'DELETE' }),
-  /**
-   * Delete media items along with all of their check-ins and list
-   * memberships. With `dryRun` it only reports how many rows would be
-   * affected, without deleting anything.
-   */
-  bulkDeleteItems: (ids: string[], dryRun: boolean) =>
-    request<{ deleted_items: number; deleted_checkins: number; deleted_list_memberships: number }>(
-      '/media/items/bulk-delete',
-      { method: 'POST', body: JSON.stringify({ ids, dryRun }) }
-    ),
-};
-
-// Yamtrack import
-export const yamtrackImport = {
-  preview: async (file: File) => {
-    const csv = await file.text();
-    return request<YamtrackPreview>('/import/yamtrack/preview', {
-      method: 'POST',
-      body: JSON.stringify({ csv }),
-    });
-  },
-  import: async (file: File) => {
-    const csv = await file.text();
-    return request<YamtrackImportResult>('/import/yamtrack/import', {
-      method: 'POST',
-      body: JSON.stringify({ csv }),
-    });
-  },
-};
-
 // LLM (Life Summary)
 export const llm = {
   candidateImages: (from: string, to: string) =>
@@ -676,6 +291,13 @@ export const llm = {
       summary: string;
       images_included: number;
       images_skipped: number;
+      /** 'single' = full data in one LLM call, 'map-reduce' = chunked + condensed. */
+      mode: 'single' | 'map-reduce';
+      /** Number of chunks condensed during the map phase (0 for single). */
+      chunks: number;
+      /** Number of recursive reduction levels applied to the digests. */
+      digest_levels: number;
+      /** Always empty (kept for backward compatibility). */
       skipped: { type: string; total: number; included: number }[];
     }>('/llm/summarize', {
       method: 'POST',

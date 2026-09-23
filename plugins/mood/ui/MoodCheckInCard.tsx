@@ -1,0 +1,127 @@
+import { Check, Pencil } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
+import { resolveActivityIcon } from '../../../client/src/utils/icons';
+import type { TimelineItem, ImmichAsset, Scrobble } from '../../../client/src/types';
+import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
+import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
+import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
+import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
+import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
+import { useResolvedPhotos } from '../../../client/src/components/checkin-card/useResolvedPhotos';
+
+interface MoodCheckInCardProps {
+  item: TimelineItem;
+  iconPack?: string;
+  immichUrl?: string | null;
+  photos?: ImmichAsset[] | null;
+  scrobbles?: Scrobble[];
+  malojaUrl?: string | null;
+  compact?: boolean;
+}
+
+function renderIcon(iconName?: string): React.ReactNode {
+  if (!iconName) return null;
+  const IconComponent = resolveActivityIcon(iconName);
+  if (!IconComponent) return null;
+  return <IconComponent size={14} className="shrink-0 text-current" />;
+}
+
+export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl, compact = false }: MoodCheckInCardProps) {
+  const { pathname } = useLocation();
+  const mood = typeof item.mood === 'number' && item.mood >= 1 && item.mood <= 5 ? item.mood : 3;
+  const activities = Array.isArray(item.activities) ? item.activities : [];
+  const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos);
+
+  if (compact) {
+    return (
+      <CardShell compact>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`flex items-center justify-center w-6 h-6 rounded-lg shrink-0 ${MOOD_BG_COLORS[mood]}`}>
+            <MoodIcon mood={mood} pack={iconPack} size={14} />
+          </div>
+          <span className={`text-sm font-semibold truncate ${MOOD_COLORS[mood]}`}>
+            {MOOD_LABELS[mood]}
+          </span>
+          {activities.length > 0 && (
+            <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400 truncate">
+              · {activities.map((a) => a.name).join(', ')}
+            </span>
+          )}
+          <TimestampLink
+            to={`/mood-checkins/${item.id}`}
+            checkedInAt={item.checked_in_at}
+            timezone={item.mood_timezone}
+            mode="time"
+            classNameOverride="ml-auto mt-0 shrink-0"
+          />
+        </div>
+      </CardShell>
+    );
+  }
+
+  return (
+    <CardShell>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          {/* Mood header */}
+          <div className="flex items-center gap-2">
+            <div className={`flex items-center justify-center w-8 h-8 rounded-xl ${MOOD_BG_COLORS[mood]}`}>
+              <MoodIcon mood={mood} pack={iconPack} size={20} />
+            </div>
+            <span className={`text-base font-semibold ${MOOD_COLORS[mood]}`}>
+              {MOOD_LABELS[mood]}
+            </span>
+          </div>
+
+          {/* Activities */}
+          {activities.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {activities.map((act) => (
+                <span
+                  key={act.id}
+                  className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center gap-1"
+                >
+                  {act.icon && renderIcon(act.icon)}
+                  {act.name}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Note (truncated to 3 lines) */}
+          <MarkdownNote note={item.notes} collapsible />
+
+          <PhotoSection
+            immichUrl={immichUrl}
+            assets={resolvedAssets}
+            checkedInAt={item.checked_in_at}
+          />
+
+          {/* Scrobbles */}
+          {scrobbles && <ScrobbleList scrobbles={scrobbles} checkedInAt={item.checked_in_at} malojaUrl={malojaUrl} />}
+
+          {/* Timestamp */}
+          <TimestampLink
+            to={`/mood-checkins/${item.id}`}
+            checkedInAt={item.checked_in_at}
+            timezone={item.mood_timezone}
+            mode={pathname === '/' ? 'time' : 'full'}
+          />
+        </div>
+
+        {/* Edit button */}
+        <div className="flex items-center gap-1 shrink-0">
+          <Link
+            to={`/mood-check-in?edit=${item.id}`}
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-all opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </Link>
+        </div>
+      </div>
+    </CardShell>
+  );
+}

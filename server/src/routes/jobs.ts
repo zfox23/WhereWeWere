@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import {
-  runBackfillJob,
-  runDawarichExportJob,
+  findPluginJob,
   requestJobCancellation,
+  runPluginJob,
+  supportedJobTypes,
+  isJobRunningLocally,
 } from '../services/jobs';
 
 const router = Router();
@@ -42,14 +44,14 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// POST / - start a new job
+// POST / - start a new job (all job types are plugin-contributed)
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { type } = req.body;
 
-    const supportedTypes = ['backfill', 'dawarich-export'];
-    if (!supportedTypes.includes(type)) {
-      return res.status(400).json({ error: `Unknown job type. Supported: ${supportedTypes.join(', ')}` });
+    const definition = findPluginJob(type);
+    if (!definition) {
+      return res.status(400).json({ error: `Unknown job type. Supported: ${supportedJobTypes().join(', ')}` });
     }
 
     // Check if there's already a running job of this type
@@ -71,8 +73,7 @@ router.post('/', async (req: Request, res: Response) => {
     const job = result.rows[0];
 
     // Fire and forget — run in the background
-    const runner = type === 'dawarich-export' ? runDawarichExportJob : runBackfillJob;
-    runner(job.id).catch((err) => {
+    runPluginJob(job.id, definition).catch((err: unknown) => {
       console.error(`Background job ${job.id} threw:`, err);
     });
 
@@ -98,8 +99,29 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Job is not active' });
     }
 
+    // Diagnostic: distinguish a live runner (in-memory flag will be honored)
+    // from a stale DB row left over from a previous process (flag goes nowhere).
+    console.log(
+      `[jobs] cancel requested for ${job.id} (status=${job.status}, runningInThisProcess=${isJobRunningLocally(job.id)})`
+    );
+    if (!isJobRunningLocally(job.id)) {
+      console.warn(
+        `[jobs] job ${job.id} has NO live runner in this process — it is a stale 'running' row from a previous server run; the in-memory cancel flag will be ignored`
+      );
+    }
+
     // Signal the in-memory runner to stop
     requestJobCancellation(job.id);
+
+    // If the job is 'running' but has no live runner in this process (e.g. the
+    // server restarted while it was running), the in-memory flag alone will
+    // never be observed — force the DB row to cancelled directly.
+    if (job.status === 'running' && !isJobRunningLocally(job.id)) {
+      await query(
+        `UPDATE jobs SET status = 'cancelled', completed_at = NOW(), error = 'Job was cancelled by user (no active runner found).' WHERE id = $1`,
+        [job.id]
+      );
+    }
 
     // If pending (not yet started), mark cancelled immediately
     if (job.status === 'pending') {

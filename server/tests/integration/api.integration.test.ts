@@ -54,8 +54,10 @@ describe('API integration', () => {
     );
     const venueId = venueInsert.rows[0].id as string;
 
+    // Location check-ins live on the location plugin's router
+    // (/api/v1/location-checkins) since the venue type became a plugin.
     const createResponse = await request(app)
-      .post('/api/v1/checkins')
+      .post('/api/v1/location-checkins')
       .send({
         user_id: DEFAULT_USER_ID,
         venue_id: venueId,
@@ -65,7 +67,7 @@ describe('API integration', () => {
     expect(createResponse.status).toBe(201);
 
     const listResponse = await request(app)
-      .get('/api/v1/checkins')
+      .get('/api/v1/location-checkins')
       .query({ user_id: DEFAULT_USER_ID });
 
     expect(listResponse.status).toBe(200);
@@ -155,7 +157,7 @@ describe('API integration', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: venueCheckinId,
-          type: 'venue',
+          type: 'location',
           suggested_timezone: 'Europe/Lisbon',
         }),
         expect.objectContaining({
@@ -180,8 +182,7 @@ describe('API integration', () => {
       (s: { id: string }) => s.id === fallbackMoodCheckinId
     );
     expect(fallbackSuggestion.reason).toContain('sleep entry');
-    expect(fallbackSuggestion.reason).toContain('No venue check-in within 24 hours');
-    expect(previewResponse.body.uninferable_mood_checkins).toEqual(
+    expect(previewResponse.body.uninferable.mood).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: uninferableMoodCheckinId,
@@ -189,7 +190,7 @@ describe('API integration', () => {
         }),
       ])
     );
-    expect(previewResponse.body.uninferable_media_checkins).toEqual(
+    expect(previewResponse.body.uninferable.media).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: uninferableMediaCheckinId,
@@ -202,7 +203,7 @@ describe('API integration', () => {
       .post('/api/v1/settings/timestamp-reconciliation/apply')
       .send({
         updates: [
-          { id: venueCheckinId, type: 'venue', suggested_timezone: 'Europe/Lisbon' },
+          { id: venueCheckinId, type: 'location', suggested_timezone: 'Europe/Lisbon' },
           { id: moodCheckinId, type: 'mood', suggested_timezone: 'Europe/Lisbon' },
           { id: mediaCheckinId, type: 'media', suggested_timezone: 'Europe/Lisbon' },
           { id: fallbackMoodCheckinId, type: 'mood', suggested_timezone: 'America/Chicago' },

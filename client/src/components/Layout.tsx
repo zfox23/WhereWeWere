@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, User, Settings, MapPin, BookOpen } from 'lucide-react';
+import { Home, User, Settings } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },

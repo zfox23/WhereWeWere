@@ -1,21 +1,40 @@
 import { useState, useEffect } from 'react';
-import { Loader2, User, Link2, Smile, Download, Ruler } from 'lucide-react';
+import { Loader2, User, Link2, Download, Ruler } from 'lucide-react';
 import { settings } from '../api/client';
 import { usePageTitle } from '../utils/pageTitle';
+import { allClientPlugins } from '../plugins/registry';
 import { AccountTab } from './settings/AccountTab';
-import { MoodTab } from './settings/MoodTab';
 import { DisplayTab } from './settings/DisplayTab';
 import { IntegrationsTab } from './settings/IntegrationsTab';
 import { DataTab } from './settings/DataTab';
 import type { UserSettings } from '../types';
+import type { CheckinTypeClient } from 'wwp-shared';
 
-type SettingsTab = 'account' | 'display' | 'mood' | 'integrations' | 'data';
+/**
+ * Check-in plugins that ship a `settings` component (e.g. the mood plugin's
+ * icon pack + activities). Only these get a Settings tab; plugins without
+ * settings (e.g. tracks) are omitted from the tab bar entirely.
+ */
+const SETTINGS_PLUGINS = allClientPlugins().filter((p) => p.client.settings);
 
-const isSettingsTab = (value: string | null): value is SettingsTab =>
-  value === 'account' || value === 'display' || value === 'mood' || value === 'integrations' || value === 'data';
+type SettingsTab = 'account' | 'display' | 'integrations' | 'data' | `plugin:${string}`;
+
+const isSettingsTab = (value: string | null): value is SettingsTab => {
+  if (!value) return false;
+  if (value === 'account' || value === 'display' || value === 'integrations' || value === 'data') {
+    return true;
+  }
+  if (value.startsWith('plugin:')) {
+    return SETTINGS_PLUGINS.some((p) => `plugin:${p.id}` === value);
+  }
+  return false;
+};
 
 const getTabFromLocation = (): SettingsTab => {
-  if (window.location.hash === '#mood-activities') return 'mood';
+  // Deep link to the mood plugin's activities section.
+  if (window.location.hash === '#mood-activities' && SETTINGS_PLUGINS.some((p) => p.id === 'mood')) {
+    return 'plugin:mood';
+  }
   const tabParam = new URLSearchParams(window.location.search).get('tab');
   return isSettingsTab(tabParam) ? tabParam : 'account';
 };
@@ -68,19 +87,70 @@ export default function Settings() {
     );
   }
 
+  const tabButtons: { value: SettingsTab; label: string; icon: React.ElementType<{ size?: number; className?: string }> }[] = [
+    { value: 'account', label: 'Account', icon: User },
+    ...SETTINGS_PLUGINS.map((p) => ({
+      value: `plugin:${p.id}` as SettingsTab,
+      label: p.strings.title,
+      icon: p.client.icon,
+    })),
+    { value: 'display' as const, label: 'Display', icon: Ruler },
+    { value: 'integrations' as const, label: 'Integrations', icon: Link2 },
+    { value: 'data' as const, label: 'Data', icon: Download },
+  ];
+
+  const renderBody = () => {
+    if (activeTab === 'account') {
+      return data && (
+        <AccountTab
+          initialUsername={data.username || ''}
+          initialDisplayName={data.display_name || ''}
+        />
+      );
+    }
+    if (activeTab === 'display') {
+      return data && (
+        <DisplayTab
+          initialDistanceUnit={data.distance_unit === 'imperial' ? 'imperial' : 'metric'}
+        />
+      );
+    }
+    if (activeTab === 'integrations') {
+      return data && (
+        <IntegrationsTab
+          initialDawarichUrl={data.dawarich_url || ''}
+          initialDawarichApiKey={data.dawarich_api_key || ''}
+          initialImmichUrl={data.immich_url || ''}
+          initialImmichApiKey={data.immich_api_key || ''}
+          initialMalojaUrl={data.maloja_url || ''}
+          initialLlmApiUrl={data.llm_api_url || ''}
+          initialLlmModel={data.llm_model || ''}
+          initialLlmReasoningLevel={data.llm_reasoning_level || 'medium'}
+          initialLlmContextWindow={data.llm_context_window ? String(data.llm_context_window) : '262144'}
+          initialLlmImageSupport={data.llm_image_support !== false}
+        />
+      );
+    }
+    if (activeTab === 'data') {
+      return <DataTab jobRefreshKey={jobRefreshKey} onImportComplete={() => setJobRefreshKey((k) => k + 1)} />;
+    }
+    const plugin: CheckinTypeClient | undefined = SETTINGS_PLUGINS.find((p) => `plugin:${p.id}` === activeTab);
+    if (plugin?.client.settings) {
+      // Plugin settings sections are self-contained (they read/write their own
+      // plugin settings store), so render without core-injected props.
+      const Settings = plugin.client.settings as unknown as React.ComponentType;
+      return <Settings />;
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
 
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-2">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {([
-            { value: 'account' as const, label: 'Account', icon: User },
-            { value: 'display' as const, label: 'Display', icon: Ruler },
-            { value: 'mood' as const, label: 'Mood', icon: Smile },
-            { value: 'integrations' as const, label: 'Integrations', icon: Link2 },
-            { value: 'data' as const, label: 'Data', icon: Download },
-          ]).map(({ value, label, icon: Icon }) => (
+          {tabButtons.map(({ value, label, icon: Icon }) => (
             <button
               key={value}
               onClick={() => setActiveTab(value)}
@@ -96,48 +166,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {activeTab === 'account' && data && (
-        <AccountTab
-          initialUsername={data.username || ''}
-          initialDisplayName={data.display_name || ''}
-        />
-      )}
-
-      {activeTab === 'mood' && data && (
-        <MoodTab initialMoodIconPack={data.mood_icon_pack} />
-      )}
-
-      {activeTab === 'display' && data && (
-        <DisplayTab
-          initialDistanceUnit={data.distance_unit === 'imperial' ? 'imperial' : 'metric'}
-        />
-      )}
-
-      {activeTab === 'integrations' && data && (
-        <IntegrationsTab
-          initialDawarichUrl={data.dawarich_url || ''}
-          initialDawarichApiKey={data.dawarich_api_key || ''}
-          initialImmichUrl={data.immich_url || ''}
-          initialImmichApiKey={data.immich_api_key || ''}
-          initialMalojaUrl={data.maloja_url || ''}
-          initialPlexUsernames={data.plex_usernames || ''}
-          initialTmdbApiKey={data.tmdb_api_key || ''}
-          initialTgdbApiKey={data.tgdb_api_key || ''}
-          initialHardcoverApiKey={data.hardcover_api_key || ''}
-          initialLlmApiUrl={data.llm_api_url || ''}
-          initialLlmModel={data.llm_model || ''}
-          initialLlmReasoningLevel={data.llm_reasoning_level || 'medium'}
-          initialLlmContextWindow={data.llm_context_window ? String(data.llm_context_window) : '262144'}
-          initialLlmImageSupport={data.llm_image_support !== false}
-        />
-      )}
-
-      {activeTab === 'data' && (
-        <DataTab
-          jobRefreshKey={jobRefreshKey}
-          onImportComplete={() => setJobRefreshKey((k) => k + 1)}
-        />
-      )}
+      {renderBody()}
     </div>
   );
 }

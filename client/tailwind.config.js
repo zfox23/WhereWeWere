@@ -2,7 +2,13 @@
 const colorVar = (name) => `rgb(var(${name}) / <alpha-value>)`;
 
 export default {
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  content: [
+    './index.html',
+    './src/**/*.{js,ts,jsx,tsx}',
+    // Plugin UI lives outside client/src since the plugin-architecture
+    // refactor; Tailwind must scan it or its classes are never emitted.
+    '../plugins/**/*.{js,ts,jsx,tsx}',
+  ],
   darkMode: 'class',
   theme: {
     extend: {

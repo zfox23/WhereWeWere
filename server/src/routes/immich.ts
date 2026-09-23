@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
+import { pluginTimestampUnion } from '../plugins/registry';
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 
 async function getImmichSettings(): Promise<{ url: string; apiKey: string } | null> {
   const result = await query(
@@ -23,14 +24,11 @@ router.get('/photos/:checkinId', async (req: Request, res: Response) => {
     const immich = await getImmichSettings();
     if (!immich) return res.json({ assets: [] });
 
-    // Get anchor timestamp (location check-in, mood check-in, or track start)
+    // Get anchor timestamp (any check-in type — location, mood, sleep,
+    // tracks, ... — each resolves its rows via its plugin hook).
     const checkinResult = await query(
-      `SELECT checked_in_at FROM checkins WHERE id = $1
-       UNION ALL
-       SELECT checked_in_at FROM mood_checkins WHERE id = $1
-       UNION ALL
-       SELECT started_at FROM tracks WHERE id = $1`,
-      [checkinId]
+      `${pluginTimestampUnion('       ')}`,
+       [[checkinId]]
     );
     if (checkinResult.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in not found' });
@@ -98,14 +96,11 @@ router.get('/photos', async (req: Request, res: Response) => {
       return res.json(empty);
     }
 
-    // Fetch all anchor timestamps across location check-ins, mood check-ins, and tracks
+    // Fetch all anchor timestamps across all check-in types (each resolves
+    // its rows via its plugin hook).
     const checkinsResult = await query(
-      `SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])
-       UNION ALL
-       SELECT id, checked_in_at FROM mood_checkins WHERE id = ANY($1::uuid[])
-       UNION ALL
-       SELECT id, started_at FROM tracks WHERE id = ANY($1::uuid[])`,
-      [checkinIds]
+      `${pluginTimestampUnion('       ')}`,
+       [checkinIds]
     );
 
     const checkinTimes = new Map<string, Date>();

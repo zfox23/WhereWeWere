@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "wwp-shared": "*",
     "@tailwindcss/typography": "^0.5.20",
     "leaflet": "^1.9.4",
     "leaflet.heat": "^0.2.0",

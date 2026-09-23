@@ -7,6 +7,8 @@ This guide is the fastest way to run WhereWeWere locally with Docker Compose.
 - Docker Engine with Docker Compose plugin
 - Git
 
+No other prerequisites are needed — the Compose stack provides its own Postgres/PostGIS database and builds the server and client images for you.
+
 ## 1. Clone the repository
 
 ```bash

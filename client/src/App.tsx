@@ -1,44 +1,92 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useParams } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { LocationProvider } from './contexts/LocationContext';
 import Layout from './components/Layout';
 import Home from './pages/Home';
-import CheckIn from './pages/CheckIn';
-import VenueDetail from './pages/VenueDetail';
+import { allClientPlugins, getClientPlugin } from './plugins/registry';
+import { AutoCheckInForm } from './plugins/autoForm';
+import PluginCheckInDetail from './pages/PluginCheckInDetail';
+import VenueDetail from '../../plugins/location/ui/VenueDetail';
 import Profile from './pages/Profile';
-import CheckInDetail from './pages/CheckInDetail';
 import Settings from './pages/Settings';
-import MoodCheckIn from './pages/MoodCheckIn';
-import MoodCheckInDetail from './pages/MoodCheckInDetail';
-import SleepCheckIn from './pages/SleepCheckIn';
-import SleepDetail from './pages/SleepDetail';
-import TrackCheckIn from './pages/TrackCheckIn';
-import TrackDetail from './pages/TrackDetail';
-import MediaCheckInLanding from './pages/media/MediaCheckInLanding';
-import MediaSearch from './pages/media/MediaSearch';
-import MediaCheckInForm from './pages/media/MediaCheckInForm';
-import TvEpisodePicker from './pages/media/TvEpisodePicker';
-import TvEpisodeCheckInForm from './pages/media/TvEpisodeCheckInForm';
-import MediaDetail from './pages/media/MediaDetail';
+// Media plugin pages. The search-first check-in flow is multi-step with
+// per-subtype routes, so they are registered here directly from the plugin
+// (the framework's plugin route table covers the bare /media-check-in
+// landing via checkInPath).
+import MediaSearch from '../../plugins/media/ui/pages/MediaSearch';
+import MediaCheckInForm from '../../plugins/media/ui/pages/MediaCheckInForm';
+import TvEpisodePicker from '../../plugins/media/ui/pages/TvEpisodePicker';
+import TvEpisodeCheckInForm from '../../plugins/media/ui/pages/TvEpisodeCheckInForm';
+import MediaDetail from '../../plugins/media/ui/pages/MediaDetail';
+
+/** Check-in page for a specific plugin (create + edit via ?edit=<id>). */
+function PluginCheckInPage({ pluginId }: { pluginId: string }) {
+  const { id } = useParams<{ id?: string }>();
+  const searchParams = new URLSearchParams(window.location.search);
+  const editId = searchParams.get('edit') ?? id ?? null;
+  const plugin = getClientPlugin(pluginId);
+  if (!plugin) return <div className="py-16 text-center text-sm text-gray-500">Unknown check-in type.</div>;
+
+  if (plugin.client.checkInForm) {
+    return (
+      <plugin.client.checkInForm
+        editId={editId}
+        dateParam={searchParams.get('date')}
+        onCreated={() => window.location.assign('/')}
+        onUpdated={() => {}}
+      />
+    );
+  }
+
+  return (
+    <AutoCheckInForm
+      plugin={{ id: plugin.id, fields: plugin.fields, strings: plugin.strings }}
+      editId={editId}
+      dateParam={searchParams.get('date')}
+      onCreated={() => {}}
+      onUpdated={() => {}}
+    />
+  );
+}
+
+/** Detail page for a specific plugin: custom detailPage or the generic one. */
+function PluginDetailPage({ pluginId }: { pluginId: string }) {
+  const { id } = useParams<{ id: string }>();
+  const plugin = getClientPlugin(pluginId);
+  if (!plugin) return <div className="py-16 text-center text-sm text-gray-500">Unknown check-in type.</div>;
+  if (plugin.client.detailPage) {
+    return <plugin.client.detailPage id={id ?? ''} />;
+  }
+  return <PluginCheckInDetail />;
+}
+
+/** Routes contributed by check-in plugins. */
+const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
+  const elements: React.ReactElement[] = [];
+  elements.push(
+    <Route key={`form-${plugin.id}`} path={plugin.client.checkInPath} element={<PluginCheckInPage pluginId={plugin.id} />} />,
+  );
+  const detailPath = plugin.client.detailPath;
+  if (detailPath) {
+    elements.push(
+      <Route key={`detail-${plugin.id}`} path={detailPath} element={<PluginDetailPage pluginId={plugin.id} />} />,
+    );
+  } else {
+    elements.push(
+      <Route key={`detail-${plugin.id}`} path={`/checkins/${plugin.id}/:id`} element={<PluginCheckInDetail />} />,
+    );
+  }
+  return elements;
+});
 
 export default function App() {
   return (
     <ThemeProvider>
-    <LocationProvider>
     <Layout>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/check-in" element={<CheckIn />} />
-        <Route path="/mood-check-in" element={<MoodCheckIn />} />
-        <Route path="/sleep-check-in" element={<SleepCheckIn />} />
-        <Route path="/sleep-entries/:id" element={<SleepDetail />} />
-        <Route path="/track-check-in" element={<TrackCheckIn />} />
-        <Route path="/tracks/:id" element={<TrackDetail />} />
-        <Route path="/mood-checkins/:id" element={<MoodCheckInDetail />} />
-        <Route path="/checkins/:id" element={<CheckInDetail />} />
 
-        {/* Media check-ins */}
-        <Route path="/media-check-in" element={<MediaCheckInLanding />} />
+        {/* Media check-in flow (the bare /media-check-in landing comes from
+            the plugin route table via checkInPath) */}
         <Route path="/media-check-in/movie" element={<MediaSearch subtype="movie" />} />
         <Route path="/media-check-in/movie/:id/:slug" element={<MediaCheckInForm subtype="movie" />} />
         <Route path="/media-check-in/tv-episode" element={<MediaSearch subtype="tv_show" />} />
@@ -60,9 +108,11 @@ export default function App() {
         <Route path="/venues/:id" element={<VenueDetail />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/settings" element={<Settings />} />
+
+        {/* Check-in plugin routes (skip paths registered explicitly above) */}
+        {pluginRouteElements}
       </Routes>
     </Layout>
-    </LocationProvider>
     </ThemeProvider>
   );
 }

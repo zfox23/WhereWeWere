@@ -1,27 +1,56 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+const { queryMock, moodRowsMock, mediaRowsMock } = vi.hoisted(() => ({
+  queryMock: vi.fn(),
+  moodRowsMock: [] as unknown[],
+  mediaRowsMock: [] as unknown[],
+}));
 
 vi.mock('../../src/db', () => ({
   query: queryMock,
 }));
 
+// Check-in plugins participate via their reconcile hooks. Mood and media are
+// registered here; location/sleep/tracks are out of scope for these tests,
+// which focus on the core anchor-resolution logic for media rows.
+vi.mock('../../src/plugins/registry', () => ({
+  allPlugins: () => [
+    {
+      id: 'mood',
+      server: {
+        reconcile: {
+          anchorLabel: 'mood check-in',
+          scanAll: true,
+          detailPath: (id: string) => `/mood-checkins/${id}`,
+          loadCheckins: async () => moodRowsMock,
+          apply: async () => true,
+        },
+      },
+    },
+    {
+      id: 'media',
+      server: {
+        reconcile: {
+          anchorLabel: 'a media check-in',
+          scanAll: false,
+          detailPath: (id: string) => `/media-checkins/${id}`,
+          loadCheckins: async () => mediaRowsMock,
+          apply: async () => true,
+        },
+      },
+    },
+  ],
+}));
+
 import { getTimestampReconciliationSuggestions } from '../../src/services/timestampReconciliation';
 
-// The scan issues five queries in this order: venues, moods, media, tracks, sleep.
-function mockScan(
-  venueRows: unknown[],
-  moodRows: unknown[],
-  mediaRows: unknown[],
-  trackRows: unknown[] = [],
-  sleepRows: unknown[] = []
-) {
-  queryMock
-    .mockResolvedValueOnce({ rows: venueRows })
-    .mockResolvedValueOnce({ rows: moodRows })
-    .mockResolvedValueOnce({ rows: mediaRows })
-    .mockResolvedValueOnce({ rows: trackRows })
-    .mockResolvedValueOnce({ rows: sleepRows });
+// The core scan is hook-driven (no direct queries); plugin rows come from
+// their reconcile.loadCheckins hooks (stubbed above).
+function mockScan(moodRows: unknown[], mediaRows: unknown[]) {
+  moodRowsMock.length = 0;
+  moodRowsMock.push(...moodRows);
+  mediaRowsMock.length = 0;
+  mediaRowsMock.push(...mediaRows);
 }
 
 beforeEach(() => {
@@ -33,7 +62,6 @@ describe('getTimestampReconciliationSuggestions', () => {
     // A Daylio import stores fixed offsets as Etc/GMT+4 (= UTC-4, i.e. EDT).
     // The app displays those as America/New_York, so suggestions must match.
     mockScan(
-      [],
       [
         { id: 'm1', checked_in_at: '2026-06-15T12:00:00Z', original_timezone: null },
         { id: 'm2', checked_in_at: '2026-06-15T11:00:00Z', original_timezone: 'Etc/GMT+4' },
@@ -64,26 +92,20 @@ describe('getTimestampReconciliationSuggestions', () => {
   });
 
   it('does not suggest a change when the stored Etc/GMT zone is equivalent to the resolved IANA zone', async () => {
-    // Venue near New York resolves to America/New_York. A mood check-in stored
-    // as Etc/GMT+4 (UTC-4) is equivalent during EDT, so no suggestion.
+    // A mood check-in stored as America/New_York anchors a sibling stored as
+    // Etc/GMT+4 (UTC-4), which is equivalent during EDT — so no suggestion.
     mockScan(
       [
-        {
-          id: 'v1',
-          checked_in_at: '2026-06-15T12:00:00Z',
-          original_timezone: 'America/New_York',
-          venue_name: 'NY Cafe',
-          latitude: 40.7128,
-          longitude: -74.006,
-        },
+        { id: 'm0', checked_in_at: '2026-06-15T12:00:00Z', original_timezone: 'America/New_York' },
+        { id: 'm1', checked_in_at: '2026-06-15T12:05:00Z', original_timezone: 'Etc/GMT+4' },
       ],
-      [{ id: 'm1', checked_in_at: '2026-06-15T12:05:00Z', original_timezone: 'Etc/GMT+4' }],
       []
     );
 
     const result = await getTimestampReconciliationSuggestions();
 
     expect(result.suggestions).toEqual([]);
-    expect(result.uninferable_mood_checkins).toEqual([]);
+    // No uninferable mood check-in: the key is only created when one exists.
+    expect(result.uninferable['mood'] ?? []).toEqual([]);
   });
 });

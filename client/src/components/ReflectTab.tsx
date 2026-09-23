@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, History, Loader2, MapPin, SmilePlus, Compass, Moon } from 'lucide-react';
+import { CalendarDays, History, Loader2, Compass } from 'lucide-react';
 import { immich as immichApi, settings, stats, scrobbles } from '../api/client';
-import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
-import { MoodYearInPixels } from './MoodStats';
+import { MoodYearInPixels } from '../../../plugins/mood/ui/MoodStats';
+import { moodStats } from '../../../plugins/mood/ui/api';
+import { SleepYearInPixels } from '../../../plugins/sleep/ui/SleepStats';
+import { sleepStats } from '../../../plugins/sleep/ui/api';
+import type { SleepDailyPoint } from '../../../plugins/sleep/ui/types';
+import { plugins } from '../plugins/api';
+import { getClientPlugin, pluginDetailPath } from '../plugins/registry';
 import { PhotoStrip } from './PhotoStrip';
 import { LifeSummarySection } from './LifeSummarySection';
 import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
-import { resolveActivityIcon } from '../utils/icons';
-import type { HeatmapDay, ImmichAsset, SleepDailyPoint, UserSettings } from '../types';
+import type { HeatmapDay, ImmichAsset } from '../types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const IMMICH_CHECKIN_BATCH_SIZE = 30;
 
 type ReflectionItem = {
-  type: 'location' | 'mood';
+  type: 'location' | (string & {});
   id: string;
   checked_in_at: string;
   note?: string | null;
@@ -29,18 +33,14 @@ type ReflectionItem = {
   mood?: number | null;
   mood_timezone?: string | null;
   activities?: { id: string; name: string; group_name: string; icon?: string | null }[];
+  /** Plugin-typed payload for plugin reflection entries. */
+  data?: Record<string, unknown> | null;
 };
 
 type ReflectionYear = {
   year: number;
   years_ago: number;
   items: ReflectionItem[];
-  sleep_entries: {
-    id: string;
-    started_at: string;
-    ended_at: string;
-    sleep_timezone?: string | null;
-  }[];
 };
 
 type MoodHeatmapPoint = {
@@ -48,129 +48,42 @@ type MoodHeatmapPoint = {
   avg_mood: number;
 };
 
-function formatMinutesToDuration(minutes: number): string {
-  const rounded = Math.max(0, Math.round(minutes));
-  const hours = Math.floor(rounded / 60);
-  const mins = rounded % 60;
-
-  if (hours === 0) return `${mins}m`;
-  if (mins === 0) return `${hours}h`;
-  return `${hours}h ${mins}m`;
-}
-
-function SleepYearInPixels({
-  data,
-  year,
-}: {
-  data: SleepDailyPoint[];
-  year: number;
-}) {
-  const dayMap = new Map(data.map((d) => [d.date, d.total_sleep_minutes]));
-  const countMap = new Map(data.map((d) => [d.date, d.count]));
-  const startDate = new Date(year, 0, 1);
-  const endDate = new Date(year, 11, 31);
-
-  const allDays: { date: string; duration: number | null; count: number }[] = [];
-  const cursor = new Date(startDate);
-  while (cursor <= endDate) {
-    const y = cursor.getFullYear();
-    const m = String(cursor.getMonth() + 1).padStart(2, '0');
-    const d = String(cursor.getDate()).padStart(2, '0');
-    const date = `${y}-${m}-${d}`;
-    allDays.push({
-      date,
-      duration: dayMap.get(date) ?? null,
-      count: countMap.get(date) ?? 0,
-    });
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  const startDow = new Date(startDate).getDay();
-  const padded = [...Array.from({ length: startDow }, () => null as null), ...allDays];
-  const weeks: (typeof padded)[] = [];
-  for (let i = 0; i < padded.length; i += 7) {
-    weeks.push(padded.slice(i, i + 7));
-  }
-
-  const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  function durationColor(minutes: number): string {
-    if (minutes < 240) return 'bg-rose-300';
-    if (minutes < 360) return 'bg-orange-300';
-    if (minutes < 420) return 'bg-cyan-300';
-    if (minutes < 480) return 'bg-sky-400';
-    return 'bg-indigo-500';
-  }
+/**
+ * Minimal chip for plugin reflection entries whose plugin does not ship a
+ * custom `reflectionCard`.
+ */
+function PluginReflectionFallback({ item }: { item: ReflectionItem }) {
+  const plugin = getClientPlugin(item.type);
+  const label = plugin?.strings.singular ?? item.type;
+  const data = (item.data ?? {}) as Record<string, unknown>;
+  const timeZone = typeof data.timezone === 'string' ? data.timezone : null;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-          <Moon size={16} className="text-indigo-500" />
-          Sleep in Pixels
-        </h3>
+    <div className="text-xs space-y-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          to={pluginDetailPath(item.type, item.id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+        >
+          {label}
+        </Link>
       </div>
-
-      <div className="overflow-x-auto">
-        <div className="relative h-4 mb-1" style={{ minWidth: weeks.length * 15 }}>
-          {monthLabels.map((month, i) => {
-            const weekIndex = Math.floor((i * 52) / 12);
-            return (
-              <span
-                key={month}
-                className="absolute text-[10px] text-gray-400"
-                style={{ left: weekIndex * 15 }}
-              >
-                {month}
-              </span>
-            );
-          })}
-        </div>
-
-        <div className="flex gap-[3px]">
-          {weeks.map((week, weekIndex) => (
-            <div key={weekIndex} className="flex flex-col gap-[3px]">
-              {week.map((day, dayIndex) => {
-                if (!day) {
-                  return <div key={dayIndex} className="w-[12px] h-[12px]" />;
-                }
-
-                if (day.duration === null || day.count === 0) {
-                  return (
-                    <div
-                      key={dayIndex}
-                      className="w-[12px] h-[12px] rounded-sm bg-gray-100 dark:bg-gray-800"
-                      title={`${day.date}: no sleep data`}
-                    />
-                  );
-                }
-
-                return (
-                  <div
-                    key={dayIndex}
-                    className={`w-[12px] h-[12px] rounded-sm cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 dark:hover:ring-gray-500 ${durationColor(day.duration)}`}
-                    title={`${day.date}: total ${formatMinutesToDuration(day.duration)} (${day.count} sleep entr${day.count === 1 ? 'y' : 'ies'})`}
-                    onClick={() => window.open(`/?from=${day.date}&to=${day.date}`, '_blank', 'noopener,noreferrer')}
-                  />
-                );
-              })}
-              {week.length < 7 &&
-                Array.from({ length: 7 - week.length }, (_, idx) => (
-                  <div key={`pad-${idx}`} className="w-[12px] h-[12px]" />
-                ))}
-            </div>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-1 mt-2 justify-start">
-          <span className="text-[10px] text-gray-400 mr-1">&le;4h</span>
-          <div className="w-[12px] h-[12px] rounded-sm bg-rose-300" title="Under 4h" />
-          <div className="w-[12px] h-[12px] rounded-sm bg-orange-300" title="4h-6h" />
-          <div className="w-[12px] h-[12px] rounded-sm bg-cyan-300" title="6h-7h" />
-          <div className="w-[12px] h-[12px] rounded-sm bg-sky-400" title="7h-8h" />
-          <div className="w-[12px] h-[12px] rounded-sm bg-indigo-500" title="8h+" />
-          <span className="text-[10px] text-gray-400 ml-1">&ge;8h</span>
-        </div>
+      {item.note ? (
+        <p className="text-gray-600 dark:text-gray-400 italic leading-relaxed">
+          {`"${item.note}"`}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        <Link
+          to={pluginDetailPath(item.type, item.id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+        >
+          {formatReflectionTime(item.checked_in_at, timeZone)}
+        </Link>
       </div>
     </div>
   );
@@ -209,17 +122,6 @@ function formatReflectionTime(dateStr: string, timeZone?: string | null) {
   }).format(new Date(dateStr));
 }
 
-function formatSleepDuration(startedAt: string, endedAt: string) {
-  const diffMs = Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
-  const totalMinutes = Math.round(diffMs / (1000 * 60));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
-}
-
 function buildImmichDayUrl(immichUrl: string, date: string) {
   const dayStart = new Date(`${date}T00:00:00.000Z`);
   const dayEnd = new Date(`${date}T23:59:59.999Z`);
@@ -244,7 +146,7 @@ function OnThisDaySection({
   dawarichUrl,
 }: {
   data: ReflectionYear[];
-  moodIconPack: UserSettings['mood_icon_pack'];
+  moodIconPack: 'emoji' | 'lucide' | 'nature';
   immichUrl: string | null;
   photosByYear: Record<number, ImmichAsset[]>;
   malojaUrl: string | null;
@@ -282,9 +184,6 @@ function OnThisDaySection({
             (a, b) =>
               new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
           );
-          const sortedSleepEntries = [...(year.sleep_entries || [])].sort(
-            (a, b) => new Date(a.ended_at).getTime() - new Date(b.ended_at).getTime()
-          );
           const yearDate = sortedItems[0]?.checked_in_at.slice(0, 10) || null;
           const yearAssets = photosByYear[year.year] || [];
 
@@ -318,64 +217,22 @@ function OnThisDaySection({
               })()}
             </div>
             <div className="space-y-3 ml-2 border-l-2 border-purple-100 dark:border-purple-800/40 pl-3">
-              {sortedSleepEntries.map((entry) => (
-                <Link
-                  key={entry.id}
-                  to={`/sleep-entries/${entry.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
-                >
-                  <Moon size={13} className="shrink-0" />
-                  <span>Slept for {formatSleepDuration(entry.started_at, entry.ended_at)}</span>
-                </Link>
-              ))}
-
               {sortedItems.map((item) => {
-                const detailHref = item.type === 'location'
-                  ? `/venues/${item.venue_id}`
-                  : `/mood-checkins/${item.id}`;
-                const timeHref = item.type === 'location'
-                  ? `/checkins/${item.id}`
-                  : `/mood-checkins/${item.id}`;
-                const title = item.type === 'location'
-                  ? item.venue_name
-                  : item.mood && item.mood >= 1 && item.mood <= 5
-                    ? MOOD_LABELS[item.mood]
-                    : 'Mood check-in';
-                const timeZone = item.type === 'location' ? item.venue_timezone : item.mood_timezone;
-
-                return (
-                  <div key={`${item.type}-${item.id}`} className="text-xs space-y-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {item.type === 'mood' && item.mood ? (
-                        <span className={`font-semibold ${MOOD_COLORS[item.mood] || 'text-gray-700 dark:text-gray-300'}`}>
-                          {title}
-                        </span>
-                      ) : null}
-                      <Link to={detailHref} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-                        {item.type === 'location' ? title : ''}
-                      </Link>
-                      {item.type === 'location' && (item.venue_category || item.city) ? (
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {item.venue_category}
-                          {item.city ? ` · ${item.city}${item.country ? `, ${item.country}` : ''}` : ''}
-                        </span>
-                      ) : null}
-                    </div>
-                    {item.note ? (
-                      <p className="text-gray-600 dark:text-gray-400 italic leading-relaxed">
-                        {`"${item.note}"`}
-                      </p>
-                    ) : null}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-                      <Link to={timeHref} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-                        {formatReflectionTime(item.checked_in_at, timeZone)}
-                      </Link>
-                    </div>
-                  </div>
-                );
-                })}
+                const plugin = getClientPlugin(item.type);
+                if (plugin) {
+                  const Card = plugin.client.reflectionCard;
+                  return Card ? (
+                    <Card
+                      key={`${item.type}-${item.id}`}
+                      item={item as unknown as Parameters<typeof Card>[0]['item']}
+                      settings={{} as Record<string, unknown>}
+                    />
+                  ) : (
+                    <PluginReflectionFallback key={`${item.type}-${item.id}`} item={item} />
+                  );
+                }
+                return <PluginReflectionFallback key={`${item.type}-${item.id}`} item={item} />;
+              })}
 
               {immichUrl && yearDate && yearAssets.length > 0 && (
                 <PhotoStrip
@@ -412,7 +269,7 @@ export function ReflectTab() {
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [photosByYear, setPhotosByYear] = useState<Record<number, ImmichAsset[]>>({});
   const [scrobblesByDate, setScrobblesByDate] = useState<Record<string, Scrobble[]>>({});
-  const [moodIconPack, setMoodIconPack] = useState<UserSettings['mood_icon_pack']>('emoji');
+  const [moodIconPack, setMoodIconPack] = useState<'emoji' | 'lucide' | 'nature'>('emoji');
   const [llmConfigured, setLlmConfigured] = useState(false);
   const [llmImageSupport, setLlmImageSupport] = useState(true);
   const [reflectionsLoading, setReflectionsLoading] = useState(true);
@@ -424,6 +281,20 @@ export function ReflectTab() {
   const [hasLoadedSleep, setHasLoadedSleep] = useState(false);
   const currentYear = new Date().getFullYear();
   const heatmapsRefreshing = locationLoading || moodLoading || sleepLoading;
+
+  // Mood icon pack is a mood-plugin setting, so load it from the plugin
+  // settings store (not the core user_settings).
+  useEffect(() => {
+    plugins
+      .settings.get('mood')
+      .then((s) => {
+        if (s?.mood_icon_pack === 'emoji' || s?.mood_icon_pack === 'lucide' || s?.mood_icon_pack === 'nature') {
+          setMoodIconPack(s.mood_icon_pack);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -447,9 +318,6 @@ export function ReflectTab() {
           setDawarichUrl(userSettings.dawarich_url.replace(/\/+$/, ''));
         } else {
           setDawarichUrl(null);
-        }
-        if (userSettings?.mood_icon_pack) {
-          setMoodIconPack(userSettings.mood_icon_pack);
         }
         setLlmConfigured(Boolean(userSettings?.llm_api_url && userSettings?.llm_model));
         setLlmImageSupport(userSettings?.llm_image_support !== false);
@@ -638,7 +506,7 @@ export function ReflectTab() {
     let cancelled = false;
     setMoodLoading(true);
 
-    stats.moodHeatmap(USER_ID, selectedYear)
+    moodStats.heatmap(USER_ID, selectedYear)
       .then((data) => {
         if (!cancelled) {
           setMoodHeatmap(data);
@@ -669,7 +537,7 @@ export function ReflectTab() {
     const from = `${selectedYear}-01-01`;
     const to = `${selectedYear}-12-31`;
 
-    stats.sleepDaily(USER_ID, from, to)
+    sleepStats.daily(USER_ID, from, to)
       .then((data) => {
         if (!cancelled) {
           setSleepHeatmap(data);

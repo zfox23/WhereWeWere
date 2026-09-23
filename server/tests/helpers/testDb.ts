@@ -3,7 +3,7 @@ import { config } from '../../src/config';
 import { runMigrations } from '../../src/db/runMigrations';
 import { Pool } from 'pg';
 
-const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
+import { DEFAULT_USER_ID } from '../../src/constants';
 
 function assertSafeTestDatabase() {
   const dbUrl = config.databaseUrl;
@@ -44,13 +44,36 @@ async function ensureTestDatabaseExists() {
   }
 }
 
+/**
+ * A failed test can release a pool connection that still holds an open or
+ * aborted transaction. pg-pool has no public API to reset pooled clients, so
+ * reach in and roll back any open transactions; otherwise the poisoned
+ * connection surfaces later as "current transaction is aborted" and a
+ * silently skipped TRUNCATE leaks data between tests.
+ */
+async function releaseStaleTransactions() {
+  const clients: Array<{ query?: (sql: string) => Promise<unknown> }> =
+    ((pool as unknown as { _clients?: unknown[] })._clients ?? []) as Array<{
+      query?: (sql: string) => Promise<unknown>;
+    }>;
+  for (const client of clients) {
+    try {
+      await client.query?.('ROLLBACK');
+    } catch {
+      /* dead client or in-flight query — ignore */
+    }
+  }
+}
+
 export async function setupIntegrationDatabase() {
   assertSafeTestDatabase();
   await ensureTestDatabaseExists();
+  await releaseStaleTransactions();
   await runMigrations(pool);
 }
 
 export async function resetIntegrationDatabase() {
+  await releaseStaleTransactions();
   const tableResult = await query(
     `SELECT tablename
      FROM pg_tables

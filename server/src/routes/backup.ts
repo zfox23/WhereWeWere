@@ -1,23 +1,45 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { pool, query } from '../db';
-import { deleteStoredTrack } from '../services/trackFiles';
+import {
+  deletePluginData,
+  exportPluginData,
+  exportPluginFiles,
+  importPluginData,
+  restoreLegacyPluginData,
+  type PluginBackupPayload,
+} from '../plugins/backup';
+import {
+  BACKUP_FORMAT,
+  LATEST_BACKUP_SCHEMA_VERSION,
+  extractBackupZip,
+  listBackupPluginFiles,
+  readBackupJsonFile,
+  removeBackupTempDir,
+  streamBackupZip,
+} from '../services/backupArchive';
+import { allPlugins } from '../plugins/registry';
 
 const router = Router();
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
-const BACKUP_FORMAT = 'wherewewere-backup';
-const LATEST_BACKUP_SCHEMA_VERSION = 1;
+import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const FIRST_START_OVER_CONFIRMATION = 'DELETE MY DATA';
 const SECOND_START_OVER_CONFIRMATION = 'START OVER';
 
 const upload = multer({
   storage: multer.memoryStorage(),
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/json' || file.originalname.endsWith('.json')) {
+    const name = file.originalname.toLowerCase();
+    const isJson =
+      file.mimetype === 'application/json' || name.endsWith('.json');
+    const isZip =
+      file.mimetype === 'application/zip' ||
+      file.mimetype === 'application/x-zip-compressed' ||
+      name.endsWith('.zip');
+    if (isJson || isZip) {
       cb(null, true);
     } else {
-      cb(new Error('Only JSON backup files are allowed'));
+      cb(new Error('Only backup .json or .zip files are allowed'));
     }
   },
   limits: { fileSize: 500 * 1024 * 1024 },
@@ -38,191 +60,12 @@ interface BackupSettings {
   immich_url: string | null;
   immich_api_key: string | null;
   maloja_url: string | null;
-  plex_usernames: string | null;
   theme: string | null;
   system_light_theme: string | null;
   system_dark_theme: string | null;
-  mood_icon_pack: string | null;
   distance_unit: string | null;
   created_at?: string;
   updated_at?: string;
-}
-
-interface BackupVenueCategory {
-  id: string;
-  name: string;
-  icon: string | null;
-  parent_id: string | null;
-  created_at: string;
-}
-
-interface BackupVenue {
-  id: string;
-  name: string;
-  category_id: string | null;
-  address: string | null;
-  city: string | null;
-  state: string | null;
-  country: string | null;
-  postal_code: string | null;
-  latitude: number;
-  longitude: number;
-  osm_id: string | null;
-  swarm_venue_id: string | null;
-  parent_venue_id: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupCheckin {
-  id: string;
-  venue_id: string;
-  notes: string | null;
-  checked_in_at: string;
-  checkin_timezone: string | null;
-  created_at: string;
-  updated_at: string;
-  swarm_id: string | null;
-}
-
-interface BackupMoodActivityGroup {
-  id: string;
-  name: string;
-  display_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMoodActivity {
-  id: string;
-  group_id: string;
-  name: string;
-  display_order: number;
-  icon: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMoodCheckin {
-  id: string;
-  mood: number;
-  note: string | null;
-  checked_in_at: string;
-  mood_timezone: string | null;
-  created_at: string;
-  updated_at: string;
-  daylio_hash: string | null;
-}
-
-interface BackupMoodCheckinActivity {
-  mood_checkin_id: string;
-  activity_id: string;
-}
-
-interface BackupTrackPoint {
-  t: number | null;
-  ele: number | null;
-  hr: number | null;
-}
-
-interface BackupTrack {
-  id: string;
-  name: string;
-  activity_type: string | null;
-  timezone: string;
-  started_at: string;
-  ended_at: string;
-  distance_m: number;
-  elapsed_time_s: number;
-  moving_time_s: number;
-  elevation_gain_m: number;
-  avg_speed_mps: number;
-  max_speed_mps: number;
-  avg_hr: number | null;
-  max_hr: number | null;
-  point_count: number;
-  file_hash: string | null;
-  geometry: [number, number][] | null;
-  points: BackupTrackPoint[] | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupSleepEntry {
-  id: string;
-  sleep_as_android_id: number;
-  sleep_timezone: string;
-  started_at: string;
-  ended_at: string;
-  rating: number;
-  comment: string | null;
-  is_pending: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMediaItem {
-  id: string;
-  media_type: string;
-  external_source: string | null;
-  external_id: string | null;
-  title: string;
-  author: string | null;
-  release_year: number | null;
-  image_url: string | null;
-  external_url: string | null;
-  platform?: string | null;
-  overview?: string | null;
-  content_rating?: string | null;
-  players?: number | null;
-  coop?: string | null;
-  genres?: string[] | null;
-  developers?: string[] | null;
-  publishers?: string[] | null;
-  page_count?: number | null;
-  series_name?: string | null;
-  series_position?: number | null;
-  series_count?: number | null;
-  rating?: number | null;
-  raw_score?: number | string | null;
-  notes?: string | null;
-  time_played_minutes?: number | null;
-  status?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMediaCheckin {
-  id: string;
-  media_item_id: string;
-  season_number: number | null;
-  episode_number: number | null;
-  episode_title: string | null;
-  checkin_type: string;
-  rating: number | null;
-  raw_score: number | string | null;
-  notes: string | null;
-  time_played_minutes?: number | null;
-  checked_in_at: string;
-  checkin_timezone: string;
-  external_event_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMediaList {
-  id: string;
-  name: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface BackupMediaListItem {
-  list_id: string;
-  media_item_id: string;
-  position: number;
-  added_at: string;
 }
 
 interface BackupV1 {
@@ -232,24 +75,34 @@ interface BackupV1 {
   data: {
     user: BackupUser | null;
     settings: BackupSettings | null;
-    venueCategories: BackupVenueCategory[];
-    venues: BackupVenue[];
-    checkins: BackupCheckin[];
-    moodActivityGroups: BackupMoodActivityGroup[];
-    moodActivities: BackupMoodActivity[];
-    moodCheckins: BackupMoodCheckin[];
-    moodCheckinActivities: BackupMoodCheckinActivity[];
-    sleepEntries: BackupSleepEntry[];
-    tracks: BackupTrack[];
-    mediaItems: BackupMediaItem[];
-    mediaCheckins: BackupMediaCheckin[];
-    mediaLists: BackupMediaList[];
-    mediaListItems: BackupMediaListItem[];
+    /** Plugin-owned data (check-in types that are plugins). */
+    plugins: Record<string, unknown>;
   };
+  /**
+   * The original `data` object as received, untyped. Legacy backup restore
+   * hooks read their type-specific keys from here (they predate `plugins`).
+   */
+  raw?: Record<string, unknown>;
 }
 
-function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? value as T[] : [];
+/**
+ * The logical restore input shared by both archive shapes:
+ *  - v1: a single JSON document ({ format, schemaVersion, exportedAt, data })
+ *  - v2: a ZIP bundle (manifest backup.json + plugins/<id>.json per plugin)
+ */
+interface ParsedBackup {
+  schemaVersion: number;
+  user: BackupUser | null;
+  settings: BackupSettings | null;
+  pluginsPayload: PluginBackupPayload | null;
+  /** v1 only: the full `data` object for legacy restore hooks. */
+  raw: Record<string, unknown> | null;
+  /**
+   * v2 only: for each plugin that has bundled files, the directory inside
+   * the extracted temp root where `plugins/<id>/` landed. The route removes
+   * the temp root when done.
+   */
+  tempRoot?: string;
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -261,38 +114,19 @@ function toStringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-/**
- * Coerce a value to a non-negative integer, or null when missing / non-finite / negative.
- * Used for INT columns (page_count, series_position, series_count) and for
- * time_played_minutes, which carries CHECK (time_played_minutes IS NULL OR >= 0).
- */
-function toIntOrNull(value: unknown): number | null {
-  if (value == null) return null;
-  const n = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n);
+function assertSupportedSchemaVersion(schemaVersion: number): void {
+  if (!Number.isInteger(schemaVersion) || schemaVersion <= 0) {
+    throw new Error('Backup schemaVersion must be a positive integer');
+  }
+  if (schemaVersion > LATEST_BACKUP_SCHEMA_VERSION) {
+    throw new Error(
+      `Backup schemaVersion ${schemaVersion} is newer than supported version ${LATEST_BACKUP_SCHEMA_VERSION}`
+    );
+  }
 }
 
-/** Coerce a value to a valid media item status, or null otherwise. */
-function toStatusOrNull(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const v = value.trim();
-  return v === 'completed' || v === 'in_progress' || v === 'dropped' ? v : null;
-}
-
-/**
- * Coerce a value to a string array (PG TEXT[] columns: genres/developers/
- * publishers), or null when absent. Non-string elements are dropped; an
- * array of only blanks becomes null.
- */
-function toStringArrayOrNull(value: unknown): string[] | null {
-  if (value == null) return null;
-  if (!Array.isArray(value)) return null;
-  const names = value.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '');
-  return names.length > 0 ? names : null;
-}
-
-function ensureV1Backup(raw: unknown): BackupV1 {
+/** Parse a v1 single-JSON backup document. */
+function parseV1Backup(raw: unknown): ParsedBackup {
   if (!raw || typeof raw !== 'object') {
     throw new Error('Backup payload must be a JSON object');
   }
@@ -302,21 +136,18 @@ function ensureV1Backup(raw: unknown): BackupV1 {
     throw new Error(`Unsupported backup format: expected "${BACKUP_FORMAT}"`);
   }
 
-  const schemaVersion = toNumber(source.schemaVersion, NaN);
-  if (!Number.isInteger(schemaVersion) || schemaVersion <= 0) {
-    throw new Error('Backup schemaVersion must be a positive integer');
-  }
-
-  if (schemaVersion > LATEST_BACKUP_SCHEMA_VERSION) {
-    throw new Error(
-      `Backup schemaVersion ${schemaVersion} is newer than supported version ${LATEST_BACKUP_SCHEMA_VERSION}`
-    );
-  }
+  assertSupportedSchemaVersion(toNumber(source.schemaVersion, NaN));
 
   // Migration hook for future schema upgrades.
   let migrated = source;
-  let currentVersion = schemaVersion;
+  let currentVersion = toNumber(source.schemaVersion, 1);
   while (currentVersion < LATEST_BACKUP_SCHEMA_VERSION) {
+    if (currentVersion === 1) {
+      // v1 documents remain fully restorable; the v2 ZIP shape changes the
+      // *container*, not the per-plugin payload, so no data migration is
+      // needed to accept v1 on a v2-aware server.
+      break;
+    }
     throw new Error(`No migrator available for schemaVersion ${currentVersion}`);
   }
 
@@ -331,893 +162,242 @@ function ensureV1Backup(raw: unknown): BackupV1 {
     : null;
 
   return {
-    format: BACKUP_FORMAT,
-    schemaVersion: 1,
-    exportedAt: typeof migrated.exportedAt === 'string' ? migrated.exportedAt : new Date().toISOString(),
-    data: {
-      user,
-      settings,
-      venueCategories: asArray<BackupVenueCategory>(migratedData.venueCategories),
-      venues: asArray<BackupVenue>(migratedData.venues).map((venue) => ({
-        ...venue,
-        latitude: toNumber((venue as BackupVenue).latitude),
-        longitude: toNumber((venue as BackupVenue).longitude),
-      })),
-      checkins: asArray<BackupCheckin>(migratedData.checkins),
-      moodActivityGroups: asArray<BackupMoodActivityGroup>(migratedData.moodActivityGroups),
-      moodActivities: asArray<BackupMoodActivity>(migratedData.moodActivities),
-      moodCheckins: asArray<BackupMoodCheckin>(migratedData.moodCheckins),
-      moodCheckinActivities: asArray<BackupMoodCheckinActivity>(migratedData.moodCheckinActivities),
-      sleepEntries: asArray<BackupSleepEntry>(migratedData.sleepEntries),
-      tracks: asArray<BackupTrack>(migratedData.tracks),
-      mediaItems: asArray<BackupMediaItem>(migratedData.mediaItems),
-      mediaCheckins: asArray<BackupMediaCheckin>(migratedData.mediaCheckins),
-      mediaLists: asArray<BackupMediaList>(migratedData.mediaLists),
-      mediaListItems: asArray<BackupMediaListItem>(migratedData.mediaListItems),
-    },
+    schemaVersion: toNumber(source.schemaVersion, 1),
+    user,
+    settings,
+    pluginsPayload: (migratedData.plugins as PluginBackupPayload) ?? null,
+    raw: migratedData,
   };
 }
 
+/** Parse a v2 ZIP bundle buffer (already extracted to a temp root). */
+function parseV2Backup(tempRoot: string): ParsedBackup {
+  const manifest = readBackupJsonFile(tempRoot, 'backup.json');
+  if (!manifest || typeof manifest !== 'object') {
+    throw new Error('Backup ZIP is missing a valid backup.json manifest');
+  }
+
+  const m = manifest as Record<string, unknown>;
+  if (m.format !== BACKUP_FORMAT) {
+    throw new Error(`Unsupported backup format: expected "${BACKUP_FORMAT}"`);
+  }
+  assertSupportedSchemaVersion(toNumber(m.schemaVersion, NaN));
+
+  const pluginsPayload: PluginBackupPayload = {};
+  for (const pluginId of listBackupPluginFiles(tempRoot)) {
+    const entry = readBackupJsonFile(tempRoot, `plugins/${pluginId}.json`);
+    if (entry && typeof entry === 'object') {
+      pluginsPayload[pluginId] = entry as PluginBackupPayload[string];
+    }
+  }
+
+  return {
+    schemaVersion: toNumber(m.schemaVersion, LATEST_BACKUP_SCHEMA_VERSION),
+    user: (m.user as BackupUser) ?? null,
+    settings: (m.settings as BackupSettings) ?? null,
+    pluginsPayload,
+    raw: null,
+    tempRoot,
+  };
+}
+
+/**
+ * Run the shared restore (user, settings, legacy plugin keys, plugin data)
+ * inside the caller's transaction. Returns per-section row counts.
+ */
+async function runRestore(
+  client: import('pg').PoolClient,
+  backup: ParsedBackup,
+  errors: string[],
+): Promise<Record<string, { inserted: number; skipped: number }>> {
+  const counts: Record<string, { inserted: number; skipped: number }> = {};
+
+  if (backup.user?.display_name !== undefined) {
+    await client.query(
+      `UPDATE users
+       SET display_name = COALESCE($2, display_name),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [USER_ID, backup.user.display_name]
+    );
+  }
+
+  if (backup.settings) {
+    const s = backup.settings;
+    await client.query(
+      `INSERT INTO user_settings (
+         user_id, dawarich_url, dawarich_api_key,
+         immich_url, immich_api_key, maloja_url,
+         theme, system_light_theme, system_dark_theme,
+         distance_unit
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ON CONFLICT (user_id) DO UPDATE SET
+          dawarich_url = EXCLUDED.dawarich_url,
+          dawarich_api_key = EXCLUDED.dawarich_api_key,
+          immich_url = EXCLUDED.immich_url,
+          immich_api_key = EXCLUDED.immich_api_key,
+          maloja_url = EXCLUDED.maloja_url,
+          theme = COALESCE(EXCLUDED.theme, user_settings.theme),
+          system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
+          system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
+          distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
+          updated_at = NOW()`,
+      [
+        USER_ID,
+        toStringOrNull(s.dawarich_url),
+        toStringOrNull(s.dawarich_api_key),
+        toStringOrNull(s.immich_url),
+        toStringOrNull(s.immich_api_key),
+        toStringOrNull(s.maloja_url),
+        toStringOrNull(s.theme),
+        toStringOrNull(s.system_light_theme),
+        toStringOrNull(s.system_dark_theme),
+        toStringOrNull(s.distance_unit),
+      ]
+    );
+
+    // Legacy setting values that plugins have moved to plugin_settings
+    // (e.g. mood_icon_pack) are claimed by the declaring plugin so old
+    // backups restore into plugin_settings.
+    for (const plugin of allPlugins()) {
+      for (const key of plugin.server.legacySettingsKeys ?? []) {
+        const value = (s as unknown as Record<string, unknown>)[key];
+        if (value == null) continue;
+        await client.query(
+          `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+           VALUES ($1, $2, $3, $4::jsonb)
+           ON CONFLICT (user_id, plugin_id, key) DO UPDATE SET value = EXCLUDED.value`,
+          [USER_ID, plugin.id, key, JSON.stringify(value)]
+        );
+      }
+    }
+  }
+
+  // Plugin check-in types: new-format backups (with a plugins payload) are
+  // restored by importPluginData below; legacy backups are restored here via
+  // each plugin's restoreLegacyBackup hook, which also claims its legacy
+  // keys so no core loop runs for them.
+  if (backup.pluginsPayload || allPlugins().some((p) => p.server.restoreLegacyBackup)) {
+    const legacy = await restoreLegacyPluginData(client, USER_ID, backup.raw ?? {}, backup.pluginsPayload, errors);
+    for (const [pluginId, pluginCounts] of Object.entries(legacy)) {
+      for (const [key, pc] of Object.entries(pluginCounts)) {
+        counts[key] = pc;
+      }
+    }
+  }
+
+  // Plugin data (generic + custom storage) — restored inside the same
+  // transaction, honoring each plugin's declared backupOrder.
+  if (backup.pluginsPayload) {
+    // v2 file bundles: each plugin with extracted files gets its directory.
+    const filesDirs: Record<string, string> = {};
+    if (backup.tempRoot) {
+      for (const pluginId of Object.keys(backup.pluginsPayload)) {
+        filesDirs[pluginId] = `${backup.tempRoot}/plugins/${pluginId}`;
+      }
+    }
+    const pluginCounts = await importPluginData(client, USER_ID, backup.pluginsPayload, filesDirs, errors);
+    for (const [pluginId, pc] of Object.entries(pluginCounts)) {
+      counts[`plugin:${pluginId}`] = pc;
+    }
+  }
+
+  return counts;
+}
+
 router.get('/export', async (_req: Request, res: Response) => {
+  let fileTempDirs: string[] = [];
   try {
     const [
       userResult,
       settingsResult,
-      categoriesResult,
-      venuesResult,
-      checkinsResult,
-      groupsResult,
-      activitiesResult,
-      moodCheckinsResult,
-      moodCheckinActivitiesResult,
-      sleepEntriesResult,
-      tracksResult,
-      mediaItemsResult,
-      mediaCheckinsResult,
-      mediaListsResult,
-      mediaListItemsResult,
+      pluginsData,
     ] = await Promise.all([
-      query(
-        `SELECT id, username, email, display_name, created_at, updated_at
-         FROM users
-         WHERE id = $1`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT dawarich_url, dawarich_api_key,
-                immich_url, immich_api_key,
-                maloja_url,
-                plex_usernames,
-                theme,
-                system_light_theme,
-                system_dark_theme,
-                mood_icon_pack,
-                distance_unit,
-                created_at,
-                updated_at
-         FROM user_settings
-         WHERE user_id = $1`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT DISTINCT vc.id, vc.name, vc.icon, vc.parent_id, vc.created_at
-         FROM venue_categories vc
-         JOIN venues v ON v.category_id = vc.id
-         ORDER BY vc.name ASC`,
-        []
-      ),
-      query(
-        `SELECT DISTINCT v.id, v.name, v.category_id,
-                v.address, v.city, v.state, v.country, v.postal_code,
-                v.latitude, v.longitude,
-                v.osm_id, v.swarm_venue_id,
-                v.parent_venue_id, v.created_by,
-                v.created_at, v.updated_at
-         FROM venues v
-         ORDER BY v.created_at ASC`,
-        []
-      ),
-      query(
-        `SELECT id, venue_id, notes,
-                checked_in_at, checkin_timezone, created_at, updated_at, swarm_id
-         FROM checkins
-         WHERE user_id = $1
-         ORDER BY checked_in_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT id, name, display_order, created_at, updated_at
-         FROM mood_activity_groups
-         WHERE user_id = $1
-         ORDER BY display_order ASC, created_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT ma.id, ma.group_id, ma.name, ma.display_order, ma.icon, ma.created_at, ma.updated_at
-         FROM mood_activities ma
-         JOIN mood_activity_groups mag ON mag.id = ma.group_id
-         WHERE mag.user_id = $1
-         ORDER BY mag.display_order ASC, ma.display_order ASC, ma.created_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT id, mood, note, checked_in_at, mood_timezone, created_at, updated_at, daylio_hash
-         FROM mood_checkins
-         WHERE user_id = $1
-         ORDER BY checked_in_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT mca.mood_checkin_id, mca.activity_id
-         FROM mood_checkin_activities mca
-         JOIN mood_checkins mc ON mc.id = mca.mood_checkin_id
-         WHERE mc.user_id = $1
-         ORDER BY mca.mood_checkin_id ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT id, sleep_as_android_id, sleep_timezone,
-                started_at, ended_at, rating, comment,
-                is_pending, created_at, updated_at
-         FROM sleep_entries
-         WHERE user_id = $1
-         ORDER BY started_at ASC`,
-        [USER_ID]
-      ),
-      query(
-        `SELECT t.id, t.name, t.activity_type, t.timezone,
-                t.started_at, t.ended_at,
-                t.distance_m, t.elapsed_time_s, t.moving_time_s,
-                t.elevation_gain_m, t.avg_speed_mps, t.max_speed_mps,
-                t.avg_hr, t.max_hr, t.point_count, t.file_hash,
-                ST_AsGeoJSON(t.path) AS geojson,
-                t.points,
-                t.created_at, t.updated_at
-         FROM tracks t
-         WHERE t.user_id = $1
-         ORDER BY t.started_at ASC`,
-       [USER_ID]
-     ),
-     query(
-       `SELECT id, media_type, external_source, external_id,
-               title, author, release_year, image_url, external_url,
-               platform, overview, content_rating, players, coop,
-               genres, developers, publishers,
-               page_count, series_name, series_position, series_count,
-               rating, raw_score, notes, time_played_minutes, status,
-               created_at, updated_at
-        FROM media_items
-        WHERE user_id = $1
-        ORDER BY created_at ASC, title ASC`,
-       [USER_ID]
-     ),
-     query(
-       `SELECT id, media_item_id, season_number, episode_number, episode_title,
-               checkin_type, rating, raw_score, notes, time_played_minutes,
-               checked_in_at, checkin_timezone, external_event_id,
-               created_at, updated_at
-        FROM media_checkins
-        WHERE user_id = $1
-        ORDER BY checked_in_at ASC`,
-       [USER_ID]
-     ),
-     query(
-       `SELECT id, name, created_at, updated_at
-        FROM media_lists
-        WHERE user_id = $1
-        ORDER BY created_at ASC`,
-       [USER_ID]
-     ),
-     query(
-       `SELECT mli.list_id, mli.media_item_id, mli.position, mli.added_at
-        FROM media_list_items mli
-        JOIN media_lists ml ON ml.id = mli.list_id
-        WHERE ml.user_id = $1
-        ORDER BY ml.created_at ASC, mli.position ASC`,
-       [USER_ID]
-     ),
-   ]);
+        query(
+          `SELECT id, username, email, display_name, created_at, updated_at
+           FROM users
+           WHERE id = $1`,
+          [USER_ID]
+        ),
+        query(
+          `SELECT dawarich_url, dawarich_api_key,
+                  immich_url, immich_api_key,
+                  maloja_url,
+                  theme,
+                  system_light_theme,
+                  system_dark_theme,
+                  distance_unit,
+                  created_at,
+                  updated_at
+           FROM user_settings
+           WHERE user_id = $1`,
+          [USER_ID]
+        ),
+        exportPluginData(USER_ID),
+      ]);
 
-    const tracks = tracksResult.rows.map((row: any) => {
-      let geometry: [number, number][] | null = null;
-      try {
-        const gj = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
-        if (gj?.type === 'LineString' && Array.isArray(gj.coordinates)) {
-          geometry = gj.coordinates;
-        }
-      } catch {
-        // leave null
-      }
-      const points = Array.isArray(row.points)
-        ? row.points
-        : row.points == null
-          ? null
-          : (() => {
-              try {
-                return JSON.parse(row.points);
-              } catch {
-                return null;
-              }
-            })();
-      return {
-        id: row.id,
-        name: row.name,
-        activity_type: row.activity_type ?? null,
-        timezone: row.timezone,
-        started_at: row.started_at,
-        ended_at: row.ended_at,
-        distance_m: Number(row.distance_m),
-        elapsed_time_s: Number(row.elapsed_time_s),
-        moving_time_s: Number(row.moving_time_s),
-        elevation_gain_m: Number(row.elevation_gain_m),
-        avg_speed_mps: Number(row.avg_speed_mps),
-        max_speed_mps: Number(row.max_speed_mps),
-        avg_hr: row.avg_hr == null ? null : Number(row.avg_hr),
-        max_hr: row.max_hr == null ? null : Number(row.max_hr),
-        point_count: Number(row.point_count),
-        file_hash: row.file_hash ?? null,
-        geometry,
-        points: Array.isArray(points) ? points : null,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      };
-    });
+    // File collection runs AFTER the data export: a plugin's backupFiles may
+    // stage generated files whose contents depend on its backupExport output
+    // (e.g. tracks generates a GPX for rows whose original is missing).
+    const { files: pluginFiles, tempDirs } = await exportPluginFiles(USER_ID);
+    fileTempDirs = tempDirs;
 
-    const payload: BackupV1 = {
+    const manifest: import('../services/backupArchive').BackupManifest = {
       format: BACKUP_FORMAT,
-      schemaVersion: 1,
+      schemaVersion: LATEST_BACKUP_SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
-      data: {
-        user: userResult.rows[0] ?? null,
-        settings: settingsResult.rows[0] ?? null,
-        venueCategories: categoriesResult.rows,
-        venues: venuesResult.rows.map((venue) => ({
-          ...venue,
-          latitude: toNumber(venue.latitude),
-          longitude: toNumber(venue.longitude),
-        })),
-        checkins: checkinsResult.rows,
-        moodActivityGroups: groupsResult.rows,
-        moodActivities: activitiesResult.rows,
-        moodCheckins: moodCheckinsResult.rows,
-        moodCheckinActivities: moodCheckinActivitiesResult.rows,
-        sleepEntries: sleepEntriesResult.rows,
-        tracks,
-        mediaItems: mediaItemsResult.rows,
-        mediaCheckins: mediaCheckinsResult.rows,
-        mediaLists: mediaListsResult.rows,
-        mediaListItems: mediaListItemsResult.rows,
-      },
+      user: userResult.rows[0] ?? null,
+      settings: settingsResult.rows[0] ?? null,
     };
 
     const day = new Date().toISOString().slice(0, 10);
-    res.setHeader('Content-Disposition', `attachment; filename="wherewewere-backup-v1-${day}.json"`);
-    res.json(payload);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="wherewewere-backup-v${LATEST_BACKUP_SCHEMA_VERSION}-${day}.zip"`
+    );
+    await streamBackupZip(res, manifest, pluginsData, pluginFiles);
   } catch (err) {
     console.error('Error exporting backup:', err);
-    res.status(500).json({ error: 'Failed to export backup' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to export backup' });
+    } else {
+      res.destroy();
+    }
+  } finally {
+    for (const dir of fileTempDirs) removeBackupTempDir(dir);
   }
 });
 
 router.post('/import', upload.single('file'), async (req: Request, res: Response) => {
   const client = await pool.connect();
+  let tempRoot: string | undefined;
   try {
-    const rawPayload = req.file
-      ? JSON.parse(req.file.buffer.toString('utf-8'))
-      : req.body;
+    let backup: ParsedBackup;
 
-    const backup = ensureV1Backup(rawPayload);
-    const counts = {
-      venues: { inserted: 0, skipped: 0 },
-      checkins: { inserted: 0, skipped: 0 },
-      moodActivityGroups: { inserted: 0, skipped: 0 },
-      moodActivities: { inserted: 0, skipped: 0 },
-      moodCheckins: { inserted: 0, skipped: 0 },
-      moodCheckinActivities: { inserted: 0, skipped: 0 },
-      sleepEntries: { inserted: 0, skipped: 0 },
-      tracks: { inserted: 0, skipped: 0 },
-      mediaItems: { inserted: 0, skipped: 0 },
-      mediaCheckins: { inserted: 0, skipped: 0 },
-      mediaLists: { inserted: 0, skipped: 0 },
-      mediaListItems: { inserted: 0, skipped: 0 },
-    };
+    if (req.file) {
+      const name = req.file.originalname.toLowerCase();
+      const isZip =
+        req.file.mimetype === 'application/zip' ||
+        req.file.mimetype === 'application/x-zip-compressed' ||
+        name.endsWith('.zip');
+
+      if (isZip) {
+        tempRoot = await extractBackupZip(req.file.buffer);
+        backup = parseV2Backup(tempRoot);
+        backup.tempRoot = tempRoot;
+      } else {
+        backup = parseV1Backup(JSON.parse(req.file.buffer.toString('utf-8')));
+      }
+    } else {
+      backup = parseV1Backup(req.body);
+    }
+
     const errors: string[] = [];
-
-    await client.query('BEGIN');
-
-    if (backup.data.user?.display_name !== undefined) {
-      await client.query(
-        `UPDATE users
-         SET display_name = COALESCE($2, display_name),
-             updated_at = NOW()
-         WHERE id = $1`,
-        [USER_ID, backup.data.user.display_name]
-      );
-    }
-
-    if (backup.data.settings) {
-      const s = backup.data.settings;
-      await client.query(
-        `INSERT INTO user_settings (
-           user_id, dawarich_url, dawarich_api_key,
-           immich_url, immich_api_key, maloja_url, plex_usernames,
-           theme, system_light_theme, system_dark_theme,
-           mood_icon_pack, distance_unit
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          ON CONFLICT (user_id) DO UPDATE SET
-            dawarich_url = EXCLUDED.dawarich_url,
-            dawarich_api_key = EXCLUDED.dawarich_api_key,
-            immich_url = EXCLUDED.immich_url,
-            immich_api_key = EXCLUDED.immich_api_key,
-            maloja_url = EXCLUDED.maloja_url,
-            plex_usernames = EXCLUDED.plex_usernames,
-            theme = COALESCE(EXCLUDED.theme, user_settings.theme),
-            system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
-            system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
-            mood_icon_pack = COALESCE(EXCLUDED.mood_icon_pack, user_settings.mood_icon_pack),
-            distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
-            updated_at = NOW()`,
-        [
-          USER_ID,
-          toStringOrNull(s.dawarich_url),
-          toStringOrNull(s.dawarich_api_key),
-          toStringOrNull(s.immich_url),
-          toStringOrNull(s.immich_api_key),
-          toStringOrNull(s.maloja_url),
-          toStringOrNull(s.plex_usernames),
-          toStringOrNull(s.theme),
-          toStringOrNull(s.system_light_theme),
-          toStringOrNull(s.system_dark_theme),
-          toStringOrNull(s.mood_icon_pack),
-          toStringOrNull(s.distance_unit),
-        ]
-      );
-    }
-
-    const categoryIdMap = new Map<string, string>();
-    for (const category of backup.data.venueCategories) {
-      if (!category?.name) continue;
-
-      const result = await client.query(
-        `INSERT INTO venue_categories (id, name, icon, parent_id, created_at)
-         VALUES ($1, $2, $3, NULL, COALESCE($4::timestamptz, NOW()))
-         ON CONFLICT (name) DO UPDATE SET
-           icon = COALESCE(EXCLUDED.icon, venue_categories.icon)
-         RETURNING id`,
-        [
-          category.id,
-          category.name,
-          toStringOrNull(category.icon),
-          category.created_at || null,
-        ]
-      );
-      categoryIdMap.set(category.id, result.rows[0].id);
-    }
-
-    for (const category of backup.data.venueCategories) {
-      const localCategoryId = categoryIdMap.get(category.id);
-      const localParentId = category.parent_id ? categoryIdMap.get(category.parent_id) : null;
-      if (!localCategoryId || !localParentId || localCategoryId === localParentId) continue;
-
-      await client.query(
-        `UPDATE venue_categories
-         SET parent_id = $2
-         WHERE id = $1`,
-        [localCategoryId, localParentId]
-      );
-    }
-
-    for (const venue of backup.data.venues) {
-      if (!venue?.id || !venue.name) {
-        counts.venues.skipped += 1;
-        errors.push(`Skipped venue with missing id/name`);
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO venues (
-           id, name, category_id,
-           address, city, state, country, postal_code,
-           latitude, longitude,
-           osm_id, swarm_venue_id,
-           parent_venue_id, created_by,
-           created_at, updated_at
-         )
-         VALUES (
-           $1, $2, $3,
-           $4, $5, $6, $7, $8,
-           $9, $10,
-           $11, $12,
-           NULL, $13,
-           COALESCE($14::timestamptz, NOW()), COALESCE($15::timestamptz, NOW())
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          venue.id,
-          venue.name,
-          venue.category_id ? (categoryIdMap.get(venue.category_id) ?? null) : null,
-          toStringOrNull(venue.address),
-          toStringOrNull(venue.city),
-          toStringOrNull(venue.state),
-          toStringOrNull(venue.country),
-          toStringOrNull(venue.postal_code),
-          toNumber(venue.latitude),
-          toNumber(venue.longitude),
-          toStringOrNull(venue.osm_id),
-          toStringOrNull(venue.swarm_venue_id),
-          USER_ID,
-          venue.created_at || null,
-          venue.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.venues.inserted += 1;
-      } else {
-        counts.venues.skipped += 1;
-      }
-    }
-
-    for (const venue of backup.data.venues) {
-      if (!venue.parent_venue_id) continue;
-      await client.query(
-        `UPDATE venues
-         SET parent_venue_id = $2
-         WHERE id = $1`,
-        [venue.id, venue.parent_venue_id]
-      );
-    }
-
-    for (const checkin of backup.data.checkins) {
-      if (!checkin?.id || !checkin.venue_id) {
-        counts.checkins.skipped += 1;
-        errors.push('Skipped check-in with missing id/venue_id');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO checkins (
-           id, user_id, venue_id,
-           notes,
-           checked_in_at, checkin_timezone, created_at, updated_at,
-           swarm_id
-         )
-         VALUES (
-           $1, $2, $3,
-           $4,
-           COALESCE($5::timestamptz, NOW()), $6,
-           COALESCE($7::timestamptz, NOW()),
-           COALESCE($8::timestamptz, NOW()),
-           $9
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          checkin.id,
-          USER_ID,
-          checkin.venue_id,
-          checkin.notes || null,
-          checkin.checked_in_at || null,
-          toStringOrNull(checkin.checkin_timezone),
-          checkin.created_at || null,
-          checkin.updated_at || null,
-          checkin.swarm_id || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.checkins.inserted += 1;
-      } else {
-        counts.checkins.skipped += 1;
-      }
-    }
-
-    for (const group of backup.data.moodActivityGroups) {
-      if (!group?.id || !group.name) {
-        counts.moodActivityGroups.skipped += 1;
-        errors.push('Skipped mood activity group with missing id/name');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_activity_groups (id, user_id, name, display_order, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()))
-         ON CONFLICT (id) DO NOTHING`,
-        [group.id, USER_ID, group.name, group.display_order ?? 0, group.created_at || null, group.updated_at || null]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodActivityGroups.inserted += 1;
-      } else {
-        counts.moodActivityGroups.skipped += 1;
-      }
-    }
-
-    for (const activity of backup.data.moodActivities) {
-      if (!activity?.id || !activity.group_id || !activity.name) {
-        counts.moodActivities.skipped += 1;
-        errors.push('Skipped mood activity with missing id/group_id/name');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_activities (id, group_id, name, display_order, icon, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()))
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          activity.id,
-          activity.group_id,
-          activity.name,
-          activity.display_order ?? 0,
-          toStringOrNull(activity.icon),
-          activity.created_at || null,
-          activity.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodActivities.inserted += 1;
-      } else {
-        counts.moodActivities.skipped += 1;
-      }
-    }
-
-    for (const moodCheckin of backup.data.moodCheckins) {
-      if (!moodCheckin?.id) {
-        counts.moodCheckins.skipped += 1;
-        errors.push('Skipped mood check-in with missing id');
-        continue;
-      }
-
-      const mood = toNumber(moodCheckin.mood, 0);
-      if (mood < 1 || mood > 5) {
-        counts.moodCheckins.skipped += 1;
-        errors.push(`Skipped mood check-in ${moodCheckin.id} with invalid mood`);
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_checkins (
-           id, user_id, mood, note,
-           checked_in_at, mood_timezone, created_at, updated_at,
-           daylio_hash
-         )
-         VALUES (
-           $1, $2, $3, $4,
-           COALESCE($5::timestamptz, NOW()), $6,
-           COALESCE($7::timestamptz, NOW()),
-           COALESCE($8::timestamptz, NOW()),
-           $9
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          moodCheckin.id,
-          USER_ID,
-          mood,
-          moodCheckin.note || null,
-          moodCheckin.checked_in_at || null,
-          toStringOrNull(moodCheckin.mood_timezone),
-          moodCheckin.created_at || null,
-          moodCheckin.updated_at || null,
-          moodCheckin.daylio_hash || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodCheckins.inserted += 1;
-      } else {
-        counts.moodCheckins.skipped += 1;
-      }
-    }
-
-    for (const link of backup.data.moodCheckinActivities) {
-      if (!link?.mood_checkin_id || !link.activity_id) {
-        counts.moodCheckinActivities.skipped += 1;
-        errors.push('Skipped mood check-in activity with missing ids');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO mood_checkin_activities (mood_checkin_id, activity_id)
-         VALUES ($1, $2)
-         ON CONFLICT (mood_checkin_id, activity_id) DO NOTHING`,
-        [link.mood_checkin_id, link.activity_id]
-      );
-
-      if (result.rowCount === 1) {
-        counts.moodCheckinActivities.inserted += 1;
-      } else {
-        counts.moodCheckinActivities.skipped += 1;
-      }
-    }
-
-    for (const sleepEntry of backup.data.sleepEntries) {
-      if (!sleepEntry?.id || sleepEntry.sleep_as_android_id == null) {
-        counts.sleepEntries.skipped += 1;
-        errors.push('Skipped sleep entry with missing id/sleep_as_android_id');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO sleep_entries (
-           id, user_id, sleep_as_android_id, sleep_timezone,
-           started_at, ended_at, rating, comment,
-           is_pending, created_at, updated_at
-         )
-         VALUES (
-           $1, $2, $3, $4,
-           COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()),
-           $7, $8,
-           COALESCE($9, false),
-           COALESCE($10::timestamptz, NOW()), COALESCE($11::timestamptz, NOW())
-         )
-         ON CONFLICT (user_id, sleep_as_android_id) DO NOTHING`,
-        [
-          sleepEntry.id,
-          USER_ID,
-          sleepEntry.sleep_as_android_id,
-          sleepEntry.sleep_timezone || 'UTC',
-          sleepEntry.started_at || null,
-          sleepEntry.ended_at || null,
-          toNumber(sleepEntry.rating, 0),
-          toStringOrNull(sleepEntry.comment),
-          typeof sleepEntry.is_pending === 'boolean' ? sleepEntry.is_pending : false,
-          sleepEntry.created_at || null,
-          sleepEntry.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.sleepEntries.inserted += 1;
-      } else {
-        counts.sleepEntries.skipped += 1;
-      }
-    }
-
-    for (const track of backup.data.tracks) {
-      if (!track?.id || !track.name) {
-        counts.tracks.skipped += 1;
-        errors.push('Skipped track with missing id/name');
-        continue;
-      }
-
-      const coords = (Array.isArray(track.geometry) ? track.geometry : [])
-        .filter((c) => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]));
-      if (coords.length < 2) {
-        counts.tracks.skipped += 1;
-        errors.push(`Skipped track ${track.id} with insufficient geometry`);
-        continue;
-      }
-
-      const wktLineString = `LINESTRING(${coords.map(([lng, lat]) => `${lng} ${lat}`).join(', ')})`;
-
-      const pointsJson = Array.isArray(track.points) && track.points.length > 0
-        ? JSON.stringify(track.points)
-        : null;
-
-      const result = await client.query(
-        `INSERT INTO tracks (
-           id, user_id, name, activity_type, timezone, started_at, ended_at,
-           distance_m, elapsed_time_s, moving_time_s,
-           elevation_gain_m, avg_speed_mps, max_speed_mps,
-           avg_hr, max_hr, point_count, file_hash,
-           created_at, updated_at,
-           path, points
-         )
-         VALUES (
-           $1, $2, $3, $4, $5,
-           COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
-           $8, $9, $10,
-           $11, $12, $13,
-           $14, $15, $16, $17,
-           COALESCE($18::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()),
-           ST_SetSRID(ST_GeomFromText($20), 4326),
-           $21::jsonb
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          track.id,
-          USER_ID,
-          track.name,
-          toStringOrNull(track.activity_type),
-          track.timezone || 'UTC',
-          track.started_at || null,
-          track.ended_at || null,
-          toNumber(track.distance_m),
-          Math.round(toNumber(track.elapsed_time_s)),
-          Math.round(toNumber(track.moving_time_s)),
-          toNumber(track.elevation_gain_m),
-          toNumber(track.avg_speed_mps),
-          toNumber(track.max_speed_mps),
-          track.avg_hr == null ? null : Math.round(toNumber(track.avg_hr)),
-          track.max_hr == null ? null : Math.round(toNumber(track.max_hr)),
-          Math.round(toNumber(track.point_count)),
-          toStringOrNull(track.file_hash),
-          track.created_at || null,
-          track.updated_at || null,
-          wktLineString,
-          pointsJson,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.tracks.inserted += 1;
-      } else {
-        counts.tracks.skipped += 1;
-      }
-    }
-
-    // Media: items first (so external-source dedupe is resolved before
-    // check-ins and list items reference them), then check-ins, lists,
-    // and finally list memberships.
-    for (const item of backup.data.mediaItems) {
-      if (!item?.id || !item.media_type || !item.title) {
-        counts.mediaItems.skipped += 1;
-        errors.push('Skipped media item with missing id/media_type/title');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO media_items (
-           id, user_id, media_type, external_source, external_id,
-           title, author, release_year, image_url, external_url,
-           platform, overview, content_rating, players, coop,
-           genres, developers, publishers,
-           page_count, series_name, series_position, series_count,
-           rating, raw_score, notes, time_played_minutes, status,
-           created_at, updated_at
-         )
-         VALUES (
-           $1, $2, $3, $4, $5,
-           $6, $7, $8, $9, $10,
-           $11, $12, $13, $14, $15,
-           $16, $17, $18, $19, $20,
-           $21, $22, $23, $24, $25, $26, $27,
-           COALESCE($28::timestamptz, NOW()), COALESCE($29::timestamptz, NOW())
-         )
-         ON CONFLICT (id) DO NOTHING`,
-         [
-           item.id,
-           USER_ID,
-           item.media_type,
-           toStringOrNull(item.external_source),
-           toStringOrNull(item.external_id),
-           item.title,
-           toStringOrNull(item.author),
-           item.release_year != null ? toNumber(item.release_year, NaN) : null,
-           toStringOrNull(item.image_url),
-           toStringOrNull(item.external_url),
-           toStringOrNull(item.platform),
-           toStringOrNull(item.overview),
-           toStringOrNull(item.content_rating),
-           // CHECK (players IS NULL OR players > 0) — non-positive values are
-           // dropped rather than failing the insert.
-           item.players != null && Number(item.players) > 0 ? Math.round(Number(item.players)) : null,
-           toStringOrNull(item.coop),
-           toStringArrayOrNull(item.genres),
-           toStringArrayOrNull(item.developers),
-           toStringArrayOrNull(item.publishers),
-           toIntOrNull(item.page_count),
-           toStringOrNull(item.series_name),
-           toIntOrNull(item.series_position),
-           toIntOrNull(item.series_count),
-           item.rating != null ? toNumber(item.rating, NaN) : null,
-           item.raw_score != null ? String(item.raw_score) : null,
-           toStringOrNull(item.notes),
-           toIntOrNull(item.time_played_minutes),
-           toStatusOrNull(item.status),
-           item.created_at || null,
-           item.updated_at || null,
-         ]
-       );
-
-      if (result.rowCount === 1) {
-        counts.mediaItems.inserted += 1;
-      } else {
-        counts.mediaItems.skipped += 1;
-      }
-    }
-
-    for (const checkin of backup.data.mediaCheckins) {
-      if (!checkin?.id || !checkin.media_item_id) {
-        counts.mediaCheckins.skipped += 1;
-        errors.push('Skipped media check-in with missing id/media_item_id');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO media_checkins (
-           id, user_id, media_item_id,
-           season_number, episode_number, episode_title,
-           checkin_type, rating, raw_score, notes, time_played_minutes,
-           checked_in_at, checkin_timezone, external_event_id,
-           created_at, updated_at
-         )
-         VALUES (
-           $1, $2, $3,
-           $4, $5, $6,
-           $7, $8, $9, $10, $11,
-           COALESCE($12::timestamptz, NOW()), $13,
-           $14,
-           COALESCE($15::timestamptz, NOW()),
-           COALESCE($16::timestamptz, NOW())
-         )
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          checkin.id,
-          USER_ID,
-          checkin.media_item_id,
-          checkin.season_number ?? null,
-          checkin.episode_number ?? null,
-          toStringOrNull(checkin.episode_title),
-          checkin.checkin_type || 'completed',
-          checkin.rating != null ? toNumber(checkin.rating, NaN) : null,
-          checkin.raw_score != null ? String(checkin.raw_score) : null,
-          toStringOrNull(checkin.notes),
-          toIntOrNull(checkin.time_played_minutes),
-          checkin.checked_in_at || null,
-          toStringOrNull(checkin.checkin_timezone) || 'UTC',
-          toStringOrNull(checkin.external_event_id),
-          checkin.created_at || null,
-          checkin.updated_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.mediaCheckins.inserted += 1;
-      } else {
-        counts.mediaCheckins.skipped += 1;
-      }
-    }
-
-    for (const list of backup.data.mediaLists) {
-      if (!list?.id || !list.name) {
-        counts.mediaLists.skipped += 1;
-        errors.push('Skipped media list with missing id/name');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO media_lists (id, user_id, name, created_at, updated_at)
-         VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
-         ON CONFLICT (id) DO NOTHING`,
-        [list.id, USER_ID, list.name, list.created_at || null, list.updated_at || null]
-      );
-
-      if (result.rowCount === 1) {
-        counts.mediaLists.inserted += 1;
-      } else {
-        counts.mediaLists.skipped += 1;
-      }
-    }
-
-    for (const listItem of backup.data.mediaListItems) {
-      if (!listItem?.list_id || !listItem.media_item_id) {
-        counts.mediaListItems.skipped += 1;
-        errors.push('Skipped media list item with missing list_id/media_item_id');
-        continue;
-      }
-
-      const result = await client.query(
-        `INSERT INTO media_list_items (list_id, media_item_id, position, added_at)
-         VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
-         ON CONFLICT (list_id, media_item_id) DO NOTHING`,
-        [
-          listItem.list_id,
-          listItem.media_item_id,
-          toNumber(listItem.position, 0),
-          listItem.added_at || null,
-        ]
-      );
-
-      if (result.rowCount === 1) {
-        counts.mediaListItems.inserted += 1;
-      } else {
-        counts.mediaListItems.skipped += 1;
-      }
-    }
-
-    await client.query('COMMIT');
+    // withTransaction commits on success and rolls back + rethrows on error.
+    const counts = await withTransaction(client, (tx) =>
+      runRestore(tx, { ...backup, tempRoot: tempRoot }, errors)
+    );
 
     res.json({
       message: 'Backup import complete',
@@ -1226,13 +406,30 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       errors,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    // withTransaction already rolls back when the restore fails; a pre-
+    // transaction failure (parse/extract) has nothing to roll back.
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error importing backup:', err);
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to import backup' });
   } finally {
+    if (tempRoot) removeBackupTempDir(tempRoot);
     client.release();
   }
 });
+
+/** Run `fn` inside an explicit transaction on `client`. */
+async function withTransaction<T>(
+  client: import('pg').PoolClient,
+  fn: (tx: import('pg').PoolClient) => Promise<T>,
+): Promise<T> {
+  await client.query('BEGIN');
+  try {
+    return await fn(client);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  }
+}
 
 router.post('/start-over', async (req: Request, res: Response) => {
   const client = await pool.connect();
@@ -1252,16 +449,26 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     const rawOptions = req.body?.options ?? {};
     const deleteAllCheckins = Boolean(rawOptions.delete_all_checkins);
-    const deleteVenueCheckins = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
-    const deleteMoodCheckins = deleteAllCheckins || Boolean(rawOptions.delete_mood_checkins);
-    const deleteSleepEntries = deleteAllCheckins || Boolean(rawOptions.delete_sleep_entries);
-    const deleteTracks = Boolean(rawOptions.delete_tracks);
-    const deleteMediaItems = Boolean(rawOptions.delete_media_items);
+    // Per-plugin check-in deletion: options use `delete_<pluginId>_checkins`.
+    // Legacy aliases: `delete_venue_checkins` maps to the location plugin;
+    // `delete_media_items` (pre-plugin "All Media" checkbox) maps to the
+    // media plugin, whose deleteUserData hook wipes all media tables.
+    const legacyVenueDelete = deleteAllCheckins || Boolean(rawOptions.delete_venue_checkins);
+    const legacyMediaDelete = deleteAllCheckins || Boolean(rawOptions.delete_media_items);
+    const selectedPluginCheckinIds = allPlugins()
+      .filter((p) => deleteAllCheckins
+        || Boolean(rawOptions[`delete_${p.id}_checkins`])
+        || (legacyVenueDelete && p.id === 'location')
+        || (legacyMediaDelete && p.id === 'media'))
+      .map((p) => p.id);
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
-    const resetMoodSettings = Boolean(rawOptions.reset_mood_settings);
+    // Per-plugin settings reset: options use `reset_<pluginId>_settings`.
+    const selectedPluginSettingsIds = allPlugins()
+      .filter((p) => Boolean(rawOptions[`reset_${p.id}_settings`]))
+      .map((p) => p.id);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (!deleteVenueCheckins && !deleteMoodCheckins && !deleteSleepEntries && !deleteTracks && !deleteMediaItems && !resetAccountSettings && !resetMoodSettings && !resetIntegrationsSettings) {
+    if (selectedPluginCheckinIds.length === 0 && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -1271,90 +478,42 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     const counts: Record<string, number> = {};
 
-    if (deleteVenueCheckins) {
-      const scrobbleResult = await client.query(
-        `DELETE FROM checkin_scrobbles
-         WHERE checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
-        [USER_ID]
-      );
-      counts.checkin_scrobbles = scrobbleResult.rowCount ?? 0;
-
-      const checkinResult = await client.query('DELETE FROM checkins WHERE user_id = $1', [USER_ID]);
-      counts.checkins = checkinResult.rowCount ?? 0;
-    }
-
-    if (deleteMoodCheckins) {
-      const moodCheckinResult = await client.query('DELETE FROM mood_checkins WHERE user_id = $1', [USER_ID]);
-      counts.mood_checkins = moodCheckinResult.rowCount ?? 0;
-    }
-
-    if (deleteSleepEntries) {
-      const sleepEntriesResult = await client.query('DELETE FROM sleep_entries WHERE user_id = $1', [USER_ID]);
-      counts.sleep_entries = sleepEntriesResult.rowCount ?? 0;
-    }
-
-    if (deleteTracks) {
-      const tracksResult = await client.query('DELETE FROM tracks WHERE user_id = $1 RETURNING id', [USER_ID]);
-      counts.tracks = tracksResult.rowCount ?? 0;
-
-      // Remove each deleted track's uploaded file from the user's folder on disk.
-      let trackFilesDeleted = 0;
-      for (const row of tracksResult.rows) {
-        deleteStoredTrack(USER_ID, String(row.id));
-        trackFilesDeleted++;
+    if (selectedPluginCheckinIds.length > 0) {
+      // Check-in plugins own their deletion via their deleteUserData hook.
+      const pluginCounts = await deletePluginData(client, USER_ID, selectedPluginCheckinIds);
+      for (const [pluginId, deleted] of Object.entries(pluginCounts)) {
+        counts[`plugin_checkins_${pluginId}`] = deleted;
       }
-      counts.track_files = trackFilesDeleted;
     }
 
-    if (deleteMediaItems) {
-      // Delete all locally stored media: check-ins, list items, cached episodes, items, and lists.
-      const mediaCheckinsResult = await client.query('DELETE FROM media_checkins WHERE user_id = $1', [USER_ID]);
-      counts.media_checkins = mediaCheckinsResult.rowCount ?? 0;
-      const listItemsResult = await client.query(
-        'DELETE FROM media_list_items WHERE list_id IN (SELECT id FROM media_lists WHERE user_id = $1)',
-        [USER_ID]
-      );
-      counts.media_list_items = listItemsResult.rowCount ?? 0;
-
-      const episodesResult = await client.query(
-        'DELETE FROM media_tv_episodes WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1)',
-        [USER_ID]
-      );
-      counts.media_tv_episodes = episodesResult.rowCount ?? 0;
-
-      const itemsResult = await client.query('DELETE FROM media_items WHERE user_id = $1', [USER_ID]);
-      counts.media_items = itemsResult.rowCount ?? 0;
-
-      const listsResult = await client.query('DELETE FROM media_lists WHERE user_id = $1', [USER_ID]);
-      counts.media_lists = listsResult.rowCount ?? 0;
-    }
-
-    if (resetMoodSettings) {
-      const groupResult = await client.query('DELETE FROM mood_activity_groups WHERE user_id = $1', [USER_ID]);
-      counts.mood_activity_groups = groupResult.rowCount ?? 0;
-
-      const moodSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, mood_icon_pack)
-         VALUES ($1, 'emoji')
-         ON CONFLICT (user_id) DO UPDATE SET
-           mood_icon_pack = EXCLUDED.mood_icon_pack,
-           updated_at = NOW()`,
-        [USER_ID]
-      );
-      counts.user_settings_mood_reset = moodSettingsResult.rowCount ?? 0;
+    if (selectedPluginSettingsIds.length > 0) {
+      // Settings reset: the framework wipes this plugin's plugin_settings rows;
+      // the plugin's resetSettings hook (when present) clears any
+      // user-scoped lookup tables it owns.
+      for (const plugin of allPlugins()) {
+        if (!selectedPluginSettingsIds.includes(plugin.id)) continue;
+        const settingsResult = await client.query(
+          `DELETE FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2`,
+          [USER_ID, plugin.id]
+        );
+        let deleted = settingsResult.rowCount ?? 0;
+        if (plugin.server.resetSettings) {
+          deleted += await plugin.server.resetSettings({ user_id: USER_ID, client });
+        }
+        counts[`plugin_settings_${plugin.id}_reset`] = deleted;
+      }
     }
 
     if (resetIntegrationsSettings) {
       const integrationSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url, plex_usernames)
-         VALUES ($1, NULL, NULL, NULL, NULL, NULL, NULL)
+        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url)
+         VALUES ($1, NULL, NULL, NULL, NULL, NULL)
          ON CONFLICT (user_id) DO UPDATE SET
            dawarich_url = NULL,
            dawarich_api_key = NULL,
            immich_url = NULL,
            immich_api_key = NULL,
            maloja_url = NULL,
-           plex_usernames = NULL,
            updated_at = NOW()`,
         [USER_ID]
       );
