@@ -13,7 +13,8 @@ RUN npm run build --workspace=server
 FROM node:24-alpine
 WORKDIR /app
 COPY --from=builder /app/server/package.json ./
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/server/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/server/src/db/migrations ./dist/server/src/db/migrations
 EXPOSE 3001
