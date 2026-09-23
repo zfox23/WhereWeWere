@@ -72,7 +72,6 @@ export function timelineDetailPath(item: { type: string; id: string }): string {
   }
   // Legacy built-in routes.
   switch (item.type) {
-    case 'location': return `/checkins/${item.id}`;
     default: return `/checkins/${item.type}/${item.id}`;
   }
 }

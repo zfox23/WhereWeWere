@@ -86,22 +86,11 @@ export function pluginIds(): string[] {
 }
 
 /**
- * Earliest-date hooks for core built-in check-in types, keyed by the
- * response key the client expects. As of the location plugin migration no
- * core built-in types remain — every check-in type (location, mood, sleep,
- * tracks) contributes its own `earliestDate` hook (keyed by plugin id).
- */
-export const BUILTIN_EARLIEST_DATES: Record<string, { sql: string }> = {};
-
-/**
  * All earliest-date sources: built-in types plus every plugin's hook.
  * Returns `{ key, sql }` entries (entries without a hook are omitted).
  */
 export function earliestDateSources(): { key: string; sql: string }[] {
   const sources: { key: string; sql: string }[] = [];
-  for (const [key, hook] of Object.entries(BUILTIN_EARLIEST_DATES)) {
-    sources.push({ key, sql: hook.sql });
-  }
   for (const plugin of allPlugins()) {
     const hook = plugin.server.earliestDate?.();
     if (hook) sources.push({ key: plugin.id, sql: hook.sql });
