@@ -3,16 +3,25 @@ import type { CheckinTypeServer, PluginLlmHook } from 'wwp-shared';
 import { allPlugins } from '../plugins/registry';
 import sharp from 'sharp';
 import { query } from '../db';
+import {
+  DEFAULT_TOKEN_CONFIG,
+  buildChronologicalEntries,
+  chunkByBudget,
+  condenseUntilFits,
+  formatDateRange,
+  type Chunk,
+} from '../services/llmCompaction';
 
 const router = Router();
 
 import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// Approximate chars-per-token for English text (conservative).
-const CHARS_PER_TOKEN = 3;
-// Leave headroom for the model's response.
-const INPUT_WINDOW_FRACTION = 0.75;
+// Token-bucket model shared by every LLM call in this route.
+const TOKEN_CONFIG = {
+  ...DEFAULT_TOKEN_CONFIG,
+  promptOverheadTokens: 500,
+};
 // Cap on how many candidate images we return to the client.
 const CANDIDATE_IMAGE_LIMIT = 200;
 // Cap on how many images we forward to the LLM per request.
@@ -20,17 +29,7 @@ const MAX_LLM_IMAGES = 10;
 // Conservative vision-token reserve per 1024px image, so text data is always
 // prioritized over photos when the context window is small.
 const IMAGE_TOKEN_RESERVE = 1200;
-// Fixed overhead reserve (system prompt + header), in tokens.
-const PROMPT_OVERHEAD_TOKENS = 500;
 
-
-interface LlmSettings {
-  api_url: string;
-  model: string;
-  reasoning_level: string;
-  context_window: number;
-  image_support: boolean;
-}
 
 async function getLlmSettings(): Promise<LlmSettings | null> {
   const result = await query(
@@ -77,6 +76,7 @@ function allLlmPlugins(): LlmPluginEntry[] {
     .filter((entry): entry is LlmPluginEntry => entry.hook !== null && entry.hook !== undefined);
 }
 
+/** Gather ALL check-ins in the period as one flat chronological entry list. */
 async function gatherLifeData(from: string, to: string) {
   const llmPlugins = allLlmPlugins();
   // Every check-in type (location, mood, sleep, tracks, ...) contributes via
@@ -88,100 +88,13 @@ async function gatherLifeData(from: string, to: string) {
     }))
   );
 
-  const pluginPools: { label: string; lines: string[] }[] = llmPlugins.map(({ hook }, i) => {
-    const rows = (pluginRowsList[i] ?? []) as PluginLlmRow[];
-    const lines = rows.flatMap((row) => hook.toLines(row));
-    return { label: hook.label, lines };
-  });
-
-  const totalLines = pluginPools.reduce((sum, pool) => sum + pool.lines.length, 0);
-  const hasAnyData = totalLines > 0;
-
-  return { pluginPools, hasAnyData };
-}
-
-
-function formatDistance(meters: number): string {
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
-}
-
-function fisherYatesShuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-interface SkippedType {
-  type: string;
-  total: number;
-  included: number;
-}
-
-// Build the data description. Every data type present in the period is
-// included in full when the char budget allows. When the budget is exceeded,
-// the SAME inclusion fraction is applied to every type (so each type is
-// represented proportionally), and each type's entries are randomly sampled
-// down to that fraction (kept in chronological order).
-function buildLifeDataText(
-  data: Awaited<ReturnType<typeof gatherLifeData>>,
-  charBudget: number
-): { text: string; skipped: SkippedType[] } {
-  const { pluginPools } = data;
-
-  const pools: { label: string; lines: string[] }[] = [];
-
-  // Every check-in type (their hooks pre-format each line, so no further
-  // work is needed here).
-  for (const pool of pluginPools) {
-    if (pool.lines.length > 0) pools.push(pool);
-  }
-
-  const sectionCost = (lines: string[]) => (pools.length > 1 ? 2 : 0);
-
-  const fullFits =
-    pools.reduce((sum, pool) => sum + pool.lines.join('\n').length + sectionCost(pool.lines), 0) <= charBudget;
-  if (fullFits) {
-    return { text: pools.map((pool) => pool.lines.join('\n')).join('\n\n'), skipped: [] };
-  }
-
-  // Over budget: apply one inclusion fraction to every type so all types
-  // present in the period remain represented.
-  const fullTotalChars = pools.reduce(
-    (sum, pool) => sum + pool.lines.join('\n').length + sectionCost(pool.lines),
-    0
-  );
-  // Scale down proportionally to the budget (leaving a small margin for
-  // rounding), never including more than 100% of any type.
-  const fraction = Math.min(1, (charBudget / fullTotalChars) * 0.95);
-
-  const keptSections: string[] = [];
-  const skipped: SkippedType[] = [];
-
-  for (const pool of pools) {
-    const total = pool.lines.length;
-    const target = fraction >= 1 ? total : Math.max(0, Math.round(total * fraction));
-
-    let chosen: number[];
-    if (target >= total) {
-      chosen = pool.lines.map((_, i) => i);
-    } else {
-      chosen = fisherYatesShuffle(pool.lines.map((_, i) => i)).slice(0, target);
-      chosen.sort((a, b) => a - b);
-    }
-
-    if (chosen.length > 0) {
-      keptSections.push(chosen.map((i) => pool.lines[i]).join('\n'));
-    }
-    if (chosen.length < total) {
-      skipped.push({ type: pool.label, total, included: chosen.length });
-    }
-  }
-
-  return { text: keptSections.join('\n\n'), skipped };
+  const sources = llmPlugins.map(({ hook }, i) => ({
+    label: hook.label,
+    rows: (pluginRowsList[i] ?? []) as PluginLlmRow[],
+    hook,
+  }));
+  const { entries, totals } = await buildChronologicalEntries(sources);
+  return { entries, totals, hasAnyData: entries.length > 0 };
 }
 
 // Convert an image buffer to JPEG so it always matches the format vision
@@ -205,6 +118,76 @@ Write a useful, actionable summary of the user's life during this period. Your s
 - 2-4 concrete, actionable suggestions for the future based on the patterns you see
 
 Be specific — reference actual places, dates, moods, and activities from the data rather than speaking in generalities. Be warm but honest. Use markdown headings and short sections. Keep it focused: aim for something a person can read in a few minutes.`;
+
+// Prompt used to condense one chronological slice of the period (map phase,
+// and each reduce level). Dense and factual: it must preserve every specific
+// the final summary will need, without doing any reflection itself.
+const DIGEST_SYSTEM_PROMPT = `You are condensing personal activity data from a life journal. You are given a chronological slice of the user's check-ins (location, mood, fitness tracks, sleep, media).
+
+Write a dense, factual digest of this slice that preserves all the specifics a later analyst will need:
+- Every distinct place, venue, person, title, activity, or mood label mentioned
+- Key dates and date ranges (use ranges for repeated events, e.g. "3 visits to X, May 1–3")
+- All notes and comments written by the user, quoted or closely paraphrased
+- Counts and totals (e.g. "12 workouts, ~45 km total", "7 bad mood check-ins")
+- Notable highs, lows, and standout entries (high ratings, unusual locations, significant notes)
+
+Rules:
+- Do NOT omit anything significant — when unsure, keep it.
+- Do NOT add interpretation, advice, or reflection; that is done later.
+- Keep the output compact: plain text with short bullet points, grouped by day or theme.`;
+
+interface LlmSettings {
+  api_url: string;
+  model: string;
+  reasoning_level: string;
+  context_window: number;
+  image_support: boolean;
+}
+
+/** Call the configured chat-completions endpoint and return the text. */
+async function callLlm(
+  llm: LlmSettings,
+  systemPrompt: string,
+  userContent: string | Array<{ type: string; [key: string]: unknown }>,
+  maxTokens: number
+): Promise<string> {
+  const llmResponse = await fetch(`${llm.api_url}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: llm.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      max_tokens: maxTokens,
+      ...(llm.reasoning_level ? { reasoning_effort: llm.reasoning_level } : {}),
+    }),
+  });
+
+  if (!llmResponse.ok) {
+    const body = await llmResponse.text();
+    console.error('LLM request failed:', llmResponse.status, body);
+    let message = `LLM request failed (${llmResponse.status})`;
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: string } | string };
+      const errMsg = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message;
+      if (errMsg) message = `LLM request failed: ${errMsg}`;
+    } catch {
+      if (body) message = `LLM request failed: ${body.slice(0, 300)}`;
+    }
+    throw new Error(message);
+  }
+
+  const llmData = await llmResponse.json() as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const content = llmData.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('LLM returned an empty response.');
+  }
+  return content;
+}
 
 // GET /candidate-images?from=&to= - Immich images taken within the date range
 router.get('/candidate-images', async (req: Request, res: Response) => {
@@ -259,7 +242,114 @@ router.get('/candidate-images', async (req: Request, res: Response) => {
   }
 });
 
-// POST /summarize - summarize a time period via the configured LLM
+/** Char budget for text data in the FINAL (reduce) call, given image reserve. */
+function finalCharBudget(llm: LlmSettings, imageTokenReserve: number): number {
+  const tokens = Math.floor(
+    llm.context_window * TOKEN_CONFIG.inputWindowFraction -
+      TOKEN_CONFIG.promptOverheadTokens -
+      imageTokenReserve
+  );
+  return Math.max(0, Math.floor(tokens * TOKEN_CONFIG.charsPerToken));
+}
+
+/** Max output tokens for a digest call (digests are dense but not a full summary). */
+function digestMaxTokens(llm: LlmSettings): number {
+  return Math.max(512, Math.min(Math.floor(llm.context_window * TOKEN_CONFIG.digestOutputFraction), 16384));
+}
+
+/**
+ * Char budget for the INPUT of a digest (map) call — no images there. The
+ * input is sized so that input + output can never exceed the context window
+ * (window − output reserve − prompt overhead), unlike the plain
+ * input-window-fraction estimate.
+ */
+function digestCharBudget(llm: LlmSettings): number {
+  const tokens = llm.context_window - digestMaxTokens(llm) - TOKEN_CONFIG.promptOverheadTokens;
+  return Math.max(0, Math.floor(tokens * TOKEN_CONFIG.charsPerToken));
+}
+
+/** Human-readable per-type counts, e.g. "location check-ins: 512, mood: 300". */
+function formatCounts(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .map(([label, n]) => `${label}: ${n}`)
+    .join(', ');
+}
+
+// Fetch the requested Immich images as content parts (text data always
+// prioritized over photos). Returns the parts plus include/skip counters.
+async function fetchImageParts(
+  llm: LlmSettings,
+  imageIds: string[]
+): Promise<{ parts: Array<{ type: string; [key: string]: unknown }>; included: number; skipped: number }> {
+  const parts: Array<{ type: string; [key: string]: unknown }> = [];
+  let included = 0;
+  let skipped = 0;
+  if (!llm.image_support || imageIds.length === 0) return { parts, included, skipped };
+
+  const immichResult = await query(
+    'SELECT immich_url, immich_api_key FROM user_settings WHERE user_id = $1',
+    [USER_ID]
+  );
+  const immichRow = immichResult.rows[0];
+  if (!immichRow?.immich_url || !immichRow?.immich_api_key) {
+    return { parts, included: 0, skipped: imageIds.length };
+  }
+  const immichUrl = String(immichRow.immich_url).replace(/\/+$/, '');
+
+  const imageResults = await Promise.all(
+    imageIds.map(async (assetId) => {
+      try {
+        // Use the 1024px preview rather than the full-resolution original:
+        // vision models don't need more, and it keeps the payload small.
+        const imgRes = await fetch(
+          `${immichUrl}/api/assets/${assetId}/thumbnail?size=preview`,
+          {
+            headers: {
+              'x-api-key': String(immichRow.immich_api_key),
+              Accept: 'image/jpeg',
+            },
+          }
+        );
+        if (!imgRes.ok) return null;
+        const buffer = Buffer.from(await imgRes.arrayBuffer());
+        const data = await toJpegBase64(buffer);
+        if (!data) {
+          console.warn(
+            `LLM summarize: skipping Immich asset ${assetId} — not a decodable image ` +
+              `(content-type: ${imgRes.headers.get('content-type') || 'unknown'})`
+          );
+          return null;
+        }
+        return { contentType: 'image/jpeg', data };
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  for (const img of imageResults) {
+    if (!img) {
+      skipped += 1;
+      continue;
+    }
+    parts.push({
+      type: 'image_url',
+      image_url: { url: `data:${img.contentType};base64,${img.data}` },
+    });
+    included += 1;
+  }
+  return { parts, included, skipped };
+}
+
+// POST /summarize - summarize a time period via the configured LLM.
+//
+// Strategy: ALL check-ins in the period always contribute. When the full
+// dataset fits the context budget, a single LLM call receives it verbatim.
+// Otherwise, the data is split into contiguous chronological chunks, each
+// chunk is condensed (digested) by the LLM in parallel (map phase), and the
+// digests are merged (reduce phase). If the digests themselves still exceed
+// the budget, they are re-chunked and re-digested (recursive reduce).
 router.post('/summarize', async (req: Request, res: Response) => {
   try {
     const { from, to, image_asset_ids } = req.body as {
@@ -287,136 +377,84 @@ router.post('/summarize', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No data found for the selected period.' });
     }
 
-    // --- Build text prompt first: data is always prioritized over images ---
-    const contentParts: Array<{ type: string; [key: string]: unknown }> = [];
-    const reserveImageTokens = llm.image_support && imageIds.length > 0;
-    const imageTokenReserve = reserveImageTokens
-      ? Math.min(imageIds.length, MAX_LLM_IMAGES) * IMAGE_TOKEN_RESERVE
-      : 0;
-    const textTokenBudget = Math.floor(
-      llm.context_window * INPUT_WINDOW_FRACTION - PROMPT_OVERHEAD_TOKENS - imageTokenReserve
-    );
-    const charBudget = Math.max(0, Math.floor(textTokenBudget * CHARS_PER_TOKEN));
-    const { text: lifeDataText, skipped } = buildLifeDataText(data, charBudget);
+    // --- Text budget: data is always prioritized over images ---
+    const imageTokenReserve =
+      llm.image_support && imageIds.length > 0
+        ? Math.min(imageIds.length, MAX_LLM_IMAGES) * IMAGE_TOKEN_RESERVE
+        : 0;
+    const finalBudget = finalCharBudget(llm, imageTokenReserve);
+    const fullText = data.entries.map((e) => e.lines.join('\n')).join('\n');
+    const fullChars = fullText.length;
 
-    // --- Fetch images (if supported and requested) ---
-    let imagesIncluded = 0;
-    let imagesSkipped = 0;
+    // --- Condense: single call when it fits, else map-reduce ---
+    let dataText: string;
+    let mode: 'single' | 'map-reduce' = 'single';
+    let chunks = 0;
+    let digestLevels = 0;
 
-    if (llm.image_support && imageIds.length > 0) {
-      const immichResult = await query(
-        'SELECT immich_url, immich_api_key FROM user_settings WHERE user_id = $1',
-        [USER_ID]
+    const digestChunk = async (chunk: Chunk, level: number): Promise<string> => {
+      const countLine = formatCounts(chunk.counts) ? `\nCheck-ins in this slice — ${formatCounts(chunk.counts)}.` : '';
+      const prompt =
+        `Chronological slice of activity data from ${formatDateRange(chunk.from, chunk.to)} ` +
+        `(slice ${level === 0 ? 'of the period' : `at reduction level ${level}`}).${countLine}\n\n${chunk.text}`;
+      return callLlm(llm, DIGEST_SYSTEM_PROMPT, prompt, digestMaxTokens(llm));
+    };
+
+    if (fullChars <= finalBudget && finalBudget > 0) {
+      dataText = fullText;
+    } else {
+      const levelChunks = chunkByBudget(data.entries, digestCharBudget(llm), TOKEN_CONFIG);
+      console.log(
+        `LLM summarize: ${fullChars} chars exceeds budget (${finalBudget}) — ` +
+          `condensing ${levelChunks.length} chunk(s) via map-reduce.`
       );
-      const immichRow = immichResult.rows[0];
-      if (immichRow?.immich_url && immichRow?.immich_api_key) {
-        const immichUrl = String(immichRow.immich_url).replace(/\/+$/, '');
-
-        const imageResults = await Promise.all(
-          imageIds.map(async (assetId) => {
-            try {
-              // Use the 1024px preview rather than the full-resolution original:
-              // vision models don't need more, and it keeps the payload small.
-              const imgRes = await fetch(
-                `${immichUrl}/api/assets/${assetId}/thumbnail?size=preview`,
-                {
-                  headers: {
-                    'x-api-key': String(immichRow.immich_api_key),
-                    Accept: 'image/jpeg',
-                  },
-                }
-              );
-              if (!imgRes.ok) return null;
-              const buffer = Buffer.from(await imgRes.arrayBuffer());
-              const data = await toJpegBase64(buffer);
-              if (!data) {
-                console.warn(
-                  `LLM summarize: skipping Immich asset ${assetId} — not a decodable image ` +
-                    `(content-type: ${imgRes.headers.get('content-type') || 'unknown'})`
-                );
-                return null;
-              }
-              return { contentType: 'image/jpeg', data };
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        for (const img of imageResults) {
-          if (!img) {
-            imagesSkipped += 1;
-            continue;
-          }
-          contentParts.push({
-            type: 'image_url',
-            image_url: { url: `data:${img.contentType};base64,${img.data}` },
-          });
-          imagesIncluded += 1;
-        }
-      } else {
-        imagesSkipped = imageIds.length;
-      }
+      const result = await condenseUntilFits(levelChunks, finalBudget, digestChunk, TOKEN_CONFIG);
+      dataText = result.text;
+      mode = 'map-reduce';
+      chunks = levelChunks.length;
+      digestLevels = result.level;
+      console.log(`LLM summarize: condensation done — ${result.chunks} digest(s), ${result.level} reduction level(s).`);
     }
 
-    const skippedNote =
-      skipped.length > 0
-        ? ` (Note: to fit the context window, only a random sample of some data was included: ${skipped
-            .map((s) => `${s.included} of ${s.total} ${s.type}`)
-            .join(', ')}.)`
+    // --- Fetch images (if supported and requested) ---
+    const imageResult = await fetchImageParts(llm, imageIds);
+    const contentParts: Array<{ type: string; [key: string]: unknown }> = [...imageResult.parts];
+
+    const countsLine = formatCounts(data.totals) ? `\nTotal check-ins in the period — ${formatCounts(data.totals)}.` : '';
+    const digestNote =
+      mode === 'map-reduce'
+        ? ' Because the period is large, the data below is a condensed digest of ALL check-ins in the period (every check-in is represented, but dense/short-lived entries may be summarized rather than listed individually).'
         : '';
     const header =
       `Summarize my life from ${fromStr} to ${toStr}. Below is my activity data from WhereWeWere during that period.` +
-      skippedNote +
-      (imagesIncluded > 0
-        ? ` I have also included ${imagesIncluded} photo${imagesIncluded === 1 ? '' : 's'} taken during this period — describe them where relevant and use them to ground your reflections.`
+      countsLine +
+      digestNote +
+      (imageResult.included > 0
+        ? ` I have also included ${imageResult.included} photo${imageResult.included === 1 ? '' : 's'} taken during this period — describe them where relevant and use them to ground your reflections.`
         : '') +
       '\n\n' +
-      lifeDataText;
+      dataText;
 
     contentParts.push({ type: 'text', text: header });
 
-    const llmResponse = await fetch(`${llm.api_url}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: llm.model,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: contentParts },
-        ],
-        max_tokens: Math.min(Math.floor(llm.context_window * 0.2), 16384),
-        ...(llm.reasoning_level ? { reasoning_effort: llm.reasoning_level } : {}),
-      }),
-    });
-
-    if (!llmResponse.ok) {
-      const body = await llmResponse.text();
-      console.error('LLM request failed:', llmResponse.status, body);
-      let message = `LLM request failed (${llmResponse.status})`;
-      try {
-        const parsed = JSON.parse(body) as { error?: { message?: string } | string };
-        const errMsg = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message;
-        if (errMsg) message = `LLM request failed: ${errMsg}`;
-      } catch {
-        if (body) message = `LLM request failed: ${body.slice(0, 300)}`;
-      }
+    let summary: string;
+    try {
+      summary = await callLlm(llm, SYSTEM_PROMPT, contentParts, Math.min(Math.floor(llm.context_window * 0.2), 16384));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to generate summary';
       return res.status(502).json({ error: message });
-    }
-
-    const llmData = await llmResponse.json() as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const summary = llmData.choices?.[0]?.message?.content;
-    if (!summary) {
-      return res.status(502).json({ error: 'LLM returned an empty response.' });
     }
 
     res.json({
       summary,
-      images_included: imagesIncluded,
-      images_skipped: imagesSkipped,
-      skipped: skipped.map((s) => ({ type: s.type, total: s.total, included: s.included })),
+      images_included: imageResult.included,
+      images_skipped: imageResult.skipped,
+      mode,
+      chunks,
+      digest_levels: digestLevels,
+      // Kept for backward compatibility with older clients; always empty now
+      // since no data is ever sampled away.
+      skipped: [] as { type: string; total: number; included: number }[],
     });
   } catch (err) {
     console.error('Error summarizing life period:', err);

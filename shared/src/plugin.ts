@@ -110,7 +110,12 @@ export interface PluginTimelineContext {
 
 /** A row returned by a plugin's LLM life-summary hook. */
 export interface PluginLlmRow {
-  checked_in_at: string;
+  /**
+   * Check-in timestamp. The pg driver returns `timestamptz` columns as
+   * `Date` objects even though the column is a timestamp; consumers must
+   * handle both `Date` and string forms (e.g. normalize before sorting).
+   */
+  checked_in_at: string | Date;
   /** IANA timezone the check-in was made in, or null. */
   timezone: string | null;
   /** The check-in's typed data. */

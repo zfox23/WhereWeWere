@@ -291,6 +291,13 @@ export const llm = {
       summary: string;
       images_included: number;
       images_skipped: number;
+      /** 'single' = full data in one LLM call, 'map-reduce' = chunked + condensed. */
+      mode: 'single' | 'map-reduce';
+      /** Number of chunks condensed during the map phase (0 for single). */
+      chunks: number;
+      /** Number of recursive reduction levels applied to the digests. */
+      digest_levels: number;
+      /** Always empty (kept for backward compatibility). */
       skipped: { type: string; total: number; included: number }[];
     }>('/llm/summarize', {
       method: 'POST',

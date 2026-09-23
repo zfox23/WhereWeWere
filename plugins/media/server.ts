@@ -138,7 +138,7 @@ const MEDIA_LLM_CHECKIN_LABELS: Record<string, string> = {
   dropped: 'dropped',
 };
 
-function formatLlmWhen(iso: string, timezone: string | null): string {
+function formatLlmWhen(iso: string | Date, timezone: string | null): string {
   const opts: Intl.DateTimeFormatOptions = {
     month: 'short',
     day: 'numeric',

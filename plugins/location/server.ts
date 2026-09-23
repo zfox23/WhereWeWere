@@ -2304,7 +2304,7 @@ export const server: CheckinTypeServerPlugin = {
         .join(' / ');
       const note = d.note ? ` — note: "${d.note}"` : '';
 
-      const formatWhen = (iso: string, timezone: string | null): string => {
+      const formatWhen = (iso: string | Date, timezone: string | null): string => {
         const opts: Intl.DateTimeFormatOptions = {
           month: 'short',
           day: 'numeric',

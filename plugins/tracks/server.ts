@@ -1135,7 +1135,7 @@ async function insertTrackRow(
 // LLM line formatting (moved from server/src/routes/llm.ts)
 // ---------------------------------------------------------------------------
 
-function formatLlmWhen(iso: string, timezone: string | null): string {
+function formatLlmWhen(iso: string | Date, timezone: string | null): string {
   const opts: Intl.DateTimeFormatOptions = {
     month: 'short',
     day: 'numeric',
