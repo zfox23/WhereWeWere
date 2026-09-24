@@ -424,7 +424,9 @@ async function withTransaction<T>(
 ): Promise<T> {
   await client.query('BEGIN');
   try {
-    return await fn(client);
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
