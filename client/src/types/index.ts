@@ -92,6 +92,15 @@ export interface CheckIn {
   created_at: string;
 }
 
+/** Row of the Profile "Companions" tab (GET /companions). */
+export interface CompanionSummary {
+  name: string;
+  /** Number of check-ins this name appears on. */
+  checkin_count: number;
+  /** Most recent check-in carrying this name (null when it has none yet). */
+  last_checkin_at: string | null;
+}
+
 export interface NearbyVenue {
   name: string;
   category: string;

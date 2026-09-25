@@ -8,6 +8,8 @@ type StartOverOptions = {
   reset_everything: boolean;
   delete_all_checkins: boolean;
   delete_venue_checkins: boolean;
+  /** Wipes the whole core companion table (every type + standalone names). */
+  delete_companions: boolean;
   reset_account_settings: boolean;
   reset_integrations_settings: boolean;
   /** Per-plugin options: `delete_<pluginId>_checkins`, `reset_<pluginId>_settings`, `delete_<pluginId>_all`. */
@@ -30,6 +32,7 @@ export function StartOverSection() {
     reset_everything: false,
     delete_all_checkins: false,
     delete_venue_checkins: false,
+    delete_companions: false,
     reset_account_settings: false,
     reset_integrations_settings: false,
     ...Object.fromEntries(plugins.flatMap((p) => [
@@ -154,6 +157,21 @@ export function StartOverSection() {
             </label>
           ) : null,
         )}
+        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={options.delete_companions}
+            disabled={options.reset_everything}
+            onChange={() => toggleOption('delete_companions')}
+          />
+          <span>
+            All Companion Data
+            <span className="block text-xs font-normal opacity-80">
+              Every companion on every check-in, plus names from the Companions tab that aren't on any check-in.
+            </span>
+          </span>
+        </label>
         <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
           <input
             type="checkbox"

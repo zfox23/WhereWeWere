@@ -202,6 +202,8 @@ export default function Home() {
   const venueId = searchParams.get('venue_id') || '';
   const category = searchParams.get('category') || '';
   const country = searchParams.get('country') || '';
+  // Core companion filter: only check-ins carrying this companion name.
+  const companion = searchParams.get('companion') || '';
   const [showFilters, setShowFilters] = useState(false);
 
   // Check-in plugin filter params, scoped per plugin.
@@ -303,10 +305,10 @@ export default function Home() {
 
   // Show filters panel if any structured filter is active
   useEffect(() => {
-    if (fromDate || toDate || venueId || category || country || hasPluginFilter) {
+    if (fromDate || toDate || venueId || category || country || companion || hasPluginFilter) {
       setShowFilters(true);
     }
-  }, [fromDate, toDate, venueId, category, country, hasPluginFilter]);
+  }, [fromDate, toDate, venueId, category, country, companion, hasPluginFilter]);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const feedContainerRef = useRef<HTMLDivElement>(null);
@@ -370,6 +372,7 @@ export default function Home() {
         if (venueId) params.venue_id = venueId;
         if (category) params.category = category;
         if (country) params.country = country;
+        if (companion.trim()) params.companion = companion.trim();
         // Plugin filter params (including the media plugin's media_subtype).
           for (const [pluginId, pluginParams] of Object.entries(pluginFilterParams)) {
             for (const [name, value] of Object.entries(pluginParams)) {
@@ -392,7 +395,7 @@ export default function Home() {
           setLoadingMore(false);
         }
       },
-      [searchQuery, fromDate, toDate, venueId, category, country, pluginFilterParams]
+      [searchQuery, fromDate, toDate, venueId, category, country, companion, pluginFilterParams]
     );
 
   // Initial load + reload on filter changes
@@ -540,7 +543,7 @@ export default function Home() {
 
   const hasNewPluginFilter = Object.keys(pluginIncludes).some((k) => !(pluginIncludes[k] ?? true));
   const hasTypeSelectionFilter = hasNewPluginFilter;
-  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || hasPluginFilter || hasTypeSelectionFilter;
+  const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || companion || hasPluginFilter || hasTypeSelectionFilter;
   const visibleItems = useMemo(
     () => items.filter((item) => {
       if (NEW_PLUGINS.some((p) => p.id === item.type)) return pluginIncludes[item.type] ?? true;
@@ -559,6 +562,7 @@ export default function Home() {
   }
   if (category) filterPills.push({ label: `Category: ${category}`, key: 'category' });
   if (country) filterPills.push({ label: `Country: ${country}`, key: 'country' });
+  if (companion) filterPills.push({ label: `Companion: ${companion}`, key: 'companion' });
   if (fromDate && toDate && fromDate === toDate) {
     filterPills.push({ label: `Date: ${fromDate}`, key: 'from' });
   } else {

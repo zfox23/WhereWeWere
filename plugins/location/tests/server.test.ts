@@ -231,7 +231,6 @@ describe('location plugin — backup & cleanup hooks', () => {
       .mockResolvedValueOnce({ rows: [{ id: 'c1', venue_id: 'v1' }] }) // checkins
       .mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Cafe' }] }) // venues
       .mockResolvedValueOnce({ rows: [{ id: 'vc1', name: 'Cafe' }] }) // categories
-      .mockResolvedValueOnce({ rows: [] }) // checkin companions
       .mockResolvedValueOnce({ rows: [] }) // venue lists
       .mockResolvedValueOnce({ rows: [] }); // venue list items
     const result = await server.backupExport!({ user_id: 'u1' } as any);
@@ -239,7 +238,6 @@ describe('location plugin — backup & cleanup hooks', () => {
       checkins: [{ id: 'c1', venue_id: 'v1' }],
       venues: [{ id: 'v1', name: 'Cafe' }],
       venueCategories: [{ id: 'vc1', name: 'Cafe' }],
-      checkinCompanions: [],
       venueLists: [],
       venueListItems: [],
     });

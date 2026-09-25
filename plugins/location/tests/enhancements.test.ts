@@ -266,19 +266,19 @@ describe('venue rating (endpoints)', () => {
 });
 
 describe('backup round-trip', () => {
-  it('backupExport includes companions, venue lists, list items, and ratings', async () => {
+  it('backupExport includes venue lists, list items, and ratings (companions ship in the core companions.json)', async () => {
     queryMock
       .mockResolvedValueOnce({ rows: [{ id: 'c1', venue_id: 'v1', rating: 3, notes: null, checked_in_at: '2026-01-01', checkin_timezone: null, created_at: null, updated_at: null, swarm_id: null }] })
       .mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Coffee', rating: 4, category_id: null, address: null, city: null, state: null, country: null, postal_code: null, latitude: 1, longitude: 1, osm_id: null, swarm_venue_id: null, parent_venue_id: null, created_by: null, created_at: null, updated_at: null }] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ checkin_id: 'c1', name: 'Ada' }] })
       .mockResolvedValueOnce({ rows: [{ id: 'l1', name: 'Favorites', created_at: null, updated_at: null }] })
       .mockResolvedValueOnce({ rows: [{ list_id: 'l1', venue_id: 'v1', position: 1, added_at: null }] });
 
     const result: any = await server.backupExport!({ user_id: USER_ID } as any);
     expect(result.checkins[0].rating).toBe(3);
     expect(result.venues[0].rating).toBe(4);
-    expect(result.checkinCompanions).toEqual([{ checkin_id: 'c1', name: 'Ada' }]);
+    // Companions are core-owned and no longer part of this plugin's payload.
+    expect(result).not.toHaveProperty('checkinCompanions');
     expect(result.venueLists).toEqual([{ id: 'l1', name: 'Favorites', created_at: null, updated_at: null }]);
     expect(result.venueListItems).toEqual([{ list_id: 'l1', venue_id: 'v1', position: 1, added_at: null }]);
   });

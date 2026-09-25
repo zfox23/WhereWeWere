@@ -2171,20 +2171,6 @@ export const server: CheckinTypeServerPlugin = {
       userIdFirst: false,
     },
     {
-      // Companion rows for this user's media check-ins (shared core table;
-      // restored after the check-ins they reference).
-      table: 'mediaCheckinCompanions',
-      select: `SELECT cc.checkin_id, cc.name
-               FROM companions cc
-               JOIN media_checkins mc ON mc.id = cc.checkin_id
-               WHERE cc.checkin_type = 'media' AND mc.user_id = $1
-               ORDER BY cc.checkin_id, cc.name`,
-      insert: `INSERT INTO companions (checkin_type, checkin_id, name)
-               VALUES ('media', $1, $2)
-               ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING`,
-      userIdFirst: false,
-    },
-    {
       table: 'mediaLists',
       select: `SELECT id, user_id, name, created_at, updated_at
                FROM media_lists WHERE user_id = $1 ORDER BY created_at`,
@@ -2206,8 +2192,10 @@ export const server: CheckinTypeServerPlugin = {
     },
   ],
 
-  // FK order: items (primary) -> check-ins -> check-in companions -> lists -> list memberships
-  backupOrder: ['primary', 'mediaCheckins', 'mediaCheckinCompanions', 'mediaLists', 'mediaListItems'],
+  // FK order: items (primary) -> check-ins -> lists -> list memberships.
+  // (Companion rows are core-owned: they ship in the backup bundle's
+  // companions.json, so this plugin no longer carries them.)
+  backupOrder: ['primary', 'mediaCheckins', 'mediaLists', 'mediaListItems'],
 
   // Old backups (no plugins payload) keep media rows under these top-level
   // keys; when a plugins.media payload is present the core skips these.

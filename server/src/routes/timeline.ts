@@ -43,6 +43,12 @@ router.get('/', async (req: Request, res: Response) => {
     const fromDate = extractDateString(from);
     const toDate = extractDateString(to);
     const searchQuery = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : null;
+    // Core companion filter: only check-ins (of any type) carrying this
+    // companion name. Applied on the merged union so it works across all
+    // check-in types that implement companions.
+    const companionName = typeof req.query.companion === 'string' && req.query.companion.trim() !== ''
+      ? req.query.companion.trim()
+      : null;
 
     const plugins = allPlugins();
 
@@ -130,14 +136,33 @@ router.get('/', async (req: Request, res: Response) => {
     params.push(parseInt(offset as string, 10));
     const offsetParam = `$${params.length}`;
 
-    const sql =
+    const unionSql =
       branches.length === 1
-        ? `${branchSqls[0].sql}
-          ORDER BY checked_in_at DESC
-          LIMIT ${limitParam} OFFSET ${offsetParam}`
-        : `${branchSqls.map((b) => `(\n${b.sql}\n)`).join('\nUNION ALL\n')}
-          ORDER BY checked_in_at DESC
-          LIMIT ${limitParam} OFFSET ${offsetParam}`;
+        ? branchSqls[0].sql
+        : branchSqls.map((b) => `(\n${b.sql}\n)`).join('\nUNION ALL\n');
+
+    let sql: string;
+    if (companionName) {
+      // Wrap the union so the companion filter applies to the aliased
+      // (type, id) envelope columns of every branch.
+      params.push(companionName);
+      const companionParam = `$${params.length}`;
+      sql = `SELECT * FROM (
+        ${unionSql}
+      ) AS timeline
+      WHERE EXISTS (
+        SELECT 1 FROM companions comp
+        WHERE comp.checkin_type = timeline.type
+          AND comp.checkin_id = timeline.id
+          AND comp.name = ${companionParam}
+      )
+      ORDER BY checked_in_at DESC
+      LIMIT ${limitParam} OFFSET ${offsetParam}`;
+    } else {
+      sql = `${unionSql}
+      ORDER BY checked_in_at DESC
+      LIMIT ${limitParam} OFFSET ${offsetParam}`;
+    }
 
     const result = await query(sql, params);
 

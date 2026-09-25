@@ -1,4 +1,5 @@
 import type {
+  CompanionSummary,
   TimestampReconciliationScanResult,
 } from '../types';
 
@@ -38,6 +39,8 @@ export const checkins = {
 
 // Companions (core, shared by every check-in type that implements them)
 export const companions = {
+  // One row per name: check-in count + most recent check-in (Profile tab).
+  list: () => request<CompanionSummary[]>('/companions'),
   // Distinct companion names (across all check-in types), for the
   // "Here With…" autocomplete.
   names: (q?: string, limit = 50) => {
@@ -46,6 +49,24 @@ export const companions = {
     qp.set('limit', String(limit));
     return request<string[]>(`/companions/names?${qp.toString()}`);
   },
+  // Add a standalone name to the shared pool (409 when it already exists).
+  add: (name: string) =>
+    request<{ name: string }>('/companions/names', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  // Rename a name across every check-in it appears on.
+  rename: (from: string, to: string) =>
+    request<{ updated: number }>('/companions/names', {
+      method: 'PUT',
+      body: JSON.stringify({ from, to }),
+    }),
+  // Remove a name from every check-in.
+  remove: (name: string) =>
+    request<{ deleted: number }>('/companions/names', {
+      method: 'DELETE',
+      body: JSON.stringify({ name }),
+    }),
 };
 
 // Venues

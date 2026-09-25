@@ -2337,8 +2337,10 @@ export const server: CheckinTypeServerPlugin = {
    * parent FKs handled on import).
    */
   backupExport: async ({ user_id }) => {
+    // Companions are core-owned: they ship in the backup bundle's
+    // companions.json (see the core backup route), not in this payload.
     const [checkinsResult, venuesResult, categoriesResult,
-          companionsResult, venueListsResult, venueListItemsResult] = await Promise.all([
+          venueListsResult, venueListItemsResult] = await Promise.all([
       query(
         `SELECT id, venue_id, notes, rating,
                 checked_in_at, checkin_timezone, created_at, updated_at, swarm_id
@@ -2366,14 +2368,6 @@ export const server: CheckinTypeServerPlugin = {
         [],
       ),
       query(
-        `SELECT cc.checkin_id, cc.name
-         FROM companions cc
-         JOIN checkins c ON c.id = cc.checkin_id
-         WHERE cc.checkin_type = 'location' AND c.user_id = $1
-         ORDER BY cc.checkin_id, cc.name`,
-        [user_id],
-      ),
-      query(
         `SELECT id, name, created_at, updated_at
          FROM venue_lists WHERE user_id = $1 ORDER BY created_at`,
         [user_id],
@@ -2391,7 +2385,6 @@ export const server: CheckinTypeServerPlugin = {
       checkins: checkinsResult.rows,
       venues: venuesResult.rows,
       venueCategories: categoriesResult.rows,
-      checkinCompanions: companionsResult.rows,
       venueLists: venueListsResult.rows,
       venueListItems: venueListItemsResult.rows,
     };
@@ -2533,7 +2526,9 @@ export const server: CheckinTypeServerPlugin = {
         if ((result.rowCount ?? 0) > 0) inserted++;
       }
 
-      // 4. Companions (referencing the user's check-ins; skip missing ones).
+      // 4. Companions — legacy backups only (old bundles carried
+      //    checkinCompanions here; new bundles ship companions.json in the
+      //    core bundle, so fresh exports never set this key).
       const checkinIds = new Set(checkins.map((r) => String(r?.id)).filter(Boolean));
       for (const cc of checkinCompanions) {
         if (!cc?.checkin_id || !cc?.name) continue;

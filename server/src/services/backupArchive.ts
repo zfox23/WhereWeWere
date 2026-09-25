@@ -4,6 +4,7 @@
  *
  * ZIP layout (see plans/backup-v2-zip.md):
  *   backup.json               manifest { format, schemaVersion, exportedAt, user, settings }
+ *   companions.json           core companion table dump (all check-in types + standalone names)
  *   plugins/<id>.json         one PluginBackupEntry per plugin
  *   plugins/<id>/files/...    optional plugin-owned files (e.g. tracks GPX)
  */
@@ -45,13 +46,17 @@ export function zipDirectory(dir: string): Promise<Buffer> {
 
 /**
  * Stream a backup v2 ZIP to the HTTP response. Resolves when the archive is
- * fully written (and the response finished).
+ * fully written (and the response finished). When `companions` is a
+ * (possibly empty) array it is written as `companions.json` — the core
+ * companion table dump (every check-in type plus standalone names), so the
+ * plugins' own payloads no longer carry companion rows.
  */
 export function streamBackupZip(
   res: Response,
   manifest: BackupManifest,
   pluginsPayload: PluginBackupPayload,
   files: PluginBackupFile[],
+  companions?: unknown,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const archive = archiver('zip', { zlib: { level: 6 } });
@@ -83,6 +88,9 @@ export function streamBackupZip(
     archive.pipe(res);
 
     archive.append(JSON.stringify(manifest, null, 2), { name: 'backup.json' });
+    if (Array.isArray(companions)) {
+      archive.append(JSON.stringify(companions, null, 2), { name: 'companions.json' });
+    }
     for (const [pluginId, entry] of Object.entries(pluginsPayload)) {
       archive.append(JSON.stringify(entry, null, 2), { name: `plugins/${pluginId}.json` });
     }

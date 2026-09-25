@@ -17,6 +17,11 @@ import {
   setCompanions,
   deleteCompanionsForCheckins,
   searchCompanionNames,
+  listCompanionSummaries,
+  addCompanionName,
+  renameCompanionName,
+  deleteCompanionName,
+  restoreCompanionRows,
   companionNamesSql,
 } from '../../src/services/companions';
 import { companionsRouter } from '../../src/routes/companions';
@@ -173,6 +178,223 @@ describe('companionNamesSql', () => {
   it('rejects types that are not safe plugin ids (SQL injection guard)', () => {
     expect(() => companionNamesSql("media' OR '1'='1", 'c.id')).toThrow();
     expect(() => companionNamesSql('Media', 'c.id')).toThrow();
+  });
+});
+
+describe('listCompanionSummaries', () => {
+  const unionSql = 'SELECT id, checked_in_at FROM plugin_checkins WHERE id = ANY($1::uuid[])';
+
+  it('resolves check-in ids first, then LEFT JOINs the timestamp union', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }, { checkin_id: 'c2' }] })
+      .mockResolvedValueOnce({
+        rows: [
+          { name: 'Ada', checkin_count: 2, last_checkin_at: '2024-01-02T00:00:00Z' },
+          { name: 'Sam', checkin_count: 0, last_checkin_at: null },
+        ],
+      });
+    const summaries = await listCompanionSummaries(unionSql);
+    expect(summaries).toEqual([
+      { name: 'Ada', checkin_count: 2, last_checkin_at: '2024-01-02T00:00:00Z' },
+      { name: 'Sam', checkin_count: 0, last_checkin_at: null },
+    ]);
+    const [idsSql, idsValues] = queryMock.mock.calls[0];
+    expect(idsSql).toContain('SELECT DISTINCT checkin_id FROM companions');
+    expect(idsValues).toEqual([]);
+    const [sql, values] = queryMock.mock.calls[1];
+    expect(sql).toContain('COUNT(c.checkin_id)');
+    expect(sql).toContain('LEFT JOIN');
+    expect(sql).toContain(unionSql);
+    expect(sql).toContain('GROUP BY c.name');
+    expect(values).toEqual([['c1', 'c2']]);
+  });
+});
+
+describe('addCompanionName', () => {
+  it('rejects blank names without querying', async () => {
+    await expect(addCompanionName('   ')).rejects.toMatchObject({ status: 400 });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects (409) a name that already exists case-insensitively', async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [{}] });
+    await expect(addCompanionName('ada')).rejects.toMatchObject({ status: 409 });
+    const [sql, values] = queryMock.mock.calls[0];
+    expect(sql).toContain('lower(name) = lower($1)');
+    expect(values).toEqual(['ada']);
+  });
+
+  it('inserts a standalone row (no check-in reference) and returns the trimmed name', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const name = await addCompanionName('  Ada  ');
+    expect(name).toBe('Ada');
+    const [sql, values] = queryMock.mock.calls[1];
+    expect(sql).toBe('INSERT INTO companions (name) VALUES ($1)');
+    expect(values).toEqual(['Ada']);
+  });
+});
+
+describe('renameCompanionName', () => {
+  it('rejects blank inputs without querying', async () => {
+    await expect(renameCompanionName('ada', '  ')).rejects.toMatchObject({ status: 400 });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('no-ops (0) when the name is unchanged', async () => {
+    expect(await renameCompanionName('Ada', 'Ada')).toBe(0);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects (409) a rename that would duplicate an existing standalone name', async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [{}] });
+    await expect(renameCompanionName('ada', 'Ada Lovelace')).rejects.toMatchObject({ status: 409 });
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves rows to the new name (merging conflicts) and returns the row count', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // no standalone collision
+      .mockResolvedValueOnce({ rowCount: 3, rows: [] }); // delete
+    const updated = await renameCompanionName('ada', 'Ada Lovelace');
+    expect(updated).toBe(3);
+    const [sql, values] = queryMock.mock.calls[1];
+    expect(sql).toContain('INSERT INTO companions (checkin_type, checkin_id, name)');
+    expect(sql).toContain('ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING');
+    expect(sql).toContain('DELETE FROM companions WHERE name = $1');
+    expect(values).toEqual(['ada', 'Ada Lovelace']);
+  });
+});
+
+describe('deleteCompanionName', () => {
+  it('rejects blank names without querying', async () => {
+    await expect(deleteCompanionName('')).rejects.toMatchObject({ status: 400 });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('deletes every row for the exact name and returns the count', async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 2, rows: [] });
+    const deleted = await deleteCompanionName('Ada');
+    expect(deleted).toBe(2);
+    const [sql, values] = queryMock.mock.calls[0];
+    expect(sql).toBe('DELETE FROM companions WHERE name = $1');
+    expect(values).toEqual(['Ada']);
+  });
+});
+
+describe('restoreCompanionRows', () => {
+  const id = '11111111-1111-1111-1111-111111111111';
+
+  it('inserts check-in rows keyed by (type, id, name)', async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const counts = await restoreCompanionRows([
+      { checkin_type: 'location', checkin_id: id, name: 'Ada', created_at: '2024-01-01T00:00:00Z' },
+    ]);
+    expect(counts).toEqual({ inserted: 1, skipped: 0 });
+    const [sql, values] = queryMock.mock.calls[0];
+    expect(sql).toContain('ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING');
+    expect(values).toEqual(['location', id, 'Ada', '2024-01-01T00:00:00Z']);
+  });
+
+  it('inserts standalone rows via the partial unique index arbiter', async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await restoreCompanionRows([{ name: 'Ada' }]);
+    const [sql, values] = queryMock.mock.calls[0];
+    expect(sql).toContain('ON CONFLICT (lower(name)) WHERE checkin_id IS NULL DO NOTHING');
+    expect(values).toEqual(['Ada', null]);
+  });
+
+  it('skips invalid rows without querying them', async () => {
+    const counts = await restoreCompanionRows([
+      'not-an-object',
+      null,
+      { name: '   ' },
+      { checkin_type: 'location', name: 'Ada' },           // type without id
+      { checkin_id: id, name: 'Ada' },                     // id without type
+      { checkin_type: 'location', checkin_id: 'nope', name: 'Ada' }, // bad uuid
+    ]);
+    expect(counts).toEqual({ inserted: 0, skipped: 6 });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('de-duplicates case variants within the dump and counts conflicts as skipped', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] })  // Ada (check-in) inserted
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] }); // ada (standalone) inserted
+    const counts = await restoreCompanionRows([
+      { checkin_type: 'location', checkin_id: id, name: 'Ada' },
+      { checkin_type: 'location', checkin_id: id, name: 'ada' },  // dupe of row 1
+      { name: 'ada' },                                            // standalone
+      { name: 'ADA' },                                            // dupe of row 3
+    ]);
+    expect(counts).toEqual({ inserted: 2, skipped: 2 });
+    expect(queryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts an existing row (no insert) as skipped', async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const counts = await restoreCompanionRows([{ name: 'Ada' }]);
+    expect(counts).toEqual({ inserted: 0, skipped: 1 });
+  });
+});
+
+describe('GET /companions (core route)', () => {
+  function app() {
+    const a = express();
+    a.use(express.json());
+    a.use('/companions', companionsRouter);
+    return a;
+  }
+
+  it('returns one summary row per companion name', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }] })
+      .mockResolvedValueOnce({
+        rows: [{ name: 'Ada', checkin_count: 1, last_checkin_at: '2024-01-01T00:00:00Z' }],
+      });
+    const res = await request(app()).get('/companions');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { name: 'Ada', checkin_count: 1, last_checkin_at: '2024-01-01T00:00:00Z' },
+    ]);
+  });
+
+  it('POST /names adds a name (201) and 409s on duplicates', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const created = await request(app()).post('/companions/names').send({ name: ' Ada ' });
+    expect(created.status).toBe(201);
+    expect(created.body).toEqual({ name: 'Ada' });
+
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [{}] });
+    const dup = await request(app()).post('/companions/names').send({ name: 'ada' });
+    expect(dup.status).toBe(409);
+    expect(dup.body).toEqual({ error: 'Companion "ada" already exists' });
+
+    const blank = await request(app()).post('/companions/names').send({ name: '  ' });
+    expect(blank.status).toBe(400);
+  });
+
+  it('PUT /names renames a name and 409s on standalone collisions', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 2, rows: [] });
+    const res = await request(app()).put('/companions/names').send({ from: 'ada', to: 'Ada' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ updated: 2 });
+
+    queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [{}] });
+    const dup = await request(app()).put('/companions/names').send({ from: 'ada', to: 'Ada' });
+    expect(dup.status).toBe(409);
+  });
+
+  it('DELETE /names removes a name', async () => {
+    queryMock.mockResolvedValueOnce({ rowCount: 4, rows: [] });
+    const res = await request(app()).delete('/companions/names').send({ name: 'Ada' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: 4 });
   });
 });
 

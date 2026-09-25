@@ -18,6 +18,7 @@ import {
   removeBackupTempDir,
   streamBackupZip,
 } from '../services/backupArchive';
+import { restoreCompanionRows } from '../services/companions';
 import { allPlugins } from '../plugins/registry';
 
 const router = Router();
@@ -95,6 +96,8 @@ interface ParsedBackup {
   user: BackupUser | null;
   settings: BackupSettings | null;
   pluginsPayload: PluginBackupPayload | null;
+  /** v2 only: the core companion table rows from companions.json. */
+  companions: unknown[] | null;
   /** v1 only: the full `data` object for legacy restore hooks. */
   raw: Record<string, unknown> | null;
   /**
@@ -166,6 +169,9 @@ function parseV1Backup(raw: unknown): ParsedBackup {
     user,
     settings,
     pluginsPayload: (migratedData.plugins as PluginBackupPayload) ?? null,
+    // v1 bundles have no core companions.json: check-in companions in old
+    // backups still restore via the plugins' legacy hooks.
+    companions: null,
     raw: migratedData,
   };
 }
@@ -196,9 +202,21 @@ function parseV2Backup(tempRoot: string): ParsedBackup {
     user: (m.user as BackupUser) ?? null,
     settings: (m.settings as BackupSettings) ?? null,
     pluginsPayload,
+    companions: readCompanionsFile(tempRoot),
     raw: null,
     tempRoot,
   };
+}
+
+/**
+ * Read companions.json from an extracted v2 bundle (core companion table
+ * dump). Missing or malformed files yield null: old bundles predate the
+ * file and their check-in companions restore via the plugins' hooks.
+ */
+function readCompanionsFile(tempRoot: string): unknown[] | null {
+  const parsed = readBackupJsonFile(tempRoot, 'companions.json');
+  if (!Array.isArray(parsed)) return null;
+  return parsed;
 }
 
 /**
@@ -303,6 +321,14 @@ async function runRestore(
     }
   }
 
+  // Core companion table (v2 companions.json): every check-in type's
+  // companion rows plus standalone names added in the Companions tab.
+  // Idempotent — the plugins' payloads may re-restore the same rows and
+  // ON CONFLICT keeps those no-ops.
+  if (Array.isArray(backup.companions) && backup.companions.length > 0) {
+    counts.companions = await restoreCompanionRows(backup.companions, client);
+  }
+
   return counts;
 }
 
@@ -312,6 +338,7 @@ router.get('/export', async (_req: Request, res: Response) => {
     const [
       userResult,
       settingsResult,
+      companionsResult,
       pluginsData,
     ] = await Promise.all([
         query(
@@ -333,6 +360,13 @@ router.get('/export', async (_req: Request, res: Response) => {
            FROM user_settings
            WHERE user_id = $1`,
           [USER_ID]
+        ),
+        // Core companion table: every check-in type's rows plus standalone
+        // names. Row ids are not preserved (they are never referenced).
+        query(
+          `SELECT checkin_type, checkin_id, name, created_at
+           FROM companions
+           ORDER BY name, checkin_id`
         ),
         exportPluginData(USER_ID),
       ]);
@@ -356,7 +390,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       'Content-Disposition',
       `attachment; filename="wherewewere-backup-v${LATEST_BACKUP_SCHEMA_VERSION}-${day}.zip"`
     );
-    await streamBackupZip(res, manifest, pluginsData, pluginFiles);
+    await streamBackupZip(res, manifest, pluginsData, pluginFiles, companionsResult.rows);
   } catch (err) {
     console.error('Error exporting backup:', err);
     if (!res.headersSent) {
@@ -472,13 +506,19 @@ router.post('/start-over', async (req: Request, res: Response) => {
       ...new Set([...selectedPluginCheckinIds, ...selectedAllDataIds]),
     ];
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
+    // Wipes the entire core companion table: companions on check-ins of
+    // every type plus standalone names from the Companions tab. (Check-in
+    // companions are also cleaned up by each plugin's deleteUserData hook
+    // when its check-ins are deleted; this option covers the rest, e.g.
+    // standalone names, when only the companion data is selected.)
+    const deleteCompanions = Boolean(rawOptions.delete_companions);
     // Per-plugin settings reset: options use `reset_<pluginId>_settings`.
     const selectedPluginSettingsIds = allPlugins()
       .filter((p) => Boolean(rawOptions[`reset_${p.id}_settings`]))
       .map((p) => p.id);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (pluginCheckinIds.length === 0 && selectedAllDataIds.length === 0 && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
+    if (pluginCheckinIds.length === 0 && selectedAllDataIds.length === 0 && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings && !deleteCompanions) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -525,6 +565,11 @@ router.post('/start-over', async (req: Request, res: Response) => {
         }
         counts[`plugin_settings_${plugin.id}_reset`] = deleted;
       }
+    }
+
+    if (deleteCompanions) {
+      const companionResult = await client.query('DELETE FROM companions');
+      counts.companions_deleted = companionResult.rowCount ?? 0;
     }
 
     if (resetIntegrationsSettings) {
