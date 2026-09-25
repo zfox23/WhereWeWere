@@ -148,6 +148,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
       {/* Results table */}
       {results && (
         <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 border-b border-gray-100 dark:border-gray-800">
@@ -252,6 +253,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
               </tr>
             </tbody>
           </table>
+          </div>
 
           {/* Add Custom form */}
           {showCustom && (
