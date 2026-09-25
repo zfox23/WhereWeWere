@@ -463,6 +463,14 @@ router.post('/start-over', async (req: Request, res: Response) => {
         || (legacyVenueDelete && p.id === 'location')
         || (legacyMediaDelete && p.id === 'media'))
       .map((p) => p.id);
+    // All-data options (e.g. "All Venues") wipe everything a plugin owns,
+    // which includes its check-ins, so they imply the check-in deletion.
+    const selectedAllDataIds = allPlugins()
+      .filter((p) => Boolean(rawOptions[`delete_${p.id}_all`]))
+      .map((p) => p.id);
+    const pluginCheckinIds = [
+      ...new Set([...selectedPluginCheckinIds, ...selectedAllDataIds]),
+    ];
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
     // Per-plugin settings reset: options use `reset_<pluginId>_settings`.
     const selectedPluginSettingsIds = allPlugins()
@@ -470,7 +478,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
       .map((p) => p.id);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (selectedPluginCheckinIds.length === 0 && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
+    if (pluginCheckinIds.length === 0 && selectedAllDataIds.length === 0 && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -480,12 +488,25 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     const counts: Record<string, number> = {};
 
-    if (selectedPluginCheckinIds.length > 0) {
+    if (pluginCheckinIds.length > 0) {
       // Check-in plugins own their deletion via their deleteUserData hook.
-      const pluginCounts = await deletePluginData(client, USER_ID, selectedPluginCheckinIds);
+      const pluginCounts = await deletePluginData(client, USER_ID, pluginCheckinIds);
       for (const [pluginId, deleted] of Object.entries(pluginCounts)) {
         counts[`plugin_checkins_${pluginId}`] = deleted;
       }
+    }
+
+    for (const plugin of allPlugins()) {
+      if (!selectedAllDataIds.includes(plugin.id)) continue;
+      // Plugins without a deleteAllData hook keep nothing beyond check-in
+      // data, so the check-in deletion above already covered everything.
+      if (!plugin.server.deleteAllData) continue;
+      // Runs after check-in deletion on purpose: the hook may reference
+      // rows owned by check-ins (e.g. check-ins that must reference a venue).
+      counts[`plugin_all_data_${plugin.id}`] = await plugin.server.deleteAllData({
+        user_id: USER_ID,
+        client,
+      });
     }
 
     if (selectedPluginSettingsIds.length > 0) {

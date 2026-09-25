@@ -292,6 +292,29 @@ describe('location plugin — backup & cleanup hooks', () => {
     expect(queryMock.mock.calls[2][0]).toContain('DELETE FROM checkins WHERE user_id = $1');
     expect(queryMock.mock.calls[3][0]).toContain('DELETE FROM venue_lists WHERE user_id = $1');
   });
+
+  it('deletes the whole venues catalog on start-over (all-data)', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 2 }) // list items (user's lists)
+      .mockResolvedValueOnce({ rowCount: 1 }) // venue lists (user's)
+      .mockResolvedValueOnce({ rowCount: 1 }) // merge suggestions
+      .mockResolvedValueOnce({ rowCount: 4 }) // venues
+      .mockResolvedValueOnce({ rowCount: 3 }); // venue categories
+    expect(await server.deleteAllData!({ user_id: 'u1' } as any)).toBe(11);
+    expect(queryMock.mock.calls[0][0]).toContain('DELETE FROM venue_list_items');
+    expect(queryMock.mock.calls[1][0]).toContain('DELETE FROM venue_lists WHERE user_id = $1');
+    expect(queryMock.mock.calls[2][0]).toContain('DELETE FROM venue_merge_suggestions');
+    expect(queryMock.mock.calls[3][0]).toContain('DELETE FROM venues');
+    expect(queryMock.mock.calls[4][0]).toContain('DELETE FROM venue_categories');
+  });
+
+  it('runs deleteAllData on the provided transaction client', async () => {
+    const clientQuery = vi.fn(async (_sql: string) => ({ rowCount: 1 }));
+    const client = { query: clientQuery, release: vi.fn() };
+    await server.deleteAllData!({ user_id: 'u1', client } as any);
+    expect(queryMock).not.toHaveBeenCalled();
+    expect(clientQuery).toHaveBeenCalledTimes(5);
+  });
 });
 
 describe('location plugin — llm hook', () => {

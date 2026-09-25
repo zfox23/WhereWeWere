@@ -410,6 +410,16 @@ export interface CheckinTypeServerPlugin {
   deleteUserData?: (ctx: PluginHookContext) => Promise<number>;
 
   /**
+   * Start-over hook: delete *all* data this plugin owns for the user,
+   * including shared/reference data that `deleteUserData` deliberately
+   * keeps (e.g. a venues catalog). Only invoked by the start-over route
+   * when the user explicitly selects the plugin's all-data option, and
+   * only after the plugin's check-ins have been deleted. Must run on the
+   * provided transaction client. Returns the number of rows deleted.
+   */
+  deleteAllData?: (ctx: PluginHookContext) => Promise<number>;
+
+  /**
    * Restore this plugin's data from a *legacy* backup (one that predates the
    * `plugins` section and stores this type under the top-level keys named in
    * `legacyBackupKeys`). The framework only calls this when the backup has
@@ -659,6 +669,27 @@ export interface CheckinTypeManifest {
    * existing type-filter behavior.
    */
   filterParams?: string[];
+  /**
+   * Start-over (danger zone) options for this plugin.
+   */
+  startOver?: {
+    /**
+     * Label override for the plugin's data-deletion checkbox (default:
+     * `All <title> <plural>`). Use it when the deletion covers more than
+     * the check-ins themselves, e.g. "All Media data (check-ins, items &
+     * lists)".
+     */
+    deleteLabel?: string;
+    /**
+     * When present, the danger zone renders an extra checkbox for this
+     * plugin backed by the server's `deleteAllData` hook, which wipes
+     * *all* data the plugin owns — including shared/reference data (e.g.
+     * the venues catalog) that check-in deletion keeps. Selecting it
+     * always also deletes the plugin's check-ins (the hook may reference
+     * rows owned by check-ins).
+     */
+    allData?: { label: string; description?: string };
+  };
 }
 
 /** Server-side view of a registered plugin: manifest + server half. */

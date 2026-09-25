@@ -96,4 +96,9 @@ export const manifest: CheckinTypeManifest = {
     profileTab: 'Media',
     confirmDelete: 'Delete this media check-in?',
   },
+  startOver: {
+    // deleteUserData wipes everything media: check-ins, lists, list items,
+    // cached episodes, items, and the Plex event log.
+    deleteLabel: 'All Media data (check-ins, items, lists & Plex log)',
+  },
 };

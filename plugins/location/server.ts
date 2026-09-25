@@ -2703,6 +2703,40 @@ export const server: CheckinTypeServerPlugin = {
     return result.rowCount ?? 0;
   },
 
+  /**
+   * Start-over: delete the entire venues catalog. The start-over route only
+   * invokes this after the user's location check-ins have been deleted (the
+   * all-data option always implies the check-in deletion), so no check-in
+   * FKs remain. venue_list_items cascade from their lists/venues; the user's
+   * own lists are already gone via deleteUserData, but any other
+   * memberships are cleaned up explicitly.
+   */
+  deleteAllData: async ({ user_id, client: txClient }) => {
+    const client = txClient ?? null;
+    const run = (sql: string, values: unknown[]) =>
+      client ? client.query(sql, values) : query(sql, values);
+
+    let deleted = 0;
+    for (const sql of [
+      'DELETE FROM venue_list_items WHERE list_id IN (SELECT id FROM venue_lists WHERE user_id = $1)',
+      'DELETE FROM venue_lists WHERE user_id = $1',
+    ]) {
+      const result = await run(sql, [user_id]);
+      deleted += result.rowCount ?? 0;
+    }
+
+    for (const sql of [
+      'DELETE FROM venue_merge_suggestions',
+      'DELETE FROM venues',
+      'DELETE FROM venue_categories',
+    ]) {
+      const result = await run(sql, []);
+      deleted += result.rowCount ?? 0;
+    }
+
+    return deleted;
+  },
+
   // ------------------------------------------------------------------
   // Cross-cutting service hooks
   // ------------------------------------------------------------------
