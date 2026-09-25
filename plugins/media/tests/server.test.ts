@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 
 const { queryMock, poolConnectMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -10,7 +12,7 @@ vi.mock('../../../server/src/db', () => ({
   pool: { connect: poolConnectMock },
 }));
 
-import { server, buildMediaDetailPath } from '../server';
+import { server, buildMediaDetailPath, mediaRouter } from '../server';
 import type { PluginTimelineContext } from 'wwp-shared';
 
 const baseCtx: PluginTimelineContext = {
@@ -96,10 +98,10 @@ describe('media plugin — plugin shape', () => {
     }
   });
 
-  it('backs up items first, then check-ins, lists, and list memberships', () => {
-    expect(server.backupOrder).toEqual(['primary', 'mediaCheckins', 'mediaLists', 'mediaListItems']);
+  it('backs up items first, then check-ins, check-in companions, lists, and list memberships', () => {
+    expect(server.backupOrder).toEqual(['primary', 'mediaCheckins', 'mediaCheckinCompanions', 'mediaLists', 'mediaListItems']);
     const tables = (server.extraBackupTables ?? []).map((t) => t.table);
-    expect(tables).toEqual(['mediaCheckins', 'mediaLists', 'mediaListItems']);
+    expect(tables).toEqual(['mediaCheckins', 'mediaCheckinCompanions', 'mediaLists', 'mediaListItems']);
   });
 
   it('declares legacy backup keys and settings keys for pre-plugin restores', () => {
@@ -210,9 +212,10 @@ describe('media plugin — backup hooks', () => {
 
   it('deletes media in FK-safe order on start-over (check-ins before items, plex log last)', async () => {
     queryMock.mockResolvedValue({ rows: [], rowCount: 2 });
-    expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(12);
+    expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(14);
     const sqls = queryMock.mock.calls.map((c) => c[0]);
     expect(sqls).toEqual([
+      'DELETE FROM companions WHERE checkin_type = \'media\' AND checkin_id IN (SELECT id FROM media_checkins WHERE user_id = $1) RETURNING id',
       'DELETE FROM media_checkins WHERE user_id = $1 RETURNING id',
       'DELETE FROM media_list_items WHERE list_id IN (SELECT id FROM media_lists WHERE user_id = $1) RETURNING list_id',
       'DELETE FROM media_tv_episodes WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1) RETURNING id',
@@ -289,5 +292,92 @@ describe('media plugin — cross-cutting hooks', () => {
   it('participates in scans only for rows missing a stored timezone', () => {
     expect(server.reconcile!.scanAll).toBe(false);
     expect(server.reconcile!.anchorLabel).toBe('a media check-in');
+  });
+});
+
+describe('media check-in companions (endpoints)', () => {
+  function app() {
+    const a = express();
+    a.use(express.json());
+    a.use('/media', mediaRouter);
+    return a;
+  }
+
+  it('the timeline branch carries companions on the shared envelope column', () => {
+    const { sql } = server.buildTimelineSelect!();
+    expect(sql).toContain(') AS companions');
+    expect(sql).toContain("checkin_type = 'media'");
+    expect(sql).toContain('checkin_id = mmc.id');
+  });
+
+  it('POST /items/:id/checkins stores companions and echoes them back', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'i1' }] }) // item exists
+      .mockResolvedValueOnce({ rows: [{ id: 'mc1', checkin_type: 'completed' }] }) // insert
+      .mockResolvedValueOnce({ rows: [] }); // companion insert
+
+    const res = await request(app())
+      .post('/media/items/i1/checkins')
+      .send({ checkin_type: 'completed', timezone: 'UTC', companions: ['Ada', 'ada', 'Grace'] });
+    expect(res.status).toBe(201);
+    expect(res.body.companions).toEqual(['Ada', 'Grace']);
+    const [sql, values] = queryMock.mock.calls[2];
+    expect(sql).toContain('INSERT INTO companions');
+    expect(values).toEqual(['media', 'mc1', ['Ada', 'Grace']]);
+  });
+
+  it('PUT /checkins/:id replaces companions when the key is present', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'mc1', rating: 2 }] }) // update
+      .mockResolvedValueOnce({ rows: [] }) // companion delete
+      .mockResolvedValueOnce({ rows: [] }); // companion insert
+
+    const res = await request(app())
+      .put('/media/checkins/mc1')
+      .send({ rating: 2, companions: ['Sam'] });
+    expect(res.status).toBe(200);
+    expect(res.body.companions).toEqual(['Sam']);
+    const [delSql, delValues] = queryMock.mock.calls[1];
+    expect(delSql).toContain('DELETE FROM companions');
+    expect(delValues).toEqual(['media', 'mc1']);
+  });
+
+  it('PUT /checkins/:id keeps existing companions when the key is absent', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'mc1', rating: 3 }] }) // update
+      .mockResolvedValueOnce({ rows: [{ name: 'Ada' }] }); // read companions
+
+    const res = await request(app()).put('/media/checkins/mc1').send({ rating: 3 });
+    expect(res.status).toBe(200);
+    expect(res.body.companions).toEqual(['Ada']);
+    expect(queryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('GET /items/:id/checkins attaches companions to each row', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'mc1' }, { id: 'mc2' }] }) // check-in rows
+      .mockResolvedValueOnce({
+        rows: [{ checkin_id: 'mc1', name: 'Ada' }, { checkin_id: 'mc2', name: 'Grace' }],
+      }); // companions by check-in
+
+    const res = await request(app()).get('/media/items/i1/checkins');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { id: 'mc1', companions: ['Ada'] },
+      { id: 'mc2', companions: ['Grace'] },
+    ]);
+  });
+
+  it('DELETE /checkins/:id removes the companion rows too', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'mc1' }] }) // check-in delete
+      .mockResolvedValueOnce({ rowCount: 1 }); // companion delete
+
+    const res = await request(app()).delete('/media/checkins/mc1');
+    expect(res.status).toBe(200);
+    const [sql, values] = queryMock.mock.calls[1];
+    expect(sql).toContain('DELETE FROM companions');
+    expect(sql).toContain('checkin_type = $1');
+    expect(values).toEqual(['media', ['mc1']]);
   });
 });

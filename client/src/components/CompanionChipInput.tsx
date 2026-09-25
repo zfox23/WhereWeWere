@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { checkins } from '../../../client/src/api/client';
+import { companions } from '../api/client';
 
 interface CompanionChipInputProps {
   /** Currently selected companion names. */
@@ -10,12 +10,13 @@ interface CompanionChipInputProps {
 }
 
 /**
- * "Here With…" chip input. Selected companions render as removable chips;
- * the trailing text field autocompletes from previously-entered companion
- * names (via the plugin's companion-names endpoint). Pressing Enter (or
- * clicking a suggestion) commits the current text as a chip; Backspace on an
- * empty field removes the last chip. Names are de-duplicated
- * case-insensitively.
+ * "Here With…" chip input, shared by every check-in type that implements
+ * companions. Selected companions render as removable chips; the trailing
+ * text field autocompletes from previously-entered companion names (via the
+ * core's /companions/names endpoint — the name pool is shared across all
+ * companion-aware check-in types). Pressing Enter (or clicking a suggestion)
+ * commits the current text as a chip; Backspace on an empty field removes
+ * the last chip. Names are de-duplicated case-insensitively.
  */
 export default function CompanionChipInput({ value, onChange, disabled = false }: CompanionChipInputProps) {
   const [text, setText] = useState('');
@@ -34,7 +35,7 @@ export default function CompanionChipInput({ value, onChange, disabled = false }
     const q = text.trim();
     debounceRef.current = setTimeout(async () => {
       try {
-        const names = await checkins.companionNames(q || undefined, 50);
+        const names = await companions.names(q || undefined, 50);
         // Exclude names already selected (case-insensitive) and exact dups.
         const seen = new Set<string>();
         const filtered = (names || [])

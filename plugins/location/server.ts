@@ -38,6 +38,14 @@ import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
+import {
+  normalizeCompanions,
+  getCompanions,
+  insertCompanions,
+  setCompanions,
+  deleteCompanionsForCheckins,
+  companionNamesSql,
+} from '../../server/src/services/companions';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 import { reverseGeocode, searchPlacesByName } from './services/nominatim';
 import { searchNearbyVenues, findEnclosingVenue } from './services/overpass';
@@ -85,23 +93,6 @@ function normalizeRating(value: unknown): number | null {
   const n = toNumberOrNull(value);
   if (n == null) return null;
   return n >= 1 && n <= 4 ? Math.trunc(n) : null;
-}
-
-/** Trim, de-duplicate, and drop empty companion names (case-insensitive dedupe). */
-function normalizeCompanions(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of value) {
-    if (typeof raw !== 'string') continue;
-    const name = raw.trim();
-    if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(name);
-  }
-  return out;
 }
 
 function serializeVenue<T extends { latitude?: unknown; longitude?: unknown }>(venue: T): T {
@@ -276,39 +267,6 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /companion-names?q=&limit= - distinct companion names for autocomplete
-// (registered before /:id so "companion-names" isn't treated as a check-in id)
-router.get('/companion-names', async (req: Request, res: Response) => {
-  try {
-    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '50'), 10) || 50, 1), 200);
-    const params: unknown[] = [USER_ID];
-
-    let sql = `
-      SELECT cc.name
-      FROM checkin_companions cc
-      JOIN checkins c ON c.id = cc.checkin_id
-      WHERE c.user_id = $1`;
-
-    if (q) {
-      params.push(`%${q}%`);
-      sql += ` AND cc.name ILIKE $2`;
-    }
-
-    sql += `
-      GROUP BY cc.name
-      ORDER BY cc.name
-      LIMIT $${params.length + 1}`;
-    params.push(limit);
-
-    const result = await query(sql, params);
-    res.json(result.rows.map((r: any) => r.name));
-  } catch (err) {
-    console.error('Error listing companion names:', err);
-    res.status(500).json({ error: 'Failed to list companion names' });
-  }
-});
-
 // GET /:id - get single check-in with venue details
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -335,16 +293,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    const companionResult = await query(
-      `SELECT name FROM checkin_companions
-       WHERE checkin_id = $1
-       ORDER BY name`,
-      [id]
-    );
-
     res.json({
       ...addTimezone(checkinResult.rows[0]),
-      companions: companionResult.rows.map((r: any) => r.name),
+      companions: await getCompanions('location', String(id)),
     });
   } catch (err) {
     console.error('Error getting check-in:', err);
@@ -378,12 +329,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     // Companions for the primary check-in
     if (companions.length > 0) {
-      await client.query(
-        `INSERT INTO checkin_companions (checkin_id, name)
-         SELECT $1, unnest($2::text[])
-         ON CONFLICT (checkin_id, name) DO NOTHING`,
-        [checkin.id, companions]
-      );
+      await insertCompanions('location', checkin.id, companions, client);
     }
 
     // Optionally create a check-in at the parent venue too
@@ -461,25 +407,11 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
 
     // Companions use full-replacement semantics when the key is present.
-    let companions: string[] = [];
+    let companions: string[];
     if (hasCompanions) {
-      const names = normalizeCompanions(req.body.companions);
-      await client.query('DELETE FROM checkin_companions WHERE checkin_id = $1', [id]);
-      if (names.length > 0) {
-        await client.query(
-          `INSERT INTO checkin_companions (checkin_id, name)
-           SELECT $1, unnest($2::text[])
-           ON CONFLICT (checkin_id, name) DO NOTHING`,
-          [id, names]
-        );
-      }
-      companions = names;
+      companions = await setCompanions('location', String(id), req.body.companions, client);
     } else {
-      const companionResult = await client.query(
-        'SELECT name FROM checkin_companions WHERE checkin_id = $1 ORDER BY name',
-        [id]
-      );
-      companions = companionResult.rows.map((r: any) => r.name);
+      companions = await getCompanions('location', String(id), client);
     }
 
     await client.query('COMMIT');
@@ -506,6 +438,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in not found' });
     }
+
+    // The shared companion table has no FK into checkins; clean up explicitly.
+    await deleteCompanionsForCheckins('location', [String(id)]);
 
     res.json({ message: 'Check-in deleted', id });
   } catch (err) {
@@ -2321,7 +2256,11 @@ export const server: CheckinTypeServerPlugin = {
     { mount: '/import/swarm', router: swarmImportRouter },
   ],
 
-  buildTimelineSelect: () => ({
+  buildTimelineSelect: () => {
+    // Shared companion attribute: carried both on the legacy `data` jsonb
+    // (consumed by the location client) and the shared envelope column.
+    const companionSql = `(${companionNamesSql('location', 'c.id')})`;
+    return {
     sql: `
       SELECT ${timelineColumnList({
         type: `'location'`,
@@ -2338,15 +2277,12 @@ export const server: CheckinTypeServerPlugin = {
         venue_category: 'vc.name',
         parent_venue_id: 'pv.id',
         parent_venue_name: 'pv.name',
+        companions: companionSql,
         data: `json_build_object(
           'venue_id', c.venue_id,
           'notes', c.notes,
           'rating', c.rating,
-          'companions', (
-            SELECT COALESCE(json_agg(cc.name ORDER BY cc.name), '[]'::json)
-            FROM checkin_companions cc
-            WHERE cc.checkin_id = c.id
-          )
+          'companions', ${companionSql}
         )::jsonb`,
         timezone: 'c.checkin_timezone',
       })}
@@ -2367,7 +2303,8 @@ export const server: CheckinTypeServerPlugin = {
       }
       return rows;
     },
-  }),
+    };
+  },
 
   buildTimelineWhere: (ctx: PluginTimelineContext) => {
     const conds = timelineWhereConditions(ctx, {
@@ -2430,9 +2367,9 @@ export const server: CheckinTypeServerPlugin = {
       ),
       query(
         `SELECT cc.checkin_id, cc.name
-         FROM checkin_companions cc
+         FROM companions cc
          JOIN checkins c ON c.id = cc.checkin_id
-         WHERE c.user_id = $1
+         WHERE cc.checkin_type = 'location' AND c.user_id = $1
          ORDER BY cc.checkin_id, cc.name`,
         [user_id],
       ),
@@ -2602,9 +2539,9 @@ export const server: CheckinTypeServerPlugin = {
         if (!cc?.checkin_id || !cc?.name) continue;
         if (!checkinIds.has(String(cc.checkin_id))) continue;
         await client.query(
-          `INSERT INTO checkin_companions (checkin_id, name)
-           VALUES ($1, $2)
-           ON CONFLICT (checkin_id, name) DO NOTHING`,
+          `INSERT INTO companions (checkin_type, checkin_id, name)
+           VALUES ('location', $1, $2)
+           ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING`,
           [cc.checkin_id, String(cc.name)]
         );
       }
@@ -2684,10 +2621,11 @@ export const server: CheckinTypeServerPlugin = {
       [user_id]
     );
 
-    // Companions cascade on check-in delete; removed explicitly for clarity.
+    // Companions (shared core table) are removed explicitly for clarity.
     await run(
-      `DELETE FROM checkin_companions
-       WHERE checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
+      `DELETE FROM companions
+       WHERE checkin_type = 'location'
+         AND checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
       [user_id]
     );
 

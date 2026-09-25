@@ -8,7 +8,7 @@ const apiMocks = vi.hoisted(() => ({
   checkinsCreate: vi.fn(),
   checkinsUpdate: vi.fn(),
   checkinsDelete: vi.fn(),
-  checkinsCompanionNames: vi.fn(),
+  companionsNames: vi.fn(),
   venuesGet: vi.fn(),
   venuesDelete: vi.fn(),
 }));
@@ -18,7 +18,9 @@ vi.mock('../../../../client/src/api/client', () => ({
     create: apiMocks.checkinsCreate,
     update: apiMocks.checkinsUpdate,
     delete: apiMocks.checkinsDelete,
-    companionNames: apiMocks.checkinsCompanionNames,
+  },
+  companions: {
+    names: apiMocks.companionsNames,
   },
   venues: {
     get: apiMocks.venuesGet,
@@ -31,12 +33,12 @@ describe('LocationCheckInForm', () => {
     apiMocks.checkinsCreate.mockReset();
     apiMocks.checkinsUpdate.mockReset();
     apiMocks.checkinsDelete.mockReset();
-    apiMocks.checkinsCompanionNames.mockReset();
+    apiMocks.companionsNames.mockReset();
     apiMocks.venuesGet.mockReset();
     apiMocks.venuesDelete.mockReset();
 
     apiMocks.checkinsCreate.mockResolvedValue({ id: 'checkin-1' });
-    apiMocks.checkinsCompanionNames.mockResolvedValue([]);
+    apiMocks.companionsNames.mockResolvedValue([]);
     apiMocks.venuesGet.mockResolvedValue({
       checkin_count: 0,
       category_name: null,

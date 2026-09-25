@@ -5,6 +5,7 @@ import { media } from '../api';
 import type { MediaItem } from '../types';
 import type { MediaSubtype } from '../../../../client/src/types';
 import ScorePicker from '../../../../client/src/components/ScorePicker';
+import CompanionChipInput from '../../../../client/src/components/CompanionChipInput';
 import { MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, detailPath } from '../../utils/media';
 import { deviceTimezone, nowLocalDatetimeValue, localDatetimeToIso, slugify } from '../../../../client/src/utils/slugify';
 import { usePageTitle } from '../../../../client/src/utils/pageTitle';
@@ -32,6 +33,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
   const [dateTime, setDateTime] = useState(nowLocalDatetimeValue());
   const [checkinType, setCheckinType] = useState<'completed' | 'in_progress' | 'started' | 'dropped'>('completed');
   const [notes, setNotes] = useState('');
+  const [companions, setCompanions] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   usePageTitle(`${config.label} Check-In${item ? `: ${item.title}` : ''}`);
@@ -78,7 +80,9 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
         notes: notes.trim() || null,
         checked_in_at: localDatetimeToIso(dateTime),
         timezone: deviceTimezone(),
+        companions,
       });
+      setCompanions([]);
       navigate(detailPath(subtype, id, slugify(item?.title || '')));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create check-in');
@@ -184,6 +188,13 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
               <option value="dropped">{CHECKIN_TYPE_LABELS.dropped}</option>
             </select>
           </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+            Here With…
+          </label>
+          <CompanionChipInput value={companions} onChange={setCompanions} />
         </div>
 
         <div>

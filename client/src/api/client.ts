@@ -34,12 +34,17 @@ export const checkins = {
     request<any>(`/location-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     request<void>(`/location-checkins/${id}`, { method: 'DELETE' }),
-  // Distinct companion names, for the "Here With…" autocomplete.
-  companionNames: (q?: string, limit = 50) => {
+};
+
+// Companions (core, shared by every check-in type that implements them)
+export const companions = {
+  // Distinct companion names (across all check-in types), for the
+  // "Here With…" autocomplete.
+  names: (q?: string, limit = 50) => {
     const qp = new URLSearchParams();
     if (q) qp.set('q', q);
     qp.set('limit', String(limit));
-    return request<string[]>(`/location-checkins/companion-names?${qp.toString()}`);
+    return request<string[]>(`/companions/names?${qp.toString()}`);
   },
 };
 

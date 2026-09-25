@@ -36,6 +36,15 @@ import { tmdb } from './services/tmdb';
 import { tgdb, type TgdbGameResult } from './services/tgdb';
 import { normalizeTitle, titleRelation } from './services/titleMatch';
 import { hardcover } from './services/hardcover';
+import {
+  normalizeCompanions,
+  getCompanions,
+  getCompanionsByCheckin,
+  insertCompanions,
+  setCompanions,
+  deleteCompanionsForCheckins,
+  companionNamesSql,
+} from '../../server/src/services/companions';
 
 const router = Router();
 
@@ -1005,7 +1014,11 @@ router.get('/items/:id/checkins', async (req: Request, res: Response) => {
        ORDER BY mc.checked_in_at DESC`,
       [req.params.id, USER_ID]
     );
-    res.json(result.rows);
+    const byCheckin = await getCompanionsByCheckin(
+      'media',
+      result.rows.map((r) => r.id as string),
+    );
+    res.json(result.rows.map((r) => ({ ...r, companions: byCheckin.get(r.id) ?? [] })));
   } catch (err) {
     console.error('Error listing media check-ins:', err);
     res.status(500).json({ error: 'Failed to list media check-ins' });
@@ -1018,7 +1031,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
     const {
       season_number, episode_number, episode_title,
       checkin_type, rating, raw_score, notes, checked_in_at, timezone,
-      time_played_minutes,
+      time_played_minutes, companions,
     } = req.body;
 
     if (!checkin_type || !CHECKIN_TYPES.has(checkin_type)) {
@@ -1062,7 +1075,12 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
         submittedTime,
       ]
     );
-    res.status(201).json(result.rows[0]);
+    // People "with" on the check-in (shared core companion table).
+    const companionNames = normalizeCompanions(companions);
+    if (companionNames.length > 0) {
+      await insertCompanions('media', result.rows[0].id as string, companionNames);
+    }
+    res.status(201).json({ ...result.rows[0], companions: companionNames });
   } catch (err) {
     console.error('Error creating media check-in:', err);
     res.status(500).json({ error: 'Failed to create media check-in' });
@@ -1135,7 +1153,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
     if (sets.length === 0) {
       const existing = await query('SELECT * FROM media_checkins WHERE id = $1 AND user_id = $2', [req.params.id, USER_ID]);
       if (existing.rows.length === 0) return res.status(404).json({ error: 'Media check-in not found' });
-      return res.json(existing.rows[0]);
+      return res.json({ ...existing.rows[0], companions: await getCompanions('media', String(req.params.id)) });
     }
 
     const idIdx = params.length + 1;
@@ -1151,7 +1169,11 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media check-in not found' });
     }
-    res.json(result.rows[0]);
+    // Companions use full-replacement semantics when the key is present.
+    const companions = body.companions !== undefined
+      ? await setCompanions('media', String(req.params.id), body.companions)
+      : await getCompanions('media', String(req.params.id));
+    res.json({ ...result.rows[0], companions });
   } catch (err) {
     console.error('Error updating media check-in:', err);
     res.status(500).json({ error: 'Failed to update media check-in' });
@@ -1168,6 +1190,8 @@ router.delete('/checkins/:id', async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media check-in not found' });
     }
+    // The shared companion table has no FK into media_checkins; clean up explicitly.
+    await deleteCompanionsForCheckins('media', [result.rows[0].id as string]);
     res.json({ message: 'Media check-in deleted', id: result.rows[0].id });
   } catch (err) {
     console.error('Error deleting media check-in:', err);
@@ -1215,6 +1239,14 @@ router.post('/items/bulk-delete', async (req: Request, res: Response) => {
       await client.query(
         `DELETE FROM media_list_items
          WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1 AND id = ANY($2))`,
+        [USER_ID, ids]
+      );
+      // Companion rows ride on the check-ins; remove them before the check-ins go.
+      await client.query(
+        `DELETE FROM companions
+         WHERE checkin_type = 'media'
+           AND checkin_id IN (SELECT id FROM media_checkins
+                              WHERE user_id = $1 AND media_item_id = ANY($2))`,
         [USER_ID, ids]
       );
       await client.query(
@@ -2089,6 +2121,7 @@ export const server: CheckinTypeServerPlugin = {
         media_episode_title: 'mmc.episode_title',
         media_timezone: 'mmc.checkin_timezone',
         timezone: 'mmc.checkin_timezone',
+        companions: `(${companionNamesSql('media', 'mmc.id')})`,
       })}
       FROM media_checkins mmc
       JOIN media_items mi ON mmc.media_item_id = mi.id
@@ -2138,6 +2171,20 @@ export const server: CheckinTypeServerPlugin = {
       userIdFirst: false,
     },
     {
+      // Companion rows for this user's media check-ins (shared core table;
+      // restored after the check-ins they reference).
+      table: 'mediaCheckinCompanions',
+      select: `SELECT cc.checkin_id, cc.name
+               FROM companions cc
+               JOIN media_checkins mc ON mc.id = cc.checkin_id
+               WHERE cc.checkin_type = 'media' AND mc.user_id = $1
+               ORDER BY cc.checkin_id, cc.name`,
+      insert: `INSERT INTO companions (checkin_type, checkin_id, name)
+               VALUES ('media', $1, $2)
+               ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING`,
+      userIdFirst: false,
+    },
+    {
       table: 'mediaLists',
       select: `SELECT id, user_id, name, created_at, updated_at
                FROM media_lists WHERE user_id = $1 ORDER BY created_at`,
@@ -2159,8 +2206,8 @@ export const server: CheckinTypeServerPlugin = {
     },
   ],
 
-  // FK order: items (primary) -> check-ins -> lists -> list memberships
-  backupOrder: ['primary', 'mediaCheckins', 'mediaLists', 'mediaListItems'],
+  // FK order: items (primary) -> check-ins -> check-in companions -> lists -> list memberships
+  backupOrder: ['primary', 'mediaCheckins', 'mediaCheckinCompanions', 'mediaLists', 'mediaListItems'],
 
   // Old backups (no plugins payload) keep media rows under these top-level
   // keys; when a plugins.media payload is present the core skips these.
@@ -2276,6 +2323,14 @@ export const server: CheckinTypeServerPlugin = {
     const run = (sql: string, values: unknown[]) =>
       client ? client.query(sql, values) : query(sql, values);
     let deleted = 0;
+    // Companion rows for this user's media check-ins (shared core table).
+    {
+      const result = await run(
+        `DELETE FROM companions WHERE checkin_type = 'media' AND checkin_id IN (SELECT id FROM media_checkins WHERE user_id = $1) RETURNING id`,
+        [user_id],
+      );
+      deleted += result.rowCount ?? 0;
+    }
     for (const sql of [
       'DELETE FROM media_checkins WHERE user_id = $1 RETURNING id',
       'DELETE FROM media_list_items WHERE list_id IN (SELECT id FROM media_lists WHERE user_id = $1) RETURNING list_id',

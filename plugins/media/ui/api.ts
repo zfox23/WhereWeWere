@@ -87,6 +87,8 @@ export const media = {
     timezone: string;
     /** Total time played in minutes (games only). */
     time_played_minutes?: number | null;
+    /** People "with" on the check-in (companion names). */
+    companions?: string[];
   }) => request<MediaCheckIn>(`/media/items/${itemId}/checkins`, { method: 'POST', body: JSON.stringify(data) }),
   updateCheckin: (id: string, data: Partial<{
     season_number: number | null;
@@ -99,6 +101,8 @@ export const media = {
     checked_in_at: string | null;
     timezone: string;
     time_played_minutes: number | null;
+    /** Full replacement of the check-in's companion names. */
+    companions: string[];
   }>) => request<MediaCheckIn>(`/media/checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCheckin: (id: string) =>
     request<{ message: string; id: string }>(`/media/checkins/${id}`, { method: 'DELETE' }),

@@ -62,6 +62,9 @@ export const TIMELINE_COLUMNS: TimelineColumn[] = [
   { name: 'media_episode_number', nullSql: `NULL::int AS media_episode_number` },
   { name: 'media_episode_title', nullSql: `NULL::text AS media_episode_title` },
   { name: 'media_timezone', nullSql: `NULL::text AS media_timezone` },
+  // People "with" on the check-in (shared companion attribute; owned by
+  // check-in types that implement companions, e.g. location and media).
+  { name: 'companions', nullSql: `NULL::json AS companions` },
   { name: 'data', nullSql: `NULL::jsonb AS data` },
   { name: 'timezone', nullSql: `NULL::text AS timezone` },
 ];

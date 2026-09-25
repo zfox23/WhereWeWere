@@ -4,7 +4,7 @@ import { Loader2, MapPin, Trash2 } from 'lucide-react';
 import { checkins, venues } from '../../../client/src/api/client';
 import VenueSearch from './VenueSearch';
 import ScorePicker from '../../../client/src/components/ScorePicker';
-import CompanionChipInput from './CompanionChipInput';
+import CompanionChipInput from '../../../client/src/components/CompanionChipInput';
 
 const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
 

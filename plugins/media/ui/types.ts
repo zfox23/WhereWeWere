@@ -118,6 +118,8 @@ export interface MediaCheckIn {
   external_event_id: string | null;
   /** Cumulative total time played at this check-in (minutes); games only. */
   time_played_minutes: number | null;
+  /** People "with" on this check-in (ordered names). */
+  companions?: string[];
   created_at: string;
   updated_at: string;
 }

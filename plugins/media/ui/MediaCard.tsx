@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { Users } from 'lucide-react';
 import type { TimelineItem } from '../../../client/src/types';
 import Stars from '../../../client/src/components/Stars';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
@@ -127,6 +128,12 @@ export default function MediaCard({ item, compact = false }: MediaCardProps) {
               <Stars value={item.media_rating} />
             )}
           </div>
+          {item.companions && item.companions.length > 0 && (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+              <Users size={13} className="text-gray-400 shrink-0" />
+              <span>Here with {item.companions.join(', ')}</span>
+            </p>
+          )}
           {item.notes && (
             <div className="mt-1">
               <MarkdownNote note={item.notes} collapsible />

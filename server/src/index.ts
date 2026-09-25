@@ -11,6 +11,7 @@ import { timelineRouter } from './routes/timeline';
 import { backupRouter } from './routes/backup';
 import { llmRouter } from './routes/llm';
 import { importYamtrackRouter } from './routes/import-yamtrack';
+import { companionsRouter } from './routes/companions';
 import { runMigrations } from './db/runMigrations';
 import { pluginsRouter } from './plugins/routes';
 import { allPlugins } from './plugins/registry';
@@ -71,6 +72,7 @@ export function createApp() {
   app.use('/api/v1/llm', llmRouter);
   app.use('/api/v1/import/yamtrack', importYamtrackRouter);
   app.use('/api/v1/plugins', pluginsRouter);
+  app.use('/api/v1/companions', companionsRouter);
 
   // Plugin-owned API routes (custom-storage plugins mount their own CRUD).
   for (const plugin of allPlugins()) {

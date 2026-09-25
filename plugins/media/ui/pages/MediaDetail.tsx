@@ -14,6 +14,7 @@ import {
   MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, dateInTimezone, formatCheckinDate, formatTimePlayed,
   isoToDatetimeValue, datetimeValueToIso,
 } from '../../utils/media';
+import CompanionChipInput from '../../../../client/src/components/CompanionChipInput';
 import { TIMEZONE_IDS, isValidTimezoneId } from '../../../../client/src/utils/timezones';
 import { findExactOption } from '../../../../client/src/components/filters/filterUtils';
 import { slugify } from '../../../../client/src/utils/slugify';
@@ -38,6 +39,7 @@ interface CheckinEditDraft {
   timezoneInput: string;
   time_hours: string;
   time_minutes: string;
+  companions: string[];
 }
 
 /** Draft state for editing the media item's own metadata (header edit mode). */
@@ -261,6 +263,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       timezoneInput: tz,
       time_hours: c.time_played_minutes != null ? String(Math.floor(c.time_played_minutes / 60)) : '',
       time_minutes: c.time_played_minutes != null ? String(c.time_played_minutes % 60) : '',
+      companions: c.companions ?? [],
     });
     // Keep the row visible while editing.
     window.setTimeout(() => {
@@ -306,6 +309,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
         checked_in_at: checkedInAt,
         timezone: tz,
         time_played_minutes: timePlayed,
+        companions: draft.companions,
       });
 
       // Refresh the check-in row and the item header aggregates.
@@ -1248,6 +1252,12 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                           {editError && (
                             <p className="text-[11px] text-red-500 dark:text-red-400 mt-1">{editError}</p>
                           )}
+                          <div className="mt-1.5">
+                            <CompanionChipInput
+                              value={draft.companions}
+                              onChange={(names) => patchDraft({ companions: names })}
+                            />
+                          </div>
                         </td>
                         {subtype === 'tv_show' && (
                           <td className="px-4 py-2.5 hidden sm:table-cell">
@@ -1364,6 +1374,11 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                             className="text-primary-600 hover:underline whitespace-nowrap">
                             {formatCheckinDate(c.checked_in_at, c.checkin_timezone)}
                           </a>
+                          {c.companions && c.companions.length > 0 && (
+                            <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                              with {c.companions.join(', ')}
+                            </p>
+                          )}
                         </td>
                         {subtype === 'tv_show' && (
                           <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 hidden sm:table-cell whitespace-nowrap">

@@ -235,6 +235,8 @@ export interface TimelineItem {
   notes: string | null;
   /** IANA timezone of the check-in (all check-in types). */
   timezone?: string | null;
+  /** People "with" on this check-in (types that implement companions). */
+  companions?: string[] | null;
   // Location fields
   venue_id?: string;
   venue_name?: string;

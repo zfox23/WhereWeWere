@@ -1,12 +1,12 @@
 import { cleanup, render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import CompanionChipInput from '../../ui/CompanionChipInput';
+import CompanionChipInput from '../../src/components/CompanionChipInput';
 
 const companionNamesMock = vi.fn();
-vi.mock('../../../../client/src/api/client', () => ({
-  checkins: {
-    companionNames: (...args: unknown[]) => companionNamesMock(...args),
+vi.mock('../../src/api/client', () => ({
+  companions: {
+    names: (...args: unknown[]) => companionNamesMock(...args),
   },
 }));
 
@@ -81,8 +81,7 @@ describe('CompanionChipInput', () => {
   });
 
   it('does not duplicate a name that already exists (case-insensitive)', async () => {
-    const { onChange } = renderInput({ value: ['Ada'] });
-    const input = screen.getByLabelText('Here with (companion names)');
+    const { onChange, input } = renderInput({ value: ['Ada'] });
     await userEvent.type(input, 'ada{Enter}');
     expect(onChange).not.toHaveBeenCalled();
   });

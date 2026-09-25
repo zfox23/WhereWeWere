@@ -46,7 +46,7 @@ describe('check-in star rating + companions (endpoints)', () => {
           return { rows: [{ id: 'c1', rating: 3 }] };
         }
         if (sql.includes('SELECT latitude, longitude')) return { rows: [{ latitude: 40.71, longitude: -74.0 }] };
-        if (sql.includes('INSERT INTO checkin_companions')) return { rows: [] };
+        if (sql.includes('INSERT INTO companions')) return { rows: [] };
         return { rows: [] };
       }),
       release: vi.fn(),
@@ -93,8 +93,8 @@ describe('check-in star rating + companions (endpoints)', () => {
       query: vi.fn(async (sql: string) => {
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
         if (sql.includes('UPDATE checkins')) return { rows: [{ id: 'c1', rating: null }] };
-        if (sql.includes('DELETE FROM checkin_companions')) return { rows: [] };
-        if (sql.includes('INSERT INTO checkin_companions')) return { rows: [] };
+        if (sql.includes('DELETE FROM companions')) return { rows: [] };
+        if (sql.includes('INSERT INTO companions')) return { rows: [] };
         return { rows: [] };
       }),
       release: vi.fn(),
@@ -107,7 +107,7 @@ describe('check-in star rating + companions (endpoints)', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.companions).toEqual(['Sam']);
-    const deleteCall = client.query.mock.calls.find((c) => c[0].includes('DELETE FROM checkin_companions'));
+    const deleteCall = client.query.mock.calls.find((c) => c[0].includes('DELETE FROM companions'));
     expect(deleteCall).toBeDefined();
     expect(client.query).toHaveBeenCalledWith('COMMIT');
   });
@@ -125,21 +125,13 @@ describe('check-in star rating + companions (endpoints)', () => {
     expect(res.body.companions).toEqual(['Ada', 'Linus']);
   });
 
-  it('GET /companion-names returns distinct, ILIKE-filtered names', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ name: 'Ada' }] });
-    const res = await request(app()).get('/location-checkins/companion-names?q=ad&limit=10');
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual(['Ada']);
-    const [sql, values] = queryMock.mock.calls[0];
-    expect(sql).toContain('ILIKE $2');
-    expect(values).toEqual([USER_ID, '%ad%', 10]);
-  });
-
-  it('the timeline data jsonb carries rating and companions', () => {
+  it('the timeline carries companions on the data jsonb and envelope column', () => {
     const { sql } = server.buildTimelineSelect!();
     expect(sql).toContain("'rating', c.rating");
-    expect(sql).toContain('json_agg(cc.name ORDER BY cc.name)');
-    expect(sql).toContain("FROM checkin_companions cc");
+    expect(sql).toContain('json_agg(name ORDER BY name)');
+    expect(sql).toContain('FROM companions');
+    expect(sql).toContain("checkin_type = 'location'");
+    expect(sql).toContain(') AS companions');
   });
 });
 
@@ -310,12 +302,12 @@ describe('backup round-trip', () => {
 
     const sqls = clientQuery.mock.calls.map((c) => c[0]);
     // A companion row was inserted for the known check-in.
-    expect(sqls.some((s) => s.includes('INSERT INTO checkin_companions'))).toBe(true);
+    expect(sqls.some((s) => s.includes('INSERT INTO companions'))).toBe(true);
     // A venue list and a list item were inserted.
     expect(sqls.some((s) => s.includes('INSERT INTO venue_lists'))).toBe(true);
     expect(sqls.some((s) => s.includes('INSERT INTO venue_list_items'))).toBe(true);
     // The companion insert referenced the real check-in id.
-    const companionCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO checkin_companions'))!;
+    const companionCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO companions'))!;
     expect(companionCall[1]).toEqual(['c1', 'Ada']);
     // List item references the list id and venue id.
     const listItemCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO venue_list_items'))!;
@@ -333,7 +325,7 @@ describe('backup round-trip', () => {
     expect(counts.checkins).toEqual({ inserted: 1, skipped: 0 });
     // No companion / list inserts since the legacy payload omitted them.
     const sqls = clientQuery.mock.calls.map((c) => c[0]);
-    expect(sqls.some((s) => s.includes('INSERT INTO checkin_companions'))).toBe(false);
+    expect(sqls.some((s) => s.includes('INSERT INTO companions'))).toBe(false);
     expect(sqls.some((s) => s.includes('INSERT INTO venue_lists'))).toBe(false);
   });
 });
