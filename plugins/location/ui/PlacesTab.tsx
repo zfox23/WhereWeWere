@@ -42,6 +42,7 @@ import type {
 import { formatDate } from '../../../client/src/utils/checkin';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from './geo';
 import '../../../client/src/utils/smoothLeafletZoom';
+import { VenuesLibrarySection } from './VenuesLibrarySection';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -872,6 +873,11 @@ export function PlacesTab() {
       </div>
 
       <CountriesList data={countries} />
+
+      <VenuesLibrarySection
+        from={placesVisibleRange.from}
+        to={placesVisibleRange.to}
+      />
     </div>
   );
 }

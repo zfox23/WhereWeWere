@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, MapPin, Trash2 } from 'lucide-react';
 import { checkins, venues } from '../../../client/src/api/client';
 import VenueSearch from './VenueSearch';
+import ScorePicker from '../../../client/src/components/ScorePicker';
+import CompanionChipInput from './CompanionChipInput';
 
 const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -35,6 +37,8 @@ interface CheckInFormProps {
   editCheckinId?: string;
   initialNotes?: string;
   initialCheckedInAt?: string;
+  initialRating?: number | null;
+  initialCompanions?: string[];
 }
 
 export default function CheckInForm({
@@ -46,6 +50,8 @@ export default function CheckInForm({
   editCheckinId,
   initialNotes,
   initialCheckedInAt,
+  initialRating,
+  initialCompanions,
 }: CheckInFormProps) {
   const navigate = useNavigate();
   const [venueId, setVenueId] = useState(initialVenueId || '');
@@ -56,6 +62,8 @@ export default function CheckInForm({
     return toLocalDatetimeString(new Date());
   });
   const [alsoCheckinParent, setAlsoCheckinParent] = useState(true);
+  const [rating, setRating] = useState<number>(initialRating ?? 0);
+  const [companions, setCompanions] = useState<string[]>(initialCompanions ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deletingVenue, setDeletingVenue] = useState(false);
@@ -161,10 +169,13 @@ export default function CheckInForm({
     let createdId: string | undefined;
 
     try {
+      const ratingPayload = rating >= 1 ? rating : null;
       if (isEditMode) {
         await checkins.update(editCheckinId!, {
           notes: notes.trim() || null,
           checked_in_at: new Date(checkedInAt).toISOString(),
+          rating: ratingPayload,
+          companions,
         });
       } else {
         const result = await checkins.create({
@@ -173,6 +184,8 @@ export default function CheckInForm({
           notes: notes.trim() || null,
           checked_in_at: new Date(checkedInAt).toISOString(),
           also_checkin_parent: alsoCheckinParent && !!parentVenueId,
+          rating: ratingPayload,
+          companions,
         });
         createdId = Array.isArray(result) ? result[0]?.id : result?.id;
 
@@ -182,6 +195,8 @@ export default function CheckInForm({
           setVenueName('');
         }
         setNotes('');
+        setRating(0);
+        setCompanions([]);
         setCheckedInAt(toLocalDatetimeString(new Date()));
       }
 
@@ -304,6 +319,22 @@ export default function CheckInForm({
           onChange={(e) => setCheckedInAt(e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
         />
+      </div>
+
+      {/* Rating */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+          Rating
+        </label>
+        <ScorePicker value={rating} onChange={setRating} />
+      </div>
+
+      {/* Here With (companions) */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+          Here With…
+        </label>
+        <CompanionChipInput value={companions} onChange={setCompanions} />
       </div>
 
       {/* Notes */}

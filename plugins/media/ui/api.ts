@@ -79,7 +79,7 @@ export const media = {
     season_number?: number | null;
     episode_number?: number | null;
     episode_title?: string | null;
-    checkin_type: 'completed' | 'in_progress' | 'dropped';
+    checkin_type: 'completed' | 'in_progress' | 'started' | 'dropped';
     rating?: number | null;
     raw_score?: number | null;
     notes?: string | null;

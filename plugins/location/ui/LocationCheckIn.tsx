@@ -214,6 +214,8 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
             editCheckinId={editId || undefined}
             initialNotes={editCheckin?.notes || ''}
             initialCheckedInAt={editCheckin?.checked_in_at || (prefillsDate ? applyDateToIsoString(dateParam) : undefined)}
+            initialRating={editCheckin?.rating ?? null}
+            initialCompanions={editCheckin?.companions ?? []}
           />
         </div>
       ) : null}

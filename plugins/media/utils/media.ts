@@ -84,6 +84,7 @@ export function detailPath(subtype: MediaSubtype, id: string, slug: string): str
 export const CHECKIN_TYPE_LABELS: Record<string, string> = {
   completed: 'Completed',
   in_progress: 'In-Progress',
+  started: 'Started',
   dropped: 'Dropped',
 };
 

@@ -30,7 +30,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
 
   const [score, setScore] = useState(0);
   const [dateTime, setDateTime] = useState(nowLocalDatetimeValue());
-  const [checkinType, setCheckinType] = useState<'completed' | 'in_progress' | 'dropped'>('completed');
+  const [checkinType, setCheckinType] = useState<'completed' | 'in_progress' | 'started' | 'dropped'>('completed');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -175,11 +175,12 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Check-in Type</label>
             <select
               value={checkinType}
-              onChange={(e) => setCheckinType(e.target.value as 'completed' | 'in_progress' | 'dropped')}
+              onChange={(e) => setCheckinType(e.target.value as 'completed' | 'in_progress' | 'started' | 'dropped')}
               className="input"
             >
               <option value="completed">{CHECKIN_TYPE_LABELS.completed}</option>
               <option value="in_progress">{CHECKIN_TYPE_LABELS.in_progress}</option>
+              <option value="started">{CHECKIN_TYPE_LABELS.started}</option>
               <option value="dropped">{CHECKIN_TYPE_LABELS.dropped}</option>
             </select>
           </div>

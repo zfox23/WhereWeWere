@@ -27,7 +27,7 @@ interface CheckinEditDraft {
   season_number: number;
   episode_number: number;
   episode_title: string;
-  checkin_type: 'completed' | 'in_progress' | 'dropped';
+  checkin_type: 'completed' | 'in_progress' | 'started' | 'dropped';
   rating: number;
   notes: string;
   /** datetime-local input value (YYYY-MM-DDTHH:mm) in `timezone`. */
@@ -893,6 +893,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                             <option value="">—</option>
                             <option value="completed">Completed</option>
                             <option value="in_progress">In progress</option>
+                            <option value="started">Started</option>
                             <option value="dropped">Dropped</option>
                           </select>
                         </label>
@@ -1279,11 +1280,12 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                         <td className="px-4 py-2.5">
                           <select
                             value={draft.checkin_type}
-                            onChange={(e) => patchDraft({ checkin_type: e.target.value as 'completed' | 'in_progress' | 'dropped' })}
+                            onChange={(e) => patchDraft({ checkin_type: e.target.value as 'completed' | 'in_progress' | 'started' | 'dropped' })}
                             className="input text-xs"
                           >
                             <option value="completed">{CHECKIN_TYPE_LABELS.completed}</option>
                             <option value="in_progress">{CHECKIN_TYPE_LABELS.in_progress}</option>
+                            <option value="started">{CHECKIN_TYPE_LABELS.started}</option>
                             <option value="dropped">{CHECKIN_TYPE_LABELS.dropped}</option>
                           </select>
                         </td>

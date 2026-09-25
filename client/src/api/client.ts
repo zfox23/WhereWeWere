@@ -34,6 +34,13 @@ export const checkins = {
     request<any>(`/location-checkins/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     request<void>(`/location-checkins/${id}`, { method: 'DELETE' }),
+  // Distinct companion names, for the "Here With…" autocomplete.
+  companionNames: (q?: string, limit = 50) => {
+    const qp = new URLSearchParams();
+    if (q) qp.set('q', q);
+    qp.set('limit', String(limit));
+    return request<string[]>(`/location-checkins/companion-names?${qp.toString()}`);
+  },
 };
 
 // Venues
@@ -41,6 +48,14 @@ export const venues = {
   list: (params?: Record<string, string>) =>
     request<any[]>(`/venues?${new URLSearchParams(params)}`),
   get: (id: string) => request<any>(`/venues/${id}`),
+  // "All Venues" library view (venues with at least one check-in).
+  library: (from?: string, to?: string) => {
+    const qp = new URLSearchParams();
+    if (from) qp.set('from', from);
+    if (to) qp.set('to', to);
+    const qs = qp.toString();
+    return request<any[]>(`/venues/library${qs ? `?${qs}` : ''}`);
+  },
   create: (data: any) =>
     request<any>('/venues', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) =>
@@ -60,6 +75,21 @@ export const venues = {
     request<{ updated: number; remaining: number }>('/venues/geocode', { method: 'POST' }),
   categorize: () =>
     request<{ updated: number; remaining: number }>('/venues/categorize', { method: 'POST' }),
+};
+
+// Venue lists (location plugin)
+export const venueLists = {
+  list: () => request<any[]>('/venues/lists'),
+  create: (name: string) =>
+    request<any>('/venues/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  rename: (id: string, name: string) =>
+    request<any>(`/venues/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+  delete: (id: string) =>
+    request<{ message: string; id: string }>(`/venues/lists/${id}`, { method: 'DELETE' }),
+  addVenue: (listId: string, venueId: string) =>
+    request<{ message: string }>(`/venues/lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ venue_id: venueId }) }),
+  removeVenue: (listId: string, venueId: string) =>
+    request<{ message: string }>(`/venues/lists/${listId}/items/${venueId}`, { method: 'DELETE' }),
 };
 
 // Stats

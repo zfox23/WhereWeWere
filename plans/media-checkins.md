@@ -57,7 +57,7 @@ CREATE TABLE media_checkins (
     season_number INT,        -- tv only
     episode_number INT,       -- tv only
     episode_title TEXT,
-    checkin_type TEXT NOT NULL CHECK (checkin_type IN ('completed','in_progress','dropped')),
+    checkin_type TEXT NOT NULL CHECK (checkin_type IN ('completed','in_progress','started','dropped')),
     rating SMALLINT CHECK (rating BETWEEN 0 AND 4),
     raw_score NUMERIC(4,2),   -- Yamtrack 0-10
     notes TEXT,
@@ -138,7 +138,7 @@ Design notes:
 |---|---|
 | `media_type = tv` or `season` | Upsert `tv_show` media_item (tmdb, `media_id`). No check-in. |
 | `media_type = episode` | Duplicate only when `(media_id, source, season, episode, end_date)` all match (first occurrence wins). Insert Completed episode check-in, `checked_in_at = end_date`, `checkin_timezone='UTC'`. `external_event_id = sha1(media_id|source|episode|s|e|checked_in_at)`. Rows without `end_date` create the TV show entity only. |
-| `movie/game/book` + status Completed / In progress / Dropped | Upsert media_item; insert check-in with mapped type, `end_date` as `checked_in_at` (tz=UTC), notes, score mapping. `external_event_id = sha1(media_id|source|type|end_date)`. Rows with no `end_date` → entity only. `start_date` is ignored. |
+| `movie/game/book` + status Completed / In progress / Started / Dropped | Upsert media_item; insert check-in with mapped type, `end_date` as `checked_in_at` (tz=UTC), notes, score mapping. `external_event_id = sha1(media_id|source|type|end_date)`. Rows with no `end_date` → entity only. `start_date` is ignored. |
 | `movie/game/book` + status Planning / Paused | Upsert media_item only. |
 | Game rows from Yamtrack use `source = igdb` in the CSV but are stored with `external_source = 'tgdb'` (per spec, games are TGDB-sourced; `media_id` is kept as `external_id` for dedupe). | |
 

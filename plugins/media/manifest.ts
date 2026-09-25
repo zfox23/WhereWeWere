@@ -45,6 +45,7 @@ export const manifest: CheckinTypeManifest = {
       options: [
         { value: 'completed', label: 'Completed' },
         { value: 'in_progress', label: 'In-Progress' },
+        { value: 'started', label: 'Started' },
         { value: 'dropped', label: 'Dropped' },
       ],
     },

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft, CalendarDays } from 'lucide-react';
+import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft, CalendarDays, Users } from 'lucide-react';
+import Stars from '../../../client/src/components/Stars';
 import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../../../client/src/api/client';
 import type { Scrobble, ImmichAsset } from '../../../client/src/types';
 import MapView from './MapView';
@@ -173,6 +174,23 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
           <span className="inline-block px-2.5 py-0.5 text-xs font-medium rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400">
             {checkin.venue_category}
           </span>
+        )}
+
+        {/* Rating */}
+        {checkin.rating != null && checkin.rating >= 1 && (
+          <div>
+            <Stars value={checkin.rating} size={18} />
+          </div>
+        )}
+
+        {/* Companions */}
+        {checkin.companions && checkin.companions.length > 0 && (
+          <div className="flex items-start gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+            <Users size={15} className="text-gray-400 shrink-0 mt-0.5" />
+            <span>
+              <span className="font-medium">Here with:</span> {checkin.companions.join(', ')}
+            </span>
+          </div>
         )}
 
         {/* Address */}

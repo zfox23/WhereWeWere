@@ -50,7 +50,7 @@ export interface MediaItem {
   /** Cumulative time played in minutes (games only). */
   time_played_minutes: number | null;
   /** Item-level status for games (completed/in_progress/dropped). */
-  status: 'completed' | 'in_progress' | 'dropped' | null;
+  status: 'completed' | 'in_progress' | 'started' | 'dropped' | null;
   created_at: string;
   last_checkin_at?: string | null;
   checkin_count?: number;
@@ -109,7 +109,7 @@ export interface MediaCheckIn {
   season_number: number | null;
   episode_number: number | null;
   episode_title: string | null;
-  checkin_type: 'completed' | 'in_progress' | 'dropped';
+  checkin_type: 'completed' | 'in_progress' | 'started' | 'dropped';
   rating: number | null;
   raw_score: number | null;
   notes: string | null;
@@ -172,13 +172,13 @@ export interface MediaLibraryItem {
   /** Cumulative time played in minutes (games only). */
   time_played_minutes: number | null;
   /** Item-level status for games. */
-  status: 'completed' | 'in_progress' | 'dropped' | null;
+  status: 'completed' | 'in_progress' | 'started' | 'dropped' | null;
   /** Display rating: the item's rating if set, else the latest check-in's. */
   latest_rating: number | null;
   /** Null when the item has no check-ins (only in the unfiltered "all" period). */
   last_checkin_at: string | null;
   last_checkin_timezone: string | null;
-  last_checkin_type: 'completed' | 'in_progress' | 'dropped' | null;
+  last_checkin_type: 'completed' | 'in_progress' | 'started' | 'dropped' | null;
   /** Number of completed check-ins for this item. */
   completed_count: number;
 }
@@ -213,7 +213,7 @@ export interface YamtrackPlanRow {
   checked_in_at: string | null;
   disposition: YamtrackDisposition;
   reason: string;
-  checkin_type: 'completed' | 'in_progress' | 'dropped' | null;
+  checkin_type: 'completed' | 'in_progress' | 'started' | 'dropped' | null;
   rating: number | null;
   raw_score: number | null;
   /** Total time played in minutes (games only, from the CSV progress column). */

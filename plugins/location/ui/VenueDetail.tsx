@@ -3,10 +3,12 @@ import { useParams, Link } from 'react-router-dom';
 import {
   MapPin, Tag, Navigation, Loader2, AlertCircle,
   Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink,
-  Navigation2
+  Navigation2, List, Plus, Trash2
 } from 'lucide-react';
-import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../../../client/src/api/client';
-import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset } from '../../../client/src/types';
+import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi, venueLists } from '../../../client/src/api/client';
+import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset, VenueList } from '../../../client/src/types';
+import ScorePicker from '../../../client/src/components/ScorePicker';
+import Stars from '../../../client/src/components/Stars';
 import VenueEditMap from './VenueEditMap';
 import CheckInCard from './LocationCard';
 import MapView from './MapView';
@@ -100,9 +102,17 @@ export default function VenueDetail() {
   const [editCountry, setEditCountry] = useState('');
   const [editLat, setEditLat] = useState(0);
   const [editLng, setEditLng] = useState(0);
+  const [editRating, setEditRating] = useState(0);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [categories, setCategories] = useState<VenueCategory[]>([]);
+
+  // ── Lists ───────────────────────────────────────────────────────────────
+  const [lists, setLists] = useState<VenueList[]>([]);
+  const [listsOpen, setListsOpen] = useState(false);
+  const [newListName, setNewListName] = useState('');
+  const [listsBusy, setListsBusy] = useState(false);
+  const [listsError, setListsError] = useState<string | null>(null);
 
   // ── Merge mode ────────────────────────────────────────────────────────────
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -129,6 +139,22 @@ export default function VenueDetail() {
   useEffect(() => {
     venues.categories().then(setCategories).catch(() => { });
   }, []);
+
+  // ── Lists loading ─────────────────────────────────────────────────────────
+  const loadLists = () => {
+    venueLists.list()
+      .then((data: VenueList[]) => setLists(data))
+      .catch(() => { setListsError('Failed to load lists.'); });
+  };
+
+  useEffect(() => {
+    loadLists();
+  }, []);
+
+  const venueListItems = lists
+    .filter((l) => l.items.some((i) => i.id === venue?.id))
+    .map((l) => ({ id: l.id, name: l.name }));
+  const availableLists = lists.filter((l) => !venueListItems.some((v) => v.id === l.id));
 
   const fetchData = async () => {
     if (!id) return;
@@ -182,6 +208,7 @@ export default function VenueDetail() {
     setEditCountry(venue.country ?? '');
     setEditLat(normalizeCoordinate(venue.latitude));
     setEditLng(normalizeCoordinate(venue.longitude));
+    setEditRating(venue.rating ?? 0);
     setEditError(null);
     setIsEditing(true);
   };
@@ -204,6 +231,7 @@ export default function VenueDetail() {
         country: editCountry.trim() || null,
         latitude: editLat,
         longitude: editLng,
+        rating: editRating >= 1 ? editRating : null,
       });
       setVenue({ ...venue, ...updated });
       setIsEditing(false);
@@ -252,6 +280,57 @@ export default function VenueDetail() {
     setMergeResults([]);
     setMergeTarget(null);
     setMergeError(null);
+  };
+
+  // ── List helpers ──────────────────────────────────────────────────────────
+  const toggleListsPanel = () => {
+    setListsOpen((o) => !o);
+    setListsError(null);
+  };
+
+  const handleCreateList = async () => {
+    const name = newListName.trim();
+    if (!name || !id) return;
+    setListsBusy(true);
+    setListsError(null);
+    try {
+      const created = await venueLists.create(name) as VenueList;
+      await venueLists.addVenue(created.id, id);
+      setNewListName('');
+      loadLists();
+    } catch (err) {
+      setListsError(err instanceof Error ? err.message : 'Failed to create list.');
+    } finally {
+      setListsBusy(false);
+    }
+  };
+
+  const handleAddToList = async (listId: string) => {
+    if (!listId || !id) return;
+    setListsBusy(true);
+    setListsError(null);
+    try {
+      await venueLists.addVenue(listId, id);
+      loadLists();
+    } catch (err) {
+      setListsError(err instanceof Error ? err.message : 'Failed to add to list.');
+    } finally {
+      setListsBusy(false);
+    }
+  };
+
+  const handleRemoveFromList = async (listId: string) => {
+    if (!listId || !id) return;
+    setListsBusy(true);
+    setListsError(null);
+    try {
+      await venueLists.removeVenue(listId, id);
+      loadLists();
+    } catch (err) {
+      setListsError(err instanceof Error ? err.message : 'Failed to remove from list.');
+    } finally {
+      setListsBusy(false);
+    }
   };
 
   if (loading) {
@@ -320,7 +399,12 @@ export default function VenueDetail() {
                 {venue.parent_venue_name}
               </Link>
             )}
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{venue.name}</h1>
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{venue.name}</h1>
+              {venue.rating != null && venue.rating >= 1 && (
+                <Stars value={venue.rating} size={16} />
+              )}
+            </div>
             {venue.category_name && (
               <div className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400">
                 <Tag size={14} />
@@ -501,6 +585,13 @@ export default function VenueDetail() {
               ))}
             </select>
           </label>
+          <div>
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Rating</span>
+            <div className="mt-1.5 flex items-center gap-3">
+              <ScorePicker value={editRating} onChange={setEditRating} />
+              {editRating >= 1 && <span className="text-sm text-gray-500 dark:text-gray-400">{editRating} / 4</span>}
+            </div>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Street address</span>
@@ -563,6 +654,77 @@ export default function VenueDetail() {
           <MapView center={[venueLat, venueLng]} zoom={15}
             markers={[{ lat: venueLat, lng: venueLng, label: venue.name, id: venue.id }]}
             className="h-88 md:h-120 w-full" />
+        </div>
+      )}
+
+      {/* ── Lists (view mode) ───────────────────────── */}
+      {!isEditing && (
+        <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700/40">
+          <button onClick={toggleListsPanel}
+            className="flex w-full items-center justify-between gap-2 rounded-xl px-5 py-3.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+            <span className="flex items-center gap-2">
+              <List size={15} className="text-sky-500" />
+              Lists
+              {venueListItems.length > 0 && (
+                <span className="rounded-full bg-sky-100 dark:bg-sky-900/40 px-2 py-0.5 text-xs text-sky-700 dark:text-sky-300">
+                  {venueListItems.length}
+                </span>
+              )}
+            </span>
+            {listsOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+          </button>
+          {listsOpen && (
+            <div className="border-t border-gray-100 dark:border-gray-800 px-5 pb-5 pt-4 space-y-4">
+              {listsError && <p className="text-xs text-red-500">{listsError}</p>}
+
+              {/* Current lists */}
+              {venueListItems.length > 0 ? (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  {venueListItems.map((l) => (
+                    <li key={l.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <span className="text-sm text-gray-800 dark:text-gray-200">{l.name}</span>
+                      <button onClick={() => handleRemoveFromList(l.id)} disabled={listsBusy}
+                        aria-label={`Remove from ${l.name}`}
+                        className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50">
+                        <Trash2 size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-gray-400">This venue isn't in any lists yet.</p>
+              )}
+
+              {/* Add to an existing list */}
+              {availableLists.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Add to a list</span>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {availableLists.map((l) => (
+                      <button key={l.id} onClick={() => handleAddToList(l.id)} disabled={listsBusy}
+                        className="inline-flex items-center gap-1 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">
+                        <Plus size={12} /> {l.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Create a new list */}
+              <div className="flex items-center gap-2">
+                <input type="text" value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreateList(); } }}
+                  placeholder="New list name…"
+                  className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-500" />
+                <button onClick={handleCreateList} disabled={listsBusy || !newListName.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700 transition-colors disabled:opacity-50">
+                  {listsBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Create
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

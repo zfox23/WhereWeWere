@@ -30,7 +30,43 @@ export interface Venue {
   parent_venue_name?: string;
   child_venues?: { id: string; name: string }[];
   checkin_count?: number;
+  /** Venue-level star rating (1-4); null when unrated. */
+  rating?: number | null;
+  /** Names of venue lists this venue belongs to (library view). */
+  lists?: string[];
   created_at: string;
+}
+
+/** A named list of venues (mirrors the media plugin's lists). */
+export interface VenueListItemRef {
+  id: string;
+  name: string;
+  added_at: string;
+}
+
+export interface VenueList {
+  id: string;
+  name: string;
+  created_at: string;
+  items: VenueListItemRef[];
+}
+
+/** One row of the "All Venues" library view. */
+export interface VenueLibraryItem {
+  id: string;
+  name: string;
+  category_id: string | null;
+  category_name: string | null;
+  category_icon?: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  rating: number | null;
+  lists: string[];
+  last_checkin_at: string | null;
+  last_checkin_timezone: string | null;
+  checkin_count: number;
 }
 
 import type { StoredThemePreference } from '../themes';
@@ -47,6 +83,10 @@ export interface CheckIn {
   parent_venue_id?: string;
   parent_venue_name?: string;
   notes: string | null;
+  /** Check-in star rating (1-4); null when unrated. */
+  rating?: number | null;
+  /** People "here with" on this check-in (ordered names). */
+  companions?: string[];
   venue_timezone?: string | null;
   checked_in_at: string;
   created_at: string;

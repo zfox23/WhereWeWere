@@ -10,7 +10,7 @@
 2. The same columns **stay on `media_checkins`** for per-episode/per-session context, but are **no longer aggregated** into the item display for games.
 3. `media_checkins.checkin_type` stays the source of truth for stats (`completed_count`, timeline) for **all** media types.
 4. **Both game import paths create zero check-ins**: the games CSV import **and** the Yamtrack game rows. Both write rating/notes/time/status onto the `media_items` row.
-5. A new nullable `status` column is added to `media_items` (`completed`/`in_progress`/`dropped`) — editable from the item detail page's edit mode, set by the game importers when status data is present.
+5. A new nullable `status` column is added to `media_items` (`completed`/`in_progress`/`started`/`dropped`) — editable from the item detail page's edit mode, set by the game importers when status data is present.
 6. The check-in form **keeps** score + notes (recorded on the check-in row) but **loses** the total-time-played field. Submitting a check-in **never** updates item-level rating/notes.
 7. Rating / notes / time-played / status are shown on the media detail page and edited there in **edit mode** (which already exists for item metadata).
 8. **Display rating resolution (all media types):** whenever the server needs "the rating of this item" (item endpoints, search, sorting by rating, "highest rated" lists, stats), it returns `media_items.rating` when non-NULL, otherwise the **latest check-in's rating** (`ORDER BY checked_in_at DESC, id DESC`). One shared query fragment/helper so every call site agrees.
@@ -24,7 +24,7 @@ ALTER TABLE media_items
   ADD COLUMN IF NOT EXISTS raw_score NUMERIC(4,2),
   ADD COLUMN IF NOT EXISTS notes TEXT,
   ADD COLUMN IF NOT EXISTS time_played_minutes INTEGER CHECK (time_played_minutes IS NULL OR time_played_minutes >= 0),
-  ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('completed','in_progress','dropped'));
+  ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('completed','in_progress','started','dropped'));
 
 CREATE INDEX idx_media_items_rating ON media_items(user_id, rating) WHERE rating IS NOT NULL;
 
@@ -47,7 +47,7 @@ Notes:
 - `GET /stats` ([media.ts:1080](server/src/routes/media.ts:1080)) and any sort-by-rating: use the shared rating-resolution (item rating else latest check-in rating).
 
 ### 4.2 [`db/import-games-csv.ts`](server/src/db/import-games-csv.ts)
-- Parse an optional `Status` column (`completed`/`in progress`/`in_progress`/`dropped`). If absent, default: rating or playtime present → `completed`, else `in_progress`.
+- Parse an optional `Status` column (`completed`/`in progress`/`started`/`dropped`). If absent, default: rating or playtime present → `completed`, else `in_progress`.
 - Per row: find-or-create the `media_items` row (title/external matching unchanged), then `UPDATE media_items SET rating, raw_score, notes, time_played_minutes = GREATEST(COALESCE(time_played_minutes,0), $csv), status WHERE ...`. The never-decrease rule now applies at item level.
 - **No `media_checkins` inserts at all.** `checkinEventId`/`ggbl:` prefix removed; idempotency is now simply "the item row already exists" (UPDATE is inherently idempotent; re-running only raises time and re-enriches).
 - `loadLocalGames` reads `time_played_minutes` from `media_items` directly (drop the `LEFT JOIN LATERAL` over check-ins).
@@ -63,7 +63,7 @@ Notes:
 - Classifier: game rows no longer produce `create_checkin` plans (both the progress>0 "in-progress check-in" path at [yamtrack.ts:346-369](server/src/services/yamtrack.ts:346) and the status-based path at [yamtrack.ts:371-433](server/src/services/yamtrack.ts:371) when `media_type = 'game'`). They produce a new disposition, e.g. `update_game_item`, carrying the values to write:
   - `rating` = `scoreToRating(row.score)`, `raw_score` = parsed score, `notes` = row notes
   - `time_played_minutes` = `parseProgressMinutes(row.progress)` (when > 0)
-  - `status` = mapped `row.status` (`completed`/`in_progress`/`dropped`); when no status but progress > 0 → `in_progress`; otherwise NULL (leave item status untouched)
+  - `status` = mapped `row.status` (`completed`/`in_progress`/`started`/`dropped`); when no status but progress > 0 → `in_progress`; otherwise NULL (leave item status untouched)
 - Executor (`executeYamtrackImport`): for `update_game_item` plans, upsert the media item (unchanged) then `UPDATE media_items SET rating = $, raw_score = $, notes = $, status = COALESCE($, status), time_played_minutes = GREATEST(COALESCE(time_played_minutes,0), $) WHERE time IS NOT NULL ...` — plain SET for rating/notes/status (last import wins, idempotent on re-import), never-decrease for time. No check-in insert, no `external_event_id`.
 - `countPlans`/preview UI ([`YamtrackImportSection.tsx`](client/src/pages/settings/YamtrackImportSection.tsx)): add the new disposition to counts and the per-row disposition table (replacing the old "creates an In-Progress check-in" reasons).
 - TV/movie/book Yamtrack rows are **unchanged** — they still create check-ins with per-event rating/notes/time.

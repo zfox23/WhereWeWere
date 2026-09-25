@@ -49,6 +49,11 @@ function toLegacyCheckin(props: CheckinCardProps): CheckIn {
     parent_venue_id?: string;
     parent_venue_name?: string;
   };
+  const data = (item.data ?? {}) as Record<string, unknown>;
+  const rating = typeof data.rating === 'number' ? data.rating : null;
+  const companions = Array.isArray(data.companions)
+    ? data.companions.filter((c): c is string => typeof c === 'string')
+    : [];
   return {
     id: item.id,
     user_id: item.user_id,
@@ -61,6 +66,8 @@ function toLegacyCheckin(props: CheckinCardProps): CheckIn {
     parent_venue_id: item.parent_venue_id,
     parent_venue_name: item.parent_venue_name,
     notes: item.notes,
+    rating,
+    companions,
     checked_in_at: item.checked_in_at,
     created_at: item.created_at,
   } as CheckIn;

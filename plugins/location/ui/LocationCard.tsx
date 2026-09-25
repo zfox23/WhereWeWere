@@ -1,6 +1,7 @@
-import { Camera, Calendar, Map, MapPin, Pencil } from 'lucide-react';
+import { Camera, Calendar, Map, MapPin, Pencil, Users } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import type { CheckIn, Scrobble, ImmichAsset } from '../../../client/src/types';
+import Stars from '../../../client/src/components/Stars';
 import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
@@ -94,6 +95,23 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
             <span className="inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400">
               {checkin.venue_category}
             </span>
+          )}
+
+          {/* Rating */}
+          {checkin.rating != null && checkin.rating >= 1 && (
+            <div className="mt-1.5">
+              <Stars value={checkin.rating} />
+            </div>
+          )}
+
+          {/* Companions */}
+          {checkin.companions && checkin.companions.length > 0 && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+              <Users size={14} className="text-gray-400 shrink-0" />
+              <span>
+                Here with {checkin.companions.join(', ')}
+              </span>
+            </p>
           )}
 
           {/* Notes */}

@@ -17,6 +17,7 @@ import type { MediaSubtype } from '../../../client/src/types';
 const BADGE_CLASSES: Record<string, string> = {
   completed: 'bg-green-100 text-green-700/90 dark:bg-green-900/90 dark:text-green-300',
   in_progress: 'bg-amber-100 text-amber-700/90 dark:bg-amber-900/90 dark:text-amber-300',
+  started: 'bg-amber-100 text-amber-700/90 dark:bg-amber-900/90 dark:text-amber-300',
   dropped: 'bg-red-100 text-red-700/90 dark:bg-red-900/90 dark:text-red-300',
 };
 

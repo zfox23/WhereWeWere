@@ -49,7 +49,7 @@ const MEDIA_ROUTE_SEGMENTS: Record<string, string> = {
 };
 
 const MEDIA_TYPES = new Set(['movie', 'tv_show', 'game', 'book', 'board_game']);
-const CHECKIN_TYPES = new Set(['completed', 'in_progress', 'dropped']);
+const CHECKIN_TYPES = new Set(['completed', 'in_progress', 'started', 'dropped']);
 const EPISODE_CACHE_MAX_AGE_DAYS = 30;
 
 interface SettingsKeys {
@@ -135,6 +135,7 @@ const MEDIA_LLM_TYPE_LABELS: Record<string, string> = {
 const MEDIA_LLM_CHECKIN_LABELS: Record<string, string> = {
   completed: 'completed',
   in_progress: 'in progress',
+  started: 'started',
   dropped: 'dropped',
 };
 
@@ -331,7 +332,7 @@ interface SearchHit {
   last_checkin_type: string | null;
   /** Item-level rating (media_items.rating), null when never set. */
   rating: number | null;
-  /** Item-level status for games (completed/in_progress/dropped). */
+  /** Item-level status for games (completed/in_progress/started/dropped). */
   status: string | null;
   /** Display rating: item rating if set, else the latest check-in's rating. */
   my_rating: number | null;
@@ -708,7 +709,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     }
     if (status !== undefined) {
       const v = typeof status === 'string' && CHECKIN_TYPES.has(status) ? status : null;
-      if (v == null && status != null) return res.status(400).json({ error: 'status must be one of completed, in_progress, dropped' });
+      if (v == null && status != null) return res.status(400).json({ error: 'status must be one of completed, in_progress, started, dropped' });
       add('status', v);
     }
     if (external_id !== undefined) {
@@ -1021,7 +1022,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
     } = req.body;
 
     if (!checkin_type || !CHECKIN_TYPES.has(checkin_type)) {
-      return res.status(400).json({ error: 'checkin_type must be one of completed, in_progress, dropped' });
+      return res.status(400).json({ error: 'checkin_type must be one of completed, in_progress, started, dropped' });
     }
     if (timezone && typeof timezone !== 'string') {
       return res.status(400).json({ error: 'timezone must be a string' });
@@ -1098,7 +1099,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
     }
     if (body.checkin_type !== undefined) {
       const v = typeof body.checkin_type === 'string' && CHECKIN_TYPES.has(body.checkin_type) ? body.checkin_type : null;
-      if (v == null) return res.status(400).json({ error: 'checkin_type must be one of completed, in_progress, dropped' });
+      if (v == null) return res.status(400).json({ error: 'checkin_type must be one of completed, in_progress, started, dropped' });
       add('checkin_type = $' + (params.length + 1), v);
     }
     if (body.rating !== undefined) {
@@ -1932,7 +1933,7 @@ function backupToIntOrNull(value: unknown): number | null {
 function backupToStatusOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const v = value.trim();
-  return v === 'completed' || v === 'in_progress' || v === 'dropped' ? v : null;
+  return v === 'completed' || v === 'in_progress' || v === 'started' || v === 'dropped' ? v : null;
 }
 
 function backupToStringArrayOrNull(value: unknown): string[] | null {

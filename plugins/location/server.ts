@@ -74,6 +74,34 @@ function toNumberOrNull(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Normalize a star rating payload to 1-4 or null (unrated). Values outside
+ * the 1-4 range (including 0) are treated as unrated, matching the
+ * ScorePicker contract where 0 = no rating.
+ */
+function normalizeRating(value: unknown): number | null {
+  const n = toNumberOrNull(value);
+  if (n == null) return null;
+  return n >= 1 && n <= 4 ? Math.trunc(n) : null;
+}
+
+/** Trim, de-duplicate, and drop empty companion names (case-insensitive dedupe). */
+function normalizeCompanions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'string') continue;
+    const name = raw.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
 function serializeVenue<T extends { latitude?: unknown; longitude?: unknown }>(venue: T): T {
   return {
     ...venue,
@@ -224,11 +252,11 @@ router.get('/', async (req: Request, res: Response) => {
     const offsetParam = `$${paramIndex}`;
 
     const sql = `
-      SELECT c.id, c.user_id, c.venue_id, c.notes,
+      SELECT c.id, c.user_id, c.venue_id, c.notes, c.rating,
               c.checked_in_at, c.checkin_timezone AS venue_timezone, c.created_at, c.updated_at,
-             v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
-             vc.name AS venue_category,
-             pv.id AS parent_venue_id, pv.name AS parent_venue_name
+              v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
+              vc.name AS venue_category,
+              pv.id AS parent_venue_id, pv.name AS parent_venue_name
       FROM checkins c
       JOIN venues v ON c.venue_id = v.id
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
@@ -246,13 +274,46 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// GET /companion-names?q=&limit= - distinct companion names for autocomplete
+// (registered before /:id so "companion-names" isn't treated as a check-in id)
+router.get('/companion-names', async (req: Request, res: Response) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '50'), 10) || 50, 1), 200);
+    const params: unknown[] = [USER_ID];
+
+    let sql = `
+      SELECT cc.name
+      FROM checkin_companions cc
+      JOIN checkins c ON c.id = cc.checkin_id
+      WHERE c.user_id = $1`;
+
+    if (q) {
+      params.push(`%${q}%`);
+      sql += ` AND cc.name ILIKE $2`;
+    }
+
+    sql += `
+      GROUP BY cc.name
+      ORDER BY cc.name
+      LIMIT $${params.length + 1}`;
+    params.push(limit);
+
+    const result = await query(sql, params);
+    res.json(result.rows.map((r: any) => r.name));
+  } catch (err) {
+    console.error('Error listing companion names:', err);
+    res.status(500).json({ error: 'Failed to list companion names' });
+  }
+});
+
 // GET /:id - get single check-in with venue details
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
     const checkinResult = await query(
-      `SELECT c.id, c.user_id, c.venue_id, c.notes,
+      `SELECT c.id, c.user_id, c.venue_id, c.notes, c.rating,
               c.checked_in_at, c.checkin_timezone AS venue_timezone, c.created_at, c.updated_at,
               v.name AS venue_name, v.address AS venue_address,
               v.city AS venue_city, v.state AS venue_state,
@@ -272,7 +333,17 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    res.json(addTimezone(checkinResult.rows[0]));
+    const companionResult = await query(
+      `SELECT name FROM checkin_companions
+       WHERE checkin_id = $1
+       ORDER BY name`,
+      [id]
+    );
+
+    res.json({
+      ...addTimezone(checkinResult.rows[0]),
+      companions: companionResult.rows.map((r: any) => r.name),
+    });
   } catch (err) {
     console.error('Error getting check-in:', err);
     res.status(500).json({ error: 'Failed to get check-in' });
@@ -281,8 +352,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // POST / - create check-in
 router.post('/', async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
-    const { user_id, venue_id, notes, checked_in_at, also_checkin_parent } = req.body;
+    await client.query('BEGIN');
+    const { user_id, venue_id, notes, checked_in_at, also_checkin_parent, rating } = req.body;
+    const companions = normalizeCompanions(req.body.companions);
+    const checkinRating = normalizeRating(rating);
 
     if (!user_id || !venue_id) {
       return res.status(400).json({ error: 'user_id and venue_id are required' });
@@ -290,65 +365,129 @@ router.post('/', async (req: Request, res: Response) => {
 
     const checkinTimezone = await inferVenueTimezone(venue_id);
 
-    const result = await query(
-      `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
+    const result = await client.query(
+      `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, rating)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6)
        RETURNING *`,
-      [user_id, venue_id, notes || null, checked_in_at || null, checkinTimezone]
+      [user_id, venue_id, notes || null, checked_in_at || null, checkinTimezone, checkinRating]
     );
 
     const checkin = result.rows[0];
 
+    // Companions for the primary check-in
+    if (companions.length > 0) {
+      await client.query(
+        `INSERT INTO checkin_companions (checkin_id, name)
+         SELECT $1, unnest($2::text[])
+         ON CONFLICT (checkin_id, name) DO NOTHING`,
+        [checkin.id, companions]
+      );
+    }
+
     // Optionally create a check-in at the parent venue too
     let parent_checkin = null;
     if (also_checkin_parent) {
-      const venueResult = await query(
+      const venueResult = await client.query(
         'SELECT parent_venue_id FROM venues WHERE id = $1',
         [venue_id]
       );
       const parentVenueId = venueResult.rows[0]?.parent_venue_id;
       if (parentVenueId) {
-        const parentResult = await query(
-          `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone)
-           VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
+        const parentResult = await client.query(
+          `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, rating)
+           VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6)
            RETURNING *`,
-          [user_id, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId)]
+          [user_id, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId), checkinRating]
         );
         parent_checkin = parentResult.rows[0];
       }
     }
 
-    res.status(201).json({ ...checkin, parent_checkin });
+    await client.query('COMMIT');
+    res.status(201).json({ ...checkin, parent_checkin, companions });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error creating check-in:', err);
     res.status(500).json({ error: 'Failed to create check-in' });
+  } finally {
+    client.release();
   }
 });
 
 // PUT /:id - update check-in
 router.put('/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { notes, checked_in_at } = req.body;
+  const hasRating = 'rating' in req.body;
+  const hasCompanions = 'companions' in req.body;
+  const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const { notes, checked_in_at } = req.body;
+    await client.query('BEGIN');
 
-    const result = await query(
+    // Build the SET clause. notes / checked_in_at keep their historical
+    // "null means no change" behavior; rating uses explicit key presence so
+    // the client can clear it back to unrated (null).
+    const setClauses: string[] = [];
+    const params: unknown[] = [id];
+    let paramIndex = 1;
+
+    if (notes !== undefined) {
+      setClauses.push(`notes = COALESCE($${++paramIndex}, notes)`);
+      params.push(notes);
+    }
+    if (checked_in_at !== undefined) {
+      setClauses.push(`checked_in_at = COALESCE($${++paramIndex}::timestamptz, checked_in_at)`);
+      params.push(checked_in_at);
+    }
+    if (hasRating) {
+      setClauses.push(`rating = $${++paramIndex}`);
+      params.push(normalizeRating(req.body.rating));
+    }
+    setClauses.push('updated_at = NOW()');
+
+    const result = await client.query(
       `UPDATE checkins
-       SET notes = COALESCE($2, notes),
-           checked_in_at = COALESCE($3::timestamptz, checked_in_at),
-           updated_at = NOW()
+       SET ${setClauses.join(', ')}
        WHERE id = $1
        RETURNING *`,
-      [id, notes, checked_in_at || null]
+      params
     );
 
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    res.json(result.rows[0]);
+    // Companions use full-replacement semantics when the key is present.
+    let companions: string[] = [];
+    if (hasCompanions) {
+      const names = normalizeCompanions(req.body.companions);
+      await client.query('DELETE FROM checkin_companions WHERE checkin_id = $1', [id]);
+      if (names.length > 0) {
+        await client.query(
+          `INSERT INTO checkin_companions (checkin_id, name)
+           SELECT $1, unnest($2::text[])
+           ON CONFLICT (checkin_id, name) DO NOTHING`,
+          [id, names]
+        );
+      }
+      companions = names;
+    } else {
+      const companionResult = await client.query(
+        'SELECT name FROM checkin_companions WHERE checkin_id = $1 ORDER BY name',
+        [id]
+      );
+      companions = companionResult.rows.map((r: any) => r.name);
+    }
+
+    await client.query('COMMIT');
+    res.json({ ...result.rows[0], companions });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error updating check-in:', err);
     res.status(500).json({ error: 'Failed to update check-in' });
+  } finally {
+    client.release();
   }
 });
 
@@ -882,7 +1021,7 @@ venuesRouter.get('/', async (req: Request, res: Response) => {
 
     const sql = `
       SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
-             v.latitude, v.longitude, v.osm_id, v.created_at, v.updated_at,
+             v.latitude, v.longitude, v.osm_id, v.rating, v.created_at, v.updated_at,
              vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon
              ${rankSelect}
       FROM venues v
@@ -1064,6 +1203,238 @@ venuesRouter.get('/place-search', async (req: Request, res: Response) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Venue lists (mirrors the media plugin's /lists endpoints). These 1-segment
+// routes must be registered before /:id so "lists" isn't treated as a venue id.
+// ---------------------------------------------------------------------------
+
+// GET /lists - lists with their venues
+venuesRouter.get('/lists', async (_req: Request, res: Response) => {
+  try {
+    const listsResult = await query(
+      'SELECT id, name, created_at FROM venue_lists WHERE user_id = $1 ORDER BY created_at',
+      [USER_ID]
+    );
+    const itemsResult = await query(
+      `SELECT l.id AS list_id,
+              json_agg(json_build_object(
+                'id', v.id, 'name', v.name, 'added_at', vli.added_at
+              ) ORDER BY vli.added_at, vli.position) AS items
+       FROM venue_lists l
+       LEFT JOIN venue_list_items vli ON vli.list_id = l.id
+       LEFT JOIN venues v ON vli.venue_id = v.id
+       WHERE l.user_id = $1
+       GROUP BY l.id`,
+      [USER_ID]
+    );
+    const itemsById = new Map(itemsResult.rows.map((r: any) => [r.list_id as string, r.items]));
+    res.json(listsResult.rows.map((l: any) => ({ ...l, items: itemsById.get(l.id) || [] })));
+  } catch (err) {
+    console.error('Error listing venue lists:', err);
+    res.status(500).json({ error: 'Failed to list venue lists' });
+  }
+});
+
+// POST /lists - create a list
+venuesRouter.post('/lists', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const result = await query(
+      'INSERT INTO venue_lists (user_id, name) VALUES ($1, $2) RETURNING id, name, created_at',
+      [USER_ID, name.trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      return res.status(409).json({ error: 'A list with that name already exists' });
+    }
+    console.error('Error creating venue list:', err);
+    res.status(500).json({ error: 'Failed to create venue list' });
+  }
+});
+
+// PUT /lists/:id - rename a list
+venuesRouter.put('/lists/:id', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const result = await query(
+      'UPDATE venue_lists SET name = $2 WHERE id = $1 AND user_id = $3 RETURNING id, name, created_at',
+      [req.params.id, name.trim(), USER_ID]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Venue list not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      return res.status(409).json({ error: 'A list with that name already exists' });
+    }
+    console.error('Error renaming venue list:', err);
+    res.status(500).json({ error: 'Failed to rename venue list' });
+  }
+});
+
+// DELETE /lists/:id - delete a list
+venuesRouter.delete('/lists/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'DELETE FROM venue_lists WHERE id = $1 AND user_id = $2 RETURNING id',
+      [req.params.id, USER_ID]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Venue list not found' });
+    }
+    res.json({ message: 'Venue list deleted', id: result.rows[0].id });
+  } catch (err) {
+    console.error('Error deleting venue list:', err);
+    res.status(500).json({ error: 'Failed to delete venue list' });
+  }
+});
+
+// POST /lists/:id/items - add a venue to a list (idempotent)
+venuesRouter.post('/lists/:id/items', async (req: Request, res: Response) => {
+  try {
+    const { venue_id } = req.body;
+    if (!venue_id) return res.status(400).json({ error: 'venue_id is required' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const listResult = await client.query(
+        'SELECT id FROM venue_lists WHERE id = $1 AND user_id = $2',
+        [req.params.id, USER_ID]
+      );
+      if (listResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Venue list not found' });
+      }
+      const venueResult = await client.query(
+        'SELECT id FROM venues WHERE id = $1',
+        [venue_id]
+      );
+      if (venueResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Venue not found' });
+      }
+      const maxPos = await client.query(
+        'SELECT COALESCE(MAX(position), 0)::int AS pos FROM venue_list_items WHERE list_id = $1',
+        [req.params.id]
+      );
+      await client.query(
+        `INSERT INTO venue_list_items (list_id, venue_id, position)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (list_id, venue_id) DO NOTHING`,
+        [req.params.id, venue_id, (maxPos.rows[0]?.pos ?? 0) + 1]
+      );
+      await client.query('COMMIT');
+      res.status(201).json({ message: 'Added to list' });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error adding to venue list:', err);
+    res.status(500).json({ error: 'Failed to add venue to list' });
+  }
+});
+
+// DELETE /lists/:id/items/:venueId - remove a venue from a list
+venuesRouter.delete('/lists/:id/items/:venueId', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `DELETE FROM venue_list_items vli
+       USING venue_lists l
+       WHERE vli.list_id = l.id AND l.id = $1 AND l.user_id = $2 AND vli.venue_id = $3
+       RETURNING vli.list_id`,
+      [req.params.id, USER_ID, req.params.venueId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Venue not in list' });
+    }
+    res.json({ message: 'Removed from list' });
+  } catch (err) {
+    console.error('Error removing from venue list:', err);
+    res.status(500).json({ error: 'Failed to remove venue from list' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /library?from=&to= - the "All Venues" library view: one row per venue
+// with at least one check-in in range (all venues with check-ins when no range),
+// including its rating, most recent check-in, check-in count, and list names.
+// ---------------------------------------------------------------------------
+venuesRouter.get('/library', async (req: Request, res: Response) => {
+  try {
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const includeUnchecked = !from && !to;
+
+    const params: unknown[] = [USER_ID];
+    const dateConditions: string[] = [];
+    if (from) {
+      dateConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${params.length + 1}::date`);
+      params.push(from);
+    }
+    if (to) {
+      dateConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $${params.length + 1}::date`);
+      params.push(to);
+    }
+    const join = includeUnchecked
+      ? `LEFT JOIN checkins c ON c.venue_id = v.id AND c.user_id = $1`
+      : `JOIN checkins c ON c.venue_id = v.id AND c.user_id = $1`;
+
+    const result = await query(
+      `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.rating,
+              vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
+              (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_at,
+              (ARRAY_AGG(c.checkin_timezone ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_timezone,
+              COUNT(c.id) FILTER (WHERE c.id IS NOT NULL)::int AS checkin_count
+       FROM venues v
+       ${join}
+       LEFT JOIN venue_categories vc ON v.category_id = vc.id
+       ${dateConditions.length ? `WHERE ${dateConditions.join(' AND ')}` : ''}
+       GROUP BY v.id, vc.id, vc.name, vc.icon
+       HAVING COUNT(c.id) > 0
+       ORDER BY last_checkin_at DESC NULLS LAST`,
+      params
+    );
+
+    // List names per venue (only for venues returned above).
+    const venueIds = result.rows.map((r: any) => r.id);
+    const listNamesByVenue = new Map<string, string[]>();
+    if (venueIds.length > 0) {
+      const listResult = await query(
+        `SELECT vli.venue_id, vl.name
+         FROM venue_list_items vli
+         JOIN venue_lists vl ON vl.id = vli.list_id
+         WHERE vl.user_id = $1 AND vli.venue_id = ANY($2::uuid[])
+         ORDER BY vl.created_at`,
+        [USER_ID, venueIds]
+      );
+      for (const row of listResult.rows) {
+        const arr = listNamesByVenue.get(row.venue_id) || [];
+        arr.push(row.name);
+        listNamesByVenue.set(row.venue_id, arr);
+      }
+    }
+
+    res.json(result.rows.map((r: any) => serializeVenue({
+      ...r,
+      lists: listNamesByVenue.get(r.id) || [],
+    })));
+  } catch (err) {
+    console.error('Error getting venue library:', err);
+    res.status(500).json({ error: 'Failed to get venue library' });
+  }
+});
+
 // GET /:id - get single venue with check-in count
 venuesRouter.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -1071,7 +1442,7 @@ venuesRouter.get('/:id', async (req: Request, res: Response) => {
 
     const result = await query(
       `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
-              v.latitude, v.longitude, v.osm_id, v.parent_venue_id,
+              v.latitude, v.longitude, v.osm_id, v.parent_venue_id, v.rating,
               v.created_at, v.updated_at,
               vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
               pv.name AS parent_venue_name,
@@ -1110,7 +1481,7 @@ venuesRouter.post('/', async (req: Request, res: Response) => {
   try {
     const {
       name, category_id, address, city, state, country,
-      postal_code, latitude, longitude, osm_id,
+      postal_code, latitude, longitude, osm_id, rating,
     } = req.body;
 
     if (!name) {
@@ -1136,7 +1507,31 @@ venuesRouter.post('/', async (req: Request, res: Response) => {
 
     const geocodedVenue = await geocodeVenueLocationIfMissing(venue);
 
-    res.status(201).json(serializeVenue(geocodedVenue));
+    // Rating is set after find/reuse so a reused venue keeps its existing
+    // rating unless the caller explicitly provides one.
+    const venueRating = normalizeRating(rating);
+    if (venueRating != null) {
+      await query(
+        'UPDATE venues SET rating = $2, updated_at = NOW() WHERE id = $1',
+        [venue.id, venueRating]
+      );
+    }
+
+    // Re-fetch to return a canonical row that includes the rating column.
+    const finalResult = await query(
+      `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
+              v.latitude, v.longitude, v.osm_id, v.rating, v.created_at, v.updated_at,
+              vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon
+       FROM venues v
+       LEFT JOIN venue_categories vc ON v.category_id = vc.id
+       WHERE v.id = $1`,
+      [venue.id]
+    );
+    const finalVenue = finalResult.rows.length > 0
+      ? finalResult.rows[0]
+      : { ...geocodedVenue, rating: venueRating };
+
+    res.status(201).json(serializeVenue(finalVenue));
   } catch (err) {
     console.error('Error creating venue:', err);
     res.status(500).json({ error: 'Failed to create venue' });
@@ -1151,30 +1546,35 @@ venuesRouter.put('/:id', async (req: Request, res: Response) => {
       name, category_id, address, city, state, country,
       postal_code, latitude, longitude, osm_id,
     } = req.body;
+    const hasRating = 'rating' in req.body;
 
     if (!name) return res.status(400).json({ error: 'name is required' });
     if (latitude === undefined || longitude === undefined) {
       return res.status(400).json({ error: 'latitude and longitude are required' });
     }
 
+    // Rating uses explicit key presence so the client can clear it to unrated.
+    const ratingClause = hasRating ? ', rating = $11' : '';
+    const ratingParam = hasRating ? normalizeRating(req.body.rating) : null;
+
     const result = await query(
       `UPDATE venues
        SET name         = $2,
-           category_id  = $3,
-           address      = $4,
-           city         = $5,
-           state        = $6,
-           country      = $7,
-           postal_code  = $8,
-           latitude     = $9,
-           longitude    = $10,
-           osm_id       = COALESCE($11, osm_id),
-           updated_at   = NOW()
+            category_id  = $3,
+            address      = $4,
+            city         = $5,
+            state        = $6,
+            country      = $7,
+            postal_code  = $8,
+            latitude     = $9,
+            longitude    = $10,
+            osm_id       = COALESCE($12, osm_id)${ratingClause},
+            updated_at   = NOW()
        WHERE id = $1
        RETURNING *`,
       [id, name, category_id || null, address || null, city || null, state || null,
        country || null, postal_code || null,
-       parseFloat(String(latitude)), parseFloat(String(longitude)), osm_id || null]
+       parseFloat(String(latitude)), parseFloat(String(longitude)), ratingParam, osm_id || null]
     );
 
     if (result.rows.length === 0) {
@@ -1931,7 +2331,13 @@ export const server: CheckinTypeServerPlugin = {
         parent_venue_name: 'pv.name',
         data: `json_build_object(
           'venue_id', c.venue_id,
-          'notes', c.notes
+          'notes', c.notes,
+          'rating', c.rating,
+          'companions', (
+            SELECT COALESCE(json_agg(cc.name ORDER BY cc.name), '[]'::json)
+            FROM checkin_companions cc
+            WHERE cc.checkin_id = c.id
+          )
         )::jsonb`,
         timezone: 'c.checkin_timezone',
       })}
@@ -1985,9 +2391,10 @@ export const server: CheckinTypeServerPlugin = {
    * parent FKs handled on import).
    */
   backupExport: async ({ user_id }) => {
-    const [checkinsResult, venuesResult, categoriesResult] = await Promise.all([
+    const [checkinsResult, venuesResult, categoriesResult,
+          companionsResult, venueListsResult, venueListItemsResult] = await Promise.all([
       query(
-        `SELECT id, venue_id, notes,
+        `SELECT id, venue_id, notes, rating,
                 checked_in_at, checkin_timezone, created_at, updated_at, swarm_id
          FROM checkins
          WHERE user_id = $1
@@ -1995,7 +2402,7 @@ export const server: CheckinTypeServerPlugin = {
         [user_id],
       ),
       query(
-        `SELECT DISTINCT v.id, v.name, v.category_id,
+        `SELECT DISTINCT v.id, v.name, v.category_id, v.rating,
                 v.address, v.city, v.state, v.country, v.postal_code,
                 v.latitude, v.longitude,
                 v.osm_id, v.swarm_venue_id,
@@ -2012,11 +2419,35 @@ export const server: CheckinTypeServerPlugin = {
          ORDER BY vc.name ASC`,
         [],
       ),
+      query(
+        `SELECT cc.checkin_id, cc.name
+         FROM checkin_companions cc
+         JOIN checkins c ON c.id = cc.checkin_id
+         WHERE c.user_id = $1
+         ORDER BY cc.checkin_id, cc.name`,
+        [user_id],
+      ),
+      query(
+        `SELECT id, name, created_at, updated_at
+         FROM venue_lists WHERE user_id = $1 ORDER BY created_at`,
+        [user_id],
+      ),
+      query(
+        `SELECT vli.list_id, vli.venue_id, vli.position, vli.added_at
+         FROM venue_list_items vli
+         JOIN venue_lists vl ON vl.id = vli.list_id
+         WHERE vl.user_id = $1
+         ORDER BY vl.created_at, vli.position`,
+        [user_id],
+      ),
     ]);
     return {
       checkins: checkinsResult.rows,
       venues: venuesResult.rows,
       venueCategories: categoriesResult.rows,
+      checkinCompanions: companionsResult.rows,
+      venueLists: venueListsResult.rows,
+      venueListItems: venueListItemsResult.rows,
     };
   },
 
@@ -2030,10 +2461,16 @@ export const server: CheckinTypeServerPlugin = {
       checkins?: Record<string, unknown>[];
       venues?: Record<string, unknown>[];
       venueCategories?: Record<string, unknown>[];
+      checkinCompanions?: Record<string, unknown>[];
+      venueLists?: Record<string, unknown>[];
+      venueListItems?: Record<string, unknown>[];
     };
     const categories = Array.isArray(data.venueCategories) ? data.venueCategories : [];
     const venues = Array.isArray(data.venues) ? data.venues : [];
     const checkins = Array.isArray(data.checkins) ? data.checkins : [];
+    const checkinCompanions = Array.isArray(data.checkinCompanions) ? data.checkinCompanions : [];
+    const venueLists = Array.isArray(data.venueLists) ? data.venueLists : [];
+    const venueListItems = Array.isArray(data.venueListItems) ? data.venueListItems : [];
 
     // Use the framework's transaction client when provided so restore stays
     // atomic; open our own connection only when running standalone.
@@ -2070,7 +2507,7 @@ export const server: CheckinTypeServerPlugin = {
         if (!venue?.id || !venue.name) continue;
         await client.query(
           `INSERT INTO venues (
-             id, name, category_id,
+             id, name, category_id, rating,
              address, city, state, country, postal_code,
              latitude, longitude,
              osm_id, swarm_venue_id,
@@ -2078,18 +2515,19 @@ export const server: CheckinTypeServerPlugin = {
              created_at, updated_at
            )
            VALUES (
-             $1, $2, $3,
-             $4, $5, $6, $7, $8,
-             $9, $10,
-             $11, $12,
-             NULL, $13,
-             COALESCE($14::timestamptz, NOW()), COALESCE($15::timestamptz, NOW())
+             $1, $2, $3, $4,
+             $5, $6, $7, $8, $9,
+             $10, $11,
+             $12, $13,
+             NULL, $14,
+             COALESCE($15::timestamptz, NOW()), COALESCE($16::timestamptz, NOW())
            )
            ON CONFLICT (id) DO NOTHING`,
           [
             venue.id,
             venue.name,
             venue.category_id ? (categoryIdMap.get(String(venue.category_id)) ?? null) : null,
+            normalizeRating(venue.rating),
             venue.address || null,
             venue.city || null,
             venue.state || null,
@@ -2120,17 +2558,17 @@ export const server: CheckinTypeServerPlugin = {
         const result = await client.query(
           `INSERT INTO checkins (
              id, user_id, venue_id,
-             notes,
+             notes, rating,
              checked_in_at, checkin_timezone, created_at, updated_at,
              swarm_id
            )
            VALUES (
              $1, $2, $3,
-             $4,
-             COALESCE($5::timestamptz, NOW()), $6,
-             COALESCE($7::timestamptz, NOW()),
+             $4, $5,
+             COALESCE($6::timestamptz, NOW()), $7,
              COALESCE($8::timestamptz, NOW()),
-             $9
+             COALESCE($9::timestamptz, NOW()),
+             $10
            )
            ON CONFLICT (id) DO NOTHING`,
           [
@@ -2138,6 +2576,7 @@ export const server: CheckinTypeServerPlugin = {
             user_id,
             row.venue_id,
             row.notes || null,
+            normalizeRating(row.rating),
             row.checked_in_at || null,
             row.checkin_timezone || null,
             row.created_at || null,
@@ -2147,6 +2586,44 @@ export const server: CheckinTypeServerPlugin = {
         );
         if ((result.rowCount ?? 0) > 0) inserted++;
       }
+
+      // 4. Companions (referencing the user's check-ins; skip missing ones).
+      const checkinIds = new Set(checkins.map((r) => String(r?.id)).filter(Boolean));
+      for (const cc of checkinCompanions) {
+        if (!cc?.checkin_id || !cc?.name) continue;
+        if (!checkinIds.has(String(cc.checkin_id))) continue;
+        await client.query(
+          `INSERT INTO checkin_companions (checkin_id, name)
+           VALUES ($1, $2)
+           ON CONFLICT (checkin_id, name) DO NOTHING`,
+          [cc.checkin_id, String(cc.name)]
+        );
+      }
+
+      // 5. Venue lists (id map so list-item references can be remapped).
+      const listIdMap = new Map<string, string>();
+      for (const list of venueLists) {
+        if (!list?.id || !list?.name) continue;
+        const result = await client.query(
+          `INSERT INTO venue_lists (id, user_id, name, created_at, updated_at)
+           VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
+           ON CONFLICT (id) DO NOTHING`,
+          [list.id, user_id, list.name, list.created_at || null, list.updated_at || null]
+        );
+        if (result.rows.length > 0) listIdMap.set(String(list.id), result.rows[0].id);
+      }
+      for (const li of venueListItems) {
+        if (!li?.list_id || !li?.venue_id) continue;
+        const localListId = listIdMap.get(String(li.list_id));
+        if (!localListId) continue;
+        await client.query(
+          `INSERT INTO venue_list_items (list_id, venue_id, position, added_at)
+           VALUES ($1, $2, COALESCE($3::int, 0), COALESCE($4::timestamptz, NOW()))
+           ON CONFLICT (list_id, venue_id) DO NOTHING`,
+          [localListId, li.venue_id, li.position ?? 0, li.added_at || null]
+        );
+      }
+
       return inserted;
     } finally {
       if (ownsClient) client.release();
@@ -2164,6 +2641,9 @@ export const server: CheckinTypeServerPlugin = {
       checkins: asArray<Record<string, unknown>>(data.checkins),
       venues: asArray<Record<string, unknown>>(data.venues),
       venueCategories: asArray<Record<string, unknown>>(data.venueCategories),
+      checkinCompanions: asArray<Record<string, unknown>>(data.checkinCompanions),
+      venueLists: asArray<Record<string, unknown>>(data.venueLists),
+      venueListItems: asArray<Record<string, unknown>>(data.venueListItems),
     };
 
     // backupImport handles the full FK-ordered insert and returns the number
@@ -2198,10 +2678,22 @@ export const server: CheckinTypeServerPlugin = {
       [user_id]
     );
 
+    // Companions cascade on check-in delete; removed explicitly for clarity.
+    await run(
+      `DELETE FROM checkin_companions
+       WHERE checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
+      [user_id]
+    );
+
     const result = await run(
       'DELETE FROM checkins WHERE user_id = $1 RETURNING id',
       [user_id]
     );
+
+    // The user's venue lists (memberships cascade). Venues themselves are
+    // shared reference data and are kept.
+    await run('DELETE FROM venue_lists WHERE user_id = $1', [user_id]);
+
     return result.rowCount ?? 0;
   },
 
