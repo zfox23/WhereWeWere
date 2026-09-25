@@ -1,7 +1,7 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import LocationCheckInForm from '../../ui/LocationCheckInForm';
 
 const apiMocks = vi.hoisted(() => ({
@@ -46,6 +46,10 @@ describe('LocationCheckInForm', () => {
       postal_code: null,
       country: null,
     });
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it('submits and calls onSuccess when pressing Shift+Enter in notes', async () => {

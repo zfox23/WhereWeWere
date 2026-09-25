@@ -227,14 +227,21 @@ describe('location plugin — plugin shape', () => {
 
 describe('location plugin — backup & cleanup hooks', () => {
   it('exports check-ins plus the venue tables they depend on', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ id: 'c1', venue_id: 'v1' }] }); // checkins
-    queryMock.mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Cafe' }] }); // venues
-    queryMock.mockResolvedValueOnce({ rows: [{ id: 'vc1', name: 'Cafe' }] }); // categories
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'c1', venue_id: 'v1' }] }) // checkins
+      .mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Cafe' }] }) // venues
+      .mockResolvedValueOnce({ rows: [{ id: 'vc1', name: 'Cafe' }] }) // categories
+      .mockResolvedValueOnce({ rows: [] }) // checkin companions
+      .mockResolvedValueOnce({ rows: [] }) // venue lists
+      .mockResolvedValueOnce({ rows: [] }); // venue list items
     const result = await server.backupExport!({ user_id: 'u1' } as any);
     expect(result).toEqual({
       checkins: [{ id: 'c1', venue_id: 'v1' }],
       venues: [{ id: 'v1', name: 'Cafe' }],
       venueCategories: [{ id: 'vc1', name: 'Cafe' }],
+      checkinCompanions: [],
+      venueLists: [],
+      venueListItems: [],
     });
     // The check-in query is scoped to the user and ordered by time.
     const [checkinsSql, checkinsValues] = queryMock.mock.calls[0];
@@ -275,11 +282,15 @@ describe('location plugin — backup & cleanup hooks', () => {
   });
 
   it('detaches scrobbles and deletes the user check-ins on start-over', async () => {
-    queryMock.mockResolvedValueOnce({ rowCount: 1 }); // scrobble detach
-    queryMock.mockResolvedValueOnce({ rowCount: 3 }); // checkin delete
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 1 }) // scrobble detach
+      .mockResolvedValueOnce({ rowCount: 1 }) // companion delete
+      .mockResolvedValueOnce({ rowCount: 3 }) // checkin delete
+      .mockResolvedValueOnce({ rowCount: 1 }); // venue-list delete
     expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(3);
     expect(queryMock.mock.calls[0][0]).toContain('DELETE FROM checkin_scrobbles');
-    expect(queryMock.mock.calls[1][0]).toContain('DELETE FROM checkins WHERE user_id = $1');
+    expect(queryMock.mock.calls[2][0]).toContain('DELETE FROM checkins WHERE user_id = $1');
+    expect(queryMock.mock.calls[3][0]).toContain('DELETE FROM venue_lists WHERE user_id = $1');
   });
 });
 

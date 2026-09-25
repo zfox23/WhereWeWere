@@ -10,9 +10,18 @@ vi.mock('../../../../client/src/api/client', () => ({
   },
 }));
 
+// Mirror the real endpoint's behavior: names are substring-filtered (case-
+// insensitively) by the query server-side.
+function setCompanionNames(names: string[]) {
+  companionNamesMock.mockImplementation(
+    (q?: string) =>
+      names.filter((n) => !q || n.toLowerCase().includes(q.toLowerCase())),
+  );
+}
+
 beforeEach(() => {
   companionNamesMock.mockReset();
-  companionNamesMock.mockResolvedValue([]);
+  setCompanionNames([]);
 });
 
 afterEach(() => {
@@ -45,7 +54,7 @@ describe('CompanionChipInput', () => {
   });
 
   it('autocompletes from previously-entered names after the debounce', async () => {
-    companionNamesMock.mockResolvedValue(['Ada', 'Adam', 'Grace']);
+    setCompanionNames(['Ada', 'Adam', 'Grace']);
     const { input } = renderInput({ value: [] });
     await userEvent.type(input, 'ad');
     await waitFor(() => expect(companionNamesMock).toHaveBeenCalledWith('ad', 50), { timeout: 1000 });
@@ -55,7 +64,7 @@ describe('CompanionChipInput', () => {
   });
 
   it('excludes already-selected names from suggestions (case-insensitive)', async () => {
-    companionNamesMock.mockResolvedValue(['ada', 'brian']);
+    setCompanionNames(['ada', 'brian']);
     renderInput({ value: ['Ada'] });
     const input = screen.getByLabelText('Here with (companion names)');
     await userEvent.type(input, 'a');

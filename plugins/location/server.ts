@@ -56,8 +56,10 @@ function addTimezone(row: any): any {
   return row;
 }
 
-async function inferVenueTimezone(venueId: string): Promise<string | null> {
-  const venueResult = await query(
+type QueryExecutor = { query: (sql: string, values?: any[]) => Promise<{ rows: any[] }> };
+
+async function inferVenueTimezone(venueId: string, executor: QueryExecutor = query as unknown as QueryExecutor): Promise<string | null> {
+  const venueResult = await executor.query(
     'SELECT latitude, longitude FROM venues WHERE id = $1',
     [venueId]
   );
@@ -363,7 +365,7 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id and venue_id are required' });
     }
 
-    const checkinTimezone = await inferVenueTimezone(venue_id);
+    const checkinTimezone = await inferVenueTimezone(venue_id, client);
 
     const result = await client.query(
       `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, rating)
@@ -397,7 +399,7 @@ router.post('/', async (req: Request, res: Response) => {
           `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, rating)
            VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6)
            RETURNING *`,
-          [user_id, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId), checkinRating]
+          [user_id, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId, client), checkinRating]
         );
         parent_checkin = parentResult.rows[0];
       }
@@ -1542,39 +1544,46 @@ venuesRouter.post('/', async (req: Request, res: Response) => {
 venuesRouter.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const {
-      name, category_id, address, city, state, country,
-      postal_code, latitude, longitude, osm_id,
-    } = req.body;
-    const hasRating = 'rating' in req.body;
+    const body = req.body;
+    const hasRating = 'rating' in body;
 
-    if (!name) return res.status(400).json({ error: 'name is required' });
-    if (latitude === undefined || longitude === undefined) {
-      return res.status(400).json({ error: 'latitude and longitude are required' });
+    // Partial-update semantics: only keys present in the body are updated.
+    // This lets callers (e.g. a rating-only save) change a single field.
+    if (body.name !== undefined && !body.name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const hasLat = body.latitude !== undefined;
+    const hasLng = body.longitude !== undefined;
+    if (hasLat !== hasLng) {
+      return res.status(400).json({ error: 'latitude and longitude must be provided together' });
     }
 
+    const setClauses: string[] = [];
+    const params: unknown[] = [id];
+    const push = (clause: string, value?: unknown) => {
+      params.push(value);
+      setClauses.push(clause.replace('$n', `$${params.length}`));
+    };
+
+    if (body.name !== undefined) push('name = $n', body.name);
+    for (const field of ['category_id', 'address', 'city', 'state', 'country', 'postal_code'] as const) {
+      if (body[field] !== undefined) push(`${field} = $n`, body[field] || null);
+    }
+    if (hasLat) {
+      push('latitude = $n', parseFloat(String(body.latitude)));
+      push('longitude = $n', parseFloat(String(body.longitude)));
+    }
+    if (body.osm_id !== undefined) push('osm_id = COALESCE($n, osm_id)', body.osm_id || null);
     // Rating uses explicit key presence so the client can clear it to unrated.
-    const ratingClause = hasRating ? ', rating = $11' : '';
-    const ratingParam = hasRating ? normalizeRating(req.body.rating) : null;
+    if (hasRating) push('rating = $n', normalizeRating(body.rating));
+    setClauses.push('updated_at = NOW()');
 
     const result = await query(
       `UPDATE venues
-       SET name         = $2,
-            category_id  = $3,
-            address      = $4,
-            city         = $5,
-            state        = $6,
-            country      = $7,
-            postal_code  = $8,
-            latitude     = $9,
-            longitude    = $10,
-            osm_id       = COALESCE($12, osm_id)${ratingClause},
-            updated_at   = NOW()
+       SET ${setClauses.join(', ')}
        WHERE id = $1
        RETURNING *`,
-      [id, name, category_id || null, address || null, city || null, state || null,
-       country || null, postal_code || null,
-       parseFloat(String(latitude)), parseFloat(String(longitude)), ratingParam, osm_id || null]
+      params
     );
 
     if (result.rows.length === 0) {
@@ -2600,27 +2609,24 @@ export const server: CheckinTypeServerPlugin = {
         );
       }
 
-      // 5. Venue lists (id map so list-item references can be remapped).
-      const listIdMap = new Map<string, string>();
+      // 5. Venue lists (payload ids are preserved by the insert, so list-item
+      //    references use them directly).
       for (const list of venueLists) {
         if (!list?.id || !list?.name) continue;
-        const result = await client.query(
+        await client.query(
           `INSERT INTO venue_lists (id, user_id, name, created_at, updated_at)
            VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
            ON CONFLICT (id) DO NOTHING`,
           [list.id, user_id, list.name, list.created_at || null, list.updated_at || null]
         );
-        if (result.rows.length > 0) listIdMap.set(String(list.id), result.rows[0].id);
       }
       for (const li of venueListItems) {
         if (!li?.list_id || !li?.venue_id) continue;
-        const localListId = listIdMap.get(String(li.list_id));
-        if (!localListId) continue;
         await client.query(
           `INSERT INTO venue_list_items (list_id, venue_id, position, added_at)
            VALUES ($1, $2, COALESCE($3::int, 0), COALESCE($4::timestamptz, NOW()))
            ON CONFLICT (list_id, venue_id) DO NOTHING`,
-          [localListId, li.venue_id, li.position ?? 0, li.added_at || null]
+          [li.list_id, li.venue_id, li.position ?? 0, li.added_at || null]
         );
       }
 

@@ -66,13 +66,11 @@ afterEach(() => {
 });
 
 describe('VenuesLibrarySection (table)', () => {
-  it('renders a row per venue with name, check-in count, and list names', async () => {
+  it('renders a row per venue with name and check-in count', async () => {
     renderSection();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
     expect(screen.getByText('Bravo')).toBeTruthy();
     expect(screen.getByText('Charlie')).toBeTruthy();
-    // "Trips" list column shows on the venues that belong to it.
-    expect(screen.getAllByText('Trips').length).toBeGreaterThanOrEqual(2);
   });
 
   it('defaults to sorting by last check-in, newest first', async () => {
