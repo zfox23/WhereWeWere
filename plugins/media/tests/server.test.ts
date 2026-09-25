@@ -110,6 +110,8 @@ describe('media plugin — plugin shape', () => {
       'tmdb_api_key',
       'tgdb_api_key',
       'hardcover_api_key',
+      'igdb_client_id',
+      'igdb_client_secret',
       'plex_usernames',
     ]);
     expect(server.legacySettingsKeys).toEqual([

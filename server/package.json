@@ -12,6 +12,7 @@
     "backfill:track-avg-speeds": "tsx ../plugins/tracks/scripts/backfill-track-avg-speeds.ts",
     "backfill:tgdb-external-urls": "tsx ../plugins/media/scripts/backfill-tgdb-external-urls.ts",
     "backfill:games-external-ids": "tsx ../plugins/media/scripts/backfill-games-external-ids.ts",
+    "backfill:games-to-igdb": "tsx ../plugins/media/scripts/backfill-games-to-igdb.ts",
     "import:games": "tsx ../plugins/media/scripts/import-games-csv.ts",
     "test": "vitest run",
     "test:watch": "vitest",
