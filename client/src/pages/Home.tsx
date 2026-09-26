@@ -8,6 +8,7 @@ import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/r
 import { PluginTimelineCard } from '../plugins/autoCard';
 import { plugins as pluginApi } from '../plugins/api';
 import Filters from '../components/filters/Filters';
+import { CompanionPhoto } from '../components/CompanionName';
 import { usePageTitle } from '../utils/pageTitle';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -555,14 +556,24 @@ export default function Home() {
   const grouped = dawarichUrl && !hasActiveFilters ? fillDateGaps(rawGrouped) : rawGrouped;
 
   // Build active filter pills for display
-  const filterPills: { label: string; key: string }[] = [];
+  const filterPills: { label: React.ReactNode; key: string }[] = [];
   if (venueId) {
     const locationItem = items.find(i => i.type === 'location');
     filterPills.push({ label: `Venue: ${locationItem?.venue_name || venueId}`, key: 'venue_id' });
   }
   if (category) filterPills.push({ label: `Category: ${category}`, key: 'category' });
   if (country) filterPills.push({ label: `Country: ${country}`, key: 'country' });
-  if (companion) filterPills.push({ label: `Companion: ${companion}`, key: 'companion' });
+  if (companion) {
+    filterPills.push({
+      label: (
+        <span className="inline-flex items-center gap-1">
+          <CompanionPhoto name={companion} size={14} />
+          Companion: {companion}
+        </span>
+      ),
+      key: 'companion',
+    });
+  }
   if (fromDate && toDate && fromDate === toDate) {
     filterPills.push({ label: `Date: ${fromDate}`, key: 'from' });
   } else {

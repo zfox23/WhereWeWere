@@ -67,6 +67,9 @@ export const companions = {
       method: 'DELETE',
       body: JSON.stringify({ name }),
     }),
+  // Featured Immich photo for a name (img src; 404 when Immich is disabled
+  // or no matching person exists — server caches lookups on disk).
+  photoUrl: (name: string) => `${API_BASE}/immich/person-photo?name=${encodeURIComponent(name)}`,
 };
 
 // Venues

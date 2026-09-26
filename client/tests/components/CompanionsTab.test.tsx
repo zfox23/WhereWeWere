@@ -5,10 +5,14 @@ import { CompanionsTab } from '../../src/components/CompanionsTab';
 import type { CompanionSummary } from '../../src/types';
 
 const listMock = vi.fn();
+const settingsGetMock = vi.fn();
 vi.mock('../../src/api/client', () => ({
   companions: {
     list: () => listMock(),
+    photoUrl: (name: string) => `/api/v1/immich/person-photo?name=${encodeURIComponent(name)}`,
   },
+  // No immich_* keys by default → companion photos stay hidden.
+  settings: { get: () => settingsGetMock() },
 }));
 
 const rows: CompanionSummary[] = [
@@ -34,6 +38,8 @@ function ariaSortOf(headerLabel: string): string {
 beforeEach(() => {
   listMock.mockReset();
   listMock.mockResolvedValue(rows);
+  settingsGetMock.mockReset();
+  settingsGetMock.mockResolvedValue({});
 });
 
 afterEach(() => {

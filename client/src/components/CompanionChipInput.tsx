@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { companions } from '../api/client';
+import { CompanionPhoto } from './CompanionName';
 
 interface CompanionChipInputProps {
   /** Currently selected companion names. */
@@ -133,6 +134,7 @@ export default function CompanionChipInput({ value, onChange, disabled = false }
             key={`${name}-${i}`}
             className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-700"
           >
+            <CompanionPhoto name={name} size={14} />
             {name}
             <button
               type="button"
@@ -181,7 +183,10 @@ export default function CompanionChipInput({ value, onChange, disabled = false }
                     : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                 }`}
               >
-                {name}
+                <span className="inline-flex items-center gap-2">
+                  <CompanionPhoto name={name} size={16} />
+                  {name}
+                </span>
               </button>
             </li>
           ))}

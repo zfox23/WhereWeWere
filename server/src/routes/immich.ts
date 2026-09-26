@@ -1,10 +1,18 @@
 import { Router, Request, Response } from 'express';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { query } from '../db';
 import { pluginTimestampUnion } from '../plugins/registry';
+import { config } from '../config';
 
 const router = Router();
 
 import { DEFAULT_USER_ID as USER_ID } from '../constants';
+
+// Person-photo disk cache: a featured person photo rarely changes, so keep it
+// for a day; a "no such person" miss is re-checked after an hour.
+const PERSON_PHOTO_TTL_MS = 24 * 60 * 60 * 1000;
+const PERSON_MISS_TTL_MS = 60 * 60 * 1000;
 
 async function getImmichSettings(): Promise<{ url: string; apiKey: string } | null> {
   const result = await query(
@@ -215,6 +223,128 @@ router.get('/thumbnail/:assetId', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error proxying Immich thumbnail:', err);
     res.status(500).send('Failed to fetch thumbnail');
+  }
+});
+
+// --- Person (companion) featured photos -------------------------------------
+
+interface PersonPhotoMeta {
+  found: boolean;
+  personId?: string;
+  contentType?: string;
+  /** Cache file name (relative to the cache dir), present when found. */
+  file?: string;
+  fetchedAt: number;
+}
+
+function personCachePath(name: string): { dir: string; meta: string } {
+  const slug =
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'unknown';
+  const dir = path.join(config.dataDir, 'cache', 'immich-people');
+  return { dir, meta: path.join(dir, `${slug}.json`) };
+}
+
+function photoExt(contentType: string | null): string {
+  switch (contentType) {
+    case 'image/png': return 'png';
+    case 'image/webp': return 'webp';
+    case 'image/gif': return 'gif';
+    default: return 'jpg';
+  }
+}
+
+async function readPersonMeta(metaPath: string): Promise<PersonPhotoMeta | null> {
+  try {
+    return JSON.parse(await fs.readFile(metaPath, 'utf8')) as PersonPhotoMeta;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * GET /person-photo?name=John%20Doe — the featured photo of the first Immich
+ * person matching the name (used next to companion names). Disk-cached under
+ * `<dataDir>/cache/immich-people/`; the browser is told to cache it for an
+ * hour so re-renders don't even reach the server.
+ */
+router.get('/person-photo', async (req: Request, res: Response) => {
+  const name = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+  if (!name) return res.status(400).send('Missing name');
+
+  const immich = await getImmichSettings();
+  if (!immich) return res.status(404).send('Immich not configured');
+
+  const { dir, meta: metaPath } = personCachePath(name);
+  const now = Date.now();
+
+  try {
+    // Serve from the disk cache while it is fresh.
+    const meta = await readPersonMeta(metaPath);
+    if (meta && now - meta.fetchedAt < (meta.found ? PERSON_PHOTO_TTL_MS : PERSON_MISS_TTL_MS)) {
+      if (meta.found && meta.file) {
+        try {
+          const img = await fs.readFile(path.join(dir, meta.file));
+          res.setHeader('Content-Type', meta.contentType || 'image/jpeg');
+          res.setHeader('Cache-Control', 'public, max-age=3600');
+          return res.send(img);
+        } catch {
+          // Cache image vanished (e.g. data dir wiped) — fall through and refetch.
+        }
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        return res.status(404).send('Person not found');
+      }
+    }
+
+    // 1. Search for the person by name to get their ID.
+    const search = await fetch(
+      `${immich.url}/api/search/person?name=${encodeURIComponent(name)}`,
+      { headers: { 'x-api-key': immich.apiKey } }
+    );
+    if (!search.ok) {
+      console.error('Immich person search failed:', search.status);
+      return res.status(502).send('Immich person search failed');
+    }
+    const people = (await search.json()) as { id: string; name: string }[];
+
+    await fs.mkdir(dir, { recursive: true });
+    if (!people || people.length === 0) {
+      // Negative cache so absent people don't hit Immich on every render.
+      await fs.writeFile(metaPath, JSON.stringify({ found: false, fetchedAt: now } satisfies PersonPhotoMeta));
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.status(404).send('Person not found');
+    }
+
+    // 2. Fetch the person's featured thumbnail.
+    const personId = people[0].id;
+    const thumb = await fetch(`${immich.url}/api/people/${personId}/thumbnail`, {
+      headers: { 'x-api-key': immich.apiKey },
+    });
+    if (!thumb.ok) {
+      console.error('Immich person thumbnail failed:', thumb.status);
+      return res.status(502).send('Failed to fetch person photo');
+    }
+    const contentType = thumb.headers.get('content-type') || 'image/jpeg';
+    const buf = Buffer.from(await thumb.arrayBuffer());
+
+    const file = `person-${photoExt(contentType)}`;
+    await fs.writeFile(path.join(dir, file), buf);
+    await fs.writeFile(
+      metaPath,
+      JSON.stringify({ found: true, personId, contentType, file, fetchedAt: now } satisfies PersonPhotoMeta)
+    );
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buf);
+  } catch (err) {
+    console.error('Error fetching person photo:', err);
+    res.status(502).send('Failed to fetch person photo');
   }
 });
 

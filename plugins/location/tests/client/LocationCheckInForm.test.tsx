@@ -21,7 +21,10 @@ vi.mock('../../../../client/src/api/client', () => ({
   },
   companions: {
     names: apiMocks.companionsNames,
+    photoUrl: (name: string) => `/api/v1/immich/person-photo?name=${encodeURIComponent(name)}`,
   },
+  // No immich_* keys → companion photos stay hidden.
+  settings: { get: () => Promise.resolve({}) },
   venues: {
     get: apiMocks.venuesGet,
     delete: apiMocks.venuesDelete,

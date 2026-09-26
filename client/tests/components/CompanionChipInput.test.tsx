@@ -4,10 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanionChipInput from '../../src/components/CompanionChipInput';
 
 const companionNamesMock = vi.fn();
+const settingsGetMock = vi.fn();
 vi.mock('../../src/api/client', () => ({
   companions: {
     names: (...args: unknown[]) => companionNamesMock(...args),
+    photoUrl: (name: string) => `/api/v1/immich/person-photo?name=${encodeURIComponent(name)}`,
   },
+  // No immich_* keys by default → companion photos stay hidden.
+  settings: { get: () => settingsGetMock() },
 }));
 
 // Mirror the real endpoint's behavior: names are substring-filtered (case-
@@ -22,6 +26,8 @@ function setCompanionNames(names: string[]) {
 beforeEach(() => {
   companionNamesMock.mockReset();
   setCompanionNames([]);
+  settingsGetMock.mockReset();
+  settingsGetMock.mockResolvedValue({});
 });
 
 afterEach(() => {

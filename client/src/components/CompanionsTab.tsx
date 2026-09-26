@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Check, ChevronsUpDown, Loader2, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import { companions as companionsApi } from '../api/client';
 import { formatDate } from '../utils/checkin';
+import { CompanionName } from './CompanionName';
 import type { CompanionSummary } from '../types';
 
 function errorMessage(err: unknown): string {
@@ -256,7 +257,7 @@ export function CompanionsTab() {
                         className="w-full px-2 py-1 bg-white/70 dark:bg-gray-900/70 border border-primary-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-gray-100"
                       />
                     ) : (
-                      <span className="font-medium text-gray-800 dark:text-gray-200">{row.name}</span>
+                      <CompanionName name={row.name} className="font-medium text-gray-800 dark:text-gray-200" />
                     )}
                   </td>
                   {!isEditing && (
