@@ -15,6 +15,7 @@
     "backfill:games-to-igdb": "tsx ../plugins/media/scripts/backfill-games-to-igdb.ts",
     "import:games": "tsx ../plugins/media/scripts/import-games-csv.ts",
     "import:ride-ratings": "tsx ../plugins/location/scripts/import-ride-ratings.ts",
+    "import:ride-log": "tsx ../plugins/location/scripts/import-ride-log.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
