@@ -21,7 +21,8 @@
     "src/**/*",
     "../plugins/**/server.ts",
     "../plugins/**/manifest.ts",
-    "../plugins/media/scripts/backfill-games-to-igdb.ts"
+    "../plugins/media/scripts/backfill-games-to-igdb.ts",
+    "../plugins/location/scripts/import-ride-ratings.ts"
   ],
   "exclude": [
     "node_modules",

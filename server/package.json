@@ -14,6 +14,7 @@
     "backfill:games-external-ids": "tsx ../plugins/media/scripts/backfill-games-external-ids.ts",
     "backfill:games-to-igdb": "tsx ../plugins/media/scripts/backfill-games-to-igdb.ts",
     "import:games": "tsx ../plugins/media/scripts/import-games-csv.ts",
+    "import:ride-ratings": "tsx ../plugins/location/scripts/import-ride-ratings.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

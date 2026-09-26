@@ -53,7 +53,8 @@ export function MediaReflectionCard({ item }: PluginReflectionCardProps) {
 
   return (
     <div className="text-xs space-y-0">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1">
+        <Clapperboard size={13} className="shrink-0 text-violet-600 dark:text-violet-400 transition-colors" />
         {checkinLabel ? (
           <span className="font-semibold text-violet-700 dark:text-violet-300">{checkinLabel}</span>
         ) : null}
@@ -64,13 +65,11 @@ export function MediaReflectionCard({ item }: PluginReflectionCardProps) {
             rel="noopener noreferrer"
             className="font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 transition-colors inline-flex items-center gap-1"
           >
-            <Clapperboard size={13} className="shrink-0" />
             {title}
             {episodeSuffix ? <span className="text-gray-500 dark:text-gray-400 font-normal">{episodeSuffix}</span> : null}
           </Link>
         ) : (
           <span className="font-medium text-violet-600 dark:text-violet-400 inline-flex items-center gap-1">
-            <Clapperboard size={13} className="shrink-0" />
             {title}
             {episodeSuffix ? <span className="text-gray-500 dark:text-gray-400 font-normal">{episodeSuffix}</span> : null}
           </span>

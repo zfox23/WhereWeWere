@@ -1,0 +1,32 @@
+# Package Managers & Dependencies
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lockb
+
+# Build Outputs & Framework Caches
+.next/
+out/
+build/
+dist/
+.vercel/
+.turbo/
+
+# Static Assets & Media
+public/
+*.svg
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.ico
+
+# Version Control & Secrets
+.git/
+.env*
+*.log
+
+# Types & Caches
+*.tsbuildinfo
+next-env.d.ts
