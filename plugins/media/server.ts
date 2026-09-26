@@ -331,7 +331,7 @@ interface SearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
-  /** Game: TGDB synopsis. */
+  /** Game: provider synopsis (IGDB/TGDB). */
   overview: string | null;
   /** Game: ESRB-style content rating, e.g. "E - Everyone". */
   content_rating: string | null;
@@ -682,7 +682,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     if (platform !== undefined && mediaType === 'game') {
       add('platform', platform ? String(platform).trim() || null : null);
     }
-    // TGDB-sourced game metadata (sync applies these; also editable directly).
+    // Provider-sourced game metadata (sync applies these; also editable directly).
     if (mediaType === 'game') {
       if (overview !== undefined) add('overview', overview ? String(overview).trim() || null : null);
       if (content_rating !== undefined) add('content_rating', content_rating ? String(content_rating).trim() || null : null);
@@ -803,11 +803,11 @@ router.put('/items/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * Re-key a local-only game by title: find a strict TGDB title match (exact or
+ * Re-key a local-only game by title: find a strict title match (exact or
  * edition qualifier) that no other local row already owns, and adopt its id +
- * metadata in place. This is what makes Yamtrack-imported games (which store
- * no external id) self-heal on their first sync. Returns the adopted TGDB
- * record, or null when no usable match exists.
+ * metadata in place — IGDB first (primary), then TGDB. This is what makes
+ * Yamtrack-imported games (which store no external id) self-heal on their
+ * first sync. Returns the adopted record, or null when no usable match exists.
  */
 /**
  * Resolve a game to an IGDB id by title (primary re-key path). searchCandidates
@@ -1033,7 +1033,8 @@ router.post('/items/:id/sync', async (req: Request, res: Response) => {
     if (!item.external_id) {
       if (item.media_type === 'game') {
         // Local-only games (e.g. imported from Yamtrack, whose IGDB ids we
-        // must not store) self-heal: resolve them by title against TGDB.
+        // must not store) self-heal: resolve them by title against a game
+        // provider (IGDB first, then TGDB).
         const match = await rekeyGameByTitle(item.id, item.title, item.platform);
         if (!match) {
           return res.status(404).json({ error: 'Could not find this game in a game database by title (it may be missing from the database).' });

@@ -20,7 +20,8 @@
   "include": [
     "src/**/*",
     "../plugins/**/server.ts",
-    "../plugins/**/manifest.ts"
+    "../plugins/**/manifest.ts",
+    "../plugins/media/scripts/backfill-games-to-igdb.ts"
   ],
   "exclude": [
     "node_modules",

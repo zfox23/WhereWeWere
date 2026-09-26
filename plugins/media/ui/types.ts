@@ -11,7 +11,7 @@ import type { MediaSubtype } from '../../../client/src/types';
 export interface MediaItem {
   id: string;
   media_type: MediaSubtype;
-  external_source: 'tmdb' | 'tgdb' | 'hardcover' | null;
+  external_source: 'tmdb' | 'tgdb' | 'igdb' | 'hardcover' | null;
   external_id: string | null;
   title: string;
   author: string | null;
@@ -19,7 +19,7 @@ export interface MediaItem {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
-  /** Game: TGDB synopsis. */
+  /** Game: provider synopsis (IGDB/TGDB). */
   overview: string | null;
   /** Game: ESRB-style content rating, e.g. "E - Everyone". */
   content_rating: string | null;
@@ -27,11 +27,11 @@ export interface MediaItem {
   players: number | null;
   /** Game: co-op support ("Yes"/"No"). */
   coop: string | null;
-  /** Game: genre names from TGDB. */
+  /** Game: genre names from the provider. */
   genres: string[] | null;
-  /** Game: developer names from TGDB. */
+  /** Game: developer names from the provider. */
   developers: string[] | null;
-  /** Game: publisher names from TGDB. */
+  /** Game: publisher names from the provider. */
   publishers: string[] | null;
   /** Book: page count of the default physical edition. */
   page_count: number | null;
@@ -60,8 +60,8 @@ export interface MediaItem {
 }
 
 export interface MediaSearchHit {
-  source: 'local' | 'tmdb' | 'tgdb' | 'hardcover';
-  external_source: 'tmdb' | 'tgdb' | 'hardcover' | null;
+  source: 'local' | 'tmdb' | 'tgdb' | 'igdb' | 'hardcover';
+  external_source: 'tmdb' | 'tgdb' | 'igdb' | 'hardcover' | null;
   external_id: string | null;
   title: string;
   author: string | null;
@@ -69,7 +69,7 @@ export interface MediaSearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
-  /** Game: TGDB synopsis. */
+  /** Game: provider synopsis (IGDB/TGDB). */
   overview: string | null;
   /** Game: ESRB-style content rating, e.g. "E - Everyone". */
   content_rating: string | null;
@@ -77,11 +77,11 @@ export interface MediaSearchHit {
   players: number | null;
   /** Game: co-op support ("Yes"/"No"). */
   coop: string | null;
-  /** Game: genre names from TGDB. */
+  /** Game: genre names from the provider. */
   genres: string[] | null;
-  /** Game: developer names from TGDB. */
+  /** Game: developer names from the provider. */
   developers: string[] | null;
-  /** Game: publisher names from TGDB. */
+  /** Game: publisher names from the provider. */
   publishers: string[] | null;
   /** Book: page count of the default physical edition. */
   page_count: number | null;

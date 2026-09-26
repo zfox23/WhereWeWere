@@ -11,7 +11,7 @@ import Stars from '../../../../client/src/components/Stars';
 import ScorePicker from '../../../../client/src/components/ScorePicker';
 import { MarkdownNote } from '../../../../client/src/components/checkin-card/MarkdownNote';
 import {
-  MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, dateInTimezone, formatCheckinDate, formatTimePlayed,
+  MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, providerNameForItem, dateInTimezone, formatCheckinDate, formatTimePlayed,
   isoToDatetimeValue, datetimeValueToIso,
 } from '../../utils/media';
 import CompanionChipInput from '../../../../client/src/components/CompanionChipInput';
@@ -62,7 +62,7 @@ interface ItemEditDraft {
   time_hours: string;
   time_minutes: string;
   status: string;
-  /** Games only: TGDB-sourced metadata (directly editable). */
+  /** Games only: provider-sourced metadata (IGDB/TGDB; directly editable). */
   overview: string;
   content_rating: string;
   players: string;
@@ -125,6 +125,11 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
   const [error, setError] = useState<string | null>(null);
   const [highlightedCheckinId, setHighlightedCheckinId] = useState<string | null>(null);
   const location = useLocation();
+
+  // Provider label for this item: games are labeled by their own source
+  // (IGDB is primary; rows still keyed to TGDB stay TGDB), other types use
+  // the subtype's primary API.
+  const providerName = providerNameForItem(subtype, item?.external_source, config.apiName);
 
   // The back button restores the page the user came from. Library cards pass
   // the library's current filter URL as `mediaFrom` in navigation state, so
@@ -439,7 +444,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       const total = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
       payload.time_played_minutes = total > 0 ? total : null;
       payload.status = d.status || null;
-      // TGDB-sourced metadata (comma-separated lists → string arrays; empty → null).
+      // Provider-sourced game metadata (comma-separated lists → string arrays; empty → null).
       payload.overview = d.overview.trim() || null;
       payload.content_rating = d.content_rating.trim() || null;
       const players = d.players.trim() === '' ? null : parseInt(d.players, 10);
@@ -794,7 +799,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                 {subtype === 'game' && (
                   <div className="sm:col-span-2 border-t border-gray-200 dark:border-gray-700 pt-2.5 mt-1">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">
-                      About the game <span className="normal-case font-normal">(from {config.apiName}, editable)</span>
+                      About the game <span className="normal-case font-normal">(from {providerName}, editable)</span>
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <label className="block sm:col-span-2">
@@ -945,19 +950,19 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                 {subtype !== 'board_game' && (
                   <label className="block sm:col-span-2">
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                      {config.apiName} ID
+                      {providerName} ID
                       <span className="font-normal text-gray-400">
                         {' — '}
                         {subtype === 'game'
                           ? 'optional — sync finds the game by title when this is empty'
-                          : `set this to enable syncing metadata from ${config.apiName}`}
+                          : `set this to enable syncing metadata from ${providerName}`}
                       </span>
                     </span>
                     <input
                       type="text"
                       value={itemDraft.external_id}
                       onChange={(e) => patchItemDraft({ external_id: e.target.value })}
-                      placeholder={item.external_id ? item.external_id : `e.g. ${config.apiName} ID`}
+                      placeholder={item.external_id ? item.external_id : `e.g. ${providerName} ID`}
                       className="input text-sm mt-0.5 font-mono text-xs"
                     />
                   </label>
@@ -985,7 +990,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                     title="Fetch the latest metadata from the provider and review the changes"
                   >
                     {syncing ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : <RefreshCw size={15} className="mr-1.5" />}
-                    Sync metadata from {config.apiName}
+                    Sync metadata from {providerName}
                   </button>
                 )}
               </div>
@@ -1034,7 +1039,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                   </span>
                 )}
               </div>
-              {/* Game metadata from TGDB (display-only; edited via provider sync) */}
+              {/* Game metadata from the provider (display-only; edited via provider sync) */}
               {subtype === 'game' && (item.overview || item.content_rating || item.players != null || item.coop || item.genres?.length || item.developers?.length || item.publishers?.length) && (
                 <div className="mt-3 space-y-2">
                   {item.genres && item.genres.length > 0 && (
@@ -1087,7 +1092,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline mt-2"
                 >
-                  View on {config.apiName || 'web'} <ExternalLink size={11} />
+                  View on {providerName || 'web'} <ExternalLink size={11} />
                 </a>
               )}
               <div className="flex items-center gap-3 mt-auto pt-4">
@@ -1110,7 +1115,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
         <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-primary-200 dark:border-primary-800/40 shadow-sm shadow-black/3 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              Proposed changes from {config.apiName}
+              Proposed changes from {providerName}
             </h2>
             <button
               onClick={acceptAllDiff}

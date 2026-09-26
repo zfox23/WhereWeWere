@@ -254,6 +254,27 @@ describe('MediaDetail (game)', () => {
     expect(labels).not.toContain('Platform');
     expect(labels).not.toContain('Title');
   });
+
+  it('labels the provider by the item source: IGDB for igdb-sourced games', async () => {
+    const user = userEvent.setup();
+    syncItemMock.mockResolvedValue({ provider: 'IGDB', found: true, metadata: {} });
+    getItemMock.mockResolvedValue(
+      gameItem({
+        external_source: 'igdb',
+        external_id: '1942',
+        external_url: 'https://www.igdb.com/games/halo',
+        title: 'Halo',
+      })
+    );
+    renderDetail();
+    await waitFor(() => expect(screen.getByText('Halo')).toBeTruthy());
+
+    await user.click(screen.getByTitle('Edit metadata'));
+    // The sync button reflects the item's own source, not the primary provider.
+    await user.click(screen.getByRole('button', { name: 'Sync metadata from IGDB' }));
+
+    await screen.findByText('Metadata from IGDB is already up to date.');
+  });
 });
 
 describe('MediaDetail back button', () => {

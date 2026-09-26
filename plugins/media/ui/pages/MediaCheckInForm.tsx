@@ -6,7 +6,7 @@ import type { MediaItem } from '../types';
 import type { MediaSubtype } from '../../../../client/src/types';
 import ScorePicker from '../../../../client/src/components/ScorePicker';
 import CompanionChipInput from '../../../../client/src/components/CompanionChipInput';
-import { MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, detailPath } from '../../utils/media';
+import { MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, detailPath, providerNameForItem } from '../../utils/media';
 import { deviceTimezone, nowLocalDatetimeValue, localDatetimeToIso, slugify } from '../../../../client/src/utils/slugify';
 import { usePageTitle } from '../../../../client/src/utils/pageTitle';
 
@@ -147,7 +147,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
               rel="noreferrer"
               className="inline-block mt-2 text-xs text-primary-600 hover:underline"
             >
-              View on {config.apiName} →
+              View on {providerNameForItem(config.subtype, item.external_source, config.apiName)} →
             </a>
           )}
         </div>

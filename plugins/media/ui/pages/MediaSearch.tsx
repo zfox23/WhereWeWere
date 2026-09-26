@@ -138,7 +138,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
       {degraded && results && (
         <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
           <AlertTriangle size={14} />
-          {config.apiName ? `${config.apiName} search unavailable (check your API key in Settings → Integrations); showing local results only.` : 'Local results only.'}
+          {config.apiName ? `${config.apiName} search unavailable (check your API keys in Settings → Media); showing local results only.` : 'Local results only.'}
         </div>
       )}
       {searchError && (
