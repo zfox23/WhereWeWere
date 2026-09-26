@@ -131,7 +131,7 @@ export default function MediaCard({ item, compact = false }: MediaCardProps) {
           {item.companions && item.companions.length > 0 && (
             <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
               <Users size={13} className="text-gray-400 shrink-0" />
-              <span>Here with {item.companions.join(', ')}</span>
+              <span>{item.companions.join(', ')}</span>
             </p>
           )}
           {item.notes && (

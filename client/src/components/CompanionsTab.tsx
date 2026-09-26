@@ -124,11 +124,6 @@ export function CompanionsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-        <Users size={16} />
-        Everyone you&apos;ve checked in with. Click a check-in count to see those check-ins.
-      </div>
-
       <form
         onSubmit={addRow}
         className="flex gap-2 bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4"

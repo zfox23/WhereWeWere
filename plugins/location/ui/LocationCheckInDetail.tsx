@@ -188,7 +188,7 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
           <div className="flex items-start gap-1.5 text-sm text-gray-700 dark:text-gray-300">
             <Users size={15} className="text-gray-400 shrink-0 mt-0.5" />
             <span>
-              <span className="font-medium">Here with:</span> {checkin.companions.join(', ')}
+              {checkin.companions.join(', ')}
             </span>
           </div>
         )}

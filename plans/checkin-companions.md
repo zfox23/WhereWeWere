@@ -12,7 +12,7 @@ Two related changes:
    endpoint, and a shared client chip-input component.
 2. **Add companions to Media check-ins**, matching the Location integration:
    chip input on the check-in form, display + edit on the detail page, and
-   "Here with …" on the timeline card.
+   companion names on the timeline card.
 
 ## 2. Core storage (migration `048_companions.sql`)
 

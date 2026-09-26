@@ -109,7 +109,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
             <p className="mt-1.5 flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
               <Users size={14} className="text-gray-400 shrink-0" />
               <span>
-                Here with {checkin.companions.join(', ')}
+                {checkin.companions.join(', ')}
               </span>
             </p>
           )}

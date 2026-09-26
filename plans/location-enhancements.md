@@ -208,7 +208,7 @@ Reuse the same `pool` transaction pattern as
 ### Display
 - [`LocationCard.tsx`](plugins/location/ui/LocationCard.tsx): show a
   [`Stars`](client/src/components/Stars.tsx) (when `checkin.rating`) and a
-  "Here with …" line (comma-joined `checkin.companions`) when present.
+  companion names line (comma-joined `checkin.companions`) when present.
 - [`LocationCheckInDetail.tsx`](plugins/location/ui/LocationCheckInDetail.tsx):
   same display (rating + companions) in the main card. The detail page fetches
   the single check-in, so it already gets `companions` from `GET /:id`.
