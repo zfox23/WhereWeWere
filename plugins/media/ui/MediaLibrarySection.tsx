@@ -31,6 +31,28 @@ function getSelectedTypesFromLocation(): MediaSubtype[] {
   return parsed.length > 0 ? parsed : MEDIA_SUBTYPE_LIST;
 }
 
+interface LibraryUrlState {
+  selectedTypes: MediaSubtype[];
+  sortBy: SortKey;
+  sortDir: SortDir;
+  filterQuery: string;
+  selectedListId: string | null;
+}
+
+/** Read the library's filter state from the URL, falling back to defaults. */
+function getLibraryStateFromLocation(): LibraryUrlState {
+  const params = new URLSearchParams(window.location.search);
+  const sort = params.get('sort');
+  const dir = params.get('dir');
+  return {
+    selectedTypes: getSelectedTypesFromLocation(),
+    sortBy: SORT_OPTIONS.some((o) => o.value === sort) ? (sort as SortKey) : DEFAULT_SORT,
+    sortDir: dir === 'asc' || dir === 'desc' ? dir : DEFAULT_DIR,
+    filterQuery: params.get('q') ?? '',
+    selectedListId: params.get('list'),
+  };
+}
+
 interface MediaLibrarySectionProps {
   from: string;
   to: string;
@@ -38,6 +60,9 @@ interface MediaLibrarySectionProps {
 
 type SortKey = 'rating' | 'checkin' | 'completed' | 'time_played' | 'list';
 type SortDir = 'asc' | 'desc';
+
+const DEFAULT_SORT: SortKey = 'checkin';
+const DEFAULT_DIR: SortDir = 'desc';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'checkin', label: 'Last check-in' },
@@ -63,15 +88,16 @@ function sortValue(item: MediaLibraryItem, key: SortKey, addedAtById?: Map<strin
 }
 
 export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
-  const [selectedTypes, setSelectedTypes] = useState<MediaSubtype[]>(getSelectedTypesFromLocation);
+  const [initialState] = useState<LibraryUrlState>(getLibraryStateFromLocation);
+  const [selectedTypes, setSelectedTypes] = useState<MediaSubtype[]>(initialState.selectedTypes);
   const [items, setItems] = useState<MediaLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
-  const [sortBy, setSortBy] = useState<SortKey>('checkin');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [filterQuery, setFilterQuery] = useState('');
+  const [sortBy, setSortBy] = useState<SortKey>(initialState.sortBy);
+  const [sortDir, setSortDir] = useState<SortDir>(initialState.sortDir);
+  const [filterQuery, setFilterQuery] = useState(initialState.filterQuery);
   const [lists, setLists] = useState<MediaList[]>([]);
-  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  const [selectedListId, setSelectedListId] = useState<string | null>(initialState.selectedListId);
 
   // Batch edit mode: select multiple cards (shift-click for a range) and delete them.
   const [editMode, setEditMode] = useState(false);
@@ -124,7 +150,12 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   // Keep state in sync when the URL changes (back/forward navigation).
   useEffect(() => {
     const syncFromLocation = () => {
-      setSelectedTypes(getSelectedTypesFromLocation());
+      const next = getLibraryStateFromLocation();
+      setSelectedTypes(next.selectedTypes);
+      setSortBy(next.sortBy);
+      setSortDir(next.sortDir);
+      setFilterQuery(next.filterQuery);
+      setSelectedListId(next.selectedListId);
     };
     window.addEventListener('popstate', syncFromLocation);
     window.addEventListener('hashchange', syncFromLocation);
@@ -134,19 +165,44 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
     };
   }, []);
 
-  // Persist the type selection to the URL, matching the tab's replaceState pattern.
+  // Persist the library's filter state to the URL (matching the tab's
+  // replaceState pattern) so the view deep-links and the back button restores
+  // it. Only non-default values are written to keep the URL short.
   useEffect(() => {
     const url = new URL(window.location.href);
-    const current = url.searchParams.get('mediaTypes');
-    const next = selectedTypes.join(',');
-    if (current === next) return;
-    if (selectedTypes.length === MEDIA_SUBTYPE_LIST.length) {
-      url.searchParams.delete('mediaTypes');
-    } else {
-      url.searchParams.set('mediaTypes', next);
+    let changed = false;
+    const setOrDelete = (key: string, value: string, isDefault: boolean) => {
+      if (isDefault) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      } else if (url.searchParams.get(key) !== value) {
+        url.searchParams.set(key, value);
+        changed = true;
+      }
+    };
+    setOrDelete(
+      'mediaTypes',
+      selectedTypes.join(','),
+      selectedTypes.length === MEDIA_SUBTYPE_LIST.length,
+    );
+    setOrDelete('list', selectedListId ?? '', selectedListId === null);
+    setOrDelete('q', filterQuery, filterQuery === '');
+    setOrDelete('sort', sortBy, sortBy === DEFAULT_SORT);
+    setOrDelete('dir', sortDir, sortDir === DEFAULT_DIR);
+
+    if (changed) {
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     }
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [selectedTypes]);
+  }, [selectedTypes, selectedListId, filterQuery, sortBy, sortDir]);
+
+  // A deep link may reference a list that has since been deleted.
+  useEffect(() => {
+    if (selectedListId && lists.length > 0 && !lists.some((l) => l.id === selectedListId)) {
+      setSelectedListId(null);
+    }
+  }, [lists, selectedListId]);
 
   useEffect(() => {
     media
@@ -518,13 +574,10 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
           {visibleItems.map((item, index) => {
             const config = MEDIA_SUBTYPES[item.media_type] || MEDIA_SUBTYPES.movie;
             const href = `${config.detailBase}/${item.id}/${item.title ? slugify(item.title) : ''}`;
-            // Carry the library's current filter state (period + types) in
-            // navigation state so the detail page's back button can deep-link
-            // straight back to this view without bloating the URL.
+            // Carry the library's current filter URL in navigation state so
+            // the detail page's back button can deep-link straight back to
+            // this view. The URL-sync effect above keeps it current.
             const origin = new URL(window.location.href);
-            const allTypes = selectedTypes.length === MEDIA_SUBTYPE_LIST.length;
-            if (allTypes) origin.searchParams.delete('mediaTypes');
-            else origin.searchParams.set('mediaTypes', selectedTypes.join(','));
             const fromState = { mediaFrom: `${origin.pathname}${origin.search}` };
             const isSelected = selectedIds.has(item.id);
             const timePlayed = item.media_type === 'game' && item.time_played_minutes != null ? formatTimePlayed(item.time_played_minutes) : null;

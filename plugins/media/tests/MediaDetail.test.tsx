@@ -300,13 +300,13 @@ describe('MediaDetail back button', () => {
   it('deep-links back to the library with its filters via navigation state', async () => {
     renderBack({
       pathname: '/media/game/game-1',
-      state: { mediaFrom: '/profile?tab=media&mediaMonth=2026-09&mediaTypes=game' },
+      state: { mediaFrom: '/profile?tab=plugin:media&mediaMonth=2026-09&mediaTypes=game' },
     });
     await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
 
     await userEvent.click(screen.getByRole('button', { name: 'Games' }));
     await waitFor(() =>
-      expect(screen.getByText('media library?tab=media&mediaMonth=2026-09&mediaTypes=game')).toBeTruthy(),
+      expect(screen.getByText('media library?tab=plugin:media&mediaMonth=2026-09&mediaTypes=game')).toBeTruthy(),
     );
   });
 

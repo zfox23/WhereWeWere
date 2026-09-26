@@ -50,7 +50,7 @@ function DetailProbe() {
 
 function renderSection(props: { from?: string; to?: string } = {}) {
   return render(
-    <MemoryRouter initialEntries={['/profile?tab=media']}>
+    <MemoryRouter initialEntries={['/profile?tab=plugin:media']}>
       <Routes>
         <Route
           path="/profile"
@@ -76,7 +76,7 @@ beforeEach(() => {
   deleteListMock.mockResolvedValue({ message: 'deleted', id: 'list-1' });
   bulkDeleteItemsMock.mockReset();
   bulkDeleteItemsMock.mockResolvedValue({ deleted_items: 1, deleted_checkins: 1, deleted_list_memberships: 0 });
-  window.history.pushState({}, '', '/profile?tab=media');
+  window.history.pushState({}, '', '/profile?tab=plugin:media');
 });
 
 afterEach(() => {
@@ -103,19 +103,19 @@ describe('MediaLibrarySection', () => {
     // Bare detail href, but the click navigates with the library URL attached
     // so the detail page's back button can deep-link back to this view.
     await user.click(screen.getByRole('link', { name: /Dune/ }));
-    await waitFor(() => expect(screen.getByText('detail/profile?tab=media')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('detail/profile?tab=plugin:media')).toBeTruthy());
   });
 
   it('includes the active filters in the mediaFrom deep link', async () => {
     const user = userEvent.setup();
-    window.history.pushState({}, '', '/profile?tab=media&mediaMonth=2026-09&mediaTypes=game,book');
+    window.history.pushState({}, '', '/profile?tab=plugin:media&mediaMonth=2026-09&mediaTypes=game,book');
     renderSection();
     await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
 
     await user.click(screen.getByRole('link', { name: /Dune/ }));
     await waitFor(() =>
       expect(
-        screen.getByText('detail/profile?tab=media&mediaMonth=2026-09&mediaTypes=game%2Cbook'),
+        screen.getByText('detail/profile?tab=plugin:media&mediaMonth=2026-09&mediaTypes=game,book'),
       ).toBeTruthy(),
     );
   });
@@ -513,5 +513,105 @@ describe('MediaLibrarySection batch edit mode', () => {
     expect(deleteButton).toBeDisabled();
     await user.click(deleteButton);
     expect(bulkDeleteItemsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('URL deep linking', () => {
+  const listFixture = {
+    id: 'list-1',
+    name: 'Watchlist',
+    created_at: '2023-01-01T00:00:00Z',
+    items: [
+      { id: 'item-1', media_type: 'movie', title: 'Dune', image_url: null, author: null, added_at: '2023-05-01T00:00:00Z' },
+    ],
+  };
+
+  const listSelect = () => screen.getByRole('combobox', { name: 'Filter by list' }) as HTMLSelectElement;
+  const sortSelect = () => screen.getByRole('combobox', { name: 'Sort library by' }) as HTMLSelectElement;
+  const filterInput = () => screen.getByRole('searchbox', { name: 'Filter media library' }) as HTMLInputElement;
+
+  it('writes non-default list, filter, sort, and direction to the URL and omits defaults', async () => {
+    listsMock.mockResolvedValue([listFixture]);
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+
+    await user.selectOptions(listSelect(), 'list-1');
+    await user.type(filterInput(), 'dune');
+    await user.selectOptions(sortSelect(), 'rating');
+    await user.click(screen.getByRole('button', { name: 'Sort ascending' }));
+
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('list')).toBe('list-1');
+    expect(params.get('q')).toBe('dune');
+    expect(params.get('sort')).toBe('rating');
+    expect(params.get('dir')).toBe('asc');
+    // Defaults stay out of the URL so it stays short.
+    expect(params.get('mediaTypes')).toBeNull();
+    expect(params.get('tab')).toBe('plugin:media');
+  });
+
+  it('removes URL params when the corresponding state returns to defaults', async () => {
+    listsMock.mockResolvedValue([listFixture]);
+    window.history.pushState({}, '', '/profile?tab=plugin:media&list=list-1&q=dune&sort=rating&dir=asc');
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+
+    await user.selectOptions(listSelect(), '');
+    await user.clear(filterInput());
+    await user.selectOptions(sortSelect(), 'checkin');
+    await user.click(screen.getByRole('button', { name: 'Sort descending' }));
+
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('list')).toBeNull();
+    expect(params.get('q')).toBeNull();
+    expect(params.get('sort')).toBeNull();
+    expect(params.get('dir')).toBeNull();
+  });
+
+  it('restores list, filter, sort, direction, and types from the URL', async () => {
+    listsMock.mockResolvedValue([listFixture]);
+    window.history.pushState(
+      {}, '',
+      '/profile?tab=plugin:media&list=list-1&q=dune&sort=rating&dir=asc&mediaTypes=movie',
+    );
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+
+    expect(listSelect().value).toBe('list-1');
+    expect(filterInput().value).toBe('dune');
+    expect(sortSelect().value).toBe('rating');
+    // dir=asc means the toggle currently offers descending.
+    expect(screen.getByRole('button', { name: 'Sort descending' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Movies', pressed: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Games', pressed: false })).toBeTruthy();
+  });
+
+  it('syncs state from the URL on popstate (back button)', async () => {
+    listsMock.mockResolvedValue([listFixture]);
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+    expect(listSelect().value).toBe('');
+
+    window.history.pushState({}, '', '/profile?tab=plugin:media&list=list-1&sort=rating&dir=asc');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+
+    await waitFor(() => {
+      expect(listSelect().value).toBe('list-1');
+      expect(sortSelect().value).toBe('rating');
+      expect(screen.getByRole('button', { name: 'Sort descending' })).toBeTruthy();
+    });
+  });
+
+  it('ignores a deep-linked list id that no longer exists', async () => {
+    listsMock.mockResolvedValue([listFixture]);
+    window.history.pushState({}, '', '/profile?tab=plugin:media&list=deleted-list');
+    renderSection();
+    await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
+
+    await waitFor(() => expect(listSelect().value).toBe(''));
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('list')).toBeNull();
   });
 });

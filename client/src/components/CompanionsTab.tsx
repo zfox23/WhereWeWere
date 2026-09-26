@@ -8,8 +8,8 @@
  * an input at the top adds new names to the pool.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { Check, Loader2, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, Check, ChevronsUpDown, Loader2, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import { companions as companionsApi } from '../api/client';
 import { formatDate } from '../utils/checkin';
 import type { CompanionSummary } from '../types';
@@ -17,6 +17,9 @@ import type { CompanionSummary } from '../types';
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Something went wrong';
 }
+
+type SortKey = 'name' | 'checkin_count' | 'last_checkin_at';
+type SortDir = 'asc' | 'desc';
 
 export function CompanionsTab() {
   const [rows, setRows] = useState<CompanionSummary[] | null>(null);
@@ -28,6 +31,46 @@ export function CompanionsTab() {
 
   // Add-a-new-name draft.
   const [addValue, setAddValue] = useState('');
+
+  // Column sort state (client-side; first click sorts ascending, next toggles).
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  const toggleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    if (rows === null) return null;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case 'name':
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case 'checkin_count':
+          cmp = a.checkin_count - b.checkin_count;
+          break;
+        case 'last_checkin_at':
+          // Names without a check-in sort last regardless of direction.
+          if (a.last_checkin_at !== b.last_checkin_at) {
+            if (!a.last_checkin_at) return 1;
+            if (!b.last_checkin_at) return -1;
+          }
+          cmp = (a.last_checkin_at ?? '').localeCompare(b.last_checkin_at ?? '');
+          break;
+      }
+      if (cmp !== 0) return cmp * dir;
+      // Deterministic tiebreak.
+      return a.name.localeCompare(b.name);
+    });
+  }, [rows, sortKey, sortDir]);
 
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -114,7 +157,7 @@ export function CompanionsTab() {
     return <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>;
   }
 
-  if (rows === null) {
+  if (!sortedRows) {
     return (
       <div className="flex items-center justify-center py-10">
         <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
@@ -153,28 +196,53 @@ export function CompanionsTab() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-              <th className="px-4 py-3">Companion</th>
-              <th className="px-4 py-3 text-center">Check-ins</th>
-              <th className="px-4 py-3">Last check-in</th>
+              {([
+                ['name', 'Companion', ''],
+                ['checkin_count', 'Check-ins', 'text-center'],
+                ['last_checkin_at', 'Last check-in', ''],
+              ] as [SortKey, string, string][]).map(([key, label, align]) => (
+                <th
+                  key={key}
+                  scope="col"
+                  aria-sort={key === sortKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className={`px-4 py-3 ${align}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(key)}
+                    title={`Sort by ${label.toLowerCase()}`}
+                    className={`flex items-center gap-1 hover:text-gray-700 dark:hover:text-gray-200 ${align === 'text-center' ? 'mx-auto' : ''}`}
+                  >
+                    {label}
+                    {key === sortKey
+                      ? sortDir === 'asc'
+                        ? <ArrowUp size={12} className="text-primary-600 dark:text-primary-400" />
+                        : <ArrowDown size={12} className="text-primary-600 dark:text-primary-400" />
+                      : <ChevronsUpDown size={12} className="opacity-40" />}
+                  </button>
+                </th>
+              ))}
               <th className="px-4 py-3" aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
+            {sortedRows.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-gray-400 dark:text-gray-500 italic">
                   No companions yet. Add a name above or check in with someone.
                 </td>
               </tr>
             )}
-            {rows.map((row) => {
+            {sortedRows.map((row) => {
               const isEditing = editingName === row.name;
               return (
                 <tr
                   key={row.name}
                   className="border-b border-gray-100 dark:border-gray-800 last:border-b-0"
                 >
-                  <td className="px-4 py-2.5">
+                  {/* In edit mode the name field spans the first three columns —
+                      check-in count and last check-in date aren't directly editable. */}
+                  <td className="px-4 py-2.5" colSpan={isEditing ? 3 : undefined}>
                     {isEditing ? (
                       <input
                         type="text"
@@ -191,20 +259,24 @@ export function CompanionsTab() {
                       <span className="font-medium text-gray-800 dark:text-gray-200">{row.name}</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-center">
-                    <a
-                      href={`/?companion=${encodeURIComponent(row.name)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`View check-ins with ${row.name} (opens in a new tab)`}
-                      className="font-semibold text-primary-600 dark:text-primary-400 hover:underline tabular-nums"
-                    >
-                      {row.checkin_count}
-                    </a>
-                  </td>
-                  <td className="px-4 py-2.5 text-gray-600 dark:text-gray-300">
-                    {row.last_checkin_at ? formatDate(row.last_checkin_at) : <span className="text-gray-400 dark:text-gray-500">—</span>}
-                  </td>
+                  {!isEditing && (
+                    <td className="px-4 py-2.5 text-center">
+                      <a
+                        href={`/?companion=${encodeURIComponent(row.name)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`View check-ins with ${row.name} (opens in a new tab)`}
+                        className="font-semibold text-primary-600 dark:text-primary-400 hover:underline tabular-nums"
+                      >
+                        {row.checkin_count}
+                      </a>
+                    </td>
+                  )}
+                  {!isEditing && (
+                    <td className="px-4 py-2.5 text-gray-600 dark:text-gray-300">
+                      {row.last_checkin_at ? formatDate(row.last_checkin_at) : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-1">
                       {isEditing ? (

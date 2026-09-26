@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Loader2, ArrowLeft, ExternalLink, PlusCircle, ListPlus, Trash2, X, Calendar,
+  Loader2, ArrowLeft, ExternalLink, Plus, ListPlus, Trash2, X, Calendar,
   Pencil, Check, RefreshCw,
 } from 'lucide-react';
 import { media } from '../api';
@@ -1096,10 +1096,6 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                 </a>
               )}
               <div className="flex items-center gap-3 mt-auto pt-4">
-                <button onClick={handleAddToTimeline} className="btn-primary text-sm">
-                  <PlusCircle size={15} className="mr-1.5" />
-                  Add to Timeline
-                </button>
                 <button onClick={openListModal} className="btn-secondary text-sm">
                   <ListPlus size={15} className="mr-1.5" />
                   Add to List
@@ -1165,14 +1161,22 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
 
       {/* Check-ins table */}
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
             Check-ins ({checkins.length})
           </h2>
+          <button
+            onClick={handleAddToTimeline}
+            className="btn-secondary text-xs px-2 py-1"
+            title="Add to timeline"
+          >
+            <Plus size={12} className="mr-1" />
+            New
+          </button>
         </div>
         {checkins.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm text-gray-400">
-            No check-ins yet. Use “Add to Timeline” to record one.
+            No check-ins yet. Use “New” to record one.
           </div>
         ) : (
           <div className="overflow-x-auto">

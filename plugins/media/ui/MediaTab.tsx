@@ -90,8 +90,8 @@ export function MediaTab() {
     const url = new URL(window.location.href);
     let changed = false;
 
-    if (url.searchParams.get('tab') !== 'media') {
-      url.searchParams.set('tab', 'media');
+    if (url.searchParams.get('tab') !== 'plugin:media') {
+      url.searchParams.set('tab', 'plugin:media');
       changed = true;
     }
     // Only persist non-default filter values so the URL stays short.

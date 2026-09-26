@@ -486,8 +486,8 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
     const url = new URL(window.location.href);
     let changed = false;
 
-    if (url.searchParams.get('tab') !== 'tracks') {
-      url.searchParams.set('tab', 'tracks');
+    if (url.searchParams.get('tab') !== 'plugin:tracks') {
+      url.searchParams.set('tab', 'plugin:tracks');
       changed = true;
     }
     // Only persist non-default filter values so the URL stays short.

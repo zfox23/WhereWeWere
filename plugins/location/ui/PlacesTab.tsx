@@ -786,8 +786,8 @@ export function PlacesTab() {
     const url = new URL(window.location.href);
     let changed = false;
 
-    if (url.searchParams.get('tab') !== 'places') {
-      url.searchParams.set('tab', 'places');
+    if (url.searchParams.get('tab') !== 'plugin:location') {
+      url.searchParams.set('tab', 'plugin:location');
       changed = true;
     }
     // Only persist non-default filter values so the URL stays short.

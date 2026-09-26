@@ -42,7 +42,7 @@ const c = makeItem({ id: 'c', name: 'Charlie', rating: null, last_checkin_at: '2
 
 function renderSection(props: { from?: string; to?: string } = {}) {
   return render(
-    <MemoryRouter initialEntries={['/profile?tab=places']}>
+    <MemoryRouter initialEntries={['/profile?tab=plugin:location']}>
       <Routes>
         <Route path="/profile" element={<VenuesLibrarySection from={props.from ?? ''} to={props.to ?? ''} />} />
         <Route path="/venues/:id" element={<div>detail</div>} />
