@@ -22,13 +22,13 @@ CREATE TABLE media_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     media_type TEXT NOT NULL CHECK (media_type IN ('movie','tv_show','game','book','board_game')),
-    external_source TEXT CHECK (external_source IN ('tmdb','tgdb','hardcover')),  -- NULL for custom/board games
+    external_source TEXT CHECK (external_source IN ('tmdb','igdb','hardcover')),  -- NULL for custom/board games
     external_id TEXT,
     title TEXT NOT NULL,
     author TEXT,              -- books
     release_year INTEGER,
     image_url TEXT,
-    external_url TEXT,        -- link to TMDB/TGDB/Hardcover page
+    external_url TEXT,        -- link to TMDB/IGDB/Hardcover page
     search_vector TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', title || ' ' || COALESCE(author,''))) STORED,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -88,7 +88,6 @@ CREATE TABLE media_list_items (
 );
 
 ALTER TABLE user_settings ADD COLUMN tmdb_api_key VARCHAR(200);
-ALTER TABLE user_settings ADD COLUMN tgdb_api_key VARCHAR(200);
 ALTER TABLE user_settings ADD COLUMN hardcover_api_key VARCHAR(200);
 ```
 
@@ -106,7 +105,7 @@ Design notes:
 |---|---|
 | `server/src/services/mediaApi.ts` | Generic in-memory TTL cache (e.g. 1h) + per-key concurrency guard for all three APIs. Never call external API if the local DB already has the entity (dedupe by `external_source+external_id`). |
 | `server/src/services/tmdb.ts` | `searchMovies(q)`, `searchTv(q)`, `getShowSeasons(tmdbId)`, `getShowEpisodes(tmdbId, season)` → upsert into `media_items` / `media_tv_episodes`. |
-| `server/src/services/tgdb.ts` | `searchGames(q)`. Graceful degradation: if TGDB is unreachable/no key, return local-only results and a warning flag in the response. |
+| `server/src/services/igdb.ts` | `searchGames(q)`. Graceful degradation: if IGDB is unreachable/unconfigured, return local-only results and a warning flag in the response. |
 | `server/src/services/hardcover.ts` | `searchBooks(q)` via Hardcover API (Bearer token). Same graceful degradation. |
 
 **API-overload protection:**
@@ -140,7 +139,7 @@ Design notes:
 | `media_type = episode` | Duplicate only when `(media_id, source, season, episode, end_date)` all match (first occurrence wins). Insert Completed episode check-in, `checked_in_at = end_date`, `checkin_timezone='UTC'`. `external_event_id = sha1(media_id|source|episode|s|e|checked_in_at)`. Rows without `end_date` create the TV show entity only. |
 | `movie/game/book` + status Completed / In progress / Started / Dropped | Upsert media_item; insert check-in with mapped type, `end_date` as `checked_in_at` (tz=UTC), notes, score mapping. `external_event_id = sha1(media_id|source|type|end_date)`. Rows with no `end_date` → entity only. `start_date` is ignored. |
 | `movie/game/book` + status Planning / Paused | Upsert media_item only. |
-| Game rows from Yamtrack use `source = igdb` in the CSV but are stored with `external_source = 'tgdb'` (per spec, games are TGDB-sourced; `media_id` is kept as `external_id` for dedupe). | |
+| Game rows from Yamtrack use `source = igdb` in the CSV and are stored with `external_source = 'igdb'` (`media_id` is the IGDB id, kept as `external_id` for dedupe). | |
 
 Score mapping: `10 → 4`, `7.5–9.99 → 3`, `5–7.49 → 2`, `2.5–4.99 → 1`, else `0`; `raw_score` always stored.
 
@@ -187,7 +186,7 @@ Score mapping: `10 → 4`, `7.5–9.99 → 3`, `5–7.49 → 2`, `2.5–4.99 →
 - Check-in pages infer device timezone client-side via `Intl.DateTimeFormat().resolvedOptions().timeZone`
   and send it with `checked_in_at`; server stores it verbatim (pattern consistent with `checkin_timezone`).
 - Home FAB gets a Media check-in entry (or expand to the 5 subtypes).
-- `Settings` → Integrations tab: three new blocks (TMDB, TGDB, Hardcover) with API key inputs +
+- `Settings` → Integrations tab: three new blocks (TMDB, IGDB, Hardcover) with API key inputs +
   "Get a key" links to the service sites.
 - `Settings` → Data tab: new `YamtrackImportSection` (upload CSV → preview table with per-row
   disposition → confirm → import table with links to check-in detail pages; re-import is idempotent).
@@ -216,7 +215,7 @@ Episode picker fetches seasons/episodes from TMDB, cached in media_tv_episodes (
 ## 7. Test plan
 - Server: unit tests for the Yamtrack classifier (all row shapes, duplicates, score mapping,
   idempotent re-import); integration test for `POST /media/items` + check-ins + timeline `media`
-  branch + `media_subtype` filter; service tests with mocked fetch for tmdb/tgdb/hardcover
+  branch + `media_subtype` filter; service tests with mocked fetch for tmdb/igdb/hardcover
   (cache hit, single-flight, graceful degradation).
 - Client: tests for `ScorePicker`, episode picker flow (mock API), MediaFilter state,
   YamtrackImportSection preview → import flow.

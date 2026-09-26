@@ -2,7 +2,7 @@
 -- Media check-ins: movies, TV shows, video games, books, and board games.
 --
 -- media_items is the local media database. It doubles as the cache for
--- external API lookups (TMDB/TGDB/Hardcover) so repeated searches never hit
+-- external API lookups (TMDB/IGDB/Hardcover) so repeated searches never hit
 -- the network. Board games are always local-only (external_source NULL).
 --
 -- TV shows are entities; individual episodes live on the check-in row
@@ -13,7 +13,7 @@ CREATE TABLE media_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     media_type TEXT NOT NULL CHECK (media_type IN ('movie','tv_show','game','book','board_game')),
-    external_source TEXT CHECK (external_source IN ('tmdb','tgdb','hardcover')),
+    external_source TEXT CHECK (external_source IN ('tmdb','igdb','hardcover')),
     external_id TEXT,
     title TEXT NOT NULL,
     author TEXT,
@@ -98,5 +98,4 @@ CREATE INDEX idx_media_list_items_media ON media_list_items(media_item_id);
 
 -- Integration API keys.
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS tmdb_api_key VARCHAR(200);
-ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS tgdb_api_key VARCHAR(200);
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS hardcover_api_key VARCHAR(200);

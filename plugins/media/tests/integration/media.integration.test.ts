@@ -108,7 +108,7 @@ describe('Media check-in API', () => {
       expect(item.body.series_count).toBe(6);
     });
 
-    it('persists and validates TGDB game metadata via PUT', async () => {
+    it('persists and validates IGDB game metadata via PUT', async () => {
       const created = await request(app)
         .post('/api/v1/media/items')
         .send({ media_type: 'game', title: 'Sonic the Hedgehog' });
@@ -1043,7 +1043,7 @@ describe('Media check-in API', () => {
     it('keeps the existing item time when the imported game time is lower (max rule, no check-ins)', async () => {
       const first = [
         CSV_HEADER,
-        '"321","tgdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","5h","","2023-02-01 00:00:00+00:00"',
+        '"321","igdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","5h","","2023-02-01 00:00:00+00:00"',
       ].join('\n');
       const import1 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: first });
       expect(import1.status).toBe(200);
@@ -1054,7 +1054,7 @@ describe('Media check-in API', () => {
       // must not decrease (imported < existing).
       const lower = [
         CSV_HEADER,
-        '"321","tgdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","1h 30min","","2023-02-01 00:00:00+00:00"',
+        '"321","igdb","game","Half-Life","img","","","","In Progress","","","2023-01-01 00:00:00+00:00","1h 30min","","2023-02-01 00:00:00+00:00"',
       ].join('\n');
       const import2 = await request(app).post('/api/v1/import/yamtrack/import').send({ csv: lower });
       expect(import2.status).toBe(200);
@@ -1070,9 +1070,9 @@ describe('Media check-in API', () => {
       expect(checkins.rows[0].n).toBe(0);
     });
 
-    it('imports igdb games as local-only and dedupes them by title on re-import', async () => {
-      // Yamtrack keys games by IGDB id; that id must NOT be stored as a
-      // TGDB external_id, so the item imports local-only.
+    it('stores igdb game ids and dedupes them by title on re-import', async () => {
+      // Yamtrack keys games by IGDB id, which is stored as-is on the item so
+      // it can sync from IGDB.
       const first = [
         CSV_HEADER,
         '"770","igdb","game","Hades","img","","","","In progress","","","2023-04-06 01:50:00+00:00","0","",""',
@@ -1085,13 +1085,12 @@ describe('Media check-in API', () => {
         'SELECT external_source, external_id, external_url FROM media_items WHERE media_type = \'game\''
       );
       expect(after1.rows).toHaveLength(1);
-      expect(after1.rows[0].external_source).toBeNull();
-      expect(after1.rows[0].external_id).toBeNull();
-      expect(after1.rows[0].external_url).toBeNull();
+      expect(after1.rows[0].external_source).toBe('igdb');
+      expect(after1.rows[0].external_id).toBe('770');
+      expect(after1.rows[0].external_url).toBe('https://www.igdb.com/games/770');
 
       // A later export of the same game (different IGDB id, edition-qualifier
-      // title): must fold into the existing local-only row, not create a
-      // duplicate.
+      // title): must fold into the existing row, not create a duplicate.
       const second = [
         CSV_HEADER,
         '"888","igdb","game","Hades  Remastered","img","","","","Completed","","","2023-05-06 01:50:00+00:00","0","",""',
@@ -1104,8 +1103,9 @@ describe('Media check-in API', () => {
         'SELECT external_source, external_id, status FROM media_items WHERE media_type = \'game\''
       );
       expect(after2.rows).toHaveLength(1);
-      expect(after2.rows[0].external_source).toBeNull();
-      expect(after2.rows[0].external_id).toBeNull();
+      // The original id is kept; the re-import only updates item metadata.
+      expect(after2.rows[0].external_source).toBe('igdb');
+      expect(after2.rows[0].external_id).toBe('770');
       // Item-level status tracks the latest import.
       expect(after2.rows[0].status).toBe('completed');
     });

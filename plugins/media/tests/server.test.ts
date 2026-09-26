@@ -2,14 +2,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { queryMock, poolConnectMock } = vi.hoisted(() => ({
+const { queryMock, poolConnectMock, igdbDetailsMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   poolConnectMock: vi.fn(),
+  igdbDetailsMock: vi.fn(),
 }));
 
 vi.mock('../../../server/src/db', () => ({
   query: queryMock,
   pool: { connect: poolConnectMock },
+}));
+
+vi.mock('../services/igdb', () => ({
+  igdb: {
+    getGameDetails: igdbDetailsMock,
+    searchGames: vi.fn(),
+    searchCandidates: vi.fn(),
+  },
+  pickIgdbCandidate: vi.fn(),
 }));
 
 import { server, buildMediaDetailPath, mediaRouter } from '../server';
@@ -26,6 +36,7 @@ const baseCtx: PluginTimelineContext = {
 beforeEach(() => {
   queryMock.mockReset();
   poolConnectMock.mockReset();
+  igdbDetailsMock.mockReset();
 });
 
 describe('buildMediaDetailPath', () => {
@@ -108,7 +119,6 @@ describe('media plugin — plugin shape', () => {
     expect(server.legacyBackupKeys).toEqual(['mediaItems', 'mediaCheckins', 'mediaLists', 'mediaListItems']);
     expect(server.settingsKeys!.map((k) => k.name)).toEqual([
       'tmdb_api_key',
-      'tgdb_api_key',
       'hardcover_api_key',
       'igdb_client_id',
       'igdb_client_secret',
@@ -116,7 +126,6 @@ describe('media plugin — plugin shape', () => {
     ]);
     expect(server.legacySettingsKeys).toEqual([
       'tmdb_api_key',
-      'tgdb_api_key',
       'hardcover_api_key',
       'plex_usernames',
     ]);
@@ -381,5 +390,56 @@ describe('media check-in companions (endpoints)', () => {
     expect(sql).toContain('DELETE FROM companions');
     expect(sql).toContain('checkin_type = $1');
     expect(values).toEqual(['media', ['mc1']]);
+  });
+});
+
+describe('POST /items/:id/sync resolves against draft title/external id', () => {
+  function app() {
+    const a = express();
+    a.use(express.json());
+    a.use('/media', mediaRouter);
+    return a;
+  }
+
+  const savedItem = { id: 'i1', media_type: 'game', external_source: 'igdb', external_id: '123', title: 'Saved Title', platform: null };
+  const keysRows = { rows: [{ key: 'igdb_client_id', value: 'cid' }, { key: 'igdb_client_secret', value: 'csecret' }] };
+
+  it('uses the posted (unsaved) values for the provider lookup', async () => {
+    igdbDetailsMock.mockResolvedValue({
+      externalId: '456', title: 'Draft Title', releaseYear: 2000, imageUrl: null,
+      externalUrl: 'https://www.igdb.com/games/draft', platform: null, overview: null,
+      contentRating: null, players: null, coop: null, genres: null, developers: null, publishers: null,
+    });
+    queryMock
+      .mockResolvedValueOnce({ rows: [savedItem] }) // item lookup
+      .mockResolvedValueOnce(keysRows); // provider api keys
+
+    const res = await request(app())
+      .post('/media/items/i1/sync')
+      .send({ title: 'Draft Title', external_id: '456' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.provider).toBe('IGDB');
+    expect(res.body.metadata.external_id).toBe('456');
+    // The lookup ran against the draft id, not the saved one.
+    expect(igdbDetailsMock).toHaveBeenCalledWith('cid', 'csecret', '456');
+  });
+
+  it('falls back to the saved row when the body is empty', async () => {
+    igdbDetailsMock.mockResolvedValue({
+      externalId: '123', title: 'Saved Title', releaseYear: 1999, imageUrl: null,
+      externalUrl: 'https://www.igdb.com/games/saved', platform: null, overview: null,
+      contentRating: null, players: null, coop: null, genres: null, developers: null, publishers: null,
+    });
+    queryMock
+      .mockResolvedValueOnce({ rows: [savedItem] }) // item lookup
+      .mockResolvedValueOnce(keysRows); // provider api keys
+
+    const res = await request(app())
+      .post('/media/items/i1/sync')
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(igdbDetailsMock).toHaveBeenCalledWith('cid', 'csecret', '123');
   });
 });

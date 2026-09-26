@@ -36,13 +36,9 @@ const CSV_HEADER =
 describe('mapYamtrackSource', () => {
   it('maps known sources', () => {
     expect(mapYamtrackSource('tmdb')).toBe('tmdb');
-    expect(mapYamtrackSource('tgdb')).toBe('tgdb');
+    expect(mapYamtrackSource('igdb')).toBe('igdb');
     expect(mapYamtrackSource('hardcover')).toBe('hardcover');
     expect(mapYamtrackSource('unknown')).toBeNull();
-  });
-
-  it('does not map igdb to tgdb (IGDB ids are not TGDB ids)', () => {
-    expect(mapYamtrackSource('igdb')).toBeNull();
   });
 });
 
@@ -267,9 +263,9 @@ describe('planYamtrackImport', () => {
     expect(b.disposition).toBe('update_game_item');
     expect(b.item_status).toBe('in_progress');
     expect(b.time_played_minutes).toBeNull();
-    // igdb rows import local-only: the IGDB media_id must not be stored.
-    expect(b.external_source).toBeNull();
-    expect(b.external_id).toBeNull();
+    // igdb rows map to IGDB-sourced items with the id stored as-is.
+    expect(b.external_source).toBe('igdb');
+    expect(b.external_id).toBe('61');
 
     const c = plans[2];
     expect(c.disposition).toBe('update_game_item');
@@ -327,9 +323,9 @@ describe('end-to-end parse + plan on a real-shaped CSV', () => {
     // Games never create check-ins: item-level metadata only.
     expect(game.disposition).toBe('update_game_item');
     expect(game.item_status).toBe('in_progress');
-    // igdb rows import local-only: the IGDB media_id must not be stored.
-    expect(game.external_source).toBeNull();
-    expect(game.external_id).toBeNull();
+    // igdb rows map to IGDB-sourced items with the id stored as-is.
+    expect(game.external_source).toBe('igdb');
+    expect(game.external_id).toBe('770');
     const counts = countPlans(plans);
     expect(counts.total).toBe(6);
     expect(counts.create_tv_show).toBe(1);

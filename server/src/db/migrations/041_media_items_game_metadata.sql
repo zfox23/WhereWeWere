@@ -1,8 +1,8 @@
 -- ============================================================================
--- TGDB-sourced game metadata for media_items (game rows only).
+-- Provider-sourced game metadata for media_items (game rows only).
 --
--- overview / content_rating / players / coop come straight off the TGDB Game
--- object; genres / developers / publishers are resolved from TGDB id arrays
+-- overview / content_rating / players / coop come straight off the IGDB game
+-- record; genres / developers / publishers are resolved from IGDB id arrays
 -- into name arrays. All nullable: non-game rows and local-only games stay
 -- NULL. `content_rating` is the ESRB-style rating (e.g. "E - Everyone") —
 -- kept distinct from the user's own 0-4 star `rating` column (migration 040).

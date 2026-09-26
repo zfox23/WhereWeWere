@@ -7,7 +7,6 @@ import { YamtrackImportSection } from './YamtrackImportSection';
 interface MediaPluginSettings {
   plex_usernames?: string | null;
   tmdb_api_key?: string | null;
-  tgdb_api_key?: string | null;
   hardcover_api_key?: string | null;
   igdb_client_id?: string | null;
   igdb_client_secret?: string | null;
@@ -24,7 +23,6 @@ interface MediaPluginSettings {
 export function MediaSettings() {
   const [plexUsernames, setPlexUsernames] = useState('');
   const [tmdbApiKey, setTmdbApiKey] = useState('');
-  const [tgdbApiKey, setTgdbApiKey] = useState('');
   const [hardcoverApiKey, setHardcoverApiKey] = useState('');
   const [igdbClientId, setIgdbClientId] = useState('');
   const [igdbClientSecret, setIgdbClientSecret] = useState('');
@@ -42,7 +40,6 @@ export function MediaSettings() {
         const settings = s as unknown as MediaPluginSettings;
         setPlexUsernames(settings.plex_usernames ?? '');
         setTmdbApiKey(settings.tmdb_api_key ?? '');
-        setTgdbApiKey(settings.tgdb_api_key ?? '');
         setHardcoverApiKey(settings.hardcover_api_key ?? '');
         setIgdbClientId(settings.igdb_client_id ?? '');
         setIgdbClientSecret(settings.igdb_client_secret ?? '');
@@ -71,7 +68,6 @@ export function MediaSettings() {
       await plugins.settings.set('media', {
         plex_usernames: plexUsernames,
         tmdb_api_key: tmdbApiKey || null,
-        tgdb_api_key: tgdbApiKey || null,
         hardcover_api_key: hardcoverApiKey || null,
         igdb_client_id: igdbClientId || null,
         igdb_client_secret: igdbClientSecret || null,
@@ -172,7 +168,7 @@ export function MediaSettings() {
           <div>
             <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
               <Gamepad2 size={11} className="inline mr-1" />
-              IGDB — video games (primary)
+              IGDB — video games
             </label>
             <div className="grid grid-cols-2 gap-2">
               <input
@@ -194,23 +190,6 @@ export function MediaSettings() {
               Create a free application at{' '}
               <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noreferrer" className="underline hover:text-gray-600">dev.twitch.tv/console</a>{' '}
               and use its Client ID / Client Secret (no redirect URL needed).
-            </p>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-              <Gamepad2 size={11} className="inline mr-1" />
-              TheGamesDB (TGDB) — video games (fallback)
-            </label>
-            <input
-              type="password"
-              value={tgdbApiKey}
-              onChange={(e) => setTgdbApiKey(e.target.value)}
-              className="input"
-              placeholder="TGDB API key"
-            />
-            <p className="text-[11px] text-gray-400 mt-1">
-              Used when IGDB is not configured or has no match. Get a key at{' '}
-              <a href="https://www.thegamesdb.net/" target="_blank" rel="noreferrer" className="underline hover:text-gray-600">thegamesdb.net</a>
             </p>
           </div>
           <div>

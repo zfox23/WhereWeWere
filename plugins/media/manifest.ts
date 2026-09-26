@@ -8,7 +8,7 @@
  * schema still documents `data` for auto UIs and auto filters).
  *
  * The Media plugin also owns the entire media-item subsystem (item
- * search/CRUD/sync against TMDB/TGDB/Hardcover, media lists, the Plex
+ * search/CRUD/sync against TMDB/IGDB/Hardcover, media lists, the Plex
  * scrobble webhook, the Yamtrack import, and the TV-episode check-in flow).
  */
 

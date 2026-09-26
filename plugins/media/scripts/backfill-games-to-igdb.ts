@@ -1,8 +1,8 @@
 // ============================================================================
 // One-off backfill: re-key game media_items rows to IGDB ids by title.
 //
-// IGDB is now the primary game metadata provider (Settings > Media). Rows
-// currently keyed to TGDB (or still local-only) can be moved over here:
+// IGDB is now the game metadata provider (Settings > Media). Rows still
+// keyed to a legacy provider (or still local-only) can be moved over here:
 //
 //   - Rows already external_source='igdb' are skipped.
 //   - Every other game row is resolved by title via IGDB search, narrowed to
@@ -136,8 +136,8 @@ async function applyRekey(
     await mergeChildRows(client, row.id, mergeAwayRowId);
     await client.query('DELETE FROM media_items WHERE id = $1', [mergeAwayRowId]);
   }
-  // Rows re-keyed from TGDB carry provider-derived values from the wrong
-  // source, but we cannot know which were ever user-edited; the same
+  // Rows re-keyed from a legacy provider carry provider-derived values from
+  // the wrong source, but we cannot know which were ever user-edited; the same
   // COALESCE(overview, …) shape as the on-demand re-key fills only what is
   // missing, and identity columns are always replaced.
   await client.query(
@@ -231,7 +231,7 @@ async function main() {
     }
 
     // Another row already owns this IGDB id => merge into it (the survivor is
-    // the earlier-created row, matching the TGDB backfill semantics).
+    // the earlier-created row, matching the earlier backfill semantics).
     const owner = ownedIds.get(pick.result.externalId);
     if (owner != null && owner !== row.id) {
       outcomes.push({ row, verdict: 'merged', adopted: pick.result });

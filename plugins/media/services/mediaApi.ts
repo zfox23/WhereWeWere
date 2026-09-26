@@ -1,6 +1,6 @@
 // ============================================================================
 // Shared in-memory TTL cache with single-flight deduplication for external
-// media APIs (TMDB, TGDB, Hardcover). Prevents overloading external services:
+// media APIs (TMDB, IGDB, Hardcover). Prevents overloading external services:
 //   - Identical requests made within the TTL window are served from memory.
 //   - Concurrent identical requests coalesce into a single network call.
 //   - All external lookups are skipped entirely when the local DB already has

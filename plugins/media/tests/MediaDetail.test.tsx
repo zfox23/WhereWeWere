@@ -24,13 +24,13 @@ function gameItem(overrides: Partial<MediaItem> = {}): MediaItem {
   return {
     id: 'game-1',
     media_type: 'game',
-    external_source: 'tgdb',
+    external_source: 'igdb',
     external_id: '53',
     title: 'Sonic the Hedgehog',
     author: null,
     release_year: 1991,
     image_url: null,
-    external_url: 'https://thegamesdb.net/game.php?id=53',
+    external_url: 'https://www.igdb.com/games/53',
     platform: 'Sega Genesis',
     overview: 'Join Sonic as he races through six zones.',
     content_rating: 'E - Everyone',
@@ -80,7 +80,7 @@ beforeEach(() => {
     ...payload,
   }));
   syncItemMock.mockReset();
-  syncItemMock.mockResolvedValue({ provider: 'TGDB', found: true, metadata: {} });
+  syncItemMock.mockResolvedValue({ provider: 'IGDB', found: true, metadata: {} });
 });
 
 afterEach(() => {
@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe('MediaDetail (game)', () => {
-  it('renders the TGDB metadata block: genres, content rating, players, bylines, overview', async () => {
+  it('renders the IGDB metadata block: genres, content rating, players, bylines, overview', async () => {
     renderDetail();
     await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
 
@@ -114,7 +114,7 @@ describe('MediaDetail (game)', () => {
     await waitFor(() => expect(screen.getByText('Co-op')).toBeTruthy());
   });
 
-  it('renders nothing extra when all TGDB fields are null', async () => {
+  it('renders nothing extra when all IGDB fields are null', async () => {
     getItemMock.mockResolvedValue(
       gameItem({
         overview: null,
@@ -135,7 +135,7 @@ describe('MediaDetail (game)', () => {
     expect(screen.queryByText('1 player')).toBeNull();
   });
 
-  it('edit mode exposes the TGDB metadata fields as editable inputs', async () => {
+  it('edit mode exposes the IGDB metadata fields as editable inputs', async () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
@@ -185,7 +185,7 @@ describe('MediaDetail (game)', () => {
     expect(payload.publishers).toEqual(['Sega']);
   });
 
-  it('sends null for blanked TGDB metadata fields', async () => {
+  it('sends null for blanked IGDB metadata fields', async () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
@@ -208,18 +208,18 @@ describe('MediaDetail (game)', () => {
     expect(payload.players).toBeNull();
   });
 
-  it('sync diff includes external id/url plus all TGDB game fields', async () => {
+  it('sync diff includes external id/url plus all IGDB game fields', async () => {
     const user = userEvent.setup();
     // Provider values differ on every stored game field.
     syncItemMock.mockResolvedValue({
-      provider: 'TGDB',
+      provider: 'IGDB',
       found: true,
       metadata: {
         title: 'Sonic the Hedgehog',
         release_year: 1991,
-        image_url: 'https://cdn.thegamesdb.net/images/medium/boxart/front/53-1.jpg',
+        image_url: 'https://images.igdb.com/igdb/image/upload/t_cover_big/abc123.jpg',
         external_id: '54',
-        external_url: 'https://thegamesdb.net/game.php?id=54',
+        external_url: 'https://www.igdb.com/games/54',
         platform: 'Sega Genesis',
         overview: 'Updated synopsis.',
         content_rating: 'E10+ - Everyone 10+',
@@ -234,11 +234,11 @@ describe('MediaDetail (game)', () => {
     await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
 
     await user.click(screen.getByTitle('Edit metadata'));
-    await user.click(screen.getByRole('button', { name: 'Sync metadata from TGDB' }));
+    await user.click(screen.getByRole('button', { name: 'Sync metadata from IGDB' }));
 
     // Every changed stored field appears as a proposed change row. Scope to the
     // diff list because the open edit form shows the same field labels.
-    const heading = await screen.findByText('Proposed changes from TGDB');
+    const heading = await screen.findByText('Proposed changes from IGDB');
     const diffList = heading.parentElement!.nextElementSibling as HTMLUListElement;
     const diffText = diffList.textContent || '';
     for (const label of [
@@ -253,6 +253,32 @@ describe('MediaDetail (game)', () => {
     expect(labels).not.toContain('Release year');
     expect(labels).not.toContain('Platform');
     expect(labels).not.toContain('Title');
+  });
+
+  it('syncs against the draft title/external id, not the saved values (no pre-save)', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await waitFor(() => expect(screen.getByText('Sonic the Hedgehog')).toBeTruthy());
+
+    await user.click(screen.getByTitle('Edit metadata'));
+
+    // Edit the title and external ID in the form without saving.
+    const titleInput = screen.getByDisplayValue('Sonic the Hedgehog');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Sonic the Hedgehog (1991)');
+    const idInput = screen.getByDisplayValue('53');
+    await user.clear(idInput);
+    await user.type(idInput, '54');
+
+    await user.click(screen.getByRole('button', { name: 'Sync metadata from IGDB' }));
+
+    // The sync request carries the current draft values, and the item is NOT
+    // saved first (the old save-then-sync round trip is gone).
+    await waitFor(() => expect(syncItemMock).toHaveBeenCalledWith('game-1', {
+      title: 'Sonic the Hedgehog (1991)',
+      external_id: '54',
+    }));
+    expect(updateItemMock).not.toHaveBeenCalled();
   });
 
   it('labels the provider by the item source: IGDB for igdb-sourced games', async () => {

@@ -57,7 +57,7 @@ export interface YamtrackPlanItem {
   disposition: YamtrackDisposition;
   reason: string;
   media_type: 'tv_show' | 'movie' | 'game' | 'book' | null;
-  external_source: 'tmdb' | 'tgdb' | 'hardcover' | null;
+  external_source: 'tmdb' | 'igdb' | 'hardcover' | null;
   external_id: string | null;
   checkin_type: 'completed' | 'in_progress' | 'dropped' | null;
   season_number: number | null;
@@ -81,17 +81,14 @@ export interface YamtrackPlanItem {
   media_item_id?: string | null;
 }
 
-export function mapYamtrackSource(source: string): 'tmdb' | 'tgdb' | 'hardcover' | null {
+export function mapYamtrackSource(source: string): 'tmdb' | 'igdb' | 'hardcover' | null {
   switch (source) {
     case 'tmdb':
       return 'tmdb';
-    case 'tgdb':
-      return 'tgdb';
     case 'igdb':
-      // Yamtrack keys games by IGDB id, which is NOT a TGDB id. Storing it
-      // would produce broken links and corrupt metadata sync, so igdb rows
-      // import as local-only games (enriched later by title search).
-      return null;
+      // Yamtrack keys games by IGDB id, which matches our IGDB-sourced game
+      // items, so the id is stored and the item syncs from IGDB.
+      return 'igdb';
     case 'hardcover':
       return 'hardcover';
     default:
@@ -226,8 +223,8 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
     const mediaType = mapYamtrackMediaType(row.media_type, row.source);
     const externalSource = mapYamtrackSource(row.source);
     // Only store the Yamtrack media_id when the source actually maps to one of
-    // our external providers. For unmapped sources (e.g. 'igdb', whose ids are
-    // not TGDB ids) the item imports local-only: external_id stays null.
+    // our external providers. For unmapped sources the item imports
+    // local-only: external_id stays null.
     const externalId = externalSource ? row.media_id || null : null;
 
     if (!mediaType || !row.title) {

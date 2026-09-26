@@ -62,7 +62,7 @@ interface ItemEditDraft {
   time_hours: string;
   time_minutes: string;
   status: string;
-  /** Games only: provider-sourced metadata (IGDB/TGDB; directly editable). */
+  /** Games only: provider-sourced metadata (IGDB; directly editable). */
   overview: string;
   content_rating: string;
   players: string;
@@ -126,9 +126,8 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
   const [highlightedCheckinId, setHighlightedCheckinId] = useState<string | null>(null);
   const location = useLocation();
 
-  // Provider label for this item: games are labeled by their own source
-  // (IGDB is primary; rows still keyed to TGDB stay TGDB), other types use
-  // the subtype's primary API.
+  // Provider label for this item: games are always labeled IGDB (the single
+  // game metadata provider); other types use the subtype's primary API.
   const providerName = providerNameForItem(subtype, item?.external_source, config.apiName);
 
   // The back button restores the page the user came from. Library cards pass
@@ -529,27 +528,24 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
 
   const handleSyncMetadata = async () => {
     if (!item || !itemDraft || !config.apiName) return;
-    // If the external_id only exists in the unsaved draft, persist it first so
-    // the server can resolve the provider lookup against the saved item.
-    // Games are exempt: a local-only game is re-keyed by the server via title
-    // search, so syncing is allowed without an external id.
-    if (!item.external_id && subtype !== 'game') {
-      if (!itemDraft.external_id.trim()) {
-        setSyncError('Enter the external ID above, then sync.');
-        return;
-      }
-      const ok = await saveItemFields();
-      if (!ok) return; // itemEditError is set
+    // Sync resolves against the form's CURRENT title / external id (sent to
+    // the server), so there is no need to save first. Games are exempt from
+    // the id requirement: a local-only game is re-keyed by the server via
+    // title search.
+    const draftExternalId = itemDraft.external_id.trim();
+    if (!draftExternalId && !item.external_id && subtype !== 'game') {
+      setSyncError('Enter the external ID above, then sync.');
+      return;
     }
     setSyncing(true);
     setSyncError(null);
     setSyncDiff(null);
     try {
-      // Re-read the item (it may have just been updated with the external_id)
-      // so the diff compares provider values against fresh server state.
+      // Re-read the item so the diff compares provider values against fresh
+      // server state.
       const [freshItem, res] = await Promise.all([
         media.getItem(item.id),
-        media.syncItem(item.id),
+        media.syncItem(item.id, { title: itemDraft.title.trim(), external_id: draftExternalId }),
       ]);
       setItem(freshItem);
       const diffs = buildSyncDiff(freshItem, res.metadata);

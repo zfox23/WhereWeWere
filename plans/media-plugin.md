@@ -18,7 +18,7 @@ only the code moves.
    `latestTimezoneAsOf` hook the plugin implements, replacing the hard-coded
    `media_checkins` query in the core.
 3. **Media API keys + `plex_usernames` move to `plugin_settings`** (media plugin
-   `settingsKeys`), with a data migration from `user_settings`. The TMDB/TGDB/Hardcover key
+   `settingsKeys`), with a data migration from `user_settings`. The TMDB/IGDB/Hardcover key
    fields and the Plex section leave the core `settings` route and the core
    IntegrationsTab and become a Media `settingsSection` component in the plugin.
 4. **Start-over "All Media" checkbox becomes plugin-driven**: maps to
@@ -77,9 +77,9 @@ plugins/media/
       reconcile      (scanAll: false — media-style "only missing/UTC labels";
          detailPath: /media/<segment>/<itemId>/<slug>; loadCheckins: join
          media_items for title; apply: label-only UPDATE of checkin_timezone)
-      settingsKeys   [tmdb_api_key, tgdb_api_key, hardcover_api_key,
+      settingsKeys   [tmdb_api_key, hardcover_api_key,
                       plex_usernames] (all type 'string')
-  services/          mediaApi.ts, tmdb.ts, tgdb.ts, hardcover.ts, titleMatch.ts
+  services/          mediaApi.ts, tmdb.ts, igdb.ts, hardcover.ts, titleMatch.ts
                      (moved from server/src/services/; pure external-API code)
   tests/
     server.test.ts         (unit: buildTimelineWhere/Select, reconcile hook,
@@ -89,7 +89,7 @@ plugins/media/
                             now asserts restore goes through plugins.media payload,
                             plus a legacy-backup restore case via restoreLegacyBackup)
     plex-webhook.integration.test.ts (moved from server/tests/integration/)
-    services/  (mediaApi/tmdb/tgdb/hardcover/gamesRekey? no — gamesRekey stays core?
+    services/  (mediaApi/tmdb/igdb/hardcover/gamesRekey? no — gamesRekey stays core?
                 see Core changes)
   ui/
     MediaCheckInLanding.tsx, MediaSearch.tsx, MediaCheckInForm.tsx,
@@ -99,7 +99,7 @@ plugins/media/
     MediaFilter.tsx (Home filter section; from client/src/components/filters/MediaFilter.tsx)
     MediaTab.tsx    (profile tab; from client/src/components/MediaTab.tsx)
     MediaLibrarySection.tsx (moved)
-    MediaIntegrationsSettings.tsx (TMDB/TGDB/Hardcover keys + Plex section; the
+    MediaIntegrationsSettings.tsx (TMDB/IGDB/Hardcover keys + Plex section; the
         media part of the current IntegrationsTab)
     YamtrackImportSection.tsx (Data settings section; from
         client/src/pages/settings/YamtrackImportSection.tsx)
@@ -134,11 +134,11 @@ All changes below are in `server/` + `client/` core:
    matching the `delete_venue_checkins` → location alias precedent). The claimed-key skip
    for legacy keys stays (generic).
 6. **[`server/src/routes/settings.ts`](server/src/routes/settings.ts)** — remove
-   `tmdb_api_key`, `tgdb_api_key`, `hardcover_api_key`, `plex_usernames` from the GET/PUT
+   `tmdb_api_key`, `hardcover_api_key`, `plex_usernames` from the GET/PUT
    columns. The plugin reads/writes its own `plugin_settings` rows (framework
    `/plugins/media/settings` endpoints).
 7. **`server/src/db/migrations/044_media_settings_to_plugin.sql`** — copy
-   `user_settings.{tmdb_api_key, tgdb_api_key, hardcover_api_key, plex_usernames}` into
+   `user_settings.{tmdb_api_key, hardcover_api_key, plex_usernames}` into
    `plugin_settings` where non-null, then drop the 4 columns. (Same pattern as
    `043_mood_settings_to_plugin.sql`.)
 8. **[`server/src/index.ts`](server/src/index.ts)** — remove the `mediaRouter` and
@@ -146,7 +146,7 @@ All changes below are in `server/` + `client/` core:
    plugin tables via the plugin's exported `upsertMediaItem` helper — same as
    `webhook-plex.ts` importing `upsertMediaItem` from `routes/media.ts` today, but now
    from `plugins/media/server`).
-9. **`server/src/services/`** — delete `mediaApi.ts`, `tmdb.ts`, `tgdb.ts`,
+9. **`server/src/services/`** — delete `mediaApi.ts`, `tmdb.ts`, `igdb.ts`,
    `hardcover.ts`, `titleMatch.ts` (moved). `yamtrack.ts` stays core (its plan model is
    pure; the route imports the plugin's upsert helper).
 10. **`server/src/routes/import-yamtrack.ts`** — replace the local
@@ -178,7 +178,7 @@ All changes below are in `server/` + `client/` core:
    plugin components) — so `App.tsx` keeps its media `<Route>` lines but imports the
    components from `plugins/media/ui/*`. (Same as today's `<Route path="/venues/:id"
    element={<VenueDetail />} />`.)
-5. **`client/src/pages/settings/IntegrationsTab.tsx`** — remove the TMDB/TGDB/Hardcover
+5. **`client/src/pages/settings/IntegrationsTab.tsx`** — remove the TMDB/IGDB/Hardcover
    fields, the Plex section, and the `plexWebhook.stats()` call. A plugin-rendered
    `settings` section (Media's `MediaIntegrationsSettings`) appears in the Settings page
    loop (check how the Settings page renders plugin settings sections — the framework
@@ -241,7 +241,7 @@ flowchart TD
 | 4 | `routes/backup.ts` drops media export/import/start-over loops; `delete_media_items` becomes a legacy alias of `delete_media_checkins` | Plugin owns its data via `backupExport/backupImport/deleteUserData` |
 | 5 | `routes/settings.ts` drops the 4 media-owned keys; migration `044_media_settings_to_plugin.sql` moves them to `plugin_settings` | Plugin owns its settings |
 | 6 | `index.ts` unmounts `mediaRouter` + `webhookPlexRouter` | Plugin mounts itself |
-| 7 | `services/{mediaApi,tmdb,tgdb,hardcover,titleMatch}.ts` moved to `plugins/media/services/` | Media item code lives in the plugin |
+| 7 | `services/{mediaApi,tmdb,igdb,hardcover,titleMatch}.ts` moved to `plugins/media/services/` | Media item code lives in the plugin |
 | 8 | Client: media removed from `Home`/`Profile`/`IntegrationsTab`/`DataTab`/`StartOverSection`/`App` hard-coding; components + types + api methods move to the plugin | No media code in core |
 
 No new contract hooks are needed — every capability media requires already exists on

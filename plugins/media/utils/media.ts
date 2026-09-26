@@ -43,8 +43,6 @@ export const MEDIA_SUBTYPES: Record<MediaSubtype, MediaSubtypeConfig> = {
     plural: 'Games',
     searchPath: '/media-check-in/game',
     detailBase: '/media/game',
-    // IGDB is the primary game provider; TGDB rows are labeled per-item by
-    // providerNameForItem below.
     apiName: 'IGDB',
     icon: '🎮',
     routeSegment: 'game',
@@ -74,19 +72,16 @@ export const MEDIA_SUBTYPES: Record<MediaSubtype, MediaSubtypeConfig> = {
 export const MEDIA_SUBTYPE_LIST: MediaSubtype[] = ['movie', 'tv_show', 'game', 'book', 'board_game'];
 
 /**
- * Human provider name for a specific item. Games are labeled by their own
- * external_source (IGDB is primary, but rows still keyed to TGDB stay
- * labeled TGDB); everything else uses the subtype's primary API name.
+ * Human provider name for a specific item. Games are always labeled IGDB
+ * (the single game metadata provider); everything else uses the subtype's
+ * primary API name.
  */
 export function providerNameForItem(
   subtype: MediaSubtype,
-  externalSource: string | null | undefined,
+  _externalSource: string | null | undefined,
   fallback: string | null
 ): string | null {
-  if (subtype === 'game' && externalSource) {
-    if (externalSource === 'igdb') return 'IGDB';
-    if (externalSource === 'tgdb') return 'TGDB';
-  }
+  if (subtype === 'game') return 'IGDB';
   return fallback;
 }
 

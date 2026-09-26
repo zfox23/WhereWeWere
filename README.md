@@ -19,7 +19,7 @@ It helps you record where you were, how you felt, and how you slept, then browse
 - Mood check-ins with custom Activity support
 - Sleep logging with duration calculation, including a Sleep as Android webhook
 - GPS track import (PostGIS-backed) with activity type, distance, and duration
-- Media check-ins for movies, TV shows (with episode tracking), games, books, and board games, with TMDB/IGDB/TheGamesDB/Hardcover metadata
+- Media check-ins for movies, TV shows (with episode tracking), games, books, and board games, with TMDB/IGDB/Hardcover metadata
 - A Profile page with reflection-worthy stats, plus LLM-assisted reflection summaries
 - Unified timeline across all check-in types
 - Data import flows (Swarm, Daylio, Sleep as Android, Yamtrack) and a Plex scrobble webhook

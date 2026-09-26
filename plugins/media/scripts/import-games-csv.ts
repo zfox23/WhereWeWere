@@ -3,7 +3,7 @@
 //   Title, Genre, Platform, Rating, Notes, Playtime (Hours), Status).
 //
 // Usage (from server/):
-//   npm run import:games -- --dry-run             # offline preview: no TGDB calls, no writes
+//   npm run import:games -- --dry-run             # offline preview: no IGDB calls, no writes
 //   npm run import:games                          # import the default CSV
 //   npm run import:games -- --dry-run /path/file  # preview a different CSV
 //   npm run import:games -- /path/to/file.csv     # import a different CSV
@@ -19,10 +19,10 @@
 //   - Status (optional column: completed / in progress / dropped). When the
 //     column or its value is absent, it defaults to 'completed' when the row
 //     has a rating or playtime, else 'in_progress'.
-//   - Metadata enrichment uses one TGDB ByGameName call per game, sequential
-//     with a delay between calls. After repeated failures (e.g. hitting the
-//     monthly rate cap, 403) further calls stop and the remaining games are
-//     created local-only — re-running the script later enriches them.
+//   - Metadata enrichment uses one IGDB search per game, sequential with a
+//     delay between calls. After repeated consecutive failures further
+//     calls stop and the remaining games are created local-only — re-running
+//     the script later enriches them.
 //   - Title matching is strict: a CSV row only joins an existing game item
 //     on an EXACT normalized-title match (or a whitelisted edition qualifier
 //     like "… Steam Edition"). Sequels, subtitles, and partial overlaps
@@ -42,7 +42,7 @@ import path from 'path';
 import os from 'os';
 import { parse } from 'csv-parse/sync';
 import { pool } from '../../server/src/db';
-import { tgdb, type TgdbGameResult } from '../services/tgdb';
+import { igdb, pickIgdbCandidate, type IgdbGameResult } from '../services/igdb';
 import { scoreToRating } from '../../server/src/services/yamtrack';
 import { normalizeTitle, titleRelation } from '../services/titleMatch';
 
@@ -50,11 +50,10 @@ import { normalizeTitle, titleRelation } from '../services/titleMatch';
 export { normalizeTitle, titleRelation };
 
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
-const TGDB_API_LIMIT_URL = 'https://api.thegamesdb.net/v1/API/Limit';
-/** Delay between consecutive TGDB API calls. */
-const TGDB_DELAY_MS = 500;
-/** Abort further TGDB calls after this many consecutive failures. */
-const TGDB_MAX_CONSECUTIVE_FAILURES = 3;
+/** Delay between consecutive IGDB API calls (limit: 4 req/s). */
+const IGDB_DELAY_MS = 300;
+/** Abort further IGDB calls after this many consecutive failures. */
+const IGDB_MAX_CONSECUTIVE_FAILURES = 3;
 
 const DEFAULT_CSV = path.join(
   os.homedir(),
@@ -205,66 +204,59 @@ function matchLocalGame(
 }
 
 // ============================================================================
-// TGDB
+// IGDB
 // ============================================================================
 
-async function fetchRemainingAllowance(apiKey: string): Promise<number | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const res = await fetch(`${TGDB_API_LIMIT_URL}?apikey=${encodeURIComponent(apiKey)}`, {
-        signal: controller.signal,
-      });
-      if (!res.ok) return null;
-      const json = (await res.json()) as { remaining_monthly_allowance?: number };
-      return Number.isFinite(json.remaining_monthly_allowance)
-        ? json.remaining_monthly_allowance!
-        : null;
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch {
-    return null;
+async function loadIgdbCredentials(): Promise<{ clientId: string; clientSecret: string } | null> {
+  // Keys live in plugin_settings (jsonb values) — see the 044 migration.
+  const res = await pool.query(
+    `SELECT key, value FROM plugin_settings
+     WHERE user_id = $1 AND plugin_id = 'media' AND key IN ('igdb_client_id', 'igdb_client_secret')`,
+    [USER_ID]
+  );
+  const decode = (v: unknown): string | null => {
+    const s = typeof v === 'string' ? v : v != null ? String(v) : '';
+    return s.length > 0 ? s : null;
+  };
+  let clientId: string | null = null;
+  let clientSecret: string | null = null;
+  for (const row of res.rows) {
+    const value = decode(row.value);
+    if (row.key === 'igdb_client_id') clientId = value;
+    if (row.key === 'igdb_client_secret') clientSecret = value;
   }
+  return clientId && clientSecret ? { clientId, clientSecret } : null;
 }
 
-interface TgdbLookup {
-  /** null => no usable TGDB match (API failed, rate-limited, or no results). */
-  match: TgdbGameResult | null;
+interface IgdbLookup {
+  /** null => no usable IGDB match (API failed or no strict title match). */
+  match: IgdbGameResult | null;
   failed: boolean;
 }
 
 /**
- * Pick the TGDB result for a CSV title: exact normalized title, then a
- * same-game edition qualifier. Anything else is left unmatched (the game is
- * created local-only) so a wrong external_id is never stored.
+ * Pick the IGDB result for a CSV title. searchCandidates already returns
+ * strict same-game title matches (exact ordered first) with each match's
+ * full platform list; pickIgdbCandidate applies the stored-platform /
+ * console-priority preference, so a wrong external_id is never stored.
  */
-function pickBestTgdbMatch(
-  results: TgdbGameResult[] | null,
+function pickBestIgdbMatch(
+  candidates: { result: IgdbGameResult; platforms: string[] }[] | null,
   row: GameCsvRow
-): TgdbGameResult | null {
-  if (!results || results.length === 0) return null;
-  const target = normalizeTitle(row.title);
-
-  // Exact, then a same-game edition qualifier. Anything else is left
-  // unmatched so the game is created local-only rather than risking a wrong
-  // external_id (TGDB matches can't be reviewed in --dry-run).
-  return results.find(
-    (r) => titleRelation(target, normalizeTitle(r.title)) === 'exact' ||
-           titleRelation(target, normalizeTitle(r.title)) === 'edition'
-  ) ?? null;
+): IgdbGameResult | null {
+  if (!candidates || candidates.length === 0) return null;
+  return pickIgdbCandidate({ title: row.title, platform: row.platform }, candidates)?.result ?? null;
 }
 
 /**
- * Sequential, delayed, degrading TGDB lookup. Returns line -> result.
- * Stops making calls after repeated consecutive failures (rate cap).
+ * Sequential, delayed, degrading IGDB lookup. Returns line -> result.
+ * Stops making calls after repeated consecutive failures.
  */
 async function lookupGames(
   rows: GameCsvRow[],
-  apiKey: string
-): Promise<Map<number, TgdbLookup>> {
-  const results = new Map<number, TgdbLookup>();
+  creds: { clientId: string; clientSecret: string }
+): Promise<Map<number, IgdbLookup>> {
+  const results = new Map<number, IgdbLookup>();
   let consecutiveFailures = 0;
   let aborted = false;
 
@@ -274,13 +266,13 @@ async function lookupGames(
       continue;
     }
     try {
-      const found = await tgdb.searchGames(apiKey, row.title);
+      const found = await igdb.searchCandidates(creds.clientId, creds.clientSecret, row.title);
       if (!found) {
-        // 403 (rate cap) or network failure; withDegradation logged it.
+        // Network/credential failure; withDegradation logged it.
         consecutiveFailures++;
-        if (consecutiveFailures >= TGDB_MAX_CONSECUTIVE_FAILURES) {
+        if (consecutiveFailures >= IGDB_MAX_CONSECUTIVE_FAILURES) {
           console.warn(
-            `  ! ${consecutiveFailures} consecutive TGDB failures — stopping TGDB lookups; ` +
+            `  ! ${consecutiveFailures} consecutive IGDB failures — stopping IGDB lookups; ` +
               `remaining games will be local-only (re-run later to enrich).`
           );
           aborted = true;
@@ -289,17 +281,17 @@ async function lookupGames(
       } else {
         consecutiveFailures = 0;
         results.set(row.line, {
-          match: pickBestTgdbMatch(found, row),
+          match: pickBestIgdbMatch(found, row),
           failed: false,
         });
       }
     } catch {
       consecutiveFailures++;
-      if (consecutiveFailures >= TGDB_MAX_CONSECUTIVE_FAILURES) aborted = true;
+      if (consecutiveFailures >= IGDB_MAX_CONSECUTIVE_FAILURES) aborted = true;
       results.set(row.line, { match: null, failed: true });
     }
     if (!aborted) {
-      await new Promise((resolve) => setTimeout(resolve, TGDB_DELAY_MS));
+      await new Promise((resolve) => setTimeout(resolve, IGDB_DELAY_MS));
     }
   }
 
@@ -307,7 +299,7 @@ async function lookupGames(
 }
 
 // ============================================================================
-// Dry run (offline: DB reads only, no TGDB calls, no writes)
+// Dry run (offline: DB reads only, no IGDB calls, no writes)
 // ============================================================================
 
 async function runDryRun(rows: GameCsvRow[]): Promise<void> {
@@ -317,7 +309,7 @@ async function runDryRun(rows: GameCsvRow[]): Promise<void> {
   let newGames = 0;
 
   console.log('');
-  console.log('=== DRY RUN (no TGDB calls, no writes) ===');
+  console.log('=== DRY RUN (no IGDB calls, no writes) ===');
   console.log('');
   console.log(
     pad('CSV title', 50) + pad('match', 18) + pad('matched local game', 38) +
@@ -331,12 +323,12 @@ async function runDryRun(rows: GameCsvRow[]): Promise<void> {
     let status: string;
     let matchLabel: string;
     if (local) {
-      status = local.external_source ? 'matches TGDB local' : 'matches manual';
+      status = local.external_source ? 'matches linked local' : 'matches manual';
       matchLabel = local.title;
       matchedLocal++;
     } else {
       status = 'NEW';
-      matchLabel = '(TGDB lookup at import time)';
+      matchLabel = '(IGDB lookup at import time)';
       newGames++;
     }
 
@@ -369,7 +361,7 @@ async function runDryRun(rows: GameCsvRow[]): Promise<void> {
 
   console.log('-'.repeat(128));
   console.log(
-    `${rows.length} rows · ${matchedLocal} match existing local games · ${newGames} new (TGDB lookup at import time)`
+    `${rows.length} rows · ${matchedLocal} match existing local games · ${newGames} new (IGDB lookup at import time)`
   );
   console.log('');
   console.log('If this looks right, re-run without --dry-run to import.');
@@ -397,8 +389,8 @@ interface ImportStats {
   itemsCreated: number;
   itemsEnriched: number;
   timeRaised: number;
-  tgdbMatches: number;
-  tgdbFailed: number;
+  igdbMatches: number;
+  igdbFailed: number;
 }
 
 async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
@@ -407,45 +399,27 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
     itemsCreated: 0,
     itemsEnriched: 0,
     timeRaised: 0,
-    tgdbMatches: 0,
-    tgdbFailed: 0,
+    igdbMatches: 0,
+    igdbFailed: 0,
   };
 
-  // TGDB API key + up-front allowance check.
-  const keyRes = await pool.query(
-    'SELECT tgdb_api_key FROM user_settings WHERE user_id = $1',
-    [USER_ID]
-  );
-  const apiKey = keyRes.rows[0]?.tgdb_api_key || null;
+  // IGDB credentials (plugin_settings) — required for metadata enrichment.
+  const creds = await loadIgdbCredentials();
 
   // Local state snapshot (item lookup + idempotency) — matches in memory so
   // the per-row work stays inside a single DB transaction.
   const { byExactKey, byExternal, all } = await loadLocalGames();
   // Items created earlier in THIS run, keyed the same way as byExternal, so
-  // two CSV rows resolving to the same TGDB id never double-insert.
+  // two CSV rows resolving to the same IGDB id never double-insert.
   const createdExternal = new Map<string, LocalGame>();
 
-  let lookups = new Map<number, TgdbLookup>();
-  if (apiKey) {
-    const allowance = await fetchRemainingAllowance(apiKey);
-    if (allowance != null) {
-      console.log(`TGDB remaining monthly allowance: ${allowance}`);
-      if (allowance < rows.length) {
-        console.warn(
-          `  ! Allowance (${allowance}) is lower than the row count (${rows.length}); ` +
-            `some games may end up local-only. Re-running later will enrich them.`
-        );
-      }
-    } else {
-      console.log('Could not check TGDB allowance; proceeding.');
-    }
-    console.log(
-      `Looking up ${rows.length} games in TGDB (sequential, ${TGDB_DELAY_MS}ms apart)…`
-    );
-    lookups = await lookupGames(rows, apiKey);
+  let lookups = new Map<number, IgdbLookup>();
+  if (creds) {
+    console.log(`Looking up ${rows.length} games in IGDB (sequential, ${IGDB_DELAY_MS}ms apart)…`);
+    lookups = await lookupGames(rows, creds);
     console.log('');
   } else {
-    console.warn('No TGDB API key in user_settings — all games will be local-only.');
+    console.warn('No IGDB credentials configured (Settings > Media) — all games will be local-only.');
   }
 
   const client = await pool.connect();
@@ -455,21 +429,21 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
     for (const row of rows) {
       const lookup = lookups.get(row.line);
       const match = lookup?.match ?? null;
-      if (match) stats.tgdbMatches++;
-      if (lookup?.failed) stats.tgdbFailed++;
+      if (match) stats.igdbMatches++;
+      if (lookup?.failed) stats.igdbFailed++;
 
       // Find-or-create the media item.
       const local = matchLocalGame(row.title, byExactKey, all);
-      // An existing item that already claims this TGDB id (from the preloaded
+      // An existing item that already claims this IGDB id (from the preloaded
       // snapshot or created earlier in this run). Reusing it is what keeps
       // the (external_source, external_id) unique index happy.
       const externalHolder = match
-        ? byExternal.get(`tgdb:${match.externalId}`) ??
-          createdExternal.get(`tgdb:${match.externalId}`) ??
+        ? byExternal.get(`igdb:${match.externalId}`) ??
+          createdExternal.get(`igdb:${match.externalId}`) ??
           null
         : null;
       let mediaItemId: string;
-      // When the TGDB id is already claimed by a DIFFERENT item (in the
+      // When the IGDB id is already claimed by a DIFFERENT item (in the
       // snapshot or created earlier in this run), attach to that item instead
       // of the title match — reusing it is what keeps the (external_source,
       // external_id) unique index happy.
@@ -482,14 +456,12 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
         mediaItemId = reuseExternal.id;
       } else if (local) {
         mediaItemId = local.id;
-        // Enrich a local-only item with TGDB data, filling nulls only so
+        // Enrich a local-only item with IGDB data, filling nulls only so
         // manually set values are never clobbered.
         if (match && !local.external_source) {
-          // Enrich a local-only item with TGDB data, filling nulls only so
-          // manually set values are never clobbered.
           await client.query(
             `UPDATE media_items
-             SET external_source = 'tgdb',
+             SET external_source = 'igdb',
                  external_id = COALESCE(external_id, $2),
                  release_year = COALESCE(release_year, $3),
                  image_url = COALESCE(image_url, $4),
@@ -533,7 +505,7 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
           RETURNING id`,
           [
             USER_ID,
-            match ? 'tgdb' : null,
+            match ? 'igdb' : null,
             match?.externalId ?? null,
             match?.title ?? row.title,
             match?.releaseYear ?? null,
@@ -552,10 +524,10 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
         mediaItemId = ins.rows[0].id as string;
         stats.itemsCreated++;
         if (match) {
-          createdExternal.set(`tgdb:${match.externalId}`, {
+          createdExternal.set(`igdb:${match.externalId}`, {
             id: mediaItemId,
             title: match.title ?? row.title,
-            external_source: 'tgdb',
+            external_source: 'igdb',
             external_id: match.externalId,
             time_played_minutes: null,
           });
@@ -605,20 +577,20 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
       const updated: LocalGame = {
         id: mediaItemId,
         title: local?.title ?? reuseExternal?.title ?? (match?.title ?? row.title),
-        external_source: match ? 'tgdb' : (local?.external_source ?? reuseExternal?.external_source ?? null),
+        external_source: match ? 'igdb' : (local?.external_source ?? reuseExternal?.external_source ?? null),
         external_id: match?.externalId ?? local?.external_id ?? reuseExternal?.external_id ?? null,
         time_played_minutes: storedTime ?? currentTotal,
       };
       const key = normalizeTitle(updated.title);
       byExactKey.set(key, updated);
       if (match) {
-        byExternal.set(`tgdb:${match.externalId}`, updated);
+        byExternal.set(`igdb:${match.externalId}`, updated);
       }
 
       const src = match
-        ? `TGDB ${match.externalId}`
+        ? `IGDB ${match.externalId}`
         : lookup?.failed
-          ? 'local-only (TGDB failed)'
+          ? 'local-only (IGDB failed)'
           : 'local-only';
       const timeNote =
         storedTime != null && currentTotal != null && storedTime > currentTotal
@@ -675,8 +647,8 @@ async function main() {
     console.log(`  media items created:  ${stats.itemsCreated}`);
     console.log(`  media items enriched: ${stats.itemsEnriched}`);
     console.log(`  time totals raised:   ${stats.timeRaised}`);
-    console.log(`  TGDB matches:         ${stats.tgdbMatches}`);
-    console.log(`  TGDB failures:        ${stats.tgdbFailed}${stats.tgdbFailed ? ' (re-run later to enrich those games)' : ''}`);
+    console.log(`  IGDB matches:         ${stats.igdbMatches}`);
+    console.log(`  IGDB failures:        ${stats.igdbFailed}${stats.igdbFailed ? ' (re-run later to enrich those games)' : ''}`);
   }
 
   await pool.end();

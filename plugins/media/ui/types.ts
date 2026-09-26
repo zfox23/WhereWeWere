@@ -11,7 +11,7 @@ import type { MediaSubtype } from '../../../client/src/types';
 export interface MediaItem {
   id: string;
   media_type: MediaSubtype;
-  external_source: 'tmdb' | 'tgdb' | 'igdb' | 'hardcover' | null;
+  external_source: 'tmdb' | 'igdb' | 'hardcover' | null;
   external_id: string | null;
   title: string;
   author: string | null;
@@ -19,7 +19,7 @@ export interface MediaItem {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
-  /** Game: provider synopsis (IGDB/TGDB). */
+  /** Game: provider synopsis (IGDB). */
   overview: string | null;
   /** Game: ESRB-style content rating, e.g. "E - Everyone". */
   content_rating: string | null;
@@ -60,8 +60,8 @@ export interface MediaItem {
 }
 
 export interface MediaSearchHit {
-  source: 'local' | 'tmdb' | 'tgdb' | 'igdb' | 'hardcover';
-  external_source: 'tmdb' | 'tgdb' | 'igdb' | 'hardcover' | null;
+  source: 'local' | 'tmdb' | 'igdb' | 'hardcover';
+  external_source: 'tmdb' | 'igdb' | 'hardcover' | null;
   external_id: string | null;
   title: string;
   author: string | null;
@@ -69,7 +69,7 @@ export interface MediaSearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
-  /** Game: provider synopsis (IGDB/TGDB). */
+  /** Game: provider synopsis (IGDB). */
   overview: string | null;
   /** Game: ESRB-style content rating, e.g. "E - Everyone". */
   content_rating: string | null;

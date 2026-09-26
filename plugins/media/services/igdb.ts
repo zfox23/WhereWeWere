@@ -8,8 +8,8 @@
 //
 // Requests are POSTs to /v4/games with a plain-text APICalypse query body.
 // Dot-expanders (genres.name, involved_companies, age_ratings, platforms.name)
-// inline related data in a single response, so — unlike TGDB — no separate
-// by-id name-resolution calls are needed.
+// inline related data in a single response, so no separate by-id
+// name-resolution calls are needed.
 //
 // Rate limit: 4 requests/second (HTTP 429). This app issues at most one query
 // per user action plus the shared ApiCache single-flight dedupe, so no
@@ -103,7 +103,7 @@ interface TwitchTokenResponse {
 }
 
 /**
- * Result shape mirrors TgdbGameResult so server dispatch code is uniform.
+ * Flat result shape used uniformly by the server dispatch code.
  * IGDB has no player-count or co-op fields: those are always null.
  */
 export interface IgdbGameResult {
@@ -342,7 +342,7 @@ export function pickIgdbCandidate(row: { title: string; platform?: string | null
 }
 
 // ---------------------------------------------------------------------------
-// Provider singleton (mirrors the tgdb/tmdb pattern)
+// Provider singleton (mirrors the tmdb/hardcover pattern)
 // ---------------------------------------------------------------------------
 
 const cache = new ApiCache(60 * 60 * 1000);
@@ -414,7 +414,7 @@ export const igdb = {
    * Search games by name. When `platform` is given, rows are filtered to
    * candidates released on that platform; if the filter yields nothing, the
    * unfiltered list is served so a quirky stored platform string never
-   * blocks a match (mirrors TGDB behavior).
+   * blocks a match.
    */
   async searchGames(
     clientId: string | null,

@@ -4,7 +4,7 @@
  * CUSTOM storage: Media keeps its pre-existing tables (media_items,
  * media_checkins, media_lists, media_list_items, media_tv_episodes,
  * plex_webhook_events) so the Yamtrack import, the Plex webhook, the
- * TMDB/TGDB/Hardcover integration, and timestamp reconciliation keep working
+ * TMDB/IGDB/Hardcover integration, and timestamp reconciliation keep working
  * untouched. The framework uses this half for the unified timeline, backups,
  * start-over, and mounts the plugin-owned API routers.
  *
@@ -13,7 +13,7 @@
  *                       library, stats, TV season cache (ex-routes/media.ts)
  *   - /webhook/plex     the Plex scrobble webhook (ex-routes/webhook-plex.ts)
  *
- * Its provider API keys (tmdb/tgdb/hardcover) and the plex_usernames filter
+ * Its provider API keys (tmdb/igdb/hardcover) and the plex_usernames filter
  * live in the generic plugin_settings table (declared in settingsKeys; the
  * 044 migration moved them out of user_settings).
  */
@@ -33,8 +33,7 @@ import type {
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
 import { tmdb } from './services/tmdb';
-import { tgdb, type TgdbGameResult } from './services/tgdb';
-import { igdb, pickIgdbCandidate } from './services/igdb';
+import { igdb, pickIgdbCandidate, type IgdbGameResult } from './services/igdb';
 import { normalizeTitle, titleRelation } from './services/titleMatch';
 import { hardcover } from './services/hardcover';
 import {
@@ -64,7 +63,6 @@ const EPISODE_CACHE_MAX_AGE_DAYS = 30;
 
 interface SettingsKeys {
   tmdb_api_key: string | null;
-  tgdb_api_key: string | null;
   hardcover_api_key: string | null;
   igdb_client_id: string | null;
   igdb_client_secret: string | null;
@@ -84,7 +82,7 @@ async function getApiKeys(): Promise<SettingsKeys> {
   const result = await query(
     `SELECT key, value FROM plugin_settings
       WHERE user_id = $1 AND plugin_id = 'media'
-        AND key IN ('tmdb_api_key', 'tgdb_api_key', 'hardcover_api_key', 'igdb_client_id', 'igdb_client_secret')`,
+        AND key IN ('tmdb_api_key', 'hardcover_api_key', 'igdb_client_id', 'igdb_client_secret')`,
     [USER_ID]
   );
   const values: Record<string, string | null> = {};
@@ -94,7 +92,6 @@ async function getApiKeys(): Promise<SettingsKeys> {
   }
   return {
     tmdb_api_key: values.tmdb_api_key ?? null,
-    tgdb_api_key: values.tgdb_api_key ?? null,
     hardcover_api_key: values.hardcover_api_key ?? null,
     igdb_client_id: values.igdb_client_id ?? null,
     igdb_client_secret: values.igdb_client_secret ?? null,
@@ -187,9 +184,9 @@ function formatLlmMinutes(minutes: number): string {
  * Mirrors upsertMediaItem, but takes an explicit client so it can run
  * inside the caller's transaction.
  *
- * Local-only items (no external_source/external_id — e.g. Yamtrack games,
- * which carry IGDB ids we must not store as TGDB ids, and board games) are
- * deduped by strict title match instead: exact normalized title, or a
+ * Local-only items (no external_source/external_id — e.g. board games and
+ * games not yet keyed to a provider id) are deduped by strict title match
+ * instead: exact normalized title, or a
  * same-game edition qualifier. Everything else counts as a different item,
  * so re-imports never create duplicate rows (same rules as the games-CSV
  * importer).
@@ -215,6 +212,21 @@ export async function upsertMediaItemWithClient(
     );
     if (existing.rows.length > 0) {
       return { id: existing.rows[0].id as string, created: false };
+    }
+    // External miss: fold into an existing item with the same strict title
+    // (e.g. a re-import where the provider id changed between exports)
+    // instead of creating a duplicate row.
+    const siblings = await client.query(
+      `SELECT id, title FROM media_items
+       WHERE user_id = $1 AND media_type = $2`,
+      [USER_ID, input.media_type]
+    );
+    const key = normalizeTitle(input.title);
+    const match = siblings.rows.find(
+      (r) => titleRelation(key, normalizeTitle(r.title as string)) !== 'none'
+    );
+    if (match) {
+      return { id: match.id as string, created: false };
     }
   } else {
     // Local-only: find an existing item of the same type by strict title.
@@ -331,7 +343,7 @@ interface SearchHit {
   image_url: string | null;
   external_url: string | null;
   platform: string | null;
-  /** Game: provider synopsis (IGDB/TGDB). */
+  /** Game: provider synopsis (IGDB). */
   overview: string | null;
   /** Game: ESRB-style content rating, e.g. "E - Everyone". */
   content_rating: string | null;
@@ -469,29 +481,13 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
       };
     }
   } else if (type === 'game') {
-    // IGDB is the primary game provider; TGDB is the fallback when IGDB is
-    // not configured or comes back empty. Both shapes match, so the row
-    // mapping below is source-agnostic.
-    let source: 'igdb' | 'tgdb' | null = null;
-    let found: { externalId: string; title: string; releaseYear: number | null; imageUrl: string | null; externalUrl: string; platform: string | null; overview: string | null; contentRating: string | null; players: number | null; coop: string | null; genres: string[] | null; developers: string[] | null; publishers: string[] | null }[] | null = null;
-    if (hasIgdbCredentials(keys)) {
-      const ig = await igdb.searchGames(keys.igdb_client_id, keys.igdb_client_secret, q);
-      if (ig && ig.length > 0) {
-        source = 'igdb';
-        found = ig;
-      }
-    }
-    if (!found) {
-      const tg = await tgdb.searchGames(keys.tgdb_api_key, q);
-      if (tg) {
-        source = 'tgdb';
-        found = tg;
-      }
-    }
+    const found = hasIgdbCredentials(keys)
+      ? await igdb.searchGames(keys.igdb_client_id, keys.igdb_client_secret, q)
+      : null;
     if (!found) {
       degraded = true;
     } else {
-      external = { external_source: source as string, rows: found.map((f) => ({ externalId: f.externalId, title: f.title, releaseYear: f.releaseYear, imageUrl: f.imageUrl, externalUrl: f.externalUrl, platform: f.platform, overview: f.overview, contentRating: f.contentRating, players: f.players, coop: f.coop, genres: f.genres, developers: f.developers, publishers: f.publishers })) };
+      external = { external_source: 'igdb', rows: found.map((f) => ({ externalId: f.externalId, title: f.title, releaseYear: f.releaseYear, imageUrl: f.imageUrl, externalUrl: f.externalUrl, platform: f.platform, overview: f.overview, contentRating: f.contentRating, players: f.players, coop: f.coop, genres: f.genres, developers: f.developers, publishers: f.publishers })) };
     }
   } else if (type === 'book') {
     const found = await hardcover.searchBooks(keys.hardcover_api_key, q);
@@ -612,7 +608,7 @@ router.post('/items', async (req: Request, res: Response) => {
 const SOURCE_BY_TYPE: Record<string, string | null> = {
   movie: 'tmdb',
   tv_show: 'tmdb',
-  game: 'tgdb',
+  game: 'igdb',
   book: 'hardcover',
   board_game: null,
 };
@@ -805,12 +801,12 @@ router.put('/items/:id', async (req: Request, res: Response) => {
 /**
  * Re-key a local-only game by title: find a strict title match (exact or
  * edition qualifier) that no other local row already owns, and adopt its id +
- * metadata in place — IGDB first (primary), then TGDB. This is what makes
- * Yamtrack-imported games (which store no external id) self-heal on their
- * first sync. Returns the adopted record, or null when no usable match exists.
+ * metadata in place against IGDB (the game metadata provider). This is what
+ * makes local-only games self-heal on their first sync. Returns the adopted
+ * record, or null when no usable match exists.
  */
 /**
- * Resolve a game to an IGDB id by title (primary re-key path). searchCandidates
+ * Resolve a game to an IGDB id by title. searchCandidates
  * already returns strict-title matches (with each match's full platform list);
  * pickIgdbCandidate applies the stored-platform / console-priority preference.
  * Returns the winning candidate or null when there is no strict match.
@@ -824,10 +820,9 @@ async function findIgdbRekeyMatch(title: string, platform?: string | null) {
   return pick?.result ?? null;
 }
 
-/** Write a re-keyed game row (either provider) — same COALESCE semantics for both. */
+/** Write a re-keyed game row. COALESCE keeps any manually set values. */
 async function applyGameRekey(
   itemId: string,
-  source: 'igdb' | 'tgdb',
   externalId: string,
   externalUrl: string,
   meta: {
@@ -860,7 +855,7 @@ async function applyGameRekey(
          publishers = COALESCE(publishers, $13),
          updated_at = NOW()
      WHERE id = $14 AND user_id = $15`,
-    [source, externalId, externalUrl,
+    ['igdb', externalId, externalUrl,
      meta.releaseYear, meta.imageUrl, meta.platform,
      meta.overview, meta.contentRating, meta.players, meta.coop,
      meta.genres, meta.developers, meta.publishers, itemId, USER_ID]
@@ -868,78 +863,39 @@ async function applyGameRekey(
 }
 
 /**
- * Re-key a local-only game row by title. Tries IGDB first (the primary game
- * provider, using the console-priority candidate selection); falls back to
- * TGDB when IGDB has no credentials or no strict match. Returns the winning
- * candidate so the sync endpoint can respond with its metadata.
+ * Re-key a local-only game row by title against IGDB, using the
+ * console-priority candidate selection. Skips when the resolved id is already
+ * owned by another local row (partial unique index on user/type/source/id).
+ * Returns the winning candidate so the sync endpoint can respond with its
+ * metadata.
  */
-async function rekeyGameByTitle(itemId: string, title: string, platform?: string | null): Promise<TgdbGameResult | null> {
+async function rekeyGameByTitle(itemId: string, title: string, platform?: string | null): Promise<IgdbGameResult | null> {
   const keys = await getApiKeys();
-  if (!keys.tgdb_api_key && !hasIgdbCredentials(keys)) return null;
+  if (!hasIgdbCredentials(keys)) return null;
 
-  // --- IGDB first ---
-  if (hasIgdbCredentials(keys)) {
-    const igMatch = await findIgdbRekeyMatch(title, platform);
-    if (igMatch) {
-      const c = igMatch;
-      const owner = await query(
-        `SELECT id FROM media_items
-         WHERE user_id = $1 AND media_type = 'game' AND external_source = 'igdb' AND external_id = $2 AND id <> $3`,
-        [USER_ID, c.externalId, itemId]
-      );
-      if (owner.rows.length === 0) {
-        await applyGameRekey(itemId, 'igdb', c.externalId, c.externalUrl, {
-          releaseYear: c.releaseYear,
-          imageUrl: c.imageUrl,
-          platform: c.platform,
-          overview: c.overview,
-          contentRating: c.contentRating,
-          players: c.players,
-          coop: c.coop,
-          genres: c.genres,
-          developers: c.developers,
-          publishers: c.publishers,
-        });
-        return c;
-      }
-    }
-  }
+  const match = await findIgdbRekeyMatch(title, platform);
+  if (!match) return null;
 
-  // --- TGDB fallback ---
-  if (keys.tgdb_api_key) {
-    // Narrow the name search to the item's platform so the right version of a
-    // multi-platform title is matched; searchGames falls back to unfiltered
-    // when the platform can't be resolved or yields nothing.
-    const found = await tgdb.searchGames(keys.tgdb_api_key, title, platform);
-    if (!found) return null;
-    const target = normalizeTitle(title);
-    for (const candidate of found) {
-      if (titleRelation(target, normalizeTitle(candidate.title)) === 'none') continue;
-      // Another local row may already own this TGDB id (partial unique index on
-      // user/type/source/id); skip to the next strict match instead of
-      // violating the constraint.
-      const owner = await query(
-        `SELECT id FROM media_items
-         WHERE user_id = $1 AND media_type = 'game' AND external_source = 'tgdb' AND external_id = $2 AND id <> $3`,
-        [USER_ID, candidate.externalId, itemId]
-      );
-      if (owner.rows.length > 0) continue;
-      await applyGameRekey(itemId, 'tgdb', candidate.externalId, `https://thegamesdb.net/game.php?id=${candidate.externalId}`, {
-        releaseYear: candidate.releaseYear,
-        imageUrl: candidate.imageUrl,
-        platform: candidate.platform,
-        overview: candidate.overview,
-        contentRating: candidate.contentRating,
-        players: candidate.players,
-        coop: candidate.coop,
-        genres: candidate.genres,
-        developers: candidate.developers,
-        publishers: candidate.publishers,
-      });
-      return candidate;
-    }
-  }
-  return null;
+  const owner = await query(
+    `SELECT id FROM media_items
+     WHERE user_id = $1 AND media_type = 'game' AND external_source = 'igdb' AND external_id = $2 AND id <> $3`,
+    [USER_ID, match.externalId, itemId]
+  );
+  if (owner.rows.length > 0) return null;
+
+  await applyGameRekey(itemId, match.externalId, match.externalUrl, {
+    releaseYear: match.releaseYear,
+    imageUrl: match.imageUrl,
+    platform: match.platform,
+    overview: match.overview,
+    contentRating: match.contentRating,
+    players: match.players,
+    coop: match.coop,
+    genres: match.genres,
+    developers: match.developers,
+    publishers: match.publishers,
+  });
+  return match;
 }
 
 /** Fetch the latest metadata for an item from its provider. Never writes (except the game title re-key above). */
@@ -963,15 +919,11 @@ async function fetchSyncMetadata(item: {
       return { provider: 'TMDB', found: true, metadata: { title: d.title, release_year: d.releaseYear, image_url: d.imageUrl, external_id: item.external_id, external_url: `https://www.themoviedb.org/tv/${item.external_id}` } };
     }
     case 'game': {
-      // Dispatch on the row's own source: igdb rows sync from IGDB,
-      // everything else (tgdb / legacy) from TGDB.
-      const isIgdb = item.external_source === 'igdb';
-      const d = isIgdb
-        ? await igdb.getGameDetails(keys.igdb_client_id, keys.igdb_client_secret, item.external_id)
-        : await tgdb.getGameDetails(keys.tgdb_api_key, item.external_id);
+      // Games sync from IGDB, the single game metadata provider.
+      const d = await igdb.getGameDetails(keys.igdb_client_id, keys.igdb_client_secret, item.external_id);
       if (!d) return null;
       return {
-        provider: isIgdb ? 'IGDB' : 'TGDB',
+        provider: 'IGDB',
         found: true,
         metadata: {
           title: d.title,
@@ -1016,7 +968,11 @@ async function fetchSyncMetadata(item: {
 }
 
 // POST /items/:id/sync - fetch fresh provider metadata; the client diffs and
-// the user accepts changes explicitly via PUT /items/:id
+// the user accepts changes explicitly via PUT /items/:id.
+//
+// The edit form may post the item's CURRENT (possibly unsaved) title and
+// external_id so a sync resolves against what the user is looking at, not
+// the database. Empty/omitted values fall back to the stored row.
 router.post('/items/:id/sync', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
@@ -1030,17 +986,22 @@ router.post('/items/:id/sync', async (req: Request, res: Response) => {
     if (item.media_type === 'board_game') {
       return res.status(400).json({ error: 'Board games are local-only and have no provider to sync from' });
     }
-    if (!item.external_id) {
+    const body = (req.body ?? {}) as { title?: unknown; external_id?: unknown };
+    const title = typeof body.title === 'string' && body.title.trim() !== ''
+      ? body.title.trim()
+      : item.title;
+    const externalId = typeof body.external_id === 'string'
+      ? body.external_id.trim()
+      : (item.external_id ?? '');
+    if (!externalId) {
       if (item.media_type === 'game') {
-        // Local-only games (e.g. imported from Yamtrack, whose IGDB ids we
-        // must not store) self-heal: resolve them by title against a game
-        // provider (IGDB first, then TGDB).
-        const match = await rekeyGameByTitle(item.id, item.title, item.platform);
+        // Local-only games self-heal: resolve them by title against IGDB.
+        const match = await rekeyGameByTitle(item.id, title, item.platform);
         if (!match) {
           return res.status(404).json({ error: 'Could not find this game in a game database by title (it may be missing from the database).' });
         }
         return res.json({
-          provider: match.externalUrl.startsWith('https://www.igdb.com') ? 'IGDB' : 'TGDB',
+          provider: 'IGDB',
           found: true,
           rekeyed: true,
           metadata: {
@@ -1062,13 +1023,13 @@ router.post('/items/:id/sync', async (req: Request, res: Response) => {
       }
       return res.status(400).json({ error: 'This item has no external ID. Set one in edit mode first.' });
     }
-    const result = await fetchSyncMetadata(item);
+    const result = await fetchSyncMetadata({ ...item, title, external_id: externalId });
     if (!result) {
       const keys = await getApiKeys();
       const hasKey = item.media_type === 'book'
         ? !!keys.hardcover_api_key
         : item.media_type === 'game'
-          ? hasIgdbCredentials(keys) || !!keys.tgdb_api_key
+          ? hasIgdbCredentials(keys)
           : !!keys.tmdb_api_key;
       if (!hasKey) {
         return res.status(400).json({ error: 'API key for this provider is not configured' });
@@ -2456,7 +2417,6 @@ export const server: CheckinTypeServerPlugin = {
 
   settingsKeys: [
     { name: 'tmdb_api_key', type: 'string', label: 'TMDB API key' },
-    { name: 'tgdb_api_key', type: 'string', label: 'TheGamesDB API key' },
     { name: 'hardcover_api_key', type: 'string', label: 'Hardcover API key' },
     { name: 'igdb_client_id', type: 'string', label: 'IGDB Client ID (Twitch app)' },
     { name: 'igdb_client_secret', type: 'string', label: 'IGDB Client Secret (Twitch app)' },
@@ -2466,7 +2426,7 @@ export const server: CheckinTypeServerPlugin = {
   // Old backups still carry these in settings.*; restoring them writes the
   // values into plugin_settings instead of the (now removed) user_settings
   // columns.
-  legacySettingsKeys: ['tmdb_api_key', 'tgdb_api_key', 'hardcover_api_key', 'plex_usernames'],
+  legacySettingsKeys: ['tmdb_api_key', 'hardcover_api_key', 'plex_usernames'],
 
   // ------------------------------------------------------------------
   // Cross-cutting service hooks

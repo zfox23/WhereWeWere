@@ -94,13 +94,13 @@ describe('Backup export/import media round-trip', () => {
   });
 
   async function seed() {
-    // Game item with a platform + TGDB-sourced metadata (set via PUT, the
+    // Game item with a platform + IGDB-sourced metadata (set via PUT, the
     // same path the provider sync applies through).
     const game = await request(app)
       .post('/api/v1/media/items')
       .send({ media_type: 'game', title: 'Hades', platform: 'Nintendo Switch' });
     expect(game.status).toBe(201);
-    const gameTgdb = await request(app)
+    const gameItem = await request(app)
       .put(`/api/v1/media/items/${game.body.id}`)
       .send({
         overview: 'Slash your way to freedom from the Underworld.',
@@ -111,7 +111,7 @@ describe('Backup export/import media round-trip', () => {
         developers: ['Supergiant Games'],
         publishers: ['Supergiant Games'],
       });
-    expect(gameTgdb.status).toBe(200);
+    expect(gameItem.status).toBe(200);
 
     // Book item with page count / series metadata.
     const book = await request(app)

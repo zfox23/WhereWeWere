@@ -69,10 +69,16 @@ export const media = {
    * Fetch the latest provider metadata; returns a diff-ready payload. For
    * local-only games the server may re-key the item by title instead (writes
    * the external id, signals it via `rekeyed: true`).
+   *
+   * `overrides` lets the edit form sync against its current (possibly
+   * unsaved) title / external id instead of the values in the database.
    */
-  syncItem: (id: string) =>
+  syncItem: (id: string, overrides?: { title?: string; external_id?: string }) =>
     request<{ provider: string; found: boolean; rekeyed?: boolean; metadata: Record<string, string | number | null> }>(
-      `/media/items/${id}/sync`, { method: 'POST' }
+      `/media/items/${id}/sync`, {
+        method: 'POST',
+        ...(overrides ? { body: JSON.stringify(overrides) } : {}),
+      }
     ),
   listCheckins: (itemId: string) => request<MediaCheckIn[]>(`/media/items/${itemId}/checkins`),
   createCheckin: (itemId: string, data: {
