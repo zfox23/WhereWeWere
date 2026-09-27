@@ -835,7 +835,11 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (listIds) {
       lists = await attachCheckinLists(String(id), listIds, client);
     } else {
-      lists = await getCheckinListIds(String(id));
+      const listsResult = await client.query(
+        `SELECT list_id FROM checkin_list_items WHERE checkin_id = $1 ORDER BY list_id`,
+        [String(id)]
+      );
+      lists = listsResult.rows.map((r: any) => r.list_id as string);
     }
 
     await client.query('COMMIT');

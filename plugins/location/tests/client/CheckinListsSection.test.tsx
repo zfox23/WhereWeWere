@@ -43,7 +43,9 @@ const ITEM = (over: Partial<Record<string, unknown>> = {}) => ({
 });
 
 async function openListDetail(user: ReturnType<typeof userEvent.setup>, name: string) {
-  await user.click(await screen.findByRole('button', { name: new RegExp(name) }));
+  // Anchor to the start so we don't also match the "Rename <name>" /
+  // "Delete <name>" row actions.
+  await user.click(await screen.findByRole('button', { name: new RegExp(`^${name}`) }));
   await screen.findByRole('button', { name: /Back to lists/ });
 }
 
@@ -141,10 +143,10 @@ describe('CheckinListsSection', () => {
       </MemoryRouter>
     );
 
-    // Deep link should land directly on the list detail.
+    // Deep link should land directly on the list detail (items load async).
     await screen.findByRole('button', { name: /Back to lists/ });
-    expect(screen.getByText('Fillmore')).toBeTruthy();
-    expect(screen.getByText('Apollo')).toBeTruthy();
+    expect(await screen.findByText('Fillmore')).toBeTruthy();
+    expect(await screen.findByText('Apollo')).toBeTruthy();
 
     // Back to the index.
     await user.click(screen.getByRole('button', { name: /Back to lists/ }));

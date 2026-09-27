@@ -177,8 +177,10 @@ describe('LocationCheckInForm', () => {
     await waitFor(() => {
       expect(apiMocks.checkinListsCreate).toHaveBeenCalledWith('Concerts');
     });
-    // The newly created list is now selected.
-    await user.click(screen.getByRole('button', { name: /Concerts/ }));
+    // The newly created list is auto-selected (no extra click needed —
+    // clicking the chip would toggle it off).
+    const chip = await screen.findByRole('button', { name: /Concerts/ });
+    expect(chip).toHaveAttribute('aria-pressed', 'true');
     const notesInput = screen.getByLabelText('Note.md');
     await user.click(notesInput);
     await user.keyboard('{Shift>}{Enter}{/Shift}');
