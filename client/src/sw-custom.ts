@@ -6,6 +6,13 @@ import { ExpirationPlugin } from 'workbox-expiration';
 
 declare const self: ServiceWorkerGlobalScope;
 
+// When a new build's service worker is installed, take over all open tabs
+// immediately instead of waiting for the next navigation. Combined with
+// registerSW()'s auto-update handling in main.tsx, this makes the page
+// reload automatically after a deployment so users never see a stale UI.
+self.skipWaiting();
+self.clients.claim();
+
 // Precache static assets injected by vite-plugin-pwa
 precacheAndRoute(self.__WB_MANIFEST);
 
