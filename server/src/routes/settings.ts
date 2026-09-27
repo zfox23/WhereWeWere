@@ -32,7 +32,7 @@ router.get('/', async (_req: Request, res: Response) => {
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.id = $1`,
-                  [USER_ID, DEFAULT_SYSTEM_LIGHT_THEME, DEFAULT_SYSTEM_DARK_THEME]
+      [USER_ID, DEFAULT_SYSTEM_LIGHT_THEME, DEFAULT_SYSTEM_DARK_THEME]
     );
 
     if (result.rows.length === 0) {
@@ -60,7 +60,9 @@ router.get('/timestamp-reconciliation', async (_req: Request, res: Response) => 
 router.put('/', async (req: Request, res: Response) => {
   try {
     const {
-      dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
+      dawarich_url, dawarich_api_key,
+      immich_url, immich_api_key,
+      maloja_url,
       theme, system_light_theme, system_dark_theme,
       distance_unit,
       timeline_density,
@@ -87,12 +89,26 @@ router.put('/', async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url,
-                                  theme, system_light_theme, system_dark_theme, distance_unit, timeline_density,
-                                  llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support)
+      `INSERT INTO user_settings (
+        user_id,
+        dawarich_url,
+        dawarich_api_key,
+        immich_url,
+        immich_api_key,
+        maloja_url,
+        theme,
+        system_light_theme,
+        system_dark_theme,
+        distance_unit,
+        timeline_density,
+        llm_api_url,
+        llm_model,
+        llm_reasoning_level,
+        llm_context_window,
+        llm_image_support)
        VALUES ($1, $2, $3, $4, $5, $6,
-               $7, COALESCE($8, $18), COALESCE($9, $19), $10, $20,
-               $11, $12, $13, $14, $15)
+               $7, COALESCE($8, $17), COALESCE($9, $18), $10,
+               $11, $12, $13, $14, $15, $16)
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = COALESCE($2, user_settings.dawarich_url),
          dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
@@ -100,26 +116,29 @@ router.put('/', async (req: Request, res: Response) => {
          immich_api_key = COALESCE($5, user_settings.immich_api_key),
          maloja_url = COALESCE($6, user_settings.maloja_url),
          theme = COALESCE($7, user_settings.theme),
-         system_light_theme = COALESCE($8, user_settings.system_light_theme, $18),
-         system_dark_theme = COALESCE($9, user_settings.system_dark_theme, $19),
+         system_light_theme = COALESCE($8, user_settings.system_light_theme, $17),
+         system_dark_theme = COALESCE($9, user_settings.system_dark_theme, $18),
          distance_unit = COALESCE($10, user_settings.distance_unit),
-         timeline_density = COALESCE($20, user_settings.timeline_density),
-         llm_api_url = COALESCE($11, user_settings.llm_api_url),
-         llm_model = COALESCE($12, user_settings.llm_model),
-         llm_reasoning_level = COALESCE($13, user_settings.llm_reasoning_level),
-         llm_context_window = COALESCE($14, user_settings.llm_context_window),
-         llm_image_support = COALESCE($15, user_settings.llm_image_support),
+         timeline_density = COALESCE($11, user_settings.timeline_density),
+         llm_api_url = COALESCE($12, user_settings.llm_api_url),
+         llm_model = COALESCE($13, user_settings.llm_model),
+         llm_reasoning_level = COALESCE($14, user_settings.llm_reasoning_level),
+         llm_context_window = COALESCE($15, user_settings.llm_context_window),
+         llm_image_support = COALESCE($16, user_settings.llm_image_support),
          updated_at = NOW()
        RETURNING *`,
       [
         USER_ID,
-        dawarich_url ?? null, dawarich_api_key ?? null,
-        immich_url ?? null, immich_api_key ?? null,
+        dawarich_url ?? null,
+        dawarich_api_key ?? null,
+        immich_url ?? null,
+        immich_api_key ?? null,
         maloja_url ?? null,
         theme ?? null,
         system_light_theme ?? null,
         system_dark_theme ?? null,
         distance_unit ?? null,
+        timeline_density ?? null,
         llm_api_url ?? null,
         llm_model ?? null,
         llm_reasoning_level ?? null,
@@ -127,7 +146,6 @@ router.put('/', async (req: Request, res: Response) => {
         llm_image_support ?? null,
         DEFAULT_SYSTEM_LIGHT_THEME,
         DEFAULT_SYSTEM_DARK_THEME,
-        timeline_density ?? null,
       ]
     );
 
