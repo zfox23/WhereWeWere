@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft, CalendarDays, Users } from 'lucide-react';
+import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft, CalendarDays, Users, List } from 'lucide-react';
 import Stars from '../../../client/src/components/Stars';
-import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi } from '../../../client/src/api/client';
-import type { Scrobble, ImmichAsset } from '../../../client/src/types';
+import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
+import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi, checkinLists } from '../../../client/src/api/client';
+import type { Scrobble, ImmichAsset, CheckinList } from '../../../client/src/types';
 import MapView from './MapView';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
@@ -64,6 +65,7 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
   const [scrobbles, setScrobbles] = useState<Scrobble[]>([]);
   const [photos, setPhotos] = useState<ImmichAsset[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [lists, setLists] = useState<CheckinList[]>([]);
 
   usePageTitle(checkin?.venue_name ? `Check-In: ${checkin.venue_name}` : 'Check-In');
 
@@ -97,6 +99,26 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
       setPhotos(data[id] || []);
     }).catch(() => {});
   }, [id, immichUrl]);
+
+  // Resolve the check-in's list membership to list names.
+  const listIds: string[] = Array.isArray(checkin?.lists) ? checkin.lists : [];
+  const listIdsKey = listIds.join(',');
+  useEffect(() => {
+    const ids = listIdsKey ? listIdsKey.split(',') : [];
+    if (ids.length === 0) {
+      setLists([]);
+      return;
+    }
+    let active = true;
+    checkinLists.list().then((data) => {
+      if (!active) return;
+      const byId = new Map((data as CheckinList[]).map((l) => [l.id, l]));
+      setLists(ids.map((lid) => byId.get(lid)).filter((l): l is CheckinList => !!l));
+    }).catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [listIdsKey]);
 
   const handleDelete = async () => {
     if (!id) return;
@@ -198,9 +220,31 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
           <p className="text-sm text-gray-500 dark:text-gray-400">{fullAddress}</p>
         )}
 
-        {/* Notes */}
+        {/* Lists */}
+        {lists.length > 0 && (
+          <div className="flex items-start gap-1.5">
+            <List size={15} className="text-gray-400 shrink-0 mt-0.5" />
+            <div className="flex flex-wrap items-center gap-1.5">
+              {lists.map((list) => (
+                <Link
+                  key={list.id}
+                  to={`/profile?tab=plugin:location&checkinList=${list.id}`}
+                  title={`Open ${list.name}`}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 hover:bg-primary-100 dark:hover:bg-primary-900/50 transition-colors"
+                >
+                  <List size={11} />
+                  {list.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Notes (markdown) */}
         {checkin.notes && (
-          <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{checkin.notes}</p>
+          <div className="text-sm">
+            <MarkdownNote note={checkin.notes} />
+          </div>
         )}
 
         {/* Photos */}

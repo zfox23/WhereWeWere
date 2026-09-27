@@ -83,7 +83,13 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
   };
 
   const handleSuccess = (newId: string) => {
-    navigate('/', { state: { newId } });
+    // Editing: go to the check-in's detail page. Creating: back to the
+    // timeline, which highlights the new check-in via `state.newId`.
+    if (editId) {
+      navigate(`/location-checkins/${editId}`);
+    } else {
+      navigate('/', { state: { newId } });
+    }
   };
 
   const handleChangeVenue = () => {

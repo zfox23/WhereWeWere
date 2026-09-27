@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ArrowDown,
   ArrowLeft,
@@ -394,6 +395,7 @@ function CheckinListDetail({
   };
 
   const handleRemoveFromList = async (item: CheckinListItem) => {
+    if (!window.confirm(`Remove "${item.venue_name}" from "${list.name}"? The check-in itself is kept.`)) return;
     try {
       await checkinLists.removeCheckin(list.id, item.checkin_id);
       setItems((prev) => prev.filter((i) => i.checkin_id !== item.checkin_id));
@@ -629,6 +631,7 @@ function CheckinListDetail({
 // ---------------------------------------------------------------------------
 
 export function CheckinListsSection() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [lists, setLists] = useState<CheckinList[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
@@ -642,6 +645,19 @@ export function CheckinListsSection() {
   };
 
   useEffect(refresh, []);
+
+  // Deep link: ?checkinList=<id> opens that list's detail (e.g. from a
+  // check-in detail page). Consumed once the list is loaded, and cleared
+  // from the URL when leaving the detail view.
+  useEffect(() => {
+    const listParam = searchParams.get('checkinList');
+    if (!listParam || listsLoading) return;
+    if (!lists.some((l) => l.id === listParam)) return;
+    setSelectedListId(listParam);
+    const next = new URLSearchParams(searchParams);
+    next.delete('checkinList');
+    setSearchParams(next, { replace: true });
+  }, [lists, listsLoading, searchParams, setSearchParams]);
 
   const selectedList = useMemo(
     () => lists.find((l) => l.id === selectedListId) ?? null,

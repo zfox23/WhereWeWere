@@ -48,7 +48,10 @@ async function openListDetail(user: ReturnType<typeof userEvent.setup>, name: st
 }
 
 describe('CheckinListsSection', () => {
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     apiMocks.listsList.mockReset();
     apiMocks.listsCreate.mockReset();
     apiMocks.listsRename.mockReset();
@@ -130,7 +133,25 @@ describe('CheckinListsSection', () => {
     expect(dateLinks[0].getAttribute('target')).toBe('_blank');
   });
 
-  it('removes a check-in from the list via the row action', async () => {
+  it('opens the list named by the checkinList deep-link param', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/profile?tab=plugin:location&checkinList=cl1']}>
+        <CheckinListsSection />
+      </MemoryRouter>
+    );
+
+    // Deep link should land directly on the list detail.
+    await screen.findByRole('button', { name: /Back to lists/ });
+    expect(screen.getByText('Fillmore')).toBeTruthy();
+    expect(screen.getByText('Apollo')).toBeTruthy();
+
+    // Back to the index.
+    await user.click(screen.getByRole('button', { name: /Back to lists/ }));
+    await waitFor(() => expect(screen.queryByText('Apollo')).toBeNull());
+  });
+
+  it('removes a check-in from the list after confirming the row action', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
 
@@ -139,10 +160,27 @@ describe('CheckinListsSection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Remove Apollo from Concerts' }));
 
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Remove "Apollo" from "Concerts"? The check-in itself is kept.'
+    );
     await waitFor(() => {
       expect(apiMocks.listsRemoveCheckin).toHaveBeenCalledWith('cl1', 'c2');
     });
     await waitFor(() => expect(screen.queryByText('Apollo')).toBeNull());
+  });
+
+  it('does not remove a check-in from the list when confirmation is cancelled', async () => {
+    const user = userEvent.setup();
+    confirmSpy.mockReturnValue(false);
+    render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
+
+    await openListDetail(user, 'Concerts');
+    await waitFor(() => expect(screen.getByText('Apollo')).toBeTruthy());
+
+    await user.click(screen.getByRole('button', { name: 'Remove Apollo from Concerts' }));
+
+    expect(apiMocks.listsRemoveCheckin).not.toHaveBeenCalled();
+    expect(screen.getByText('Apollo')).toBeTruthy();
   });
 
   it('shows a drag hint and the unranked drop zone when sorted by rank (default)', async () => {
