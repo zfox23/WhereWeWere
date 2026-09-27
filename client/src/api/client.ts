@@ -106,6 +106,37 @@ export const venues = {
     request<{ updated: number; remaining: number }>('/venues/categorize', { method: 'POST' }),
 };
 
+// Checkin lists (location plugin) — named lists of location check-ins.
+export const checkinLists = {
+  list: () => request<any[]>('/location-checkins/lists'),
+  create: (name: string) =>
+    request<any>('/location-checkins/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  rename: (id: string, name: string) =>
+    request<any>(`/location-checkins/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+  delete: (id: string) =>
+    request<{ message: string; id: string }>(`/location-checkins/lists/${id}`, { method: 'DELETE' }),
+  items: (listId: string) => request<any[]>(`/location-checkins/lists/${listId}/items`),
+  addCheckin: (listId: string, checkinId: string) =>
+    request<{ message: string }>(`/location-checkins/lists/${listId}/items`, {
+      method: 'POST',
+      body: JSON.stringify({ checkin_id: checkinId }),
+    }),
+  removeCheckin: (listId: string, checkinId: string) =>
+    request<{ message: string }>(`/location-checkins/lists/${listId}/items/${checkinId}`, { method: 'DELETE' }),
+  setRank: (listId: string, checkinId: string, rank: number | null) =>
+    request<{ rank: number | null }>(`/location-checkins/lists/${listId}/items/${checkinId}/rank`, {
+      method: 'PUT',
+      body: JSON.stringify({ rank }),
+    }),
+  // Drag-to-rank: the check-in ids in their new rank order (1..n); everyone
+  // else in the list becomes unranked.
+  reRank: (listId: string, rankedIds: string[]) =>
+    request<{ ranked_ids: string[] }>(`/location-checkins/lists/${listId}/ranks`, {
+      method: 'PUT',
+      body: JSON.stringify({ ranked_ids: rankedIds }),
+    }),
+};
+
 // Venue lists (location plugin)
 export const venueLists = {
   list: () => request<any[]>('/venues/lists'),

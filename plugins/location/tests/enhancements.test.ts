@@ -112,17 +112,19 @@ describe('check-in star rating + companions (endpoints)', () => {
     expect(client.query).toHaveBeenCalledWith('COMMIT');
   });
 
-  it('GET /:id returns the check-in plus its companion names', async () => {
+  it('GET /:id returns the check-in plus its companion names and list memberships', async () => {
     queryMock
       .mockResolvedValueOnce({
         rows: [{ id: 'c1', rating: 4, venue_timezone: 'America/New_York', venue_latitude: null, venue_longitude: null }],
       })
-      .mockResolvedValueOnce({ rows: [{ name: 'Ada' }, { name: 'Linus' }] });
+      .mockResolvedValueOnce({ rows: [{ name: 'Ada' }, { name: 'Linus' }] })
+      .mockResolvedValueOnce({ rows: [{ list_id: 'cl1' }, { list_id: 'cl2' }] });
 
     const res = await request(app()).get('/location-checkins/c1');
     expect(res.status).toBe(200);
     expect(res.body.rating).toBe(4);
     expect(res.body.companions).toEqual(['Ada', 'Linus']);
+    expect(res.body.lists).toEqual(['cl1', 'cl2']);
   });
 
   it('the timeline carries companions on the data jsonb and envelope column', () => {
@@ -208,6 +210,214 @@ describe('venue lists (endpoints)', () => {
   });
 });
 
+describe('checkin lists (endpoints)', () => {
+  it('GET /lists returns each list with its item count', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'cl1', name: 'Concerts', created_at: '2026-01-01', updated_at: '2026-01-02' }] })
+      .mockResolvedValueOnce({ rows: [{ list_id: 'cl1', count: 4 }] });
+
+    const res = await request(app()).get('/location-checkins/lists');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { id: 'cl1', name: 'Concerts', created_at: '2026-01-01', updated_at: '2026-01-02', item_count: 4 },
+    ]);
+  });
+
+  it('GET /lists/:id/items joins venue, companions, and rank columns', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'cl1' }] }) // list ownership
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            checkin_id: 'c1', rank: 1, added_at: '2026-01-01',
+            checked_in_at: '2026-01-01T19:00:00Z', venue_timezone: 'America/New_York',
+            notes: 'Great show', rating: 4,
+            venue_id: 'v1', venue_name: 'Fillmore', parent_venue_id: null, parent_venue_name: null,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [{ checkin_id: 'c1', name: 'Ada' }] }); // companions
+
+    const res = await request(app()).get('/location-checkins/lists/cl1/items');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({
+      checkin_id: 'c1',
+      rank: 1,
+      venue_id: 'v1',
+      venue_name: 'Fillmore',
+      notes: 'Great show',
+      rating: 4,
+      companions: ['Ada'],
+    });
+    // The item query orders ranked rows first, by rank, then unranked by date.
+    const [itemsSql] = queryMock.mock.calls[1];
+    expect(itemsSql).toContain('(cli.rank IS NULL) ASC');
+    expect(itemsSql).toContain('cli.rank ASC');
+  });
+
+  it('GET /lists/:id/items is 404 for a list the user does not own', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app()).get('/location-checkins/lists/other/items');
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /lists/:id/items adds a check-in idempotently (optional rank)', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
+        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
+        if (sql.includes('SELECT id FROM checkins')) return { rows: [{ id: 'c1' }] };
+        if (sql.includes('INSERT INTO checkin_list_items')) return { rows: [] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    poolConnectMock.mockResolvedValueOnce(client);
+
+    const res = await request(app()).post('/location-checkins/lists/cl1/items').send({ checkin_id: 'c1', rank: 2 });
+    expect(res.status).toBe(201);
+    const insertCall = client.query.mock.calls.find((c) => c[0].includes('INSERT INTO checkin_list_items')) as unknown[];
+    expect(insertCall[1]).toEqual(['cl1', 'c1', 2]);
+    expect(client.query).toHaveBeenCalledWith('COMMIT');
+  });
+
+  it('POST /lists/:id/items is 404 when the check-in does not exist', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
+        if (sql.includes('SELECT id FROM checkins')) return { rows: [] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    poolConnectMock.mockResolvedValueOnce(client);
+
+    const res = await request(app()).post('/location-checkins/lists/cl1/items').send({ checkin_id: 'missing' });
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE /lists/:id/items/:checkinId removes a membership (404 if absent)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }] });
+    const ok = await request(app()).delete('/location-checkins/lists/cl1/items/c1');
+    expect(ok.status).toBe(200);
+
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    const missing = await request(app()).delete('/location-checkins/lists/cl1/items/cX');
+    expect(missing.status).toBe(404);
+  });
+
+  it('PUT /lists/:id/items/:checkinId/rank clears a rank with rank:null', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
+        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
+        if (sql.includes('SELECT rank FROM checkin_list_items')) return { rows: [{ rank: 3 }] };
+        if (sql.includes('UPDATE checkin_list_items SET rank = $3')) return { rows: [], rowCount: 1 };
+        if (sql.includes('rank = rank - 1')) return { rows: [] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    poolConnectMock.mockResolvedValueOnce(client);
+
+    const res = await request(app()).put('/location-checkins/lists/cl1/items/c1/rank').send({ rank: null });
+    expect(res.status).toBe(200);
+    expect(res.body.rank).toBeNull();
+    // Ranks below the removed one are renumbered down.
+    const renumber = client.query.mock.calls.find((c) => c[0].includes('rank = rank - 1')) as unknown[];
+    expect(renumber[1]).toEqual(['cl1', 3]);
+  });
+
+  it('PUT /lists/:id/ranks bulk re-ranks the given order and clears the rest', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
+        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
+        if (sql.includes('SET rank = NULL')) return { rows: [] };
+        if (sql.includes('UPDATE checkin_list_items SET rank = $3')) return { rows: [], rowCount: 1 };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    poolConnectMock.mockResolvedValueOnce(client);
+
+    const res = await request(app()).put('/location-checkins/lists/cl1/ranks').send({ ranked_ids: ['c2', 'c1'] });
+    expect(res.status).toBe(200);
+    expect(res.body.ranked_ids).toEqual(['c2', 'c1']);
+    const updates = client.query.mock.calls
+      .filter((c) => c[0].includes('UPDATE checkin_list_items SET rank = $3'))
+      .map((c) => c as unknown[]);
+    expect(updates.map((c) => c[1])).toEqual([
+      ['cl1', 'c2', 1],
+      ['cl1', 'c1', 2],
+    ]);
+  });
+
+  it('PUT /lists/:id/ranks rejects a non-array body', async () => {
+    const res = await request(app()).put('/location-checkins/lists/cl1/ranks').send({ ranked_ids: 'nope' });
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /lists is registered before GET /:id on the checkin router', () => {
+    const router = mounts()['/location-checkins'];
+    const listsIdx = router.stack.findIndex((l: any) => l.route?.path === '/lists');
+    const idIdx = router.stack.findIndex((l: any) => l.route?.path === '/:id');
+    expect(listsIdx).toBeGreaterThan(-1);
+    expect(idIdx).toBeGreaterThan(listsIdx);
+  });
+
+  it('POST / attaches selected list_ids in the create transaction', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
+        if (sql.includes('INSERT INTO checkins')) return { rows: [{ id: 'c1' }] };
+        if (sql.includes('SELECT latitude, longitude')) return { rows: [{ latitude: 40.71, longitude: -74.0 }] };
+        if (sql.includes('INSERT INTO checkin_list_items')) return { rows: [] };
+        if (sql.includes('SELECT list_id FROM checkin_list_items')) return { rows: [{ list_id: 'cl1' }] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    poolConnectMock.mockResolvedValueOnce(client);
+
+    const res = await request(app())
+      .post('/location-checkins')
+      .send({ user_id: USER_ID, venue_id: 'v1', list_ids: ['cl1'] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.lists).toEqual(['cl1']);
+    const insertCall = client.query.mock.calls.find((c) => c[0].includes('INSERT INTO checkin_list_items')) as unknown[];
+    expect(insertCall[1]).toEqual(['c1', ['cl1'], USER_ID]);
+  });
+
+  it('PUT /:id replaces list memberships when list_ids is present', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
+        if (sql.includes('UPDATE checkins')) return { rows: [{ id: 'c1' }] };
+        if (sql.includes('SELECT list_id FROM companions') || sql.includes('FROM companions')) return { rows: [] };
+        if (sql.includes('INSERT INTO checkin_list_items')) return { rows: [] };
+        if (sql.includes('DELETE FROM checkin_list_items')) return { rows: [] };
+        if (sql.includes('SELECT list_id FROM checkin_list_items')) return { rows: [{ list_id: 'cl1' }] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    poolConnectMock.mockResolvedValueOnce(client);
+
+    const res = await request(app())
+      .put('/location-checkins/c1')
+      .send({ list_ids: ['cl1'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.lists).toEqual(['cl1']);
+    expect(client.query.mock.calls.some((c) => c[0].includes('INSERT INTO checkin_list_items'))).toBe(true);
+    expect(client.query.mock.calls.some((c) => c[0].includes('DELETE FROM checkin_list_items'))).toBe(true);
+  });
+});
+
 describe('venue library (endpoints)', () => {
   it('GET /library returns one row per venue with check-ins, including list names', async () => {
     queryMock
@@ -272,7 +482,9 @@ describe('backup round-trip', () => {
       .mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Coffee', rating: 4, category_id: null, address: null, city: null, state: null, country: null, postal_code: null, latitude: 1, longitude: 1, osm_id: null, swarm_venue_id: null, parent_venue_id: null, created_by: null, created_at: null, updated_at: null }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: 'l1', name: 'Favorites', created_at: null, updated_at: null }] })
-      .mockResolvedValueOnce({ rows: [{ list_id: 'l1', venue_id: 'v1', position: 1, added_at: null }] });
+      .mockResolvedValueOnce({ rows: [{ list_id: 'l1', venue_id: 'v1', position: 1, added_at: null }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'cl1', name: 'Concerts', created_at: null, updated_at: null }] })
+      .mockResolvedValueOnce({ rows: [{ list_id: 'cl1', checkin_id: 'c1', rank: 1, added_at: null }] });
 
     const result: any = await server.backupExport!({ user_id: USER_ID } as any);
     expect(result.checkins[0].rating).toBe(3);
@@ -281,6 +493,8 @@ describe('backup round-trip', () => {
     expect(result).not.toHaveProperty('checkinCompanions');
     expect(result.venueLists).toEqual([{ id: 'l1', name: 'Favorites', created_at: null, updated_at: null }]);
     expect(result.venueListItems).toEqual([{ list_id: 'l1', venue_id: 'v1', position: 1, added_at: null }]);
+    expect(result.checkinLists).toEqual([{ id: 'cl1', name: 'Concerts', created_at: null, updated_at: null }]);
+    expect(result.checkinListItems).toEqual([{ list_id: 'cl1', checkin_id: 'c1', rank: 1, added_at: null }]);
   });
 
   it('backupImport restores companions, venue lists, and list items in FK order', async () => {
@@ -296,6 +510,12 @@ describe('backup round-trip', () => {
         checkinCompanions: [{ checkin_id: 'c1', name: 'Ada' }],
         venueLists: [{ id: 'l1', name: 'Favorites', created_at: null, updated_at: null }],
         venueListItems: [{ list_id: 'l1', venue_id: 'v1', position: 1, added_at: null }],
+        checkinLists: [{ id: 'cl1', name: 'Concerts', created_at: null, updated_at: null }],
+        checkinListItems: [
+          { list_id: 'cl1', checkin_id: 'c1', rank: 1, added_at: null },
+          // Items pointing at a check-in absent from the payload are skipped.
+          { list_id: 'cl1', checkin_id: 'missing', rank: 2, added_at: null },
+        ],
       },
     );
     expect(inserted).toBe(1);
@@ -312,6 +532,11 @@ describe('backup round-trip', () => {
     // List item references the list id and venue id.
     const listItemCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO venue_list_items'))!;
     expect(listItemCall[1]).toEqual(['l1', 'v1', 1, null]);
+    // Checkin list + item were inserted; the dangling item was skipped.
+    expect(sqls.some((s) => s.includes('INSERT INTO checkin_lists'))).toBe(true);
+    const checkinListItemCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO checkin_list_items'))!;
+    expect(checkinListItemCall[1]).toEqual(['cl1', 'c1', 1, null]);
+    expect(clientQuery.mock.calls.filter((c) => c[0].includes('INSERT INTO checkin_list_items'))).toHaveLength(1);
     expect(client.release).not.toHaveBeenCalled();
   });
 

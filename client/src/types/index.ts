@@ -51,6 +51,31 @@ export interface VenueList {
   items: VenueListItemRef[];
 }
 
+/** A named list of location check-ins (e.g. "Concerts", "Broadway"). */
+export interface CheckinList {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at?: string;
+  item_count?: number;
+}
+
+/** One row of a checkin list's detail view. */
+export interface CheckinListItem {
+  checkin_id: string;
+  rank: number | null;
+  added_at: string;
+  checked_in_at: string;
+  venue_timezone: string | null;
+  notes: string | null;
+  rating: number | null;
+  venue_id: string;
+  venue_name: string;
+  parent_venue_id: string | null;
+  parent_venue_name: string | null;
+  companions: string[];
+}
+
 /** One row of the "All Venues" library view. */
 export interface VenueLibraryItem {
   id: string;
@@ -87,6 +112,8 @@ export interface CheckIn {
   rating?: number | null;
   /** People "here with" on this check-in (ordered names). */
   companions?: string[];
+  /** Ids of checkin lists this check-in belongs to (location type). */
+  lists?: string[];
   venue_timezone?: string | null;
   checked_in_at: string;
   created_at: string;

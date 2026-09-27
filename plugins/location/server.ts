@@ -177,6 +177,411 @@ function haversineMeters(fromLat: number, fromLon: number, toLat: number, toLon:
 
 const router = Router();
 
+// ---------------------------------------------------------------------------
+// Checkin lists — named lists of location CHECK-INS (not venues), so events
+// like concerts or broadway shows can be collected into one browsable section
+// without a new check-in type. Mirrors the /venues/lists surface.
+//
+// These 1-segment routes must be registered before /:id so "lists" isn't
+// treated as a check-in id.
+// ---------------------------------------------------------------------------
+
+function normalizeListIds(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean);
+  return Array.from(new Set(ids));
+}
+
+/**
+ * Attach a check-in to exactly the given lists (full-replacement: any
+ * membership not in the set is detached). Runs on the caller's transaction
+ * client so it commits atomically with the surrounding check-in
+ * insert/update. Returns the list ids the check-in is now a member of.
+ */
+async function attachCheckinLists(
+  checkinId: string,
+  listIds: string[],
+  client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }> }
+): Promise<string[]> {
+  await client.query(
+    `INSERT INTO checkin_list_items (list_id, checkin_id)
+     SELECT l.id, $1 FROM checkin_lists l
+     WHERE l.id = ANY($2::uuid[]) AND l.user_id = $3
+     ON CONFLICT (list_id, checkin_id) DO NOTHING`,
+    [checkinId, listIds, USER_ID]
+  );
+  await client.query(
+    `DELETE FROM checkin_list_items cli
+     USING checkin_lists cl
+     WHERE cli.list_id = cl.id
+       AND cl.user_id = $2
+       AND cli.checkin_id = $3
+       AND NOT (cl.id = ANY($1::uuid[]))`,
+    [listIds, USER_ID, checkinId]
+  );
+  const result = await client.query(
+    `SELECT list_id FROM checkin_list_items WHERE checkin_id = $1 ORDER BY list_id`,
+    [checkinId]
+  );
+  return result.rows.map((r: any) => r.list_id as string);
+}
+
+/** List ids a check-in currently belongs to (for GET /:id). */
+async function getCheckinListIds(checkinId: string): Promise<string[]> {
+  const result = await query(
+    `SELECT list_id FROM checkin_list_items WHERE checkin_id = $1 ORDER BY list_id`,
+    [checkinId]
+  );
+  return result.rows.map((r: any) => r.list_id as string);
+}
+
+// GET /lists - checkin lists with their item counts
+router.get('/lists', async (_req: Request, res: Response) => {
+  try {
+    const listsResult = await query(
+      'SELECT id, name, created_at, updated_at FROM checkin_lists WHERE user_id = $1 ORDER BY name ASC',
+      [USER_ID]
+    );
+    const countsResult = await query(
+      `SELECT list_id, COUNT(*)::int AS count
+       FROM checkin_list_items
+       WHERE list_id IN (SELECT id FROM checkin_lists WHERE user_id = $1)
+       GROUP BY list_id`,
+      [USER_ID]
+    );
+    const countById = new Map(countsResult.rows.map((r: any) => [r.list_id as string, r.count as number]));
+    res.json(
+      listsResult.rows.map((l: any) => ({
+        ...l,
+        item_count: countById.get(l.id) ?? 0,
+      }))
+    );
+  } catch (err) {
+    console.error('Error listing checkin lists:', err);
+    res.status(500).json({ error: 'Failed to list checkin lists' });
+  }
+});
+
+// POST /lists - create a checkin list
+router.post('/lists', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const result = await query(
+      'INSERT INTO checkin_lists (user_id, name) VALUES ($1, $2) RETURNING id, name, created_at, updated_at',
+      [USER_ID, name.trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      return res.status(409).json({ error: 'A list with that name already exists' });
+    }
+    console.error('Error creating checkin list:', err);
+    res.status(500).json({ error: 'Failed to create checkin list' });
+  }
+});
+
+// PUT /lists/:id - rename a checkin list
+router.put('/lists/:id', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const result = await query(
+      'UPDATE checkin_lists SET name = $2 WHERE id = $1 AND user_id = $3 RETURNING id, name, created_at, updated_at',
+      [req.params.id, name.trim(), USER_ID]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Checkin list not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      return res.status(409).json({ error: 'A list with that name already exists' });
+    }
+    console.error('Error renaming checkin list:', err);
+    res.status(500).json({ error: 'Failed to rename checkin list' });
+  }
+});
+
+// DELETE /lists/:id - delete a checkin list (items cascade)
+router.delete('/lists/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'DELETE FROM checkin_lists WHERE id = $1 AND user_id = $2 RETURNING id',
+      [req.params.id, USER_ID]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Checkin list not found' });
+    }
+    res.json({ message: 'Checkin list deleted', id: result.rows[0].id });
+  } catch (err) {
+    console.error('Error deleting checkin list:', err);
+    res.status(500).json({ error: 'Failed to delete checkin list' });
+  }
+});
+
+// GET /lists/:id/items - the check-ins in a list, with display fields
+router.get('/lists/:id/items', async (req: Request, res: Response) => {
+  try {
+    const listResult = await query(
+      'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
+      [req.params.id, USER_ID]
+    );
+    if (listResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Checkin list not found' });
+    }
+    const itemsResult = await query(
+      `SELECT cli.checkin_id,
+              cli.rank,
+              cli.added_at,
+              c.checked_in_at,
+              c.checkin_timezone AS venue_timezone,
+              c.notes,
+              c.rating,
+              v.id AS venue_id,
+              v.name AS venue_name,
+              pv.id AS parent_venue_id,
+              pv.name AS parent_venue_name
+       FROM checkin_list_items cli
+       JOIN checkins c ON cli.checkin_id = c.id
+       JOIN venues v ON c.venue_id = v.id
+       LEFT JOIN venues pv ON v.parent_venue_id = pv.id
+       WHERE cli.list_id = $1
+       ORDER BY (cli.rank IS NULL) ASC, cli.rank ASC, c.checked_in_at DESC, cli.added_at ASC`,
+      [req.params.id]
+    );
+    const items = itemsResult.rows.map((row: any) => addTimezone(row));
+    const checkinIds = items.map((i: any) => i.checkin_id as string);
+    let companionsByCheckin = new Map<string, string[]>();
+    if (checkinIds.length > 0) {
+      const compResult = await query(
+        `SELECT checkin_id, name FROM companions
+         WHERE checkin_type = 'location' AND checkin_id = ANY($1::uuid[])
+         ORDER BY name ASC`,
+        [checkinIds]
+      );
+      for (const row of compResult.rows) {
+        const list = companionsByCheckin.get(row.checkin_id) ?? [];
+        list.push(row.name);
+        companionsByCheckin.set(row.checkin_id, list);
+      }
+    }
+    res.json(items.map((i: any) => ({ ...i, companions: companionsByCheckin.get(i.checkin_id) ?? [] })));
+  } catch (err) {
+    console.error('Error listing checkin list items:', err);
+    res.status(500).json({ error: 'Failed to list checkin list items' });
+  }
+});
+
+// POST /lists/:id/items - add a check-in to a list (idempotent; optional rank)
+router.post('/lists/:id/items', async (req: Request, res: Response) => {
+  try {
+    const { checkin_id, rank } = req.body ?? {};
+    if (!checkin_id) return res.status(400).json({ error: 'checkin_id is required' });
+    const rankValue =
+      rank == null ? null : typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 ? rank : null;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const listResult = await client.query(
+        'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
+        [req.params.id, USER_ID]
+      );
+      if (listResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Checkin list not found' });
+      }
+      const checkinResult = await client.query('SELECT id FROM checkins WHERE id = $1', [
+        checkin_id,
+      ]);
+      if (checkinResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Check-in not found' });
+      }
+      try {
+        await client.query(
+          `INSERT INTO checkin_list_items (list_id, checkin_id, rank)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (list_id, checkin_id) DO NOTHING`,
+          [req.params.id, checkin_id, rankValue]
+        );
+      } catch (insertErr: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        if (insertErr?.code === '23505') {
+          return res.status(409).json({ error: 'That rank is already taken in this list' });
+        }
+        throw insertErr;
+      }
+      await client.query('COMMIT');
+      res.status(201).json({ message: 'Added to list' });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error adding check-in to list:', err);
+    res.status(500).json({ error: 'Failed to add check-in to list' });
+  }
+});
+
+// DELETE /lists/:id/items/:checkinId - remove a check-in from a list
+router.delete('/lists/:id/items/:checkinId', async (req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `DELETE FROM checkin_list_items cli
+       USING checkin_lists cl
+       WHERE cli.list_id = cl.id
+         AND cl.id = $1 AND cl.user_id = $2
+         AND cli.checkin_id = $3
+       RETURNING cli.checkin_id`,
+      [req.params.id, USER_ID, req.params.checkinId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Check-in is not in this list' });
+    }
+    res.json({ message: 'Removed from list' });
+  } catch (err) {
+    console.error('Error removing check-in from list:', err);
+    res.status(500).json({ error: 'Failed to remove check-in from list' });
+  }
+});
+
+// PUT /lists/:id/items/:checkinId/rank - set (or clear, with rank: null) one rank
+router.put('/lists/:id/items/:checkinId/rank', async (req: Request, res: Response) => {
+  try {
+    const { rank } = req.body ?? {};
+    const rankValue =
+      rank == null ? null : typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 ? rank : null;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const listResult = await client.query(
+        'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
+        [req.params.id, USER_ID]
+      );
+      if (listResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Checkin list not found' });
+      }
+      const itemResult = await client.query(
+        'SELECT rank FROM checkin_list_items WHERE list_id = $1 AND checkin_id = $2',
+        [req.params.id, req.params.checkinId]
+      );
+      if (itemResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Check-in is not in this list' });
+      }
+      const oldRank: number | null = itemResult.rows[0].rank;
+      if (rankValue != null && oldRank != null && oldRank === rankValue) {
+        await client.query('ROLLBACK');
+        return res.json({ rank: rankValue });
+      }
+      if (rankValue != null) {
+        await client.query(
+          `UPDATE checkin_list_items
+           SET rank = rank + 1
+           WHERE list_id = $1 AND rank IS NOT NULL AND rank >= $2`,
+          [req.params.id, rankValue]
+        );
+      }
+      try {
+        const updateResult = await client.query(
+          'UPDATE checkin_list_items SET rank = $3 WHERE list_id = $1 AND checkin_id = $2',
+          [req.params.id, req.params.checkinId, rankValue]
+        );
+        if ((updateResult.rowCount ?? 0) === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Check-in is not in this list' });
+        }
+      } catch (updateErr: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        if (updateErr?.code === '23505') {
+          return res.status(409).json({ error: 'That rank is already taken in this list' });
+        }
+        throw updateErr;
+      }
+      if (rankValue == null && oldRank != null) {
+        await client.query(
+          `UPDATE checkin_list_items
+           SET rank = rank - 1
+           WHERE list_id = $1 AND rank IS NOT NULL AND rank > $2`,
+          [req.params.id, oldRank]
+        );
+      }
+      await client.query('COMMIT');
+      res.json({ rank: rankValue });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error setting checkin list rank:', err);
+    res.status(500).json({ error: 'Failed to set rank' });
+  }
+});
+
+// PUT /lists/:id/ranks - bulk re-rank (drag-to-rank).
+// Body: { ranked_ids: string[] } — the check-in ids in their new rank order
+// (1..n); every other member of the list becomes unranked (NULL).
+router.put('/lists/:id/ranks', async (req: Request, res: Response) => {
+  try {
+    const { ranked_ids } = req.body ?? {};
+    if (!Array.isArray(ranked_ids) || !ranked_ids.every((v) => typeof v === 'string')) {
+      return res.status(400).json({ error: 'ranked_ids must be an array of check-in ids' });
+    }
+    const ordered = Array.from(new Set(ranked_ids as string[]));
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const listResult = await client.query(
+        'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
+        [req.params.id, USER_ID]
+      );
+      if (listResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Checkin list not found' });
+      }
+      // Clear everything first; only list members are touched.
+      await client.query(
+        `UPDATE checkin_list_items
+         SET rank = NULL
+         WHERE list_id = $1
+           AND checkin_id IN (SELECT checkin_id FROM checkin_list_items WHERE list_id = $1)`,
+        [req.params.id]
+      );
+      for (let i = 0; i < ordered.length; i += 1) {
+        await client.query(
+          'UPDATE checkin_list_items SET rank = $3 WHERE list_id = $1 AND checkin_id = $2',
+          [req.params.id, ordered[i], i + 1]
+        );
+      }
+      await client.query('COMMIT');
+      res.json({ ranked_ids: ordered });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error re-ranking checkin list:', err);
+    res.status(500).json({ error: 'Failed to re-rank list' });
+  }
+});
+
 // GET / - list check-ins with venue info
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -296,6 +701,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.json({
       ...addTimezone(checkinResult.rows[0]),
       companions: await getCompanions('location', String(id)),
+      lists: await getCheckinListIds(String(id)),
     });
   } catch (err) {
     console.error('Error getting check-in:', err);
@@ -311,6 +717,8 @@ router.post('/', async (req: Request, res: Response) => {
     const { user_id, venue_id, notes, checked_in_at, also_checkin_parent, rating } = req.body;
     const companions = normalizeCompanions(req.body.companions);
     const checkinRating = normalizeRating(rating);
+    const hasListIds = 'list_ids' in req.body;
+    const listIds = hasListIds ? normalizeListIds(req.body.list_ids) ?? [] : null;
 
     if (!user_id || !venue_id) {
       return res.status(400).json({ error: 'user_id and venue_id are required' });
@@ -351,8 +759,14 @@ router.post('/', async (req: Request, res: Response) => {
       }
     }
 
+    // List memberships (optional) attach within the same transaction.
+    let lists: string[] = [];
+    if (listIds) {
+      lists = await attachCheckinLists(checkin.id, listIds, client);
+    }
+
     await client.query('COMMIT');
-    res.status(201).json({ ...checkin, parent_checkin, companions });
+    res.status(201).json({ ...checkin, parent_checkin, companions, lists });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Error creating check-in:', err);
@@ -368,6 +782,8 @@ router.put('/:id', async (req: Request, res: Response) => {
   const { notes, checked_in_at } = req.body;
   const hasRating = 'rating' in req.body;
   const hasCompanions = 'companions' in req.body;
+  const hasListIds = 'list_ids' in req.body;
+  const listIds = hasListIds ? normalizeListIds(req.body.list_ids) ?? [] : null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -414,8 +830,16 @@ router.put('/:id', async (req: Request, res: Response) => {
       companions = await getCompanions('location', String(id), client);
     }
 
+    // Checkin lists use full-replacement semantics when the key is present.
+    let lists: string[];
+    if (listIds) {
+      lists = await attachCheckinLists(String(id), listIds, client);
+    } else {
+      lists = await getCheckinListIds(String(id));
+    }
+
     await client.query('COMMIT');
-    res.json({ ...result.rows[0], companions });
+    res.json({ ...result.rows[0], companions, lists });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Error updating check-in:', err);
@@ -2340,7 +2764,8 @@ export const server: CheckinTypeServerPlugin = {
     // Companions are core-owned: they ship in the backup bundle's
     // companions.json (see the core backup route), not in this payload.
     const [checkinsResult, venuesResult, categoriesResult,
-          venueListsResult, venueListItemsResult] = await Promise.all([
+          venueListsResult, venueListItemsResult,
+          checkinListsResult, checkinListItemsResult] = await Promise.all([
       query(
         `SELECT id, venue_id, notes, rating,
                 checked_in_at, checkin_timezone, created_at, updated_at, swarm_id
@@ -2380,6 +2805,19 @@ export const server: CheckinTypeServerPlugin = {
          ORDER BY vl.created_at, vli.position`,
         [user_id],
       ),
+      query(
+        `SELECT id, name, created_at, updated_at
+         FROM checkin_lists WHERE user_id = $1 ORDER BY created_at`,
+        [user_id],
+      ),
+      query(
+        `SELECT cli.list_id, cli.checkin_id, cli.rank, cli.added_at
+         FROM checkin_list_items cli
+         JOIN checkin_lists cl ON cl.id = cli.list_id
+         WHERE cl.user_id = $1
+         ORDER BY cl.created_at, cli.rank, cli.added_at`,
+        [user_id],
+      ),
     ]);
     return {
       checkins: checkinsResult.rows,
@@ -2387,6 +2825,8 @@ export const server: CheckinTypeServerPlugin = {
       venueCategories: categoriesResult.rows,
       venueLists: venueListsResult.rows,
       venueListItems: venueListItemsResult.rows,
+      checkinLists: checkinListsResult.rows,
+      checkinListItems: checkinListItemsResult.rows,
     };
   },
 
@@ -2403,6 +2843,8 @@ export const server: CheckinTypeServerPlugin = {
       checkinCompanions?: Record<string, unknown>[];
       venueLists?: Record<string, unknown>[];
       venueListItems?: Record<string, unknown>[];
+      checkinLists?: Record<string, unknown>[];
+      checkinListItems?: Record<string, unknown>[];
     };
     const categories = Array.isArray(data.venueCategories) ? data.venueCategories : [];
     const venues = Array.isArray(data.venues) ? data.venues : [];
@@ -2410,6 +2852,8 @@ export const server: CheckinTypeServerPlugin = {
     const checkinCompanions = Array.isArray(data.checkinCompanions) ? data.checkinCompanions : [];
     const venueLists = Array.isArray(data.venueLists) ? data.venueLists : [];
     const venueListItems = Array.isArray(data.venueListItems) ? data.venueListItems : [];
+    const checkinLists = Array.isArray(data.checkinLists) ? data.checkinLists : [];
+    const checkinListItems = Array.isArray(data.checkinListItems) ? data.checkinListItems : [];
 
     // Use the framework's transaction client when provided so restore stays
     // atomic; open our own connection only when running standalone.
@@ -2559,10 +3003,37 @@ export const server: CheckinTypeServerPlugin = {
            VALUES ($1, $2, COALESCE($3::int, 0), COALESCE($4::timestamptz, NOW()))
            ON CONFLICT (list_id, venue_id) DO NOTHING`,
           [li.list_id, li.venue_id, li.position ?? 0, li.added_at || null]
-        );
-      }
+       );
+     }
 
-      return inserted;
+     // 6. Checkin lists (after check-ins, since items reference them).
+     for (const list of checkinLists) {
+       if (!list?.id || !list?.name) continue;
+       await client.query(
+         `INSERT INTO checkin_lists (id, user_id, name, created_at, updated_at)
+          VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
+          ON CONFLICT (id) DO NOTHING`,
+         [list.id, user_id, list.name, list.created_at || null, list.updated_at || null]
+       );
+     }
+     const restoredCheckinIds = new Set(checkins.map((r) => String(r?.id)).filter(Boolean));
+     for (const li of checkinListItems) {
+       if (!li?.list_id || !li?.checkin_id) continue;
+       if (!restoredCheckinIds.has(String(li.checkin_id))) continue;
+       const rank =
+         typeof li.rank === 'number' && Number.isInteger(li.rank) && li.rank >= 1 ? li.rank : null;
+       // A re-run of the same restore must be idempotent even when the
+       // local row already carries a (different) rank.
+       await client.query(
+         `INSERT INTO checkin_list_items (list_id, checkin_id, rank, added_at)
+          VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
+          ON CONFLICT (list_id, checkin_id) DO UPDATE SET
+            rank = COALESCE(EXCLUDED.rank, checkin_list_items.rank)`,
+         [li.list_id, li.checkin_id, rank, li.added_at || null]
+       );
+     }
+
+     return inserted;
     } finally {
       if (ownsClient) client.release();
     }
@@ -2632,6 +3103,10 @@ export const server: CheckinTypeServerPlugin = {
     // The user's venue lists (memberships cascade). Venues themselves are
     // shared reference data and are kept.
     await run('DELETE FROM venue_lists WHERE user_id = $1', [user_id]);
+
+    // The user's checkin lists. Items that belonged to the deleted check-ins
+    // already cascaded above; deleting the lists cascades any remainder.
+    await run('DELETE FROM checkin_lists WHERE user_id = $1', [user_id]);
 
     return result.rowCount ?? 0;
   },

@@ -11,6 +11,8 @@ const apiMocks = vi.hoisted(() => ({
   companionsNames: vi.fn(),
   venuesGet: vi.fn(),
   venuesDelete: vi.fn(),
+  checkinListsList: vi.fn(),
+  checkinListsCreate: vi.fn(),
 }));
 
 vi.mock('../../../../client/src/api/client', () => ({
@@ -22,6 +24,10 @@ vi.mock('../../../../client/src/api/client', () => ({
   companions: {
     names: apiMocks.companionsNames,
     photoUrl: (name: string) => `/api/v1/immich/person-photo?name=${encodeURIComponent(name)}`,
+  },
+  checkinLists: {
+    list: apiMocks.checkinListsList,
+    create: apiMocks.checkinListsCreate,
   },
   // No immich_* keys → companion photos stay hidden.
   settings: { get: () => Promise.resolve({}) },
@@ -39,8 +45,14 @@ describe('LocationCheckInForm', () => {
     apiMocks.companionsNames.mockReset();
     apiMocks.venuesGet.mockReset();
     apiMocks.venuesDelete.mockReset();
+    apiMocks.checkinListsList.mockReset();
+    apiMocks.checkinListsCreate.mockReset();
 
     apiMocks.checkinsCreate.mockResolvedValue({ id: 'checkin-1' });
+    apiMocks.checkinListsList.mockResolvedValue([]);
+    apiMocks.checkinListsCreate.mockImplementation(
+      (name: string) => Promise.resolve({ id: `list-${name}`, name })
+    );
     apiMocks.companionsNames.mockResolvedValue([]);
     apiMocks.venuesGet.mockResolvedValue({
       checkin_count: 0,
@@ -119,5 +131,92 @@ describe('LocationCheckInForm', () => {
       }),
     );
     expect(onSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes selected lists in the create payload', async () => {
+    apiMocks.checkinListsList.mockResolvedValueOnce([
+      { id: 'list-a', name: 'Concerts' },
+      { id: 'list-b', name: 'Broadway' },
+    ]);
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter>
+        <LocationCheckInForm venueId="venue-1" venueName="Test Venue" onSuccess={onSuccess} />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Concerts/ }));
+    await user.click(screen.getByRole('button', { name: /Broadway/ }));
+    const notesInput = screen.getByLabelText('Note.md');
+    await user.click(notesInput);
+    await user.keyboard('{Shift>}{Enter}{/Shift}');
+
+    await waitFor(() => {
+      expect(apiMocks.checkinsCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(apiMocks.checkinsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ list_ids: ['list-a', 'list-b'] }),
+    );
+  });
+
+  it('creates a new list and includes it in the create payload', async () => {
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter>
+        <LocationCheckInForm venueId="venue-1" venueName="Test Venue" onSuccess={onSuccess} />
+      </MemoryRouter>,
+    );
+
+    await user.type(screen.getByLabelText('New list name'), 'Concerts');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      expect(apiMocks.checkinListsCreate).toHaveBeenCalledWith('Concerts');
+    });
+    // The newly created list is now selected.
+    await user.click(screen.getByRole('button', { name: /Concerts/ }));
+    const notesInput = screen.getByLabelText('Note.md');
+    await user.click(notesInput);
+    await user.keyboard('{Shift>}{Enter}{/Shift}');
+
+    await waitFor(() => {
+      expect(apiMocks.checkinsCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(apiMocks.checkinsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ list_ids: ['list-Concerts'] }),
+    );
+  });
+
+  it('sends the preselected lists on update in edit mode', async () => {
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter>
+        <LocationCheckInForm
+          venueId="venue-1"
+          venueName="Test Venue"
+          onSuccess={onSuccess}
+          editCheckinId="checkin-1"
+          initialListIds={['list-a']}
+        />
+      </MemoryRouter>,
+    );
+
+    const notesInput = screen.getByLabelText('Note.md');
+    await user.click(notesInput);
+    await user.keyboard('{Shift>}{Enter}{/Shift}');
+
+    await waitFor(() => {
+      expect(apiMocks.checkinsUpdate).toHaveBeenCalledTimes(1);
+    });
+    expect(apiMocks.checkinsUpdate).toHaveBeenCalledWith(
+      'checkin-1',
+      expect.objectContaining({ list_ids: ['list-a'] }),
+    );
   });
 });

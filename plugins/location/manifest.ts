@@ -40,8 +40,9 @@ export const manifest: CheckinTypeManifest = {
     confirmDelete: 'Delete this location check-in?',
   },
   startOver: {
-    // The check-in deletion also removes the user's venue lists.
-    deleteLabel: 'All Location data (check-ins & venue lists)',
+    // The check-in deletion also removes the user's venue lists and
+    // checkin lists (their memberships cascade with the check-ins).
+    deleteLabel: 'All Location data (check-ins, venue lists & checkin lists)',
     allData: {
       label: 'All Venues & Venue Categories (shared reference data)',
       description:
