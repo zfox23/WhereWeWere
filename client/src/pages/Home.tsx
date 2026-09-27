@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, AlignJustify, Rows3 } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
@@ -317,6 +317,12 @@ export default function Home() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offsetRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Local value for the search input. The URL param is the source of truth,
+  // but controlling the input directly from it lags a render behind while the
+  // URL update round-trips; on mobile, autocorrect edits see that stale value
+  // and duplicate text. Keep the input controlled by synchronous local state
+  // and mirror changes into the URL.
+  const [searchInput, setSearchInput] = useState(searchQuery);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -351,6 +357,21 @@ export default function Home() {
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  // Sync the search input from the URL only when the change came from outside
+  // the input (e.g. clear filters, deep-link navigation). While the input is
+  // focused we are the source of truth, so never overwrite it.
+  useEffect(() => {
+    if (document.activeElement !== searchInputRef.current) {
+      setSearchInput(searchQuery);
+    }
+  }, [searchQuery]);
+
+  const handleSearchChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    setFilter('q', value);
+  }, [setFilter]);
 
   const fetchTimeline = useCallback(
     async (offset: number, append: boolean) => {
@@ -604,8 +625,8 @@ export default function Home() {
           <input
             ref={searchInputRef}
             type="text"
-            value={searchQuery}
-            onChange={(e) => setFilter('q', e.target.value)}
+            value={searchInput}
+            onChange={handleSearchChange}
             placeholder="Search check-ins..."
             className="w-full pl-10 pr-4 py-3 bg-white/70 dark:bg-gray-900/70 border border-white/40 dark:border-gray-700/40 rounded-2xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none shadow-sm shadow-black/3 dark:text-gray-100"
           />
