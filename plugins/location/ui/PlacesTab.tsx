@@ -12,6 +12,8 @@ import {
   MoonStarIcon,
   Sun,
   SunriseIcon,
+  Library,
+  List,
 } from 'lucide-react';
 import { CircleMarker, FeatureGroup, MapContainer, Marker, Polyline, Popup as LeafletPopup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -622,6 +624,19 @@ function CountriesList({ data }: { data: CountryStats[] }) {
   );
 }
 
+type PlacesSection = 'venues' | 'lists' | 'map';
+
+const PLACES_SECTIONS: { key: PlacesSection; label: string; icon: React.ElementType }[] = [
+  { key: 'venues', label: 'Venue Library', icon: Library },
+  { key: 'lists', label: 'Lists', icon: List },
+  { key: 'map', label: 'Map & Stats', icon: MapPin },
+];
+
+function getPlacesSectionFromLocation(): PlacesSection {
+  const section = new URLSearchParams(window.location.search).get('placesSection');
+  return section === 'venues' || section === 'lists' || section === 'map' ? section : 'map';
+}
+
 export function PlacesTab() {
   const getPlacesMonthFromLocation = (): string => {
     const monthParam = new URLSearchParams(window.location.search).get('placesMonth');
@@ -640,6 +655,7 @@ export function PlacesTab() {
   const [placesPeriodMode, setPlacesPeriodMode] = useState<PeriodMode>(getPlacesPeriodFromLocation);
   const [placesSelectedMonth, setPlacesSelectedMonth] = useState<string>(getPlacesMonthFromLocation);
   const [placesSelectedWeek, setPlacesSelectedWeek] = useState<string>(getPlacesWeekFromLocation);
+  const [placesSection, setPlacesSection] = useState<PlacesSection>(getPlacesSectionFromLocation);
   const [placesYear, setPlacesYear] = useState(() => parseInt(getPlacesMonthFromLocation().slice(0, 4), 10));
   const [summary, setSummary] = useState<StatsType | null>(null);
   const [topVenues, setTopVenues] = useState<TopVenue[]>([]);
@@ -771,6 +787,7 @@ export function PlacesTab() {
       setPlacesSelectedWeek(getPlacesWeekFromLocation());
       setPlacesYear(parseInt(nextMonth.slice(0, 4), 10));
       setPlacesPeriodMode(getPlacesPeriodFromLocation());
+      setPlacesSection(getPlacesSectionFromLocation());
     };
 
     syncStateFromLocation();
@@ -806,11 +823,12 @@ export function PlacesTab() {
     setOrDelete('placesMonth', placesSelectedMonth, placesSelectedMonth === getCurrentMonthIso());
     setOrDelete('placesPeriod', placesPeriodMode, placesPeriodMode === 'single');
     setOrDelete('placesWeek', placesSelectedWeek, placesSelectedWeek === getCurrentDateIso());
+    setOrDelete('placesSection', placesSection, placesSection === 'map');
 
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [placesPeriodMode, placesSelectedMonth, placesSelectedWeek]);
+  }, [placesPeriodMode, placesSelectedMonth, placesSelectedWeek, placesSection]);
 
   if (!initialPlacesLoaded) {
     return (
@@ -822,65 +840,82 @@ export function PlacesTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <PeriodRangeSelector
-          periodMode={placesPeriodMode}
-          onPeriodModeChange={setPlacesPeriodMode}
-          year={placesYear}
-          onYearChange={setPlacesYear}
-          selectedMonth={placesSelectedMonth}
-          onSelectedMonthChange={setPlacesSelectedMonth}
-          selectedWeek={placesSelectedWeek}
-          onSelectedWeekChange={setPlacesSelectedWeek}
-          allTimeStartDate={earliestCheckinDate ?? undefined}
-          onOpenHome={() => {
-            if (placesVisibleRange.from && placesVisibleRange.to) {
-              window.open(`/?from=${placesVisibleRange.from}&to=${placesVisibleRange.to}`, '_blank', 'noopener,noreferrer');
-            } else {
-              window.open('/', '_blank', 'noopener,noreferrer');
-            }
-          }}
-        />
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit max-w-full overflow-x-auto">
+        {PLACES_SECTIONS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setPlacesSection(key)}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${placesSection === key
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }`}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
       </div>
 
-      {summary && (
-        <div className="grid grid-cols-3 gap-1.5 md:gap-3">
-          <StatCard icon={MapPin} label="Check-ins" value={summary.total_checkins} />
-          <StatCard icon={MapPin} label="Unique" value={summary.unique_venues} />
-          <StatCard icon={CalendarDays} label="Active Days" value={summary.days_with_checkins} />
+      {placesSection === 'map' && (
+        <>
+          <div className="flex items-center gap-2">
+            <PeriodRangeSelector
+              periodMode={placesPeriodMode}
+              onPeriodModeChange={setPlacesPeriodMode}
+              year={placesYear}
+              onYearChange={setPlacesYear}
+              selectedMonth={placesSelectedMonth}
+              onSelectedMonthChange={setPlacesSelectedMonth}
+              selectedWeek={placesSelectedWeek}
+              onSelectedWeekChange={setPlacesSelectedWeek}
+              allTimeStartDate={earliestCheckinDate ?? undefined}
+              onOpenHome={() => {
+                if (placesVisibleRange.from && placesVisibleRange.to) {
+                  window.open(`/?from=${placesVisibleRange.from}&to=${placesVisibleRange.to}`, '_blank', 'noopener,noreferrer');
+                } else {
+                  window.open('/', '_blank', 'noopener,noreferrer');
+                }
+              }}
+            />
+          </div>
+
+        {summary && (
+          <div className="grid grid-cols-3 gap-1.5 md:gap-3">
+            <StatCard icon={MapPin} label="Check-ins" value={summary.total_checkins} />
+            <StatCard icon={MapPin} label="Unique" value={summary.unique_venues} />
+            <StatCard icon={CalendarDays} label="Active Days" value={summary.days_with_checkins} />
+          </div>
+        )}
+
+        <VenuePinsMap
+          data={mapData}
+          loading={placesLoading}
+          periodLabel={placesRangeLabel}
+          range={placesVisibleRange}
+        />
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <TopVenuesList venues={topVenues} />
+          <CategoryChart data={categories} />
         </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <DayOfWeekChart data={dayOfWeek} />
+          <TimeOfDayChart data={timeOfDay} />
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <BusiestDays data={busiestDays} />
+          <TopCities data={topCities} />
+        </div>
+
+        <CountriesList data={countries} />
+        </>
       )}
 
-      <VenuePinsMap
-        data={mapData}
-        loading={placesLoading}
-        periodLabel={placesRangeLabel}
-        range={placesVisibleRange}
-      />
+      {placesSection === 'lists' && <CheckinListsSection />}
 
-      <div className="grid md:grid-cols-2 gap-4">
-        <TopVenuesList venues={topVenues} />
-        <CategoryChart data={categories} />
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-4">
-        <DayOfWeekChart data={dayOfWeek} />
-        <TimeOfDayChart data={timeOfDay} />
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-4">
-        <BusiestDays data={busiestDays} />
-        <TopCities data={topCities} />
-      </div>
-
-      <CountriesList data={countries} />
-
-      <CheckinListsSection />
-
-      <VenuesLibrarySection
-        from={placesVisibleRange.from}
-        to={placesVisibleRange.to}
-      />
+      {placesSection === 'venues' && <VenuesLibrarySection from="" to="" />}
     </div>
   );
 }
