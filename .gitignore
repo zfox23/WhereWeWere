@@ -8,3 +8,6 @@ uploads/
 coverage/
 .tsbuildinfo
 data/
+
+# Personal Diving Log backup (import source for the scuba plugin)
+Logbook.sql
