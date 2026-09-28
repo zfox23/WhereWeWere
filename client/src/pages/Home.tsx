@@ -88,7 +88,7 @@ function ExpandableFAB() {
         onClick={() => setExpanded(false)}
       />
 
-      <div className={`fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col gap-3 items-end transition-all duration-200 ease-out ${expanded ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'}`} aria-hidden={!expanded}>
+      <div className={`fixed bottom-36 md:bottom-24 right-4 md:right-6 z-40 flex flex-col-reverse gap-3 items-end transition-all duration-200 ease-out ${expanded ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'}`} aria-hidden={!expanded}>
           {FAB_PLUGINS.map((plugin) => {
             const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
             return (

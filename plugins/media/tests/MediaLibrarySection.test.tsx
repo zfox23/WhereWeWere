@@ -149,7 +149,7 @@ describe('MediaLibrarySection', () => {
     await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
 
     expect(libraryMock).toHaveBeenCalledWith('2023-01-01', '2023-01-31', [
-      'movie', 'tv_show', 'game', 'book', 'board_game',
+      'movie', 'tv_show', 'book', 'game', 'board_game',
     ]);
   });
 

@@ -561,9 +561,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
         </div>
       )}
 
-      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">All Tracks</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Tap or click a track to see its details.</p>
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3">
         {mapTracks.some((t) => t.coordinates.length >= 2) ? (
           <TracksMap tracks={mapTracks} distanceUnit={distanceUnit} />
         ) : (

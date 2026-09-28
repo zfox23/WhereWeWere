@@ -123,8 +123,8 @@ function MoodProfileTab(_props: PluginProfileTabProps) {
 export const client: CheckinTypeClientPlugin = {
   icon: Smile,
   iconColor: 'text-green-500',
-  hotkey: 'm',
-  fabOrder: 100,
+  hotkey: 'j',
+  fabOrder: 30,
   checkInPath: '/mood-check-in',
   detailPath: '/mood-checkins/:id',
 

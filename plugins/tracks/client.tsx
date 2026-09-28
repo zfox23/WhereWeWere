@@ -31,7 +31,7 @@ export const client: CheckinTypeClientPlugin = {
   icon: Route,
   iconColor: 'text-rose-500',
   hotkey: 't',
-  fabOrder: 100,
+  fabOrder: 40,
   checkInPath: '/track-check-in',
   detailPath: '/tracks/:id',
 

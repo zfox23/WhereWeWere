@@ -33,7 +33,7 @@ export const client: CheckinTypeClientPlugin = {
   icon: Moon,
   iconColor: 'text-indigo-500',
   hotkey: 's',
-  fabOrder: 100,
+  fabOrder: 50,
   checkInPath: '/sleep-check-in',
   detailPath: '/sleep-entries/:id',
 

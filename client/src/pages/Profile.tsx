@@ -10,8 +10,9 @@ import type { CheckinTypeClient } from 'wwp-shared';
 /**
  * Tabs contributed by check-in plugins. A plugin that ships a `profileTab`
  * gets a tab keyed `plugin:<id>`; the others fall back to the auto count tab.
+ * Displays in the same order as floating action button order
  */
-const PROFILE_PLUGINS = allClientPlugins();
+const PROFILE_PLUGINS = allClientPlugins().slice().sort((a, b) => (a.client.fabOrder ?? 100) - (b.client.fabOrder ?? 100));;
 
 function renderPluginTab(plugin: CheckinTypeClient, userId: string) {
   const Tab = plugin.client.profileTab;

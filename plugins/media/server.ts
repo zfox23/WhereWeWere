@@ -57,7 +57,7 @@ const MEDIA_ROUTE_SEGMENTS: Record<string, string> = {
   board_game: 'board-game',
 };
 
-const MEDIA_TYPES = new Set(['movie', 'tv_show', 'game', 'book', 'board_game']);
+const MEDIA_TYPES = new Set(['movie', 'tv_show', 'book', 'game', 'board_game']);
 const CHECKIN_TYPES = new Set(['completed', 'in_progress', 'started', 'dropped']);
 const EPISODE_CACHE_MAX_AGE_DAYS = 30;
 

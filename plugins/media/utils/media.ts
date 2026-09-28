@@ -37,16 +37,6 @@ export const MEDIA_SUBTYPES: Record<MediaSubtype, MediaSubtypeConfig> = {
     icon: '📺',
     routeSegment: 'tv',
   },
-  game: {
-    subtype: 'game',
-    label: 'Game',
-    plural: 'Games',
-    searchPath: '/media-check-in/game',
-    detailBase: '/media/game',
-    apiName: 'IGDB',
-    icon: '🎮',
-    routeSegment: 'game',
-  },
   book: {
     subtype: 'book',
     label: 'Book',
@@ -56,6 +46,16 @@ export const MEDIA_SUBTYPES: Record<MediaSubtype, MediaSubtypeConfig> = {
     apiName: 'Hardcover',
     icon: '📖',
     routeSegment: 'book',
+  },
+  game: {
+    subtype: 'game',
+    label: 'Game',
+    plural: 'Games',
+    searchPath: '/media-check-in/game',
+    detailBase: '/media/game',
+    apiName: 'IGDB',
+    icon: '🎮',
+    routeSegment: 'game',
   },
   board_game: {
     subtype: 'board_game',
@@ -69,7 +69,7 @@ export const MEDIA_SUBTYPES: Record<MediaSubtype, MediaSubtypeConfig> = {
   },
 };
 
-export const MEDIA_SUBTYPE_LIST: MediaSubtype[] = ['movie', 'tv_show', 'game', 'book', 'board_game'];
+export const MEDIA_SUBTYPE_LIST: MediaSubtype[] = ['movie', 'tv_show', 'book', 'game', 'board_game'];
 
 /**
  * Human provider name for a specific item. Games are always labeled IGDB

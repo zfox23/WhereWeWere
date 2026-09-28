@@ -132,40 +132,7 @@ function CheckinListsIndex({
   };
 
   return (
-    <div>
-      {/* Create */}
-      <div className="flex items-center gap-1.5 mb-4">
-        <input
-          type="text"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              void handleCreate();
-            }
-          }}
-          placeholder="New list name"
-          aria-label="New checkin list name"
-          className="flex-1 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-600 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-        />
-        <button
-          type="button"
-          onClick={() => void handleCreate()}
-          disabled={creating || !newName.trim()}
-          className="inline-flex items-center gap-1 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 py-1.5 text-sm font-medium text-white transition-colors"
-        >
-          {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-          Add
-        </button>
-      </div>
-
-      {error && (
-        <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-md px-3 py-2 mb-3">
-          {error}
-        </p>
-      )}
-
+    <div className="space-y-4">
       {lists.length === 0 ? (
         <p className="text-sm text-gray-400">
           No checkin lists yet. Create one to collect events like concerts or shows in one place.
@@ -238,6 +205,39 @@ function CheckinListsIndex({
             </li>
           ))}
         </ul>
+      )}
+
+      {/* Create */}
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void handleCreate();
+            }
+          }}
+          placeholder="New list name"
+          aria-label="New checkin list name"
+          className="flex-1 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-600 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+        />
+        <button
+          type="button"
+          onClick={() => void handleCreate()}
+          disabled={creating || !newName.trim()}
+          className="inline-flex items-center gap-1 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 py-1.5 text-sm font-medium text-white transition-colors"
+        >
+          {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          Add
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-md px-3 py-2">
+          {error}
+        </p>
       )}
     </div>
   );
@@ -468,7 +468,7 @@ function CheckinListDetail({
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  { canDrag && <th scope="col" className="py-2 pr-2 w-8" aria-label="Drag handle" /> }
+                  {canDrag && <th scope="col" className="py-2 pr-2 w-8" aria-label="Drag handle" />}
                   {headerCell('rank', 'Rank', 'pl-0')}
                   {headerCell('venue', 'Venue name')}
                   {headerCell('date', 'Check-in date & time')}

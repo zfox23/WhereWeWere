@@ -68,8 +68,8 @@ function MediaCheckInPage(_props: CheckInFormProps) {
 export const client: CheckinTypeClientPlugin = {
   icon: Clapperboard,
   iconColor: 'text-violet-500',
-  hotkey: 'n',
-  fabOrder: 100,
+  hotkey: 'm',
+  fabOrder: 20,
   checkInPath: '/media-check-in',
   // No `detailPath`/`detailPage`: media detail URLs are item-scoped
   // (`/media/<segment>/<itemId>/<slug>`) and are reached from the timeline
