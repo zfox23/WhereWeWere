@@ -12,7 +12,7 @@ const nearbyPrefetchInflight = new Map<string, Promise<NearbyVenue[]>>();
 const nearbyPrefetchCache = new Map<string, { data: NearbyVenue[]; expiresAt: number }>();
 
 function buildNearbyPrefetchKey(lat: number, lon: number): string {
-  return `${lat.toFixed(5)},${lon.toFixed(5)}|${PREFETCH_LIMIT}|${PREFETCH_OFFSET}`;
+  return `${lat.toFixed(5)},${lon.toFixed(5)}|${PREFETCH_LIMIT}|${PREFETCH_OFFSET}|local`;
 }
 
 function fetchNearbyPrefetch(lat: number, lon: number): Promise<NearbyVenue[]> {
@@ -25,11 +25,14 @@ function fetchNearbyPrefetch(lat: number, lon: number): Promise<NearbyVenue[]> {
   const existing = nearbyPrefetchInflight.get(key);
   if (existing) return existing;
 
+  // Prefetch local-only venues: they come back instantly so the check-in page
+  // can render them immediately while OSM results load separately.
   const request = venues.nearby({
     lat: lat.toString(),
     lon: lon.toString(),
     limit: PREFETCH_LIMIT,
     offset: PREFETCH_OFFSET,
+    source: 'local',
   }).then((data) => {
     nearbyPrefetchCache.set(key, {
       data,

@@ -1424,12 +1424,20 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
     const radiusMeters = parseInt(radius as string, 10);
     const limitNum = Math.min(Math.max(parseInt(limit as string, 10) || 20, 1), 100);
     const offsetNum = Math.max(parseInt(offset as string, 10) || 0, 0);
+    const rawSource = typeof req.query.source === 'string' ? req.query.source : undefined;
+    const source: 'local' | 'osm' | 'mixed' =
+      rawSource === 'local' || rawSource === 'osm' ? rawSource : 'mixed';
 
     if (isNaN(latNum) || isNaN(lonNum)) {
       return res.status(400).json({ error: 'lat and lon must be valid numbers' });
     }
 
     // Search local DB using Haversine distance
+    const haversineExpr = `(6371000 * acos(
+               cos(radians($1)) * cos(radians(v.latitude)) *
+               cos(radians(v.longitude) - radians($2)) +
+               sin(radians($1)) * sin(radians(v.latitude))
+             ))`;
     const dbParams: unknown[] = [latNum, lonNum, radiusMeters];
     let searchCondition = '';
     if (search) {
@@ -1437,33 +1445,49 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
       dbParams.push(search);
     }
 
-    const dbSql = `
-      SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
-             v.latitude, v.longitude, v.osm_id, v.created_at, v.updated_at,
-             vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
-             (6371000 * acos(
-               cos(radians($1)) * cos(radians(v.latitude)) *
-               cos(radians(v.longitude) - radians($2)) +
-               sin(radians($1)) * sin(radians(v.latitude))
-             )) AS distance,
-             'local' AS source
-      FROM venues v
-      LEFT JOIN venue_categories vc ON v.category_id = vc.id
-      WHERE (6371000 * acos(
-               cos(radians($1)) * cos(radians(v.latitude)) *
-               cos(radians(v.longitude) - radians($2)) +
-               sin(radians($1)) * sin(radians(v.latitude))
-             )) <= $3
-      ${searchCondition}
-      ORDER BY distance ASC
-    `;
+    let localVenues: any[] = [];
+    let localOsmIds = new Set<string>();
 
-    const dbResult = await query(dbSql, dbParams);
-    const localVenues = dbResult.rows.map((row) => serializeVenue(row));
+    if (source === 'osm') {
+      // OSM-only: skip the full local query, but fetch local osm_ids so we can
+      // still dedupe OSM results against venues already imported locally.
+      const idSql = `
+        SELECT DISTINCT v.osm_id
+        FROM venues v
+        WHERE v.osm_id IS NOT NULL
+          AND ${haversineExpr} <= $3
+          ${searchCondition}
+      `;
+      const idResult = await query(idSql, dbParams);
+      localOsmIds = new Set(idResult.rows.map((row: { osm_id: string }) => row.osm_id));
+    } else {
+      let dbSql = `
+        SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
+               v.latitude, v.longitude, v.osm_id, v.created_at, v.updated_at,
+               vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
+               ${haversineExpr} AS distance,
+               'local' AS source
+        FROM venues v
+        LEFT JOIN venue_categories vc ON v.category_id = vc.id
+        WHERE ${haversineExpr} <= $3
+        ${searchCondition}
+        ORDER BY distance ASC
+      `;
+      if (source === 'local') {
+        dbSql += ` LIMIT $${dbParams.length + 1} OFFSET $${dbParams.length + 2}`;
+        dbParams.push(limitNum, offsetNum);
+      }
+      const dbResult = await query(dbSql, dbParams);
+      localVenues = dbResult.rows.map((row) => serializeVenue(row));
+      localOsmIds = new Set(
+        localVenues.filter((v: { osm_id: string | null }) => v.osm_id).map((v: { osm_id: string }) => v.osm_id)
+      );
+    }
 
-    // Also query Overpass API
+    // Also query Overpass API (skipped for source=local so that request stays fast)
     let osmVenues: Array<Record<string, unknown>> = [];
-    try {
+    if (source !== 'local') {
+      try {
       const osmResults = await searchNearbyVenues(
         latNum,
         lonNum,
@@ -1482,9 +1506,10 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
           ...r,
           source: 'osm',
         }));
-    } catch (osmErr) {
-      // If Overpass fails, just return local results
-      console.error('Overpass API error (non-fatal):', osmErr);
+      } catch (osmErr) {
+        // If Overpass fails, just return local results
+        console.error('Overpass API error (non-fatal):', osmErr);
+      }
     }
 
     const localWithDistance = localVenues
@@ -1507,6 +1532,14 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
       }))
       .filter((venue) => Number.isFinite(venue.distance))
       .sort((a, b) => a.distance - b.distance);
+
+    // Single-source pagination (source=local / source=osm)
+    if (source !== 'mixed') {
+      const list = (source === 'local' ? localWithDistance : osmWithDistance)
+        .slice(offsetNum, offsetNum + limitNum)
+        .map(({ distance, ...venue }) => venue);
+      return res.json(list);
+    }
 
     // Keep the first page source-diverse so check-in search doesn't appear "local only"
     // in dense areas where local venues can dominate the nearest-distance ranking.

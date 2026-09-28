@@ -32,10 +32,18 @@ const PLACE_TAG_KEYS = [
   'natural',
   'man_made',
 ] as const;
-const PLACE_TAG_KEY_PATTERN = `^(${PLACE_TAG_KEYS.join('|')})$`;
+
+// Nearby searches scan a large area with `around:`, so drop the two heaviest
+// tag classes (individual buildings and natural features) to keep the query
+// cheap. The `is_in` enclosing-venue lookup only evaluates the handful of
+// elements that actually contain the point, so it keeps the full list.
+const NEARBY_TAG_KEYS = PLACE_TAG_KEYS.filter(
+  (key) => key !== 'building' && key !== 'natural',
+) as (typeof PLACE_TAG_KEYS)[number][];
+
 const GENERIC_CATEGORY_VALUES = new Set(['yes']);
 const MIN_NEARBY_SEARCH_RADIUS_METERS = 5000;
-const QUERY_SEARCH_RADIUS_METERS = 10000;
+const QUERY_SEARCH_RADIUS_METERS = 5000;
 const SEARCHABLE_NAME_KEY_PATTERN = '^(name|official_name|brand|short_name|alt_name|operator)$';
 
 function formatOsmTagValue(value: string): string {
@@ -114,8 +122,8 @@ function getSearchRadius(radius: number, query?: string): number {
   return Math.max(radius, MIN_NEARBY_SEARCH_RADIUS_METERS);
 }
 
-function buildPlaceFilter(): string {
-  return `[~"${PLACE_TAG_KEY_PATTERN}"~"."]`;
+function buildPlaceFilter(keys: readonly string[] = PLACE_TAG_KEYS): string {
+  return `[~"^(${keys.join('|')})$"~"."]`;
 }
 
 function getParentPriority(tags: Record<string, string>): number {
@@ -135,26 +143,17 @@ async function fetchNearbyOverpassVenues(
   radius: number,
   query?: string,
 ): Promise<OSMVenueResult[]> {
-  const placeFilter = buildPlaceFilter();
+  const placeFilter = buildPlaceFilter(NEARBY_TAG_KEYS);
   const nameFilter = buildNameFilter(query);
   const searchRadius = getSearchRadius(radius, query);
 
   const overpassQuery = `
-    [out:json][timeout:15];
+    [out:json][timeout:30];
     nwr${placeFilter}${nameFilter}(around:${searchRadius},${lat},${lon});
     out center;
   `;
 
-  const url = 'https://overpass-api.de/api/interpreter';
-  const requestBody = `data=${encodeURIComponent(overpassQuery)}`;
-
-  const response = await fetchWithRetry(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: requestBody,
-  });
+  const response = await fetchWithRetry(`data=${encodeURIComponent(overpassQuery)}`);
 
   const data = (await response.json()) as { elements: OverpassElement[] };
   const deduped = new Map<string, OSMVenueResult>();
@@ -205,7 +204,7 @@ function cacheKey(lat: number, lon: number, query: string | undefined, radius: n
   return `${rlat},${rlon}|${radius}|${(query || '').toLowerCase()}`;
 }
 
-// Overpass queries can legitimately take up to their [timeout:15] server-side
+// Overpass queries can legitimately take up to their [timeout:30] server-side
 // limit; give the socket a generous margin so a hung connection can't wedge a
 // backfill job forever.
 const OVERPASS_FETCH_TIMEOUT_MS = 60000;
@@ -215,38 +214,56 @@ const OVERPASS_FETCH_TIMEOUT_MS = 60000;
 // edge blocks, so set one explicitly on every request.
 const OVERPASS_USER_AGENT = 'WhereWeWere/1.0 (self-hosted checkin app)';
 
+// 504s are usually per-instance load, not a bad query. Rotating to a
+// different mirror on failure is far more effective than hammering the same
+// server, so each retry attempt moves to the next endpoint in the list.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+
 async function fetchWithRetry(
-  url: string,
-  init: RequestInit,
+  body: string,
   retries: number = 2,
 ): Promise<Response> {
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const url = OVERPASS_ENDPOINTS[attempt % OVERPASS_ENDPOINTS.length];
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), OVERPASS_FETCH_TIMEOUT_MS);
     let response: Response;
     try {
-      const headers = new Headers(init.headers);
+      const headers = new Headers({ 'Content-Type': 'application/x-www-form-urlencoded' });
       headers.set('User-Agent', OVERPASS_USER_AGENT);
-      response = await fetch(url, { ...init, headers, signal: controller.signal });
+      response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
     } catch (err: any) {
       clearTimeout(timeoutHandle);
       if (err?.name === 'AbortError') {
         throw new Error(`Overpass request timed out after ${OVERPASS_FETCH_TIMEOUT_MS}ms`);
       }
-      throw err;
+      // Network error talking to this mirror — try the next one without
+      // waiting; the others are likely healthy.
+      if (attempt === retries) throw err;
+      continue;
     }
     clearTimeout(timeoutHandle);
 
     if (response.ok) return response;
 
-    // Retry on 429 (rate limit) or 504 (gateway timeout), but not on other errors
-    const retryable = response.status === 429 || response.status === 504;
+    // Retry (on the next mirror) for rate limits and transient gateway
+    // errors, but not for other errors (e.g. 4xx query syntax problems).
+    const retryable =
+      response.status === 429 ||
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504;
     if (!retryable || attempt === retries) {
-      throw new Error(`Overpass API error: ${response.status} ${response.statusText}`);
+      throw new Error(`Overpass API error: ${response.status} ${response.statusText} (${new URL(url).host})`);
     }
 
-    // Exponential backoff: 1 s, then 3 s
-    const delayMs = response.status === 429 ? 1000 * (attempt + 1) * 2 : 1000 * (attempt + 1);
+    // Be gentler on 429; only a brief pause otherwise so the next mirror
+    // isn't hit in the same instant.
+    const delayMs = response.status === 429 ? 1000 * (attempt + 1) * 2 : 1000;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
@@ -304,7 +321,7 @@ export async function findEnclosingVenue(
   const placeFilter = buildPlaceFilter();
 
   const overpassQuery = `
-    [out:json][timeout:15];
+    [out:json][timeout:30];
     is_in(${lat},${lon})->.enclosing;
     (
       way.enclosing${placeFilter}["name"];
@@ -314,15 +331,7 @@ export async function findEnclosingVenue(
   `;
 
   try {
-    const response = await fetchWithRetry(
-      'https://overpass-api.de/api/interpreter',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(overpassQuery)}`,
-      },
-      1, // fewer retries — this is a secondary lookup
-    );
+    const response = await fetchWithRetry(`data=${encodeURIComponent(overpassQuery)}`, 1); // fewer retries — this is a secondary lookup
 
     const data = (await response.json()) as { elements: OverpassElement[] };
     cache.set(key, { data: data.elements, expires: Date.now() + CACHE_TTL_MS });

@@ -39,6 +39,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMoreResults, setHasMoreResults] = useState(false);
+  const [osmLoading, setOsmLoading] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -66,6 +67,10 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const customVenueFormRef = useRef<HTMLFormElement | null>(null);
   const customNameInputRef = useRef<HTMLInputElement | null>(null);
   const requestIdRef = useRef(0);
+  const localCountRef = useRef(0);
+  const osmCountRef = useRef(0);
+  const localHasMoreRef = useRef(false);
+  const osmHasMoreRef = useRef(false);
   const customAddressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const customAddressRequestIdRef = useRef(0);
   const browserCoords = prefetched.coords;
@@ -119,6 +124,121 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     setSelectedNearbyMarkerId(null);
   }, [venuesByMarkerId, selectedNearbyMarkerId]);
 
+  const sortVenuesByDistance = useCallback(
+    (venues: NearbyVenue[], center: { lat: number; lon: number }) =>
+      [...venues].sort(
+        (a, b) =>
+          haversineDistance(center.lat, center.lon, a.latitude, a.longitude) -
+          haversineDistance(center.lat, center.lon, b.latitude, b.longitude)
+      ),
+    []
+  );
+
+  // Fetch local and OSM venues in parallel. Local results come from our own
+  // DB and render immediately; OSM results (slow external Overpass call) are
+  // merged in once they arrive, with a spinner shown in the meantime.
+  const searchNearby = useCallback(
+    async (
+      searchQuery: string,
+      append = false,
+      searchCoords: { lat: number; lon: number } | null = null,
+      opts: { localResults?: NearbyVenue[] | null } = {}
+    ) => {
+      const coordsToUse = searchCoords || coords;
+      if (!coordsToUse) return;
+      const requestId = ++requestIdRef.current;
+
+      const baseParams: Record<string, string> = {
+        lat: coordsToUse.lat.toString(),
+        lon: coordsToUse.lon.toString(),
+        radius: (searchQuery.trim() ? QUERY_NEARBY_RADIUS_METERS : DEFAULT_NEARBY_RADIUS_METERS).toString(),
+        limit: NEARBY_PAGE_SIZE.toString(),
+      };
+      if (searchQuery.trim()) {
+        baseParams.search = searchQuery.trim();
+      }
+
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        if (!opts.localResults) {
+          setLoading(true);
+        }
+        setOsmLoading(true);
+        osmCountRef.current = 0;
+        osmHasMoreRef.current = false;
+        if (!opts.localResults) {
+          localCountRef.current = 0;
+          localHasMoreRef.current = false;
+        }
+      }
+
+      const localOffset = localCountRef.current;
+      const osmOffset = osmCountRef.current;
+
+      const mergeVenues = (prev: NearbyVenue[], incoming: NearbyVenue[]) => {
+        const deduped = new Map<string, NearbyVenue>();
+        [...prev, ...incoming].forEach((venue) => deduped.set(getVenueKey(venue), venue));
+        return sortVenuesByDistance(Array.from(deduped.values()), coordsToUse);
+      };
+
+      const localPromise = opts.localResults
+        ? Promise.resolve(opts.localResults)
+        : venues.nearby({ ...baseParams, offset: localOffset.toString(), source: 'local' });
+
+      void localPromise
+        .then((data) => {
+          if (requestId !== requestIdRef.current) return;
+          localCountRef.current += data.length;
+          localHasMoreRef.current = data.length === NEARBY_PAGE_SIZE;
+          if (append) {
+            setResults((prev) => mergeVenues(prev, data));
+          } else {
+            setResults(sortVenuesByDistance(data, coordsToUse));
+          }
+          setHasMoreResults(localHasMoreRef.current || osmHasMoreRef.current);
+        })
+        .catch(() => {
+          if (requestId !== requestIdRef.current) return;
+          localHasMoreRef.current = false;
+          if (!append) {
+            setResults([]);
+          }
+          setHasMoreResults(localHasMoreRef.current || osmHasMoreRef.current);
+        })
+        .finally(() => {
+          if (requestId !== requestIdRef.current) return;
+          if (append) {
+            setLoadingMore(false);
+          } else {
+            setLoading(false);
+          }
+        });
+
+      void venues
+        .nearby({ ...baseParams, offset: osmOffset.toString(), source: 'osm' })
+        .then((data) => {
+          if (requestId !== requestIdRef.current) return;
+          osmCountRef.current += data.length;
+          osmHasMoreRef.current = data.length === NEARBY_PAGE_SIZE;
+          if (data.length > 0) {
+            setResults((prev) => mergeVenues(prev, data));
+          }
+          setHasMoreResults(localHasMoreRef.current || osmHasMoreRef.current);
+        })
+        .catch(() => {
+          if (requestId !== requestIdRef.current) return;
+          osmHasMoreRef.current = false;
+          setHasMoreResults(localHasMoreRef.current || osmHasMoreRef.current);
+        })
+        .finally(() => {
+          if (requestId !== requestIdRef.current) return;
+          setOsmLoading(false);
+        });
+    },
+    [coords, getVenueKey, sortVenuesByDistance]
+  );
+
   // Determine coordinates from explicit params or LocationContext prefetch.
   // Avoid a second geolocation flow here, which can duplicate nearby requests.
   useEffect(() => {
@@ -129,17 +249,21 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     // Use prefetched coords if available
     if (prefetched.coords) {
       setCoords(prefetched.coords);
-      // Use prefetched venues as initial results
+      // Use prefetched (local-only) venues as immediate results, then fetch
+      // OSM venues in the background while a spinner is shown.
       if (prefetched.nearbyVenues && !usedPrefetchRef.current) {
         usedPrefetchRef.current = true;
-        setResults(prefetched.nearbyVenues);
-        setHasMoreResults(prefetched.nearbyVenues.length === NEARBY_PAGE_SIZE);
+        localCountRef.current = prefetched.nearbyVenues.length;
+        localHasMoreRef.current = prefetched.nearbyVenues.length === NEARBY_PAGE_SIZE;
+        setResults(sortVenuesByDistance(prefetched.nearbyVenues, prefetched.coords));
+        setHasMoreResults(localHasMoreRef.current);
+        void searchNearby('', false, prefetched.coords, { localResults: prefetched.nearbyVenues });
       }
       return;
     }
     // Wait for LocationContext to resolve coordinates.
     setCoords(null);
-  }, [initialLat, initialLon, prefetched.coords, prefetched.nearbyVenues]);
+  }, [initialLat, initialLon, prefetched.coords, prefetched.nearbyVenues, searchNearby, sortVenuesByDistance]);
 
   // Load categories for custom venue form
   useEffect(() => {
@@ -260,58 +384,6 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     };
   }, [customAddress, showCreateForm]);
 
-  const searchNearby = useCallback(
-    async (searchQuery: string, offset = 0, append = false, searchCoords?: { lat: number; lon: number } | null) => {
-      const coordsToUse = searchCoords || coords;
-      if (!coordsToUse) return;
-      const requestId = ++requestIdRef.current;
-      if (append) {
-        setLoadingMore(true);
-      } else {
-        setLoading(true);
-      }
-      try {
-        const params: Record<string, string> = {
-          lat: coordsToUse.lat.toString(),
-          lon: coordsToUse.lon.toString(),
-          radius: (searchQuery.trim() ? QUERY_NEARBY_RADIUS_METERS : DEFAULT_NEARBY_RADIUS_METERS).toString(),
-          limit: NEARBY_PAGE_SIZE.toString(),
-          offset: offset.toString(),
-        };
-        if (searchQuery.trim()) {
-          params.search = searchQuery.trim();
-        }
-        const data = await venues.nearby(params);
-        if (requestId !== requestIdRef.current) return;
-        if (append) {
-          setResults((prev) => {
-            const merged = [...prev, ...data];
-            const deduped = new Map<string, NearbyVenue>();
-            merged.forEach((venue) => deduped.set(getVenueKey(venue), venue));
-            return Array.from(deduped.values());
-          });
-        } else {
-          setResults(data);
-        }
-        setHasMoreResults(data.length === NEARBY_PAGE_SIZE);
-      } catch {
-        if (requestId !== requestIdRef.current) return;
-        if (!append) {
-          setResults([]);
-        }
-        setHasMoreResults(false);
-      } finally {
-        if (requestId !== requestIdRef.current) return;
-        if (append) {
-          setLoadingMore(false);
-        } else {
-          setLoading(false);
-        }
-      }
-    },
-    [coords, getVenueKey]
-  );
-
   // Debounced search
   useEffect(() => {
     if (!coords) return;
@@ -329,7 +401,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      searchNearby(query, 0, false);
+      searchNearby(query);
     }, searchDelayMs);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -346,7 +418,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     }
 
     // Immediately search with the new coordinates and current query
-    void searchNearby(query, 0, false, newCoords);
+    void searchNearby(query, false, newCoords);
   }, [query, searchNearby]);
 
   const handlePlaceSelect = useCallback((lat: number, lon: number) => {
@@ -358,7 +430,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       clearTimeout(debounceRef.current);
     }
 
-    void searchNearby(query, 0, false, newCoords);
+    void searchNearby(query, false, newCoords);
   }, [query, searchNearby]);
 
   const handleResetToBrowserLocation = useCallback(async () => {
@@ -380,9 +452,9 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   }, [browserCoords, handlePlaceSelect, prefetched]);
 
   const loadMore = useCallback(() => {
-    if (loading || loadingMore || !hasMoreResults) return;
-    searchNearby(query, results.length, true);
-  }, [loading, loadingMore, hasMoreResults, searchNearby, query, results.length]);
+    if (loading || loadingMore || osmLoading || !hasMoreResults) return;
+    searchNearby(query, true);
+  }, [loading, loadingMore, osmLoading, hasMoreResults, searchNearby, query]);
 
   const handleSelectLocal = (venue: NearbyVenue) => {
     if (venue.id) {
@@ -597,10 +669,10 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       )}
 
       {/* Results list */}
-      {loading && (
+      {(loading || (osmLoading && results.length === 0)) && (
         <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-3 justify-center">
           <Loader2 size={16} className="animate-spin" />
-          Searching nearby...
+          {loading ? 'Searching nearby...' : 'Fetching OSM venues...'}
         </div>
       )}
 
@@ -672,6 +744,14 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               );
             })()
           ))}
+          {osmLoading && (
+            <li className="py-2.5 text-center text-xs text-gray-500 dark:text-gray-400">
+              <span className="inline-flex items-center gap-1.5">
+                <Loader2 size={12} className="animate-spin" />
+                Fetching OSM venues...
+              </span>
+            </li>
+          )}
           {loadingMore && (
             <li className="py-2.5 text-center text-xs text-gray-500 dark:text-gray-400">
               <span className="inline-flex items-center gap-1.5">
@@ -694,7 +774,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         </ul>
       )}
 
-      {!loading && results.length === 0 && coords && query && (
+      {!loading && !osmLoading && results.length === 0 && coords && query && (
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-3">
           No venues found. Try a different search or create a custom venue.
         </p>
