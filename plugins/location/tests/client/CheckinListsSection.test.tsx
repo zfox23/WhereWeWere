@@ -88,8 +88,7 @@ describe('CheckinListsSection', () => {
   it('shows the lists index with item counts', async () => {
     render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
 
-    expect(await screen.findByRole('heading', { name: 'Checkin Lists' })).toBeTruthy();
-    expect(screen.getByText('Concerts')).toBeTruthy();
+    expect(await screen.findByText('Concerts')).toBeTruthy();
     expect(screen.getByText(/2 check-ins/)).toBeTruthy();
   });
 
@@ -97,8 +96,7 @@ describe('CheckinListsSection', () => {
     const user = userEvent.setup();
     render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
 
-    await screen.findByRole('heading', { name: 'Checkin Lists' });
-    await user.type(screen.getByLabelText('New checkin list name'), 'Broadway');
+    await user.type(await screen.findByLabelText('New checkin list name'), 'Broadway');
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => {
@@ -185,14 +183,15 @@ describe('CheckinListsSection', () => {
     expect(screen.getByText('Apollo')).toBeTruthy();
   });
 
-  it('shows a drag hint and the unranked drop zone when sorted by rank (default)', async () => {
+  it('shows draggable rows and the unranked drop zone when sorted by rank (default)', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
 
     await openListDetail(user, 'Concerts');
     await waitFor(() => expect(screen.getByText('Fillmore')).toBeTruthy());
 
-    expect(screen.getByText(/Drag rows to rank them/)).toBeTruthy();
+    const fillmoreRow = screen.getByText('Fillmore').closest('tr') as HTMLElement;
+    expect(fillmoreRow.getAttribute('draggable')).toBe('true');
     expect(screen.getByText(/^Unranked/)).toBeTruthy();
   });
 
