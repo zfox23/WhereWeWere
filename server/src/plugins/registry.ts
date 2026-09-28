@@ -27,6 +27,8 @@ import { server as locationServer } from '../../../plugins/location/server';
 import { manifest as locationManifest } from '../../../plugins/location/manifest';
 import { server as mediaServer } from '../../../plugins/media/server';
 import { manifest as mediaManifest } from '../../../plugins/media/manifest';
+import { server as scubaServer } from '../../../plugins/scuba/server';
+import { manifest as scubaManifest } from '../../../plugins/scuba/manifest';
 
 const registrations: CheckinTypeServer[] = [
   { ...moodManifest, server: moodServer },
@@ -34,6 +36,7 @@ const registrations: CheckinTypeServer[] = [
   { ...tracksManifest, server: tracksServer },
   { ...locationManifest, server: locationServer },
   { ...mediaManifest, server: mediaServer },
+  { ...scubaManifest, server: scubaServer },
 ];
 
 const byId = new Map<string, CheckinTypeServer>();
