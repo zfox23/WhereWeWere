@@ -627,9 +627,9 @@ function CountriesList({ data }: { data: CountryStats[] }) {
 type PlacesSection = 'venues' | 'lists' | 'map';
 
 const PLACES_SECTIONS: { key: PlacesSection; label: string; icon: React.ElementType }[] = [
-  { key: 'venues', label: 'Venue Library', icon: Library },
-  { key: 'lists', label: 'Lists', icon: List },
   { key: 'map', label: 'Map & Stats', icon: MapPin },
+  { key: 'lists', label: 'Lists', icon: List },
+  { key: 'venues', label: 'Venue Library', icon: Library },
 ];
 
 function getPlacesSectionFromLocation(): PlacesSection {

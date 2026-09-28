@@ -145,7 +145,7 @@ function CheckinListsIndex({
               void handleCreate();
             }
           }}
-          placeholder="New list name (e.g. Concerts, Broadway)…"
+          placeholder="New list name"
           aria-label="New checkin list name"
           className="flex-1 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-600 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
@@ -370,7 +370,7 @@ function CheckinListDetail({
     // No-op when the order didn't actually change.
     const currentRankedIds = ranked.map((i) => i.checkin_id);
     if (nextRankedIds.length === currentRankedIds.length &&
-        nextRankedIds.every((v, i) => v === currentRankedIds[i])) {
+      nextRankedIds.every((v, i) => v === currentRankedIds[i])) {
       return;
     }
     await persistOrder(nextRankedIds);
@@ -454,12 +454,6 @@ function CheckinListDetail({
         {saving && <Loader2 size={14} className="animate-spin text-primary-500 ml-auto" />}
       </div>
 
-      {canDrag && !saving && (
-        <p className="text-xs text-gray-400 mb-2">
-          Drag rows to rank them; drop a row into the unranked zone below to clear its rank.
-        </p>
-      )}
-
       {loading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="animate-spin text-primary-600" size={24} />
@@ -474,7 +468,7 @@ function CheckinListDetail({
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  <th scope="col" className="py-2 pr-2 w-8" aria-label="Drag handle" />
+                  { canDrag && <th scope="col" className="py-2 pr-2 w-8" aria-label="Drag handle" /> }
                   {headerCell('rank', 'Rank', 'pl-0')}
                   {headerCell('venue', 'Venue name')}
                   {headerCell('date', 'Check-in date & time')}
@@ -514,15 +508,16 @@ function CheckinListDetail({
                       dropIndicator(item),
                     ].join(' ')}
                   >
-                    <td className="py-2.5 pr-2">
-                      <span
-                        className="inline-flex text-gray-300 dark:text-gray-600"
-                        title={canDrag ? 'Drag to rank' : 'Sort by Rank to drag-reorder'}
-                        aria-hidden
-                      >
-                        ⠿
-                      </span>
-                    </td>
+                    {canDrag &&
+                      <td className="py-2.5 pr-2">
+                        <span
+                          className="inline-flex text-gray-300 dark:text-gray-600"
+                          title={canDrag ? 'Drag to rank' : 'Sort by Rank to drag-reorder'}
+                          aria-hidden
+                        >
+                          ⠿
+                        </span>
+                      </td>}
                     <td className="py-2.5 pr-3 tabular-nums w-12">
                       {item.rank != null ? (
                         <span className="inline-flex items-center justify-center min-w-[1.5rem] px-1 rounded-md bg-primary-50 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 text-xs font-bold">
@@ -666,10 +661,6 @@ export function CheckinListsSection() {
 
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
-      <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-3">
-        Checkin Lists
-      </h2>
-
       {listsLoading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="animate-spin text-primary-600" size={24} />
