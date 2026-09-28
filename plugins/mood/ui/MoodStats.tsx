@@ -118,6 +118,28 @@ function MoodLineSpanChart({
     setIsScrubbing(false);
   }, [data, mode]);
 
+  // Expand the data across every calendar day between the first and last entry,
+  // so skipped days render as gaps on the x-axis instead of being squished together.
+  const { slots, slotDates } = useMemo(() => {
+    if (!data.length) {
+      return { slots: [] as (DailyPt | null)[], slotDates: [] as string[] };
+    }
+    const byDate = new Map(data.map((d) => [d.date, d]));
+    const [yy, mm, dd] = data[0].date.split('-').map(Number);
+    const cur = new Date(yy, mm - 1, dd);
+    const last = data[data.length - 1].date;
+    const slots: (DailyPt | null)[] = [];
+    const slotDates: string[] = [];
+    for (;;) {
+      const ds = isoDate(cur);
+      slotDates.push(ds);
+      slots.push(byDate.get(ds) ?? null);
+      if (ds === last) break;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return { slots, slotDates };
+  }, [data]);
+
   if (!data.length) {
     return (
       <div className="flex items-center justify-center h-36 text-sm text-gray-400">
@@ -126,21 +148,22 @@ function MoodLineSpanChart({
     );
   }
 
-  const n = data.length;
+  const n = slots.length;
 
   // X ticks: one per month boundary, skipping ticks that are too close together
   const xticks: { key: string; x: number; label: string }[] = [];
   let pm = '';
   let lastTickX = -Infinity;
-  data.forEach((d, i) => {
-    const mo = d.date.slice(0, 7);
+  slots.forEach((_, i) => {
+    const date = slotDates[i];
+    const mo = date.slice(0, 7);
     if (mo !== pm) {
       const x = toX(i, n);
       if (x - lastTickX >= 55) {
         xticks.push({
           key: mo,
           x,
-          label: new Date(d.date + 'T12:00').toLocaleString('en-US', { month: 'short', day: 'numeric' }),
+          label: new Date(date + 'T12:00').toLocaleString('en-US', { month: 'short', day: 'numeric' }),
         });
         lastTickX = x;
       }
@@ -148,25 +171,52 @@ function MoodLineSpanChart({
     }
   });
 
-  const avgPath = data
-    .map((d, i) => `${i ? 'L' : 'M'} ${toX(i, n).toFixed(1)} ${toY(d.avg_mood).toFixed(1)}`)
+  // Contiguous runs of days with data; the line breaks across gaps.
+  const segments: { start: number; end: number }[] = [];
+  for (let start = -1, i = 0; i <= n; i++) {
+    const has = i < n && slots[i] !== null;
+    if (has && start === -1) start = i;
+    if (!has && start !== -1) {
+      segments.push({ start, end: i - 1 });
+      start = -1;
+    }
+  }
+
+  const segmentLinePath = (get: (d: DailyPt) => number) =>
+    segments
+      .map(({ start, end }) => {
+        let d = '';
+        for (let i = start; i <= end; i++) {
+          d += `${i === start ? 'M' : 'L'} ${toX(i, n).toFixed(1)} ${toY(get(slots[i]!)).toFixed(1)} `;
+        }
+        return d.trim();
+      })
+      .join(' ');
+  const avgPath = segmentLinePath((d) => d.avg_mood);
+  const maxPath = segmentLinePath((d) => d.max_mood);
+  const minPath = segmentLinePath((d) => d.min_mood);
+  const spanAreas = segments
+    .map(({ start, end }) => {
+      let d = '';
+      for (let i = start; i <= end; i++) {
+        d += `${i === start ? 'M' : 'L'} ${toX(i, n).toFixed(1)} ${toY(slots[i]!.max_mood).toFixed(1)} `;
+      }
+      for (let i = end; i >= start; i--) {
+        d += `L ${toX(i, n).toFixed(1)} ${toY(slots[i]!.min_mood).toFixed(1)} `;
+      }
+      return `${d.trim()} Z`;
+    })
     .join(' ');
-  const maxPath = data
-    .map((d, i) => `${i ? 'L' : 'M'} ${toX(i, n).toFixed(1)} ${toY(d.max_mood).toFixed(1)}`)
+  const lineAreas = segments
+    .map(({ start, end }) => {
+      let d = '';
+      for (let i = start; i <= end; i++) {
+        d += `${i === start ? 'M' : 'L'} ${toX(i, n).toFixed(1)} ${toY(slots[i]!.avg_mood).toFixed(1)} `;
+      }
+      d += `L ${toX(end, n).toFixed(1)} ${(PT + CH).toFixed(1)} L ${toX(start, n).toFixed(1)} ${(PT + CH).toFixed(1)} Z`;
+      return d.trim();
+    })
     .join(' ');
-  const minPath = data
-    .map((d, i) => `${i ? 'L' : 'M'} ${toX(i, n).toFixed(1)} ${toY(d.min_mood).toFixed(1)}`)
-    .join(' ');
-  const spanArea =
-    data
-      .map((d, i) => `${i ? 'L' : 'M'} ${toX(i, n).toFixed(1)} ${toY(d.max_mood).toFixed(1)}`)
-      .join(' ') +
-    ' ' +
-    [...data]
-      .reverse()
-      .map((d, i) => `L ${toX(n - 1 - i, n).toFixed(1)} ${toY(d.min_mood).toFixed(1)}`)
-      .join(' ') +
-    ' Z';
 
   const GC = 'rgba(128,128,128,0.2)';
   const TC = 'rgba(128,128,128,0.8)';
@@ -192,14 +242,17 @@ function MoodLineSpanChart({
 
   const updateActiveFromPointer = (clientX: number, clientY: number) => {
     const idx = getIndexFromClientX(clientX, clientY);
-    if (idx === null) return;
+    if (idx === null || !slots[idx]) {
+      setActiveIndex(null);
+      return;
+    }
     setActiveIndex(idx);
   };
 
   const displayIndex = activeIndex ?? pinnedIndex;
-  const selectedPoint = displayIndex !== null ? data[displayIndex] : null;
+  const selectedPoint = displayIndex !== null ? slots[displayIndex] : null;
   const selectedX = displayIndex !== null ? toX(displayIndex, n) : null;
-  const sleepTotals = data.map((d) => Math.max(0, sleepTotalsByDate.get(d.date) || 0));
+  const sleepTotals = slotDates.map((date) => Math.max(0, sleepTotalsByDate.get(date) || 0));
   const maxSleepMinutes = Math.max(...sleepTotals, 0);
   const toSleepY = (minutes: number) => {
     if (maxSleepMinutes <= 0) return PT + CH;
@@ -241,7 +294,7 @@ function MoodLineSpanChart({
           if (e.pointerType === 'mouse') {
             const idx = getIndexFromClientX(e.clientX, e.clientY);
             if (idx !== null) {
-              const day = data[idx]?.date;
+              const day = slots[idx]?.date;
               if (day) openInNewTab(`/?from=${day}&to=${day}`);
             }
             return;
@@ -250,7 +303,7 @@ function MoodLineSpanChart({
           const idx = getIndexFromClientX(e.clientX, e.clientY);
           setIsScrubbing(false);
           setActiveIndex(null);
-          if (idx !== null) setPinnedIndex(idx);
+          if (idx !== null) setPinnedIndex(slots[idx] ? idx : null);
           e.currentTarget.releasePointerCapture(e.pointerId);
         }}
         onPointerCancel={() => {
@@ -308,7 +361,7 @@ function MoodLineSpanChart({
               const h = PT + CH - y;
               return (
                 <rect
-                  key={`sleep-${data[i].date}`}
+                  key={`sleep-${slotDates[i]}`}
                   x={x}
                   y={y}
                   width={barWidth}
@@ -316,7 +369,7 @@ function MoodLineSpanChart({
                   rx={1}
                   fill="rgba(20, 184, 166, 0.35)"
                 >
-                  <title>{`${data[i].date}: sleep ${formatSleepMinutesShort(minutes)}`}</title>
+                  <title>{`${slotDates[i]}: sleep ${formatSleepMinutesShort(minutes)}`}</title>
                 </rect>
               );
             })}
@@ -344,7 +397,7 @@ function MoodLineSpanChart({
 
         {mode === 'span' && (
           <>
-            <path d={spanArea} fill="rgba(99,102,241,0.18)" />
+            <path d={spanAreas} fill="rgba(99,102,241,0.18)" />
             <path d={maxPath} fill="none" stroke="rgba(99,102,241,0.45)" strokeWidth={1} strokeDasharray="3 2" />
             <path d={minPath} fill="none" stroke="rgba(99,102,241,0.45)" strokeWidth={1} strokeDasharray="3 2" />
             <path
@@ -360,13 +413,7 @@ function MoodLineSpanChart({
 
         {mode === 'line' && (
           <>
-            <path
-              d={
-                avgPath +
-                ` L ${toX(n - 1, n).toFixed(1)} ${(PT + CH).toFixed(1)} L ${toX(0, n).toFixed(1)} ${(PT + CH).toFixed(1)} Z`
-              }
-              fill="rgba(99,102,241,0.08)"
-            />
+            <path d={lineAreas} fill="rgba(99,102,241,0.08)" />
             <path
               d={avgPath}
               fill="none"
@@ -376,13 +423,15 @@ function MoodLineSpanChart({
               strokeLinejoin="round"
             />
             {n <= 45 &&
-              data.map((d, i) => (
-                <circle key={d.date} cx={toX(i, n)} cy={toY(d.avg_mood)} r={2.5} fill="#6366f1">
-                  <title>
-                    {d.date}: avg {d.avg_mood.toFixed(1)} ({d.count} {d.count === 1 ? 'entry' : 'entries'})
-                  </title>
-                </circle>
-              ))}
+              slots.map((d, i) =>
+                d ? (
+                  <circle key={d.date} cx={toX(i, n)} cy={toY(d.avg_mood)} r={2.5} fill="#6366f1">
+                    <title>
+                      {d.date}: avg {d.avg_mood.toFixed(1)} ({d.count} {d.count === 1 ? 'entry' : 'entries'})
+                    </title>
+                  </circle>
+                ) : null
+              )}
           </>
         )}
 
