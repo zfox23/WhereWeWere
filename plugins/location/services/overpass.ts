@@ -210,6 +210,11 @@ function cacheKey(lat: number, lon: number, query: string | undefined, radius: n
 // backfill job forever.
 const OVERPASS_FETCH_TIMEOUT_MS = 60000;
 
+// overpass-api.de rejects requests without a proper User-Agent (406 Not
+// Acceptable). Node's global fetch sends "undici" by default, which their
+// edge blocks, so set one explicitly on every request.
+const OVERPASS_USER_AGENT = 'WhereWeWere/1.0 (self-hosted checkin app)';
+
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
@@ -220,7 +225,9 @@ async function fetchWithRetry(
     const timeoutHandle = setTimeout(() => controller.abort(), OVERPASS_FETCH_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetch(url, { ...init, signal: controller.signal });
+      const headers = new Headers(init.headers);
+      headers.set('User-Agent', OVERPASS_USER_AGENT);
+      response = await fetch(url, { ...init, headers, signal: controller.signal });
     } catch (err: any) {
       clearTimeout(timeoutHandle);
       if (err?.name === 'AbortError') {

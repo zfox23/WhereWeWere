@@ -78,12 +78,6 @@ function fillDateGaps(grouped: Map<string, TimelineItem[]>): Map<string, Timelin
   return filled;
 }
 
-function buildDawarichDayUrl(dawarichUrl: string, date: string): string {
-  const start = encodeURIComponent(encodeURIComponent(date + 'T00:00'));
-  const end = encodeURIComponent(encodeURIComponent(date + 'T23:59'));
-  return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
-}
-
 function ExpandableFAB() {
   const [expanded, setExpanded] = useState(false);
 
@@ -563,6 +557,17 @@ export default function Home() {
     setShowFilters(false);
   };
 
+  /** Apply a date-only filter for the given date, clearing all other filters. */
+  const filterByDate = (date: string) => {
+    setSearchParams(() => {
+      const next = new URLSearchParams();
+      next.set('from', date);
+      next.set('to', date);
+      return next;
+    }, { replace: true });
+    setAllPluginIncludes(true);
+  };
+
   const hasNewPluginFilter = Object.keys(pluginIncludes).some((k) => !(pluginIncludes[k] ?? true));
   const hasTypeSelectionFilter = hasNewPluginFilter;
   const hasActiveFilters = searchQuery || fromDate || toDate || venueId || category || country || companion || hasPluginFilter || hasTypeSelectionFilter;
@@ -789,18 +794,14 @@ export default function Home() {
                   </div>
                 </div>
                 <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                  {dawarichUrl ? (
-                    <a
-                      href={buildDawarichDayUrl(dawarichUrl, date)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                    >
-                      {formatDateHeader(date)}
-                    </a>
-                  ) : (
-                    formatDateHeader(date)
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => filterByDate(date)}
+                    className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                    title={`Show all check-ins on ${formatDateHeader(date)}`}
+                  >
+                    {formatDateHeader(date)}
+                  </button>
                 </h2>
               </div>
               {/* Cards with vertical line */}
