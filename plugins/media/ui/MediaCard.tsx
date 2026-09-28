@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import type { TimelineItem } from '../../../client/src/types';
+import { CompanionName } from '../../../client/src/components/CompanionName';
 import Stars from '../../../client/src/components/Stars';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
 import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
@@ -129,9 +130,11 @@ export default function MediaCard({ item, compact = false }: MediaCardProps) {
             )}
           </div>
           {item.companions && item.companions.length > 0 && (
-            <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
               <Users size={13} className="text-gray-400 shrink-0" />
-              <span>{item.companions.join(', ')}</span>
+              {item.companions.map((name) => (
+                <CompanionName key={name} name={name} />
+              ))}
             </p>
           )}
           {item.notes && (

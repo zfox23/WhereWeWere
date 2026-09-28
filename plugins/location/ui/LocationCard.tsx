@@ -2,6 +2,7 @@ import { Camera, Calendar, Map, MapPin, Pencil, Users } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import type { CheckIn, Scrobble, ImmichAsset } from '../../../client/src/types';
 import Stars from '../../../client/src/components/Stars';
+import { CompanionName } from '../../../client/src/components/CompanionName';
 import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
@@ -106,11 +107,11 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
 
           {/* Companions */}
           {checkin.companions && checkin.companions.length > 0 && (
-            <p className="mt-1.5 flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
               <Users size={14} className="text-gray-400 shrink-0" />
-              <span>
-                {checkin.companions.join(', ')}
-              </span>
+              {checkin.companions.map((name) => (
+                <CompanionName key={name} name={name} />
+              ))}
             </p>
           )}
 
