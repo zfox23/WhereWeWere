@@ -20,7 +20,7 @@ describe('MediaFilter', () => {
   it('renders the Media include toggle and all five subtype checkboxes', () => {
     render(<MediaFilter {...baseProps} onToggleIncluded={vi.fn()} onSetMediaSubtypes={vi.fn()} />);
 
-    expect(screen.getByRole('checkbox', { name: 'Media' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Media' })).toBeTruthy();
     for (const label of ['Movie', 'TV Show', 'Game', 'Book', 'Board Game']) {
       expect(screen.getByRole('checkbox', { name: label })).toBeTruthy();
     }
@@ -31,9 +31,16 @@ describe('MediaFilter', () => {
     render(<MediaFilter {...baseProps} onToggleIncluded={onToggleIncluded} onSetMediaSubtypes={vi.fn()} />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('checkbox', { name: 'Media' }));
+    await user.click(screen.getByRole('button', { name: 'Media' }));
 
     expect(onToggleIncluded).toHaveBeenCalledTimes(1);
+  });
+
+  it('collapses subtype options when the Media type is not included', () => {
+    render(
+      <MediaFilter {...baseProps} included={false} onToggleIncluded={vi.fn()} onSetMediaSubtypes={vi.fn()} />,
+    );
+    expect(screen.queryByRole('checkbox', { name: 'Movie' })).toBeNull();
   });
 
   it('adds and removes subtypes in canonical order', async () => {
@@ -79,7 +86,7 @@ describe('MediaFilter', () => {
     render(
       <MediaFilter {...baseProps} typeToggleDisabled filtersDisabled onToggleIncluded={vi.fn()} onSetMediaSubtypes={vi.fn()} />,
     );
-    expect(screen.getByRole('checkbox', { name: 'Media' })).toHaveAttribute('disabled');
+    expect(screen.getByRole('button', { name: 'Media' })).toHaveAttribute('disabled');
     expect(screen.getByText(/clear other type filters/i)).toBeTruthy();
   });
 });

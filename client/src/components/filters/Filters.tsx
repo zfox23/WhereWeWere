@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { X, Check } from 'lucide-react';
+import { X, Check, ArrowLeftRight } from 'lucide-react';
 import type { CheckinTypeClient, PluginFilterSectionProps } from 'wwp-shared';
 
 const COMPLETE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -102,6 +102,8 @@ export interface FiltersProps {
   onClearAll: () => void;
   /** Check-in plugin filter sections (all check-in types are plugins). */
   pluginFilterSpecs?: PluginFilterSpec[];
+  /** Invert the include state of every top-level plugin filter. */
+  onInvertPluginFilters?: () => void;
 }
 
 export default function Filters(props: FiltersProps) {
@@ -112,6 +114,7 @@ export default function Filters(props: FiltersProps) {
     onSetDateFilter,
     onClearAll,
     pluginFilterSpecs = [],
+    onInvertPluginFilters,
   } = props;
 
   const [fromDateInput, setFromDateInput] = useState(fromDate);
@@ -159,14 +162,26 @@ export default function Filters(props: FiltersProps) {
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
+          {onInvertPluginFilters && pluginFilterSpecs.length > 0 && (
+            <button
+              type="button"
+              onClick={onInvertPluginFilters}
+              className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
+            >
+              <ArrowLeftRight size={12} />
+              Invert
+            </button>
+          )}
+        </div>
         {hasActiveFilters && (
           <button
             onClick={onClearAll}
             className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
           >
             <X size={12} />
-            Clear all
+            Reset
           </button>
         )}
       </div>
@@ -202,7 +217,7 @@ export default function Filters(props: FiltersProps) {
           />
         </div>
       </div>
-      <div className="grid gap-3 lg:grid-cols-2 items-start">
+      <div className="grid gap-3 lg:grid-cols-2">
         {pluginFilterSpecs.map((spec) => (
           <div key={spec.plugin.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/40 dark:bg-gray-900/40 p-3">
             <PluginFilterSlot spec={spec} />
