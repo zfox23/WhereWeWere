@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MapPin } from 'lucide-react';
-import PluginTypeToggle from '../../../client/src/components/filters/PluginTypeToggle';
+import PluginFilterShell from '../../../client/src/components/filters/PluginFilterShell';
 import { findExactOption } from '../../../client/src/components/filters/filterUtils';
 
 export interface LocationFilterProps {
@@ -54,93 +54,83 @@ export default function LocationFilter({
   }, [countryInput, countryOptions]);
 
   return (
-    <div className={`rounded-xl border space-y-3 ${filtersDisabled ? 'border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 opacity-60' : 'border-sky-200 dark:border-sky-800/60 bg-sky-50/50 dark:bg-sky-950/20'}`}>
-      <PluginTypeToggle
-        icon={<MapPin size={16} className="text-primary-500" />}
-        label="Location"
-        included={included}
-        disabled={typeToggleDisabled}
-        onToggle={onToggleIncluded}
-      />
-      {included && (
-        <>
-          {filtersDisabled && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Clear mood/sleep filters to enable location filtering.
-            </p>
-          )}
-          <div className="grid grid-cols-1 gap-3">
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Category</label>
-              <input
-                type="text"
-                list="category-options"
-                value={categoryInput}
-                disabled={sectionDisabled}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setCategoryInput(next);
-                  const match = findExactOption(next, categoryOptions);
-                  if (match && category !== match) onSetCategory(match);
-                  if (!match && category) onSetCategory('');
-                }}
-                onBlur={() => {
-                  if (!categoryInput.trim()) return;
-                  const match = findExactOption(categoryInput, categoryOptions);
-                  if (match) {
-                    setCategoryInput(match);
-                    if (category !== match) onSetCategory(match);
-                  } else {
-                    setCategoryInput('');
-                    if (category) onSetCategory('');
-                  }
-                }}
-                className="input disabled:cursor-not-allowed disabled:opacity-60"
-                placeholder="Restaurant, Home..."
-              />
-              <datalist id="category-options">
-                {filteredCategoryOptions.map((opt) => (
-                  <option key={opt} value={opt} />
-                ))}
-              </datalist>
-            </div>
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">Country</label>
-            <input
-              type="text"
-              list="country-options"
-              value={countryInput}
-              disabled={sectionDisabled}
-              onChange={(e) => {
-                const next = e.target.value;
-                setCountryInput(next);
-                const match = findExactOption(next, countryOptions);
-                if (match && country !== match) onSetCountry(match);
-                if (!match && country) onSetCountry('');
-              }}
-              onBlur={() => {
-                if (!countryInput.trim()) return;
-                const match = findExactOption(countryInput, countryOptions);
-                if (match) {
-                  setCountryInput(match);
-                  if (country !== match) onSetCountry(match);
-                } else {
-                  setCountryInput('');
-                  if (country) onSetCountry('');
-                }
-              }}
-              className="input disabled:cursor-not-allowed disabled:opacity-60"
-              placeholder="United States, Espana..."
-            />
-            <datalist id="country-options">
-              {filteredCountryOptions.map((opt) => (
-                <option key={opt} value={opt} />
-              ))}
-            </datalist>
-          </div>
-          </div>
-        </>
-      )}
-    </div>
+    <PluginFilterShell
+      icon={<MapPin size={16} className="text-primary-500" />}
+      label="Location"
+      included={included}
+      filtersDisabled={filtersDisabled}
+      sectionDisabled={sectionDisabled}
+      typeToggleDisabled={typeToggleDisabled}
+      onToggleIncluded={onToggleIncluded}
+    >
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">Category</label>
+        <input
+          type="text"
+          list="category-options"
+          value={categoryInput}
+          disabled={sectionDisabled}
+          onChange={(e) => {
+            const next = e.target.value;
+            setCategoryInput(next);
+            const match = findExactOption(next, categoryOptions);
+            if (match && category !== match) onSetCategory(match);
+            if (!match && category) onSetCategory('');
+          }}
+          onBlur={() => {
+            if (!categoryInput.trim()) return;
+            const match = findExactOption(categoryInput, categoryOptions);
+            if (match) {
+              setCategoryInput(match);
+              if (category !== match) onSetCategory(match);
+            } else {
+              setCategoryInput('');
+              if (category) onSetCategory('');
+            }
+          }}
+          className="input disabled:cursor-not-allowed disabled:opacity-60"
+          placeholder="Restaurant, Home..."
+        />
+        <datalist id="category-options">
+          {filteredCategoryOptions.map((opt) => (
+            <option key={opt} value={opt} />
+          ))}
+        </datalist>
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">Country</label>
+        <input
+          type="text"
+          list="country-options"
+          value={countryInput}
+          disabled={sectionDisabled}
+          onChange={(e) => {
+            const next = e.target.value;
+            setCountryInput(next);
+            const match = findExactOption(next, countryOptions);
+            if (match && country !== match) onSetCountry(match);
+            if (!match && country) onSetCountry('');
+          }}
+          onBlur={() => {
+            if (!countryInput.trim()) return;
+            const match = findExactOption(countryInput, countryOptions);
+            if (match) {
+              setCountryInput(match);
+              if (country !== match) onSetCountry(match);
+            } else {
+              setCountryInput('');
+              if (country) onSetCountry('');
+            }
+          }}
+          className="input disabled:cursor-not-allowed disabled:opacity-60"
+          placeholder="United States, Espana..."
+        />
+        <datalist id="country-options">
+          {filteredCountryOptions.map((opt) => (
+            <option key={opt} value={opt} />
+          ))}
+        </datalist>
+      </div>
+    </PluginFilterShell>
   );
 }

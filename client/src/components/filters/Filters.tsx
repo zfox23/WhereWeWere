@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { X, Check, ArrowLeftRight } from 'lucide-react';
+import { X, ArrowLeftRight } from 'lucide-react';
 import type { CheckinTypeClient, PluginFilterSectionProps } from 'wwp-shared';
+import PluginFilterShell from './PluginFilterShell';
 
 const COMPLETE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -31,44 +32,38 @@ function DefaultPluginFilterSection({ spec }: { spec: PluginFilterSpec }) {
   const params = plugin.filterParams ?? [];
 
   return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        onClick={spec.onToggleIncluded}
-        disabled={spec.typeToggleDisabled}
-        className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-          spec.included
-            ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-            : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-primary-400'
-        } ${spec.typeToggleDisabled ? 'opacity-50' : ''}`}
-      >
-        <Icon size={16} className={plugin.client.iconColor} />
-        {plugin.strings.title}
-        {spec.included && <Check size={14} className="ml-auto" />}
-      </button>
-
+    <PluginFilterShell
+      icon={<Icon size={16} className={plugin.client.iconColor} />}
+      label={plugin.strings.title}
+      included={spec.included}
+      filtersDisabled={spec.filtersDisabled}
+      sectionDisabled={spec.sectionDisabled}
+      typeToggleDisabled={spec.typeToggleDisabled}
+      onToggleIncluded={spec.onToggleIncluded}
+    >
       {!spec.sectionDisabled &&
         params.map((param) => {
           const field = plugin.fields.find((f) => f.name === param || (f.options && f.options.length > 0));
           const options = field?.options ?? [];
           return (
-            <select
-              key={param}
-              value={spec.params[param] ?? ''}
-              disabled={spec.filtersDisabled}
-              onChange={(e) => spec.onSetParam(param, e.target.value)}
-              className="input text-sm"
-            >
-              <option value="">All {field?.label.toLowerCase() ?? param}s</option>
-              {options.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.icon ? `${opt.icon} ` : ''}{opt.label}
-                </option>
-              ))}
-            </select>
+            <div key={param}>
+              <select
+                value={spec.params[param] ?? ''}
+                disabled={spec.filtersDisabled}
+                onChange={(e) => spec.onSetParam(param, e.target.value)}
+                className="input"
+              >
+                <option value="">All {field?.label.toLowerCase() ?? param}s</option>
+                {options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.icon ? `${opt.icon} ` : ''}{opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           );
         })}
-    </div>
+    </PluginFilterShell>
   );
 }
 
@@ -219,9 +214,7 @@ export default function Filters(props: FiltersProps) {
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         {pluginFilterSpecs.map((spec) => (
-          <div key={spec.plugin.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/40 dark:bg-gray-900/40 p-3">
-            <PluginFilterSlot spec={spec} />
-          </div>
+          <PluginFilterSlot key={spec.plugin.id} spec={spec} />
         ))}
       </div>
     </div>
