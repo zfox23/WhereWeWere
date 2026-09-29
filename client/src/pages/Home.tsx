@@ -232,8 +232,8 @@ export default function Home() {
   const hasNarrowedTypes = includedPluginIds.length > 0 && includedPluginIds.length < NEW_PLUGINS.length;
   const typesParam = hasNarrowedTypes ? includedPluginIds.join(',') : null;
 
-  // Plugin filter disabled states (mutually exclusive with every other type).
-  const pluginFiltersDisabled = hasPluginFilter;
+  // The include toggle stays locked while any plugin filter is active (the
+  // filter pins the timeline to its own type).
   const pluginTypeToggleDisabled = hasPluginFilter;
 
   // Whether any plugin check-in type is currently included in the timeline.
@@ -242,8 +242,11 @@ export default function Home() {
   const pluginFilterSpecs = NEW_PLUGINS.map((plugin) => ({
     plugin,
     included: pluginIncludes[plugin.id] ?? true,
-    filtersDisabled: pluginFiltersDisabled || !(pluginIncludes[plugin.id] ?? true),
-    sectionDisabled: pluginFiltersDisabled || !(pluginIncludes[plugin.id] ?? true),
+    // Only another type's active filter disables this section's controls; the
+    // type owning the active filter stays selectable so its sub-filters can
+    // be adjusted without clearing everything first.
+    filtersDisabled: (activePluginFilterId !== null && activePluginFilterId !== plugin.id) || !(pluginIncludes[plugin.id] ?? true),
+    sectionDisabled: (activePluginFilterId !== null && activePluginFilterId !== plugin.id) || !(pluginIncludes[plugin.id] ?? true),
     typeToggleDisabled: pluginTypeToggleDisabled,
     params: pluginFilterParams[plugin.id] ?? {},
     onToggleIncluded: () => togglePluginType(plugin.id),
