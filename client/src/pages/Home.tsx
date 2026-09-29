@@ -223,6 +223,15 @@ export default function Home() {
   }, [pluginFilterParams]);
   const hasPluginFilter = activePluginFilterId !== null;
 
+  // Plugin ids currently included in the timeline. When this is a proper
+  // subset of all types (e.g. only SCUBA on), it is sent to the server as the
+  // `types` param so the timeline UNION is narrowed to those branches — a
+  // single included type then returns its rows directly instead of the
+  // client paginating past every other type's more recent check-ins.
+  const includedPluginIds = Object.keys(pluginIncludes).filter((id) => pluginIncludes[id] ?? true);
+  const hasNarrowedTypes = includedPluginIds.length > 0 && includedPluginIds.length < NEW_PLUGINS.length;
+  const typesParam = hasNarrowedTypes ? includedPluginIds.join(',') : null;
+
   // Plugin filter disabled states (mutually exclusive with every other type).
   const pluginFiltersDisabled = hasPluginFilter;
   const pluginTypeToggleDisabled = hasPluginFilter;
@@ -244,6 +253,15 @@ export default function Home() {
   function includedForType(type: string): boolean {
     if (NEW_PLUGINS.some((p) => p.id === type)) return pluginIncludes[type] ?? true;
     return true;
+  }
+
+  function invertPluginTypes() {
+    if (pluginTypeToggleDisabled) return;
+    setPluginIncludes((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([id, v]) => [id, !(v ?? true)]),
+      ),
+    );
   }
 
   function togglePluginType(pluginId: string) {
@@ -389,6 +407,10 @@ export default function Home() {
         if (category) params.category = category;
         if (country) params.country = country;
         if (companion.trim()) params.companion = companion.trim();
+        // Narrow the server-side timeline UNION to the included types so a
+        // single selected type (e.g. only SCUBA) returns its rows directly
+        // instead of the client paginating past other types' check-ins.
+        if (typesParam) params.types = typesParam;
         // Plugin filter params (including the media plugin's media_subtype).
           for (const [pluginId, pluginParams] of Object.entries(pluginFilterParams)) {
             for (const [name, value] of Object.entries(pluginParams)) {
@@ -411,7 +433,7 @@ export default function Home() {
           setLoadingMore(false);
         }
       },
-      [searchQuery, fromDate, toDate, venueId, category, country, companion, pluginFilterParams]
+      [searchQuery, fromDate, toDate, venueId, category, country, companion, pluginFilterParams, typesParam]
     );
 
   // Initial load + reload on filter changes
@@ -709,6 +731,7 @@ export default function Home() {
             onSetDateFilter={setFilter}
             onClearAll={clearFilters}
             pluginFilterSpecs={pluginFilterSpecs}
+            onInvertPluginFilters={invertPluginTypes}
           />
         </div>
       </div>

@@ -62,6 +62,12 @@ export function genericTimelineWhere(
     search: (c, q) => c.push(`(pc.data::text ILIKE ?)`, `%${q}%`),
   });
 
+  // Scope to this plugin's own rows. The generic branch SELECTs from the
+  // shared `plugin_checkins` table, so without this every generic type would
+  // return every generic check-in (each re-labelled as its own type) and a
+  // single-type `types` filter could not isolate one plugin's rows.
+  conds.push(`pc.plugin_id = ?`, plugin.id);
+
   // Plugin-specific filters for generic storage: equality on data keys.
   // The convention is `data.<field> = value` for string values; numeric
   // fields compare numerically when the stored value is a number.

@@ -12,14 +12,28 @@ import { registerPlugin } from '../../src/plugins/registry';
 import { exportPluginData, importPluginData, deletePluginData } from '../../src/plugins/backup';
 import { pool } from '../../src/db';
 import { genericPlugin, PLUGIN_ID } from '../fixtures/genericPlugin';
+import type { CheckinTypeServer } from 'wwp-shared';
+
+/**
+ * A second generic-storage plugin so the timeline route has more than one
+ * branch to choose from — required to exercise the `types` narrowing.
+ */
+const OTHER_PLUGIN_ID = 'test_generic_other';
+const otherGenericPlugin: CheckinTypeServer = {
+  ...genericPlugin,
+  id: OTHER_PLUGIN_ID,
+  strings: { ...genericPlugin.strings, title: 'Test Generic Other' },
+};
 
 describe('Generic-storage plugin (framework defaults)', () => {
   beforeAll(async () => {
     await setupIntegrationDatabase();
-    // Register the fixture after DB is up, before any requests. The plugin is
-    // read from the registry per request (timeline, plugin routes, backup),
-    // so late registration is safe — there is no plugin-owned API to mount.
+    // Register the fixtures after DB is up, before any requests. The plugin
+    // is read from the registry per request (timeline, plugin routes,
+    // backup), so late registration is safe — there is no plugin-owned API
+    // to mount.
     registerPlugin(genericPlugin);
+    registerPlugin(otherGenericPlugin);
   });
 
   beforeEach(async () => {
@@ -111,6 +125,53 @@ describe('Generic-storage plugin (framework defaults)', () => {
     const filteredPluginRows = filtered.body.filter((row: any) => row.type === PLUGIN_ID);
     expect(filteredPluginRows).toHaveLength(1);
     expect(filteredPluginRows[0].data.flavor).toBe('strawberry');
+  });
+
+  it('narrows the timeline to the given types via the `types` param', async () => {
+    // Two check-ins on the "other" plugin and two on this one.
+    await request(app)
+      .post(`/api/v1/plugins/${OTHER_PLUGIN_ID}/checkins`)
+      .send({ data: { flavor: 'chocolate' } });
+    await request(app)
+      .post(`/api/v1/plugins/${OTHER_PLUGIN_ID}/checkins`)
+      .send({ data: { flavor: 'strawberry' } });
+    await request(app)
+      .post(`/api/v1/plugins/${PLUGIN_ID}/checkins`)
+      .send({ data: { flavor: 'chocolate' } });
+
+    // Without `types` every registered plugin branch is included, so both
+    // types show up in the unified timeline.
+    const all = await request(app).get('/api/v1/timeline').query({ user_id: DEFAULT_USER_ID });
+    expect(all.status).toBe(200);
+    const allTypes = new Set(all.body.map((row: any) => row.type));
+    expect(allTypes).toContain(PLUGIN_ID);
+    expect(allTypes).toContain(OTHER_PLUGIN_ID);
+
+    // `types` narrows the UNION to the selected branch, so a single included
+    // type returns only its own rows (no pagination past other types needed).
+    const onlyThis = await request(app)
+      .get('/api/v1/timeline')
+      .query({ user_id: DEFAULT_USER_ID, types: PLUGIN_ID });
+    expect(onlyThis.status).toBe(200);
+    expect(onlyThis.body.length).toBe(1);
+    expect(onlyThis.body[0].type).toBe(PLUGIN_ID);
+
+    // A comma-separated list keeps every selected branch.
+    const both = await request(app)
+      .get('/api/v1/timeline')
+      .query({ user_id: DEFAULT_USER_ID, types: `${PLUGIN_ID},${OTHER_PLUGIN_ID}` });
+    expect(both.status).toBe(200);
+    const bothTypes = new Set(both.body.map((row: any) => row.type));
+    expect(both.body).toHaveLength(3);
+    expect(bothTypes).toContain(PLUGIN_ID);
+    expect(bothTypes).toContain(OTHER_PLUGIN_ID);
+
+    // Unknown ids are ignored rather than erroring.
+    const unknown = await request(app)
+      .get('/api/v1/timeline')
+      .query({ user_id: DEFAULT_USER_ID, types: 'no_such_plugin' });
+    expect(unknown.status).toBe(200);
+    expect(unknown.body).toHaveLength(0);
   });
 
   it('round-trips a generic plugin through backup export + import', async () => {

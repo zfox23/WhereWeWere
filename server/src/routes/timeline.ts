@@ -19,6 +19,21 @@ function rebasePlaceholders(sql: string, offset: number): string {
 }
 
 /**
+ * Parse the optional `types` query param (comma-separated plugin ids, or a
+ * single id) into a set. Returns null when the param is absent/empty so the
+ * caller can treat it as "all types".
+ */
+function parseTypeFilterIds(raw: unknown): Set<string> | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parts = (Array.isArray(raw) ? raw : [raw])
+    .map((v) => String(v))
+    .flatMap((v) => v.split(','))
+    .map((v) => v.trim())
+    .filter((v) => v !== '');
+  return parts.length > 0 ? new Set(parts) : null;
+}
+
+/**
  * A branch of the unified timeline: a SELECT plus its WHERE.
  * Placeholders in `whereSql` are 1-based relative to `values`.
  */
@@ -33,11 +48,12 @@ interface TimelineBranch {
 
 // GET / - unified timeline of all check-in types (built-ins + plugins)
 router.get('/', async (req: Request, res: Response) => {
-  try {
-    const {
-      user_id, from, to,
-      limit = '50', offset = '0',
-    } = req.query;
+try {
+  const {
+    user_id, from, to,
+    limit = '50', offset = '0',
+    types,
+  } = req.query;
 
     const userId = user_id ? String(user_id) : null;
     const fromDate = extractDateString(from);
@@ -68,10 +84,20 @@ router.get('/', async (req: Request, res: Response) => {
 
     // Decide which branches to include (a type filter narrows to one type;
     // plugin filters win first — a plugin's declared filterParams flow
-    // through generically).
+    // through generically). An explicit `types` list (comma-separated plugin
+    // ids) narrows the union to those branches so a single included type
+    // returns its rows directly instead of the client paginating past every
+    // other type's more recent check-ins.
+    const typeFilterIds = parseTypeFilterIds(types);
     const includedKeys: string[] = [];
     if (activePluginFilterIds.length > 0) {
       includedKeys.push(`plugin:${activePluginFilterIds[0]}`);
+    } else if (typeFilterIds) {
+      includedKeys.push(
+        ...plugins
+          .filter((p) => typeFilterIds!.has(p.id))
+          .map((p) => `plugin:${p.id}`),
+      );
     } else {
       includedKeys.push(...plugins.map((p) => `plugin:${p.id}`));
     }
