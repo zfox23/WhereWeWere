@@ -1,14 +1,6 @@
 import { Clapperboard } from 'lucide-react';
 import PluginFilterShell from '../../../client/src/components/filters/PluginFilterShell';
-import { MEDIA_SUBTYPE_LIST } from '../utils/media';
-
-const SUBTYPE_LABELS: Record<string, string> = {
-  movie: 'Movie',
-  tv_show: 'TV Show',
-  game: 'Game',
-  book: 'Book',
-  board_game: 'Board Game',
-};
+import { MEDIA_SUBTYPE_LIST, MEDIA_SUBTYPES } from '../utils/media';
 
 export interface MediaFilterProps {
   included: boolean;
@@ -58,22 +50,26 @@ export default function MediaFilter({
       onToggleIncluded={onToggleIncluded}
     >
       <div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {MEDIA_SUBTYPE_LIST.map((subtype) => (
-            <label
-              key={subtype}
-              className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 select-none cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(subtype)}
+        <div className="flex flex-wrap gap-1.5">
+          {MEDIA_SUBTYPE_LIST.map((subtype) => {
+            const config = MEDIA_SUBTYPES[subtype];
+            const active = selected.has(subtype);
+            return (
+              <button
+                key={subtype}
+                type="button"
+                onClick={() => toggleSubtype(subtype)}
                 disabled={sectionDisabled}
-                onChange={() => toggleSubtype(subtype)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
-              />
-              {SUBTYPE_LABELS[subtype]}
-            </label>
-          ))}
+                aria-pressed={active}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border disabled:cursor-not-allowed disabled:opacity-50 ${active
+                  ? 'bg-primary-500 border-primary-500 text-white'
+                  : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  }`}
+              >
+                {config.plural}
+              </button>
+            );
+          })}
         </div>
       </div>
     </PluginFilterShell>
