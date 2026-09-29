@@ -127,6 +127,8 @@ describe('parseDivingLogBackup', () => {
     const row1 = result.rows.find((r) => r.data.source_uuid === 'AAAA-1111')!;
     expect(row1.checked_in_at).toBe('2020-06-19T17:23:00.000Z');
     expect(row1.checkin_timezone).toBe('Etc/GMT+8');
+    expect(row1.local_date).toBe('2020-06-19');
+    expect(row1.timezone_source).toBe('utc_offset');
     expect(row1.data.place).toBe('San Carlos Beach');
     expect(row1.data.city).toBe('Monterey');
     expect(row1.data.country).toBe('United States');
@@ -147,6 +149,8 @@ describe('parseDivingLogBackup', () => {
     const row2 = result.rows.find((r) => r.data.source_uuid === 'BBBB-2222')!;
     expect(row2.checkin_timezone).toBe('America/Los_Angeles');
     expect(row2.checked_in_at).toBe('2019-07-04T15:10:00.000Z');
+    expect(row2.local_date).toBe('2019-07-04');
+    expect(row2.timezone_source).toBe('geo');
     expect(row2.data.divetype).toBe('Fun, Photography');
     expect(row2.data.buddy).toBe('Olivia Erickson, Ben Hamme');
     expect(row2.data.shop).toBe('Island Divers Hawaii');
@@ -163,6 +167,8 @@ describe('parseDivingLogBackup', () => {
     const row3 = result.rows.find((r) => r.data.source_uuid === 'CCCC-3333')!;
     expect(row3.checkin_timezone).toBe('America/New_York');
     expect(row3.checked_in_at).toBe('2019-09-26T22:23:00.000Z');
+    expect(row3.local_date).toBe('2019-09-26');
+    expect(row3.timezone_source).toBe('fallback');
     expect(row3.data.entry_method).toBe('pool');
   });
 

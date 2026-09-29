@@ -18,6 +18,7 @@ import type {
 } from './api';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
+import { formatDepth, useScubaUnits } from './units';
 import {
   PeriodMode,
   getCurrentDateIso,
@@ -100,6 +101,7 @@ export function ScubaTab(_props: PluginProfileTabProps) {
   const [selectedMonth, setSelectedMonth] = useState<string>(getScubaMonthFromLocation);
   const [selectedWeek, setSelectedWeek] = useState<string>(getScubaWeekFromLocation);
   const [year, setYear] = useState(() => parseInt(getScubaMonthFromLocation().slice(0, 4), 10));
+  const unit = useScubaUnits();
   const [loading, setLoading] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [summary, setSummary] = useState<ScubaSummaryStats | null>(null);
@@ -253,7 +255,7 @@ export function ScubaTab(_props: PluginProfileTabProps) {
             <StatCard
               icon={Anchor}
               label="Max depth"
-              value={summary?.max_depth != null ? `${summary.max_depth} m` : '—'}
+              value={summary?.max_depth != null ? (formatDepth(summary.max_depth, unit) ?? '—') : '—'}
             />
             <StatCard icon={MapPin} label="Sites" value={summary?.unique_sites ?? 0} />
           </div>
@@ -298,7 +300,7 @@ export function ScubaTab(_props: PluginProfileTabProps) {
                         label={[site.place, site.city].filter(Boolean).join(', ')}
                         count={site.dives}
                         max={maxSite}
-                        extra={site.max_depth != null ? `${site.max_depth} m max` : null}
+                        extra={site.max_depth != null ? `${formatDepth(site.max_depth, unit)} max` : null}
                       />
                     </li>
                   ))}

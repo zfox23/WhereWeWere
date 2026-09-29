@@ -8,6 +8,8 @@
  *
  *   - `/scuba/stats/*`            — dive stats for the Profile > Dives tab
  *   - `/import/scuba-logbook`     — import from a Diving Log 4.x .sql backup
+ *                                  (POST /preview parses without writing;
+ *                                  POST / honors per-dive `timezones` overrides)
  *
  * plus the cross-cutting service hooks (timestamps, reflections, earliest
  * date, LLM life summary, reconciliation).
@@ -21,7 +23,7 @@ import { query } from '../../server/src/db';
 import { createGenericCheckin } from '../../server/src/plugins/genericStore';
 import { getPlugin } from '../../server/src/plugins/registry';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
-import { parseDivingLogBackup } from './logbook';
+import { parseDivingLogBackup, localTimeToIso } from './logbook';
 
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
@@ -262,69 +264,176 @@ const logbookUpload = createImportUpload({
   },
 });
 
-// POST / — import a Diving Log .sql backup (SQLite database)
-importRouter.post('/', logbookUpload.single('file'), async (req: Request, res: Response) => {
-  const file = req.file;
-  if (!file) {
-    return res.status(400).json({ error: 'No logbook file provided' });
+// ---------------------------------------------------------------------------
+// Shared parse + import logic (also used by the /preview endpoint)
+// ---------------------------------------------------------------------------
+
+type ScubaLogbookRow = ReturnType<typeof parseDivingLogBackup>['rows'][number];
+
+/**
+ * Parse a Diving Log .sql backup, applying the caller's per-dive timezone
+ * overrides (keyed by the row's `source_uuid`). Overridden rows get their
+ * timestamp re-anchored to the new zone while keeping the logged wall-clock
+ * date + entry time. The fallback zone only affects dives whose stored
+ * UtcOffset is missing and whose site has no coordinates.
+ */
+export async function parseLogbookForImport(
+  filePath: string,
+  fallbackTimezone: string,
+  timezoneOverrides: Record<string, string> | undefined,
+): Promise<{ rows: ScubaLogbookRow[]; errors: string[] }> {
+  const fallback = isValidTimeZone(fallbackTimezone) ? fallbackTimezone : 'UTC';
+  const parsed = parseDivingLogBackup(filePath, fallback);
+
+  const rows: ScubaLogbookRow[] = [];
+  for (const row of parsed.rows) {
+    const uuid = typeof row.data.source_uuid === 'string' ? row.data.source_uuid : '';
+    const override = uuid ? timezoneOverrides?.[uuid]?.trim() : undefined;
+    if (override && override !== row.checkin_timezone && isValidTimeZone(override)) {
+      const entryTime = typeof row.data.entry_time === 'string' ? row.data.entry_time : '';
+      const checkedInAt = localTimeToIso(row.local_date, entryTime, override);
+      if (!checkedInAt) {
+        const label = `Dive ${row.data.source_number ?? row.data.source_id ?? '?'}`;
+        parsed.errors.push(`${label}: could not build a timestamp for ${row.local_date} ${entryTime} in ${override}`);
+        continue;
+      }
+      rows.push({ ...row, checkin_timezone: override, checked_in_at: checkedInAt });
+    } else {
+      rows.push(row);
+    }
+  }
+  return { rows, errors: parsed.errors };
+}
+
+/**
+ * Execute an import: skips dives whose `source_uuid` already exists
+ * (idempotent re-imports) and creates the rest as generic check-ins.
+ * Returns the stored check-in id for imported rows.
+ */
+export async function executeScubaLogbookImport(rows: ScubaLogbookRow[]): Promise<{
+  imported: number;
+  skipped: number;
+  errors: string[];
+  imported_ids: (string | null)[];
+}> {
+  const plugin = getPlugin(PLUGIN_ID);
+  if (!plugin) {
+    throw new Error('scuba plugin is not registered');
   }
 
   let imported = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const importedIds: (string | null)[] = [];
+
+  for (const row of rows) {
+    const sourceUuid = row.data.source_uuid;
+
+    // Idempotent re-import: skip dives already imported from this backup.
+    if (typeof sourceUuid === 'string' && sourceUuid) {
+      const existing = await query(
+        `SELECT id FROM plugin_checkins
+         WHERE plugin_id = $1 AND user_id = $2 AND data->>'source_uuid' = $3`,
+        [PLUGIN_ID, USER_ID, sourceUuid],
+      );
+      if (existing.rows.length > 0) {
+        skipped++;
+        importedIds.push(null);
+        continue;
+      }
+    }
+
+    try {
+      const created = await createGenericCheckin(USER_ID, plugin, {
+        checked_in_at: row.checked_in_at,
+        checkin_timezone: row.checkin_timezone || null,
+        data: row.data,
+      });
+      imported++;
+      importedIds.push(created.id);
+    } catch (rowErr) {
+      errors.push(`Dive ${row.data.source_number ?? row.data.source_id ?? '?'}: ${(rowErr as Error).message}`);
+      skipped++;
+      importedIds.push(null);
+    }
+  }
+
+  return { imported, skipped, errors, imported_ids: importedIds };
+}
+
+// POST /preview — parse the backup without writing anything; returns one
+// preview row per dive (site, date, resolved timezone + how it was derived).
+importRouter.post('/preview', logbookUpload.single('file'), async (req: Request, res: Response) => {
+  const file = req.file;
+  if (!file) {
+    return res.status(400).json({ error: 'No logbook file provided' });
+  }
 
   try {
-    const fallbackRaw = String(req.body?.fallback_timezone || '').trim();
-    const fallbackTimezone = isValidTimeZone(fallbackRaw) ? fallbackRaw : 'UTC';
-
-    let parsed;
+    let result;
     try {
-      parsed = parseDivingLogBackup(file.path, fallbackTimezone);
+      result = await parseLogbookForImport(file.path, String(req.body?.fallback_timezone || ''), undefined);
     } catch (err) {
       return res.status(400).json({
         error: `Could not read the logbook file: ${(err as Error).message || err}`,
       });
     }
 
-    const plugin = getPlugin(PLUGIN_ID);
-    if (!plugin) {
-      return res.status(500).json({ error: 'scuba plugin is not registered' });
+    res.json({
+      total: result.rows.length,
+      rows: result.rows.map((row) => ({
+        source_uuid: typeof row.data.source_uuid === 'string' ? row.data.source_uuid : null,
+        source_number: typeof row.data.source_number === 'number' ? row.data.source_number : null,
+        place: typeof row.data.place === 'string' ? row.data.place : null,
+        city: typeof row.data.city === 'string' ? row.data.city : null,
+        local_date: row.local_date,
+        entry_time: typeof row.data.entry_time === 'string' ? row.data.entry_time : null,
+        depth: typeof row.data.depth === 'number' ? row.data.depth : null,
+        bottom_time: typeof row.data.bottom_time === 'number' ? row.data.bottom_time : null,
+        checkin_timezone: row.checkin_timezone,
+        timezone_source: row.timezone_source,
+        checked_in_at: row.checked_in_at,
+      })),
+      errors: result.errors,
+    });
+  } catch (err) {
+    console.error('SCUBA logbook preview error:', err);
+    res.status(500).json({ error: 'Preview failed', details: (err as Error).message || String(err) });
+  } finally {
+    removeImportFile(file.path);
+  }
+});
+
+// POST / — import a Diving Log .sql backup. Optional `timezones` body maps
+// `source_uuid` → IANA zone for dives the user re-zoned in the preview.
+importRouter.post('/', logbookUpload.single('file'), async (req: Request, res: Response) => {
+  const file = req.file;
+  if (!file) {
+    return res.status(400).json({ error: 'No logbook file provided' });
+  }
+
+  try {
+    const timezones =
+      req.body?.timezones && typeof req.body.timezones === 'object' && !Array.isArray(req.body.timezones)
+        ? (req.body.timezones as Record<string, string>)
+        : undefined;
+
+    let result;
+    try {
+      result = await parseLogbookForImport(file.path, String(req.body?.fallback_timezone || ''), timezones);
+    } catch (err) {
+      return res.status(400).json({
+        error: `Could not read the logbook file: ${(err as Error).message || err}`,
+      });
     }
 
-    for (const row of parsed.rows) {
-      const sourceUuid = row.data.source_uuid;
-
-      // Idempotent re-import: skip dives already imported from this backup.
-      if (typeof sourceUuid === 'string' && sourceUuid) {
-        const existing = await query(
-          `SELECT id FROM plugin_checkins
-           WHERE plugin_id = $1 AND user_id = $2 AND data->>'source_uuid' = $3`,
-          [PLUGIN_ID, USER_ID, sourceUuid],
-        );
-        if (existing.rows.length > 0) {
-          skipped++;
-          continue;
-        }
-      }
-
-      try {
-        await createGenericCheckin(USER_ID, plugin, {
-          checked_in_at: row.checked_in_at,
-          checkin_timezone: row.checkin_timezone || null,
-          data: row.data,
-        });
-        imported++;
-      } catch (rowErr) {
-        errors.push(`Dive ${row.data.source_number ?? row.data.source_id ?? '?'}: ${(rowErr as Error).message}`);
-        skipped++;
-      }
-    }
-
-    errors.push(...parsed.errors);
+    const outcome = await executeScubaLogbookImport(result.rows);
+    const errors = [...result.errors, ...outcome.errors];
 
     res.json({
-      imported,
-      skipped,
+      imported: outcome.imported,
+      skipped: outcome.skipped,
+      imported_ids: outcome.imported_ids,
       errors: errors.slice(0, 20),
       total_errors: errors.length,
     });

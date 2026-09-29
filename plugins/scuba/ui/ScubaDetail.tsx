@@ -10,6 +10,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Loader2, Pencil, Waves } from 'lucide-react';
 import { plugins, type GenericCheckin } from '../../../client/src/plugins/api';
 import { formatDate, formatTime } from '../../../client/src/utils/checkin';
+import { formatDepth, formatPressure, formatTemp, formatWeight, useScubaUnits } from './units';
 
 const PLUGIN_ID = 'scuba';
 
@@ -33,6 +34,7 @@ function Section({ title, rows }: { title: string; rows: [string, unknown][] }) 
 
 export default function ScubaDetail() {
   const { id } = useParams<{ id: string }>();
+  const unit = useScubaUnits();
   const [row, setRow] = useState<GenericCheckin | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export default function ScubaDetail() {
 
   const d = (row.data ?? {}) as Record<string, unknown>;
   const txt = (key: string): unknown => (typeof d[key] === 'string' && d[key] ? d[key] : null);
-  const num = (key: string): unknown => (typeof d[key] === 'number' ? d[key] : null);
+  const num = (key: string): number | null => (typeof d[key] === 'number' ? d[key] : null);
   const bool = (key: string): unknown => (d[key] === true ? 'Yes' : null);
 
   const site = [txt('place'), txt('city')].filter(Boolean).join(', ');
@@ -112,8 +114,8 @@ export default function ScubaDetail() {
           <Section
             title="Dive"
             rows={[
-              ['Max depth', num('depth') != null ? `${num('depth')} m` : null],
-              ['Average depth', num('depth_avg') != null ? `${num('depth_avg')} m` : null],
+              ['Max depth', formatDepth(num('depth'), unit)],
+              ['Average depth', formatDepth(num('depth_avg'), unit)],
               ['Bottom time', num('bottom_time') != null ? `${num('bottom_time')} min` : null],
               ['Water', txt('water_type')],
               ['Entry', txt('entry_method')],
@@ -134,8 +136,8 @@ export default function ScubaDetail() {
               ['Visibility (0–3)', num('visibility')],
               ['Horizontal visibility', txt('vis_hor')],
               ['Vertical visibility', txt('vis_ver')],
-              ['Air temp', num('air_temp') != null ? `${num('air_temp')} °C` : null],
-              ['Water temp', num('water_temp') != null ? `${num('water_temp')} °C` : null],
+              ['Air temp', formatTemp(num('air_temp'), unit)],
+              ['Water temp', formatTemp(num('water_temp'), unit)],
               ['Altitude', txt('altitude')],
               ['Surface interval', txt('surface_interval')],
             ]}
@@ -148,14 +150,14 @@ export default function ScubaDetail() {
               ['Gas', txt('gas')],
               ['O₂', num('o2') != null ? `${num('o2')} %` : null],
               ['He', num('he') != null ? `${num('he')} %` : null],
-              ['Start pressure', num('start_pressure') != null ? `${num('start_pressure')} bar` : null],
-              ['End pressure', num('end_pressure') != null ? `${num('end_pressure')} bar` : null],
-              ['Weighted pressure', num('weight_pressure') != null ? `${num('weight_pressure')} bar` : null],
-              ['Min pPO₂', num('min_ppo2') != null ? `${num('min_ppo2')} bar` : null],
-              ['Max pPO₂', num('max_ppo2') != null ? `${num('max_ppo2')} bar` : null],
+              ['Start pressure', formatPressure(num('start_pressure'), unit)],
+              ['End pressure', formatPressure(num('end_pressure'), unit)],
+              ['Weighted pressure', formatPressure(num('weight_pressure'), unit)],
+              ['Min pPO₂', formatPressure(num('min_ppo2'), unit)],
+              ['Max pPO₂', formatPressure(num('max_ppo2'), unit)],
               ['Supply type', txt('supply_type')],
               ['Doubles', bool('dbl_tank')],
-              ['Weight belt', num('weight') != null ? `${num('weight')} kg` : null],
+              ['Weight belt', formatWeight(num('weight'), unit)],
               ['Divesuit', txt('divesuit')],
               ['Computer', txt('computer')],
               ['Used equipment', txt('used_equip')],

@@ -12,6 +12,18 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, Loader2, Save, Trash2 } from 'lucide-react';
 import type { CheckInFormProps } from 'wwp-shared';
 import { plugins, type GenericCheckin } from '../../../client/src/plugins/api';
+import {
+  depthToDisplay,
+  depthToStored,
+  pressureToDisplay,
+  pressureToStored,
+  tempToDisplay,
+  tempToStored,
+  useScubaUnits,
+  weightToDisplay,
+  weightToStored,
+  type DistanceUnit,
+} from './units';
 
 const PLUGIN_ID = 'scuba';
 
@@ -215,6 +227,59 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/**
+ * Numeric fields stored in metric units (m, °C, bar, kg) but displayed and
+ * edited in the user's imperial/metric preference. `values` always holds the
+ * stored (metric) value; this wrapper converts on display and back on edit.
+ */
+const UNIT_FIELDS = {
+  depth: { toDisplay: depthToDisplay, toStored: depthToStored, metric: 'm', imperial: 'ft' },
+  depth_avg: { toDisplay: depthToDisplay, toStored: depthToStored, metric: 'm', imperial: 'ft' },
+  air_temp: { toDisplay: tempToDisplay, toStored: tempToStored, metric: '°C', imperial: '°F' },
+  water_temp: { toDisplay: tempToDisplay, toStored: tempToStored, metric: '°C', imperial: '°F' },
+  start_pressure: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
+  end_pressure: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
+  weight_pressure: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
+  min_ppo2: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
+  max_ppo2: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
+  weight: { toDisplay: weightToDisplay, toStored: weightToStored, metric: 'kg', imperial: 'lb' },
+} as const;
+
+function UnitField({
+  name,
+  label,
+  values,
+  setField,
+  unit,
+  min,
+  step,
+  className,
+}: {
+  name: keyof typeof UNIT_FIELDS;
+  label: string;
+  values: Values;
+  setField: (name: string, value: unknown) => void;
+  unit: DistanceUnit;
+  min?: number;
+  step?: number;
+  className?: string;
+}) {
+  const spec = UNIT_FIELDS[name];
+  const raw = values[name];
+  const storedValue = typeof raw === 'number' ? raw : null;
+  return (
+    <NumberField
+      label={label}
+      value={spec.toDisplay(storedValue, unit)}
+      onChange={(v) => setField(name, v == null || typeof v !== 'number' ? undefined : spec.toStored(v, unit))}
+      unit={unit === 'imperial' ? spec.imperial : spec.metric}
+      min={min}
+      step={step}
+      className={className}
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -223,6 +288,7 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get('date');
+  const unit = useScubaUnits();
 
   const [date, setDate] = useState<string>(dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayIso());
   const [values, setValues] = useState<Values>({});
@@ -360,8 +426,8 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
 
         <Section title="Dive">
           <div className="grid grid-cols-3 gap-3">
-            <NumberField label="Max depth" value={values.depth} onChange={(v) => setField('depth', v)} unit="m" min={0} step={0.1} />
-            <NumberField label="Average depth" value={values.depth_avg} onChange={(v) => setField('depth_avg', v)} unit="m" min={0} step={0.1} />
+            <UnitField name="depth" label="Max depth" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
+            <UnitField name="depth_avg" label="Average depth" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
             <SelectField
               label="Entry"
               value={values.entry_method}
@@ -391,8 +457,8 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
           </div>
           <div className="grid grid-cols-3 gap-3">
             <NumberField label="Visibility (0–3)" value={values.visibility} onChange={(v) => setField('visibility', v)} min={0} step={1} />
-            <NumberField label="Air temp" value={values.air_temp} onChange={(v) => setField('air_temp', v)} unit="°C" step={0.1} />
-            <NumberField label="Water temp" value={values.water_temp} onChange={(v) => setField('water_temp', v)} unit="°C" step={0.1} />
+            <UnitField name="air_temp" label="Air temp" values={values} setField={setField} unit={unit} step={0.1} />
+            <UnitField name="water_temp" label="Water temp" values={values} setField={setField} unit={unit} step={0.1} />
           </div>
         </Section>
 
@@ -412,9 +478,9 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
             <Field label="Gas" value={values.gas} onChange={(v) => setField('gas', v)} placeholder="e.g. Air, EAN32" />
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <NumberField label="Start pressure" value={values.start_pressure} onChange={(v) => setField('start_pressure', v)} unit="bar" min={0} step={0.1} />
-            <NumberField label="End pressure" value={values.end_pressure} onChange={(v) => setField('end_pressure', v)} unit="bar" min={0} step={0.1} />
-            <NumberField label="Weight belt" value={values.weight} onChange={(v) => setField('weight', v)} unit="kg" min={0} step={0.1} />
+            <UnitField name="start_pressure" label="Start pressure" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
+            <UnitField name="end_pressure" label="End pressure" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
+            <UnitField name="weight" label="Weight belt" values={values} setField={setField} unit={unit} min={0} step={0.1} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <Field label="Divesuit" value={values.divesuit} onChange={(v) => setField('divesuit', v)} placeholder="e.g. 8mm Semi-Dry" />
@@ -447,11 +513,11 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
               <div className="grid grid-cols-3 gap-3">
                 <NumberField label="O₂ %" value={values.o2} onChange={(v) => setField('o2', v)} min={0} max={100} step={0.1} />
                 <NumberField label="He %" value={values.he} onChange={(v) => setField('he', v)} min={0} max={100} step={0.1} />
-                <NumberField label="Weighted pressure" value={values.weight_pressure} onChange={(v) => setField('weight_pressure', v)} unit="bar" min={0} step={0.1} />
+                <UnitField name="weight_pressure" label="Weighted pressure" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <NumberField label="Min pPO₂" value={values.min_ppo2} onChange={(v) => setField('min_ppo2', v)} unit="bar" min={0} step={0.1} />
-                <NumberField label="Max pPO₂" value={values.max_ppo2} onChange={(v) => setField('max_ppo2', v)} unit="bar" min={0} step={0.1} />
+                <UnitField name="min_ppo2" label="Min pPO₂" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
+                <UnitField name="max_ppo2" label="Max pPO₂" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
                 <Field label="Supply type" value={values.supply_type} onChange={(v) => setField('supply_type', v)} />
               </div>
               <div className="grid grid-cols-3 gap-3">

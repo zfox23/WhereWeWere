@@ -10,6 +10,7 @@ import { Waves } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { PluginReflectionCardProps } from 'wwp-shared';
 import { pluginDetailPath } from '../../../client/src/plugins/registry';
+import { formatDepth, useScubaUnits } from './units';
 
 interface ScubaReflectionData {
   place?: string | null;
@@ -19,10 +20,12 @@ interface ScubaReflectionData {
 }
 
 export function ScubaReflectionCard({ item }: PluginReflectionCardProps) {
+  const unit = useScubaUnits();
   const data = (item.data ?? {}) as ScubaReflectionData;
   const site = [data.place, data.city].filter(Boolean).join(', ');
+  const depthLabel = formatDepth(data.depth, unit);
   const bits = [
-    data.depth != null ? `to ${data.depth} m` : null,
+    depthLabel ? `to ${depthLabel}` : null,
     data.bottom_time != null ? `${data.bottom_time} min` : null,
   ]
     .filter(Boolean)

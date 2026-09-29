@@ -17,6 +17,10 @@ import { find as findTimezone } from 'geo-tz';
 export interface LogbookImportRow {
   checked_in_at: string;
   checkin_timezone: string;
+  /** The dive's local wall-clock date (`YYYY-MM-DD`) as logged. */
+  local_date: string;
+  /** How the timezone was resolved (import previews show this to flag guesses). */
+  timezone_source: 'utc_offset' | 'geo' | 'fallback';
   data: Record<string, unknown>;
 }
 
@@ -358,7 +362,9 @@ export function parseDivingLogBackup(
       const utcOffset = asInt(row.UtcOffset);
       let checkinTimezone: string;
       let checkedInAt: string | null;
+      let timezoneSource: 'utc_offset' | 'geo' | 'fallback';
       if (utcOffset != null) {
+        timezoneSource = 'utc_offset';
         // The logbook row carries an explicit UTC offset in minutes east:
         // wall clock - offset = the UTC instant.
         const entryTime = asText(row.Entrytime) ?? '00:00';
@@ -393,6 +399,7 @@ export function parseDivingLogBackup(
             tz = null;
           }
         }
+        timezoneSource = tz ? 'geo' : 'fallback';
         checkinTimezone = tz ?? fallbackTimezone;
         checkedInAt = localTimeToIso(date, asText(row.Entrytime) ?? '', checkinTimezone);
       }
@@ -402,7 +409,13 @@ export function parseDivingLogBackup(
         continue;
       }
 
-      rows.push({ checked_in_at: checkedInAt, checkin_timezone: checkinTimezone, data });
+      rows.push({
+        checked_in_at: checkedInAt,
+        checkin_timezone: checkinTimezone,
+        local_date: date,
+        timezone_source: timezoneSource,
+        data,
+      });
     }
 
     return { total: logbook.length, rows, errors };

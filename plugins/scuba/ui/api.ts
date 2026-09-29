@@ -51,8 +51,33 @@ export interface ScubaMonthlyPoint {
 export interface ScubaImportResult {
   imported: number;
   skipped: number;
+  /** Stored check-in id per imported row (null for skipped rows). */
+  imported_ids: (string | null)[];
   errors: string[];
   total_errors: number;
+}
+
+/** How a dive's timezone was resolved during parsing. */
+export type ScubaTimezoneSource = 'utc_offset' | 'geo' | 'fallback';
+
+export interface ScubaLogbookPreviewRow {
+  source_uuid: string | null;
+  source_number: number | null;
+  place: string | null;
+  city: string | null;
+  local_date: string;
+  entry_time: string | null;
+  depth: number | null;
+  bottom_time: number | null;
+  checkin_timezone: string;
+  timezone_source: ScubaTimezoneSource;
+  checked_in_at: string;
+}
+
+export interface ScubaLogbookPreview {
+  total: number;
+  rows: ScubaLogbookPreviewRow[];
+  errors: string[];
 }
 
 const BASE = '/scuba/stats';
@@ -81,21 +106,40 @@ export const scubaStats = {
   earliest: (userId: string) => request<{ date: string | null }>(`${BASE}/earliest?user_id=${userId}`),
 };
 
+async function postLogbookForm(
+  path: string,
+  file: File,
+  extra?: Record<string, string>,
+): Promise<any> {
+  const form = new FormData();
+  form.append('file', file);
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (value) form.append(key, value);
+  }
+  const res = await fetch(`/api/v1/import/scuba-logbook${path}`, {
+    method: 'POST',
+    headers: withAuthHeader(),
+    body: form,
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || error.message || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export const scubaLogbookImport = {
-  /** Import a Diving Log .sql (SQLite) backup into SCUBA check-ins. */
-  importFile: async (file: File, fallbackTimezone: string): Promise<ScubaImportResult> => {
-    const form = new FormData();
-    form.append('file', file);
-    form.append('fallback_timezone', fallbackTimezone);
-    const res = await fetch('/api/v1/import/scuba-logbook', {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(error.error || error.message || `Import failed: ${res.status}`);
-    }
-    return res.json() as Promise<ScubaImportResult>;
-  },
+  /** Parse a Diving Log .sql backup without writing anything. */
+  preview: (file: File): Promise<ScubaLogbookPreview> =>
+    postLogbookForm('/preview', file),
+
+  /**
+   * Import a Diving Log .sql (SQLite) backup into SCUBA check-ins.
+   * `timezones` optionally maps a dive's `source_uuid` to an IANA zone
+   * (chosen in the import preview) to re-anchor its timestamp.
+   */
+  importFile: (file: File, timezones?: Record<string, string>): Promise<ScubaImportResult> =>
+    postLogbookForm('', file, {
+      ...(timezones ? { timezones: JSON.stringify(timezones) } : {}),
+    }),
 };

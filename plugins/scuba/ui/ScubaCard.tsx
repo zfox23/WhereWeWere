@@ -12,6 +12,7 @@ import type { CheckinCardProps } from 'wwp-shared';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
 import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
+import { formatDepth, formatTemp, useScubaUnits } from './units';
 
 interface ScubaData {
   place?: string | null;
@@ -54,15 +55,19 @@ function siteLabel(data: ScubaData): string {
 }
 
 export function ScubaCard({ item, compact = false }: CheckinCardProps) {
+  const unit = useScubaUnits();
   const data = (item.data ?? {}) as ScubaData;
   const timezone = normalizeTimezoneForDisplay(item.timezone) || item.timezone || 'UTC';
   const rating = Number(data.rating ?? 0);
   const detailTo = `/checkins/scuba/${item.id}`;
 
+  const depthLabel = formatDepth(data.depth, unit);
+  const waterLabel = formatTemp(data.water_temp, unit);
+
   const chips: { label: string; value: string }[] = [];
-  if (data.depth != null) chips.push({ label: 'Depth', value: `${data.depth} m` });
+  if (depthLabel) chips.push({ label: 'Depth', value: depthLabel });
   if (data.bottom_time != null) chips.push({ label: 'Bottom time', value: formatBottomTime(Number(data.bottom_time)) });
-  if (data.water_temp != null) chips.push({ label: 'Water', value: `${data.water_temp}°C` });
+  if (waterLabel) chips.push({ label: 'Water', value: waterLabel });
   if (data.weather) chips.push({ label: 'Weather', value: String(data.weather) });
   if (data.divetype) chips.push({ label: 'Types', value: String(data.divetype) });
   if (data.buddy) chips.push({ label: 'Buddy', value: String(data.buddy) });
@@ -75,9 +80,9 @@ export function ScubaCard({ item, compact = false }: CheckinCardProps) {
           <Link to={detailTo} className="text-sm font-semibold text-cyan-700 dark:text-cyan-300 truncate">
             {siteLabel(data)}
           </Link>
-          {data.depth != null && (
+          {depthLabel && (
             <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400 truncate">
-              · {data.depth} m
+              · {depthLabel}
             </span>
           )}
           <span className="ml-auto text-xs text-gray-500 dark:text-gray-400 shrink-0">
