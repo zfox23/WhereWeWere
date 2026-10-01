@@ -5,6 +5,7 @@
  * ZIP layout (see plans/backup-v2-zip.md):
  *   backup.json               manifest { format, schemaVersion, exportedAt, user, settings }
  *   companions.json           core companion table dump (all check-in types + standalone names)
+ *   postcards.json            "Postcard From Your Past" history (Profile > Reflect)
  *   plugins/<id>.json         one PluginBackupEntry per plugin
  *   plugins/<id>/files/...    optional plugin-owned files (e.g. tracks GPX)
  */
@@ -57,6 +58,7 @@ export function streamBackupZip(
   pluginsPayload: PluginBackupPayload,
   files: PluginBackupFile[],
   companions?: unknown,
+  postcards?: unknown,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const archive = archiver('zip', { zlib: { level: 6 } });
@@ -90,6 +92,9 @@ export function streamBackupZip(
     archive.append(JSON.stringify(manifest, null, 2), { name: 'backup.json' });
     if (Array.isArray(companions)) {
       archive.append(JSON.stringify(companions, null, 2), { name: 'companions.json' });
+    }
+    if (Array.isArray(postcards)) {
+      archive.append(JSON.stringify(postcards, null, 2), { name: 'postcards.json' });
     }
     for (const [pluginId, entry] of Object.entries(pluginsPayload)) {
       archive.append(JSON.stringify(entry, null, 2), { name: `plugins/${pluginId}.json` });

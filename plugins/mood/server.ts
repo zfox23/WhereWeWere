@@ -1611,16 +1611,7 @@ export const server: CheckinTypeServerPlugin = {
                 json_build_object(
                   'mood', mc.mood,
                   'note', mc.note,
-                  COALESCE(
-                    (
-                      SELECT json_agg(json_build_object('name', ma.name, 'group_name', mag.name))
-                      FROM mood_checkin_activities mca
-                      JOIN mood_activities ma ON mca.activity_id = ma.id
-                      JOIN mood_activity_groups mag ON mag.id = ma.group_id
-                      WHERE mca.mood_checkin_id = mc.id
-                    ),
-                    '[]'::json
-                  ) AS activities
+                  'activities', ${ACTIVITIES_JSON}
                 )::jsonb AS data
          FROM mood_checkins mc
          WHERE mc.user_id = $1
