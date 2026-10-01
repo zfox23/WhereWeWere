@@ -244,8 +244,6 @@ function buildImmichPeriodUrl(immichUrl: string, from: string, to: string) {
   return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
 }
 
-const HANDWRITING_FONT = `'Segoe Script', 'Bradley Hand', 'Comic Sans MS', cursive`;
-
 /**
  * The flippable postcard. Front: photo collage + stamp + Immich link.
  * Back: To / From lines + the LLM message in a handwriting-style font.
@@ -337,56 +335,6 @@ function PostcardCard({
                 )
               )}
             </div>
-
-            {/* Right rail: stamp + address block */}
-            <div className="w-1/4 flex flex-col items-center justify-between py-1">
-              {/* Stamp */}
-              <div className="flex items-start gap-0.5">
-                {postcard.stamp_city && (
-                  <div
-                    className="px-1.5 py-1 rounded-sm border-2 border-dashed border-purple-700/50 bg-purple-50/60 dark:bg-purple-900/20 text-center"
-                    style={{ transform: 'rotate(3deg)' }}
-                  >
-                    <div className="text-[9px] leading-tight font-semibold text-purple-800 dark:text-purple-300 uppercase tracking-wide max-w-[72px] break-words">
-                      {postcard.stamp_city}
-                    </div>
-                    <div className="text-[8px] text-purple-700/70 dark:text-purple-400/70">{postcard.to.slice(0, 7)}</div>
-                  </div>
-                )}
-                {/* Postmark */}
-                <div
-                  className="w-8 h-8 rounded-full border border-gray-500/40 flex items-center justify-center -ml-1 mt-1"
-                  style={{ transform: 'rotate(-12deg)' }}
-                >
-                  <span className="text-[7px] text-gray-500/70 text-center leading-tight">
-                    {postcard.from.slice(5)}
-                  </span>
-                </div>
-              </div>
-
-              {/* To block */}
-              <div className="w-full px-1 text-right space-y-0.5">
-                <div className="border-b border-gray-400/40 pb-0.5" />
-                <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">
-                  {postcard.addressed_to}
-                </div>
-                <div className="text-[10px] text-gray-500 dark:text-gray-400">{postcard.sender_line}</div>
-              </div>
-
-              {/* Immich link */}
-              {immichUrl && (
-                <a
-                  href={buildImmichPeriodUrl(immichUrl, postcard.from, postcard.to)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-0.5 text-[10px] text-blue-600 dark:text-blue-400 hover:underline self-end"
-                >
-                  <ExternalLink size={10} />
-                  View in Immich
-                </a>
-              )}
-            </div>
           </div>
         </div>
 
@@ -410,8 +358,7 @@ function PostcardCard({
             </div>
 
             <div
-              className="flex-1 overflow-y-auto my-3 pr-1 text-sm leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-line"
-              style={{ fontFamily: HANDWRITING_FONT }}
+              className="flex-1 overflow-y-auto my-3 pr-1 text-lg leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-line font-mono"
             >
               {postcard.message}
             </div>
@@ -421,8 +368,7 @@ function PostcardCard({
                 {postcard.from} → {postcard.to}
               </div>
               <div
-                className="text-sm text-gray-700 dark:text-gray-300"
-                style={{ fontFamily: HANDWRITING_FONT }}
+                className="text-sm text-gray-700 dark:text-gray-300 font-mono"
               >
                 {postcard.sender_line}
               </div>

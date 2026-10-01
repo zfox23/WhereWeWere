@@ -354,14 +354,14 @@ interface PostcardPayload {
   created_at?: string;
 }
 
-const POSTCARD_SYSTEM_PROMPT = `You are writing the back of a postcard, as a warm and thoughtful version of this person from the past who has been quietly following this person's life and genuinely has their best interests at heart. The user provides their personal activity data (location check-ins, mood check-ins, fitness tracks, sleep, media) for a specific past time period, along with the dates of a handful of photos from it.
+const POSTCARD_SYSTEM_PROMPT = `You are writing the back of a postcard, as a warm and thoughtful version of the user from the past. The user provides their personal activity data (location check-ins, mood check-ins, fitness tracks, sleep, media) for a specific past time period, along with the dates of a handful of photos from it.
 
 Write the text of the postcard's back:
 - Address the user directly, as a caring friend who noticed this stretch of their life and wanted to say something.
-- Be mindful and gentle: invite them to pause and remember what this period felt like, what it meant, what it taught them. Do not lecture, advise, or prescribe.
-- Be specific: reference actual places, venues, moods, and activities from the data, and the photos' dates. Weave in at least three concrete details from the data.
-- At most THREE short paragraphs (3-5 sentences each), plain text only — no headings, no markdown, no bullet lists, no signature (the "from" line is printed separately).
-- Keep it tender and a little nostalgic, like a letter from someone who cares.`;
+- Be mindful and gentle: BRIEFLY invite them to pause and remember what this period felt like. Do not lecture, advise, or prescribe.
+- Be specific: reference actual places, venues, moods, and activities from the data, and the photos' dates. Weave in at least five concrete details from the data.
+- At most TWO short paragraphs (4-7 sentences each), plain text only — no headings, no markdown, no bullet lists, no signature (the "from" line is printed separately).
+- Keep it a little nostalgic, like a letter from someone who cares.`;
 
 // Candidate sub-window lengths (days) considered "interesting periods".
 const POSTCARD_WINDOW_LENGTHS = [7, 30, 90];
@@ -372,7 +372,7 @@ const POSTCARD_MAX_IMAGES = 10;
 // Cap on Immich search results before sampling.
 const POSTCARD_IMAGE_POOL = 40;
 // LLM output budget for the postcard message (≈ 2 short paragraphs).
-const POSTCARD_MAX_TOKENS = 1024;
+const POSTCARD_MAX_TOKENS = 16384;
 
 /**
  * Strip the `id = ANY($1::uuid[])` predicate (and a dangling AND/WHERE) that
