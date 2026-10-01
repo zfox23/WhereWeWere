@@ -98,6 +98,8 @@ interface ParsedBackup {
   pluginsPayload: PluginBackupPayload | null;
   /** v2 only: the core companion table rows from companions.json. */
   companions: unknown[] | null;
+  /** v2 only: the "Postcard From Your Past" history from postcards.json. */
+  postcards: unknown[] | null;
   /** v1 only: the full `data` object for legacy restore hooks. */
   raw: Record<string, unknown> | null;
   /**
@@ -169,9 +171,10 @@ function parseV1Backup(raw: unknown): ParsedBackup {
     user,
     settings,
     pluginsPayload: (migratedData.plugins as PluginBackupPayload) ?? null,
-    // v1 bundles have no core companions.json: check-in companions in old
-    // backups still restore via the plugins' legacy hooks.
+    // v1 bundles have no core companions.json / postcards.json: check-in
+    // companions in old backups still restore via the plugins' legacy hooks.
     companions: null,
+    postcards: null,
     raw: migratedData,
   };
 }
@@ -203,6 +206,7 @@ function parseV2Backup(tempRoot: string): ParsedBackup {
     settings: (m.settings as BackupSettings) ?? null,
     pluginsPayload,
     companions: readCompanionsFile(tempRoot),
+    postcards: readPostcardsFile(tempRoot),
     raw: null,
     tempRoot,
   };
@@ -215,6 +219,13 @@ function parseV2Backup(tempRoot: string): ParsedBackup {
  */
 function readCompanionsFile(tempRoot: string): unknown[] | null {
   const parsed = readBackupJsonFile(tempRoot, 'companions.json');
+  if (!Array.isArray(parsed)) return null;
+  return parsed;
+}
+
+/** Read postcards.json (Postcard From Your Past history) from a v2 bundle. */
+function readPostcardsFile(tempRoot: string): unknown[] | null {
+  const parsed = readBackupJsonFile(tempRoot, 'postcards.json');
   if (!Array.isArray(parsed)) return null;
   return parsed;
 }
@@ -329,6 +340,54 @@ async function runRestore(
     counts.companions = await restoreCompanionRows(backup.companions, client);
   }
 
+  // Postcard From Your Past history (v2 postcards.json): re-insert rows with
+  // their generated ids so repeated restores are no-ops.
+  if (Array.isArray(backup.postcards) && backup.postcards.length > 0) {
+    let inserted = 0;
+    let skipped = 0;
+    for (const raw of backup.postcards) {
+      if (!raw || typeof raw !== 'object') {
+        skipped += 1;
+        continue;
+      }
+      const p = raw as Record<string, unknown>;
+      if (typeof p.id !== 'string' || typeof p.message !== 'string' || typeof p.sender_line !== 'string') {
+        skipped += 1;
+        continue;
+      }
+      const day = (v: unknown) =>
+        typeof v === 'string' ? v.slice(0, 10) : v instanceof Date ? v.toISOString().slice(0, 10) : '';
+      const periodFrom = day(p.period_from);
+      const periodTo = day(p.period_to);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(periodFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(periodTo)) {
+        skipped += 1;
+        continue;
+      }
+      const result = await client.query(
+        `INSERT INTO postcards (id, user_id, period_from, period_to, addressed_to, sender_line,
+                                stamp_city, message, images, counts, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          p.id,
+          USER_ID,
+          periodFrom,
+          periodTo,
+          typeof p.addressed_to === 'string' ? p.addressed_to : '',
+          p.sender_line,
+          typeof p.stamp_city === 'string' ? p.stamp_city : null,
+          p.message,
+          JSON.stringify(Array.isArray(p.images) ? p.images : []),
+          JSON.stringify(p.counts && typeof p.counts === 'object' ? p.counts : {}),
+          typeof p.created_at === 'string' ? p.created_at : null,
+        ]
+      );
+      if ((result.rowCount ?? 0) > 0) inserted += 1;
+      else skipped += 1;
+    }
+    counts.postcards = { inserted, skipped };
+  }
+
   return counts;
 }
 
@@ -339,6 +398,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       userResult,
       settingsResult,
       companionsResult,
+      postcardsResult,
       pluginsData,
     ] = await Promise.all([
         query(
@@ -368,6 +428,16 @@ router.get('/export', async (_req: Request, res: Response) => {
            FROM companions
            ORDER BY name, checkin_id`
         ),
+        // Postcard From Your Past history. Full rows so the restored
+        // postcards keep their generated id, message, and image metadata.
+        query(
+          `SELECT id, period_from, period_to, addressed_to, sender_line, stamp_city,
+                  message, images, counts, created_at
+           FROM postcards
+           WHERE user_id = $1
+           ORDER BY created_at`,
+          [USER_ID]
+        ),
         exportPluginData(USER_ID),
       ]);
 
@@ -390,7 +460,7 @@ router.get('/export', async (_req: Request, res: Response) => {
       'Content-Disposition',
       `attachment; filename="wherewewere-backup-v${LATEST_BACKUP_SCHEMA_VERSION}-${day}.zip"`
     );
-    await streamBackupZip(res, manifest, pluginsData, pluginFiles, companionsResult.rows);
+    await streamBackupZip(res, manifest, pluginsData, pluginFiles, companionsResult.rows, postcardsResult.rows);
   } catch (err) {
     console.error('Error exporting backup:', err);
     if (!res.headersSent) {
@@ -512,13 +582,15 @@ router.post('/start-over', async (req: Request, res: Response) => {
     // when its check-ins are deleted; this option covers the rest, e.g.
     // standalone names, when only the companion data is selected.)
     const deleteCompanions = Boolean(rawOptions.delete_companions);
+    // "Postcard From Your Past" history (Profile > Reflect).
+    const deletePostcards = Boolean(rawOptions.delete_postcards);
     // Per-plugin settings reset: options use `reset_<pluginId>_settings`.
     const selectedPluginSettingsIds = allPlugins()
       .filter((p) => Boolean(rawOptions[`reset_${p.id}_settings`]))
       .map((p) => p.id);
     const resetIntegrationsSettings = Boolean(rawOptions.reset_integrations_settings);
 
-    if (pluginCheckinIds.length === 0 && selectedAllDataIds.length === 0 && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings && !deleteCompanions) {
+    if (pluginCheckinIds.length === 0 && selectedAllDataIds.length === 0 && !resetAccountSettings && selectedPluginSettingsIds.length === 0 && !resetIntegrationsSettings && !deleteCompanions && !deletePostcards) {
       return res.status(400).json({
         error: 'No start-over actions selected',
       });
@@ -570,6 +642,11 @@ router.post('/start-over', async (req: Request, res: Response) => {
     if (deleteCompanions) {
       const companionResult = await client.query('DELETE FROM companions');
       counts.companions_deleted = companionResult.rowCount ?? 0;
+    }
+
+    if (deletePostcards) {
+      const postcardsResult = await client.query('DELETE FROM postcards');
+      counts.postcards_deleted = postcardsResult.rowCount ?? 0;
     }
 
     if (resetIntegrationsSettings) {

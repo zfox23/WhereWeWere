@@ -370,8 +370,48 @@ export const settings = {
     }),
 };
 
+// Postcard From Your Past (Profile > Reflect)
+export interface PostcardImage {
+  id: string;
+  originalFileName: string;
+  localDateTime: string;
+}
+
+export interface Postcard {
+  id?: string;
+  from: string;
+  to: string;
+  addressed_to: string;
+  sender_line: string;
+  stamp_city: string | null;
+  images: PostcardImage[];
+  message: string;
+  counts: Record<string, number>;
+  created_at?: string;
+}
+
+/** Row in the received-postcards history list (GET /llm/postcards). */
+export interface PostcardSummary {
+  id: string;
+  from: string;
+  to: string;
+  sender_line: string;
+  stamp_city: string | null;
+  message_preview: string;
+  image_ids: string[];
+  created_at: string;
+}
+
 // LLM (Life Summary)
 export const llm = {
+  /** "Postcard From Your Past" — one received postcard (front + back data). */
+  postcard: () =>
+    request<Postcard>('/llm/postcard', { method: 'POST', body: JSON.stringify({}) }),
+  /** Received postcards, newest first (history list under the button). */
+  postcardHistory: () => request<PostcardSummary[]>('/llm/postcards'),
+  getPostcard: (id: string) => request<Postcard>(`/llm/postcards/${id}`),
+  deletePostcard: (id: string) =>
+    request<{ message: string; id: string }>(`/llm/postcards/${id}`, { method: 'DELETE' }),
   candidateImages: (from: string, to: string) =>
     request<{ assets: { id: string; thumbhash: string | null; originalFileName: string; localDateTime: string }[] }>(
       `/llm/candidate-images?${new URLSearchParams({ from, to })}`

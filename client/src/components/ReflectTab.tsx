@@ -11,6 +11,7 @@ import { plugins } from '../plugins/api';
 import { getClientPlugin, pluginDetailPath } from '../plugins/registry';
 import { PhotoStrip } from './PhotoStrip';
 import { LifeSummarySection } from './LifeSummarySection';
+import { PostcardSection } from './PostcardSection';
 import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
@@ -582,6 +583,14 @@ export function ReflectTab() {
           configured: llmConfigured,
           imageSupport: llmImageSupport,
         }}
+      />
+
+      <PostcardSection
+        llmConfig={{
+          configured: llmConfigured,
+          imageSupport: llmImageSupport,
+        }}
+        immichUrl={immichUrl}
       />
 
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4 space-y-4">

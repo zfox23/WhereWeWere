@@ -10,6 +10,8 @@ type StartOverOptions = {
   delete_venue_checkins: boolean;
   /** Wipes the whole core companion table (every type + standalone names). */
   delete_companions: boolean;
+  /** Deletes every received "Postcard From Your Past" (Profile > Reflect). */
+  delete_postcards: boolean;
   reset_account_settings: boolean;
   reset_integrations_settings: boolean;
   /** Per-plugin options: `delete_<pluginId>_checkins`, `reset_<pluginId>_settings`, `delete_<pluginId>_all`. */
@@ -33,6 +35,7 @@ export function StartOverSection() {
     delete_all_checkins: false,
     delete_venue_checkins: false,
     delete_companions: false,
+    delete_postcards: false,
     reset_account_settings: false,
     reset_integrations_settings: false,
     ...Object.fromEntries(plugins.flatMap((p) => [
@@ -169,6 +172,21 @@ export function StartOverSection() {
             All Companion Data
             <span className="block text-xs font-normal opacity-80">
               Every companion on every check-in, plus names from the Companions tab that aren't on any check-in.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-100">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={options.delete_postcards}
+            disabled={options.reset_everything}
+            onChange={() => toggleOption('delete_postcards')}
+          />
+          <span>
+            All Postcards
+            <span className="block text-xs font-normal opacity-80">
+              Every postcard received in Profile → Reflect ("Postcard From Your Past").
             </span>
           </span>
         </label>
