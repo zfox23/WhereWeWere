@@ -97,6 +97,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   const [sortDir, setSortDir] = useState<SortDir>(initialState.sortDir);
   const [filterQuery, setFilterQuery] = useState(initialState.filterQuery);
   const [lists, setLists] = useState<MediaList[]>([]);
+  const [listsLoaded, setListsLoaded] = useState(false);
   const [selectedListId, setSelectedListId] = useState<string | null>(initialState.selectedListId);
 
   // Batch edit mode: select multiple cards (shift-click for a range) and delete them.
@@ -199,18 +200,22 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
 
   // A deep link may reference a list that has since been deleted.
   useEffect(() => {
-    if (selectedListId && lists.length > 0 && !lists.some((l) => l.id === selectedListId)) {
+    if (listsLoaded && selectedListId && !lists.some((l) => l.id === selectedListId)) {
       setSelectedListId(null);
     }
-  }, [lists, selectedListId]);
+  }, [lists, listsLoaded, selectedListId]);
 
   useEffect(() => {
     media
       .lists()
-      .then(setLists)
+      .then((data) => {
+        setLists(data);
+        setListsLoaded(true);
+      })
       .catch((err) => {
         console.error('Failed to load media lists:', err);
         setLists([]);
+        setListsLoaded(true);
       });
   }, []);
 

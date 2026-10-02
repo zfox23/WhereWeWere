@@ -110,28 +110,57 @@ export default function Profile() {
     <div className="space-y-6">
 
       {/* Tab bar */}
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit max-w-full overflow-x-auto">
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800/60 rounded-xl p-1 w-fit max-w-full overflow-x-auto" role="tablist" aria-label="Profile tabs">
         {PROFILE_PLUGINS.map((plugin) => {
           const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
           const key = `plugin:${plugin.id}`;
           return (
-            <button key={key} onClick={() => setActiveTab(key as ProfileTab)} className={tabButtonClass(activeTab === key)}>
+            <button
+              key={key}
+              onClick={() => setActiveTab(key as ProfileTab)}
+              className={tabButtonClass(activeTab === key)}
+              role="tab"
+              aria-selected={activeTab === key}
+              aria-controls={`tabpanel-${key}`}
+              id={`tab-${key}`}
+            >
               <Icon size={14} className={plugin.client.iconColor} />
               {plugin.strings.profileTab}
             </button>
           );
         })}
-        <button onClick={() => setActiveTab('reflect')} className={tabButtonClass(activeTab === 'reflect')}>
+        <button
+          onClick={() => setActiveTab('reflect')}
+          className={tabButtonClass(activeTab === 'reflect')}
+          role="tab"
+          aria-selected={activeTab === 'reflect'}
+          aria-controls="tabpanel-reflect"
+          id="tab-reflect"
+        >
           <Brain size={14} />
           Reflect
         </button>
-        <button onClick={() => setActiveTab('companions')} className={tabButtonClass(activeTab === 'companions')}>
+        <button
+          onClick={() => setActiveTab('companions')}
+          className={tabButtonClass(activeTab === 'companions')}
+          role="tab"
+          aria-selected={activeTab === 'companions'}
+          aria-controls="tabpanel-companions"
+          id="tab-companions"
+        >
           <Users size={14} />
           Companions
         </button>
       </div>
 
-      {renderBody()}
+      <div
+        role="tabpanel"
+        id={`tabpanel-${activeTab}`}
+        aria-labelledby={`tab-${activeTab}`}
+        tabIndex={0}
+      >
+        {renderBody()}
+      </div>
     </div>
   );
 }
