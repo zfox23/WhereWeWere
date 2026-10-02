@@ -56,6 +56,8 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
             ? 'bg-primary-50/80 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
             : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
             }`}
+          aria-pressed={currentTheme === SYSTEM_THEME_ID}
+          aria-label="System Theme"
         >
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
@@ -95,6 +97,8 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
                         ? 'bg-primary-50/80 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
                         : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                         }`}
+                      aria-pressed={isSelected}
+                      aria-label={`${themeOption.label} Theme`}
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">

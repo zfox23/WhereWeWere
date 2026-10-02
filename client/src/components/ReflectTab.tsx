@@ -193,6 +193,7 @@ function OnThisDaySection({
               <button
                 onClick={() => handleYearClick(year)}
                 className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+                aria-label={`View check-ins from ${year.years_ago} year${year.years_ago !== 1 ? 's' : ''} ago in ${year.year}`}
               >
                 {year.years_ago} year{year.years_ago !== 1 ? 's' : ''} ago
               </button>
@@ -592,10 +593,11 @@ export function ReflectTab() {
               onClick={() => setSelectedYear(selectedYear - 1)}
               disabled={heatmapsRefreshing}
               className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={`View previous year, ${selectedYear - 1}`}
             >
               &larr; {selectedYear - 1}
             </button>
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 min-w-12 text-center">
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 min-w-12 text-center" aria-live="polite">
               {selectedYear}
             </span>
             {selectedYear < currentYear && (
@@ -603,6 +605,7 @@ export function ReflectTab() {
                 onClick={() => setSelectedYear(selectedYear + 1)}
                 disabled={heatmapsRefreshing}
                 className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={`View next year, ${selectedYear + 1}`}
               >
                 {selectedYear + 1} &rarr;
               </button>

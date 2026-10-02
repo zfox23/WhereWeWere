@@ -217,6 +217,7 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
               onClick={handleCopyMarkdown}
               className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               title="Copy the summary as markdown"
+              aria-label={copied ? "Copied to clipboard" : "Copy summary as markdown"}
             >
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
               {copied ? 'Copied' : 'Copy as markdown'}
@@ -224,6 +225,7 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
             <button
               onClick={() => setResult(null)}
               className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              aria-label="Clear summary"
             >
               Clear
             </button>
@@ -298,6 +300,7 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
                   onClick={handleShuffle}
                   disabled={candidatesLoading || candidates.length === 0}
                   className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 px-2.5 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Shuffle unselected photos"
                 >
                   <Shuffle size={13} />
                   Shuffle

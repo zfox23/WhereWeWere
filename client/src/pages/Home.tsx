@@ -123,6 +123,8 @@ function ExpandableFAB() {
       <button
         onClick={() => setExpanded(!expanded)}
         className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 w-14 h-14 bg-linear-to-br from-primary-500 to-primary-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-primary-500/30 hover:shadow-lg hover:shadow-primary-500/50 hover:scale-105 transition-all"
+        aria-label={expanded ? "Close new check-in menu" : "Open new check-in menu"}
+        aria-expanded={expanded}
       >
         <Plus
           size={24}
@@ -690,6 +692,8 @@ export default function Home() {
               ? 'bg-primary-50/70 border-primary-300/60 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
               : 'bg-white/70 dark:bg-gray-900/70 border-white/40 dark:border-gray-700/40 text-gray-600 dark:text-gray-400 hover:bg-white/90 dark:hover:bg-gray-800/90 shadow-sm shadow-black/3'
           }`}
+          aria-label={showFilters ? "Hide filters" : "Show filters"}
+          aria-expanded={showFilters}
         >
           <SlidersHorizontal size={18} />
         </button>
@@ -727,6 +731,7 @@ export default function Home() {
             <button
               onClick={clearFilters}
               className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1"
+              aria-label="Clear all active filters"
             >
               Clear all
             </button>
