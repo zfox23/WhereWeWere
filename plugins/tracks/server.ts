@@ -30,6 +30,12 @@ import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { getVenueTimezone } from '../location/services/geoTimezone';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import {
+  getCompanions,
+  setCompanions,
+  deleteCompanionsForCheckins,
+  companionNamesSql,
+} from '../../server/src/services/companions';
 
 import {
   computeTrackStats,
@@ -55,7 +61,7 @@ import { findTrimRange, sliceTrackPoints } from './services/trackBackup';
 // (moved from server/src/routes/tracks.ts; behavior unchanged)
 // ---------------------------------------------------------------------------
 
-const tracksRouter = Router();
+export const tracksRouter = Router();
 
 const trackStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -347,6 +353,7 @@ async function fetchTrackFull(id: string | string[]): Promise<any | null> {
   api.geometry = coordinates;
   api.points =
     typeof row.points === 'string' ? JSON.parse(row.points) : row.points ?? null;
+  api.companions = await getCompanions('tracks', String(id));
   return api;
 }
 
@@ -491,11 +498,11 @@ tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Res
   }
 });
 
-// PUT /:id - update editable track fields (name, activity_type)
+// PUT /:id - update editable track fields (name, activity_type, companions)
 tracksRouter.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, activity_type } = req.body ?? {};
+    const { name, activity_type, companions } = req.body ?? {};
 
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -524,20 +531,33 @@ tracksRouter.put('/:id', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    if (sets.length === 0) {
+    if (sets.length === 0 && companions === undefined) {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    params.push(id);
-    const result = await query(
-      `UPDATE tracks SET ${sets.join(', ')}, updated_at = NOW()
-       WHERE id = $${paramIndex}
-       RETURNING id`,
-      params
-    );
+    if (sets.length > 0) {
+      params.push(id);
+      const result = await query(
+        `UPDATE tracks SET ${sets.join(', ')}, updated_at = NOW()
+         WHERE id = $${paramIndex}
+         RETURNING id`,
+        params
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Track not found' });
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Track not found' });
+      }
+    } else {
+      // Companions-only update: still require the track to exist.
+      const existing = await query('SELECT id FROM tracks WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Track not found' });
+      }
+    }
+
+    // Companions use full-replacement semantics when the key is present.
+    if (companions !== undefined) {
+      await setCompanions('tracks', String(id), companions);
     }
 
     // Re-fetch with geometry/points so the response matches the GET /:id
@@ -715,6 +735,9 @@ tracksRouter.delete('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Track not found' });
     }
 
+    // The shared companion table has no FK into tracks; clean up explicitly.
+    await deleteCompanionsForCheckins('tracks', [String(id)]);
+
     deleteStoredTrack(USER_ID, String(id));
 
     res.json({ message: 'Track deleted', id });
@@ -811,6 +834,7 @@ export const server: CheckinTypeServerPlugin = {
         track_ended_at: 't.ended_at',
         track_elapsed_time_s: 't.elapsed_time_s',
         timezone: 't.timezone',
+        companions: `(${companionNamesSql('tracks', 't.id')})`,
       })}
       FROM tracks t
     `,
@@ -1058,15 +1082,25 @@ export const server: CheckinTypeServerPlugin = {
     const client = txClient ?? null;
     const run = (sql: string, values: unknown[]) =>
       client ? client.query(sql, values) : query(sql, values);
+    let deleted = 0;
+    // Companion rows for this user's tracks (shared core table).
+    {
+      const result = await run(
+        `DELETE FROM companions WHERE checkin_type = 'tracks' AND checkin_id IN (SELECT id FROM tracks WHERE user_id = $1) RETURNING id`,
+        [user_id],
+      );
+      deleted += result.rowCount ?? 0;
+    }
     const result = await run(
       'DELETE FROM tracks WHERE user_id = $1 RETURNING id',
       [user_id],
     );
+    deleted += result.rowCount ?? 0;
     // Remove each deleted track's uploaded original from disk.
     for (const row of result.rows) {
       deleteStoredTrack(user_id, String(row.id));
     }
-    return result.rowCount ?? 0;
+    return deleted;
   },
 
   // ------------------------------------------------------------------

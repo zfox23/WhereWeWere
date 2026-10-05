@@ -20,7 +20,12 @@ export const tracks = {
   mapData: (params?: Record<string, string>) =>
     request<TrackMapEntry[]>(`${BASE}/map-data?${new URLSearchParams(params)}`),
   get: (id: string) => request<TrackEntry>(`${BASE}/${id}`),
-  update: (id: string, data: { name?: string; activity_type?: string | null }) =>
+  update: (id: string, data: {
+    name?: string;
+    activity_type?: string | null;
+    /** Full replacement of the track's companion names. */
+    companions?: string[];
+  }) =>
     request<TrackEntry>(`${BASE}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   trim: (id: string, start_index: number, end_index: number) =>
     request<TrackEntry>(`${BASE}/${id}/trim`, {

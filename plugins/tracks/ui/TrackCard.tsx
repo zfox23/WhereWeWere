@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Clock, Route } from 'lucide-react';
+import { Clock, Route, Users } from 'lucide-react';
 import type { CheckinCardProps } from 'wwp-shared';
 import type { TrackTimelineFields } from './types';
 import { formatDistance, type DistanceUnit } from '../../location/ui/geo';
@@ -18,6 +18,7 @@ import { CardShell } from '../../../client/src/components/checkin-card/CardShell
 import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
 import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
 import { useResolvedPhotos } from '../../../client/src/components/checkin-card/useResolvedPhotos';
+import { CompanionName } from '../../../client/src/components/CompanionName';
 
 function formatDuration(totalSeconds: number): string {
   const totalMinutes = Math.max(0, Math.round(totalSeconds / 60));
@@ -31,7 +32,9 @@ function formatDuration(totalSeconds: number): string {
 
 export function TrackCard({ item, integrations, photos, scrobbles, compact = false }: CheckinCardProps) {
   const { pathname } = useLocation();
-  const track = item as unknown as TrackTimelineFields;
+  const track = item as unknown as TrackTimelineFields & {
+    companions?: string[] | null;
+  };
   const immichUrl = integrations.immich_url ?? null;
   const malojaUrl = integrations.maloja_url ?? null;
   const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos as any[] | null);
@@ -100,6 +103,15 @@ export function TrackCard({ item, integrations, photos, scrobbles, compact = fal
               {formatDuration(elapsedS)}
             </span>
           </div>
+
+          {track.companions && track.companions.length > 0 && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+              <Users size={13} className="text-gray-400 shrink-0" />
+              {track.companions.map((name) => (
+                <CompanionName key={name} name={name} />
+              ))}
+            </p>
+          )}
 
           <PhotoSection
             immichUrl={immichUrl}

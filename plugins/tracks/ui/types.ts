@@ -36,6 +36,8 @@ export interface TrackEntry {
   geometry?: [number, number][];
   /** Per-point series (same order as `geometry`), null for older tracks */
   points?: TrackPoint[] | null;
+  /** People "with" on this track (ordered names). */
+  companions?: string[];
 }
 
 export interface TrackMapEntry {

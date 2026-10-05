@@ -26,6 +26,7 @@ import {
   Save,
   Scissors,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import { MapContainer, Polyline, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -36,6 +37,7 @@ import { settings } from '../../../client/src/api/client';
 import type { TrackEntry } from './types';
 import TrackGraph from './TrackGraph';
 import DualRangeSlider from '../../../client/src/components/DualRangeSlider';
+import CompanionChipInput from '../../../client/src/components/CompanionChipInput';
 import { formatDistance, formatSpeed, type DistanceUnit } from '../../location/ui/geo';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../location/ui/geo';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
@@ -279,6 +281,7 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editActivityType, setEditActivityType] = useState('');
+  const [editCompanions, setEditCompanions] = useState<string[]>([]);
   const [activityTypes, setActivityTypes] = useState<string[]>([]);
   const [typeSuggestOpen, setTypeSuggestOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -292,6 +295,7 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
     if (!track) return;
     setEditName(track.name);
     setEditActivityType(track.activity_type ?? '');
+    setEditCompanions(track.companions ?? []);
     const trackWin = trackWindowMs(track);
     setTrimStart(0);
     setTrimEnd((track.geometry?.length ?? 1) - 1);
@@ -445,6 +449,7 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
       const updated = await tracks.update(id, {
         name,
         activity_type: trimmedType || null,
+        companions: editCompanions,
       });
       setTrack(updated);
       setIsEditing(false);
@@ -634,6 +639,16 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
             )}
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+              Here With…
+            </label>
+            <CompanionChipInput
+              value={editCompanions}
+              onChange={setEditCompanions}
+            />
+          </div>
+
           {canTrim && (
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2">
               <div className="flex items-center justify-between">
@@ -789,6 +804,12 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
                 <CalendarDays size={14} />
               </Link>
             </div>
+            {track.companions && track.companions.length > 0 && (
+              <div className="flex items-start gap-2">
+                <Users size={14} />
+                <span>Here with {track.companions.join(', ')}</span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">

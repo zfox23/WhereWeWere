@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 
 const { queryMock, poolConnectMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -10,7 +12,7 @@ vi.mock('../../../server/src/db', () => ({
   pool: { connect: poolConnectMock },
 }));
 
-import { server } from '../server';
+import { server, tracksRouter } from '../server';
 import { TIMELINE_COLUMNS } from '../../../server/src/plugins/timeline';
 import type { PluginTimelineContext } from 'wwp-shared';
 
@@ -323,11 +325,144 @@ describe('tracks plugin — backup & cleanup hooks', () => {
     expect(clientQuery).toHaveBeenCalledTimes(1);
   });
 
-  it("deletes the user's tracks on start-over", async () => {
-    queryMock.mockResolvedValueOnce({ rowCount: 2, rows: [] });
-    expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(2);
-    const [sql, values] = queryMock.mock.calls[0];
+  it("deletes the user's tracks (and their companion rows) on start-over", async () => {
+    queryMock
+      .mockResolvedValueOnce({ rowCount: 3, rows: [] }) // companion rows
+      .mockResolvedValueOnce({ rowCount: 2, rows: [] }); // track rows
+    expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(5);
+    const [compSql] = queryMock.mock.calls[0];
+    expect(compSql).toContain('DELETE FROM companions');
+    expect(compSql).toContain("checkin_type = 'tracks'");
+    const [sql, values] = queryMock.mock.calls[1];
     expect(sql).toContain('DELETE FROM tracks WHERE user_id = $1');
     expect(values).toEqual(['u1']);
+  });
+});
+
+describe('track companions (endpoints)', () => {
+  function app() {
+    const a = express();
+    a.use(express.json());
+    a.use('/tracks', tracksRouter);
+    return a;
+  }
+
+  const trackRow = {
+    id: 't1',
+    user_id: 'u1',
+    name: 'Night Ride',
+    activity_type: 'Cycling',
+    timezone: 'UTC',
+    started_at: '2013-05-31T13:41:00Z',
+    ended_at: '2013-05-31T15:31:00Z',
+    distance_m: 5200,
+    elapsed_time_s: 5400,
+    moving_time_s: 5300,
+    elevation_gain_m: 120,
+    avg_speed_mps: 1.4,
+    max_speed_mps: 3.1,
+    avg_hr: 105,
+    max_hr: 140,
+    point_count: 3,
+    file_hash: 'abc123',
+    source_filename: null,
+    geojson: null,
+    points: null,
+    created_at: '2013-05-31T13:41:00Z',
+    updated_at: '2013-05-31T13:41:00Z',
+  };
+
+  it('the timeline branch carries companions on the shared envelope column', () => {
+    const { sql } = server.buildTimelineSelect!();
+    expect(sql).toContain(') AS companions');
+    expect(sql).toContain("checkin_type = 'tracks'");
+    expect(sql).toContain('checkin_id = t.id');
+  });
+
+  it('GET /:id attaches companions to the track', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [trackRow] }) // track row
+      .mockResolvedValueOnce({ rows: [{ name: 'Ada' }, { name: 'Grace' }] }); // companions
+
+    const res = await request(app()).get('/tracks/t1');
+    expect(res.status).toBe(200);
+    expect(res.body.companions).toEqual(['Ada', 'Grace']);
+  });
+
+  it('PUT /:id replaces companions when the key is present (companions-only)', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 't1' }] }) // existence check
+      .mockResolvedValueOnce({ rows: [] }) // companion delete
+      .mockResolvedValueOnce({ rows: [] }) // companion insert
+      .mockResolvedValueOnce({ rows: [trackRow] }) // re-fetch
+      .mockResolvedValueOnce({ rows: [{ name: 'Sam' }] }); // read companions
+
+    const res = await request(app())
+      .put('/tracks/t1')
+      .send({ companions: ['Sam', 'sam', ''] });
+    expect(res.status).toBe(200);
+    expect(res.body.companions).toEqual(['Sam']);
+    const [delSql, delValues] = queryMock.mock.calls[1];
+    expect(delSql).toContain('DELETE FROM companions');
+    expect(delValues).toEqual(['tracks', 't1']);
+    const [insSql, insValues] = queryMock.mock.calls[2];
+    expect(insSql).toContain('INSERT INTO companions');
+    expect(insValues).toEqual(['tracks', 't1', ['Sam']]);
+  });
+
+  it('PUT /:id replaces companions alongside other field updates', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 't1' }] }) // UPDATE
+      .mockResolvedValueOnce({ rows: [] }) // companion delete
+      .mockResolvedValueOnce({ rows: [] }) // companion insert
+      .mockResolvedValueOnce({ rows: [trackRow] }) // re-fetch
+      .mockResolvedValueOnce({ rows: [{ name: 'Ada' }, { name: 'Grace' }] });
+
+    const res = await request(app())
+      .put('/tracks/t1')
+      .send({ name: 'Sunset Ride', companions: ['Ada', 'Grace'] });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('Night Ride');
+    expect(res.body.companions).toEqual(['Ada', 'Grace']);
+    const [updSql, updValues] = queryMock.mock.calls[0];
+    expect(updSql).toContain('UPDATE tracks');
+    expect(updValues).toContain('Sunset Ride');
+  });
+
+  it('PUT /:id keeps existing companions when the key is absent', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 't1' }] }) // UPDATE
+      .mockResolvedValueOnce({ rows: [trackRow] }) // re-fetch
+      .mockResolvedValueOnce({ rows: [{ name: 'Ada' }] }); // read companions
+
+    const res = await request(app()).put('/tracks/t1').send({ name: 'New Name' });
+    expect(res.status).toBe(200);
+    expect(res.body.companions).toEqual(['Ada']);
+    expect(queryMock).toHaveBeenCalledTimes(3);
+    for (const [sql] of queryMock.mock.calls) {
+      expect(String(sql)).not.toContain('DELETE FROM companions');
+    }
+  });
+
+  it('PUT /:id still 404s for a missing track (companions-only)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] }); // existence check
+
+    const res = await request(app())
+      .put('/tracks/missing')
+      .send({ companions: ['Ada'] });
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE /:id removes the companion rows too', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 't1' }] }) // track delete
+      .mockResolvedValueOnce({ rowCount: 2 }); // companion delete
+
+    const res = await request(app()).delete('/tracks/t1');
+    expect(res.status).toBe(200);
+    const [sql, values] = queryMock.mock.calls[1];
+    expect(sql).toContain('DELETE FROM companions');
+    expect(sql).toContain('checkin_type = $1');
+    expect(values).toEqual(['tracks', ['t1']]);
   });
 });
