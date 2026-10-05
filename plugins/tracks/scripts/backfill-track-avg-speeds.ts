@@ -21,6 +21,7 @@ type TrackRow = {
   moving_time_s: string | number;
   elapsed_time_s: string | number;
   avg_speed_mps: string | number;
+  max_speed_mps: string | number;
   geojson: string | { type: string; coordinates: [number, number][] };
   points: { t: number | null }[] | null;
 };
@@ -31,7 +32,7 @@ async function backfillTrackAvgSpeeds() {
   try {
     const { rows: tracks } = await client.query<TrackRow>(
       `SELECT id, distance_m, moving_time_s, elapsed_time_s,
-              avg_speed_mps, ST_AsGeoJSON(path) AS geojson, points
+              avg_speed_mps, max_speed_mps, ST_AsGeoJSON(path) AS geojson, points
        FROM tracks`
     );
 
@@ -82,8 +83,14 @@ async function backfillTrackAvgSpeeds() {
       if (movingTimeS > elapsedS) movingTimeS = elapsedS;
       movingTimeS = Math.round(movingTimeS);
       const newDistanceM = Math.round(distanceM);
-      const newAvgSpeedMps =
+      let newAvgSpeedMps =
         Math.round((movingTimeS > 0 ? distanceM / movingTimeS : 0) * 100) / 100;
+      // Cap at the stored (windowed) max speed, mirroring computeTrackStats.
+      // Floor (not round) so the stored value never exceeds the max.
+      const storedMaxSpeedMps = Number(track.max_speed_mps);
+      if (storedMaxSpeedMps > 0 && newAvgSpeedMps > storedMaxSpeedMps) {
+        newAvgSpeedMps = Math.floor(storedMaxSpeedMps * 100) / 100;
+      }
 
       const oldDistanceM = Number(track.distance_m);
       const oldMovingS = Number(track.moving_time_s);

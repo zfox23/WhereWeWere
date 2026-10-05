@@ -42,10 +42,29 @@ export interface TrackStats {
 }
 
 const EARTH_RADIUS_M = 6371000;
-/** Segments slower than this (~5 km/h) are treated as stopped, not "moving". */
-const MOVING_SPEED_THRESHOLD_MPS = 1.4;
-/** Minimum window length (seconds) for max-speed computation. */
-const MAX_SPEED_WINDOW_S = 5;
+/**
+ * Segments slower than this (~1.4 km/h) are treated as stopped, not
+ * "moving". This is compared against the net-displacement speed over a
+ * MOVING_SPEED_WINDOW_S trailing window (not raw per-second speed): a
+ * toddler-paced walk is ~0.3-0.8 m/s, so a higher threshold misclassifies
+ * real slow walking as stopped.
+ */
+const MOVING_SPEED_THRESHOLD_MPS = 0.4;
+/**
+ * Trailing window (seconds) used to classify segments as moving. Raw speed
+ * between two 1 s-apart fixes is dominated by GPS position jitter, which
+ * makes per-segment classification unreliable. A longer net-displacement
+ * window has two benefits: per-second jitter cancels out, and a stationary
+ * receiver's drift (a random walk) averages down as ~1/sqrt(t), so a
+ * receiver that slowly wanders while stopped stays under the threshold.
+ */
+const MOVING_SPEED_WINDOW_S = 30;
+/**
+ * Minimum window length (seconds) for max-speed computation. A 10 s window
+ * is needed to average out GPS position jitter, which otherwise produces
+ * single-window spikes of several m/s from a slow walker.
+ */
+const MAX_SPEED_WINDOW_S = 10;
 /**
  * Segments faster than this (~108 km/h, far beyond any human-powered
  * activity) are treated as GPS lock jumps rather than real speed.
@@ -237,6 +256,10 @@ export interface TrackSegmentTotals {
  * skipped from the distance and moving-time sums, mirroring the treatment in
  * computeMaxSpeedMps (the same dtS/distance plausibility test).
  *
+ * Moving time is classified with the net displacement over a trailing
+ * MOVING_SPEED_WINDOW_S window rather than raw per-segment speed, which GPS
+ * position jitter dominates (see computeMovingTimeS).
+ *
  * Shared by the GPX/TCX parsers and the track stats backfill so both use
  * identical logic.
  */
@@ -244,7 +267,6 @@ export function computeTrackSegmentTotals(
   points: GpxPoint[]
 ): TrackSegmentTotals {
   let distanceM = 0;
-  let movingTimeS = 0;
   let elevationGainM = 0;
 
   for (let i = 1; i < points.length; i++) {
@@ -267,16 +289,71 @@ export function computeTrackSegmentTotals(
       const dEle = curr.ele - prev.ele;
       if (dEle > 0) elevationGainM += dEle;
     }
-
-    if (plausible && dtS > 0) {
-      const speed = segDist / dtS;
-      if (speed >= MOVING_SPEED_THRESHOLD_MPS) {
-        movingTimeS += dtS;
-      }
-    }
   }
 
-  return { distanceM, movingTimeS, elevationGainM };
+  return {
+    distanceM,
+    movingTimeS: computeMovingTimeS(points),
+    elevationGainM,
+  };
+}
+
+/**
+ * Compute moving time over an ordered list of points.
+ *
+ * A segment counts as moving when the net displacement over the trailing
+ * MOVING_SPEED_WINDOW_S window ending at the segment's end is at least
+ * MOVING_SPEED_THRESHOLD_MPS. Raw per-segment speed (distance between two
+ * consecutive fixes divided by the time between them) is dominated by GPS
+ * position jitter: with fixes roughly once per second and several meters of
+ * horizontal error, a stationary receiver registers per-second "speeds" of
+ * 1-2+ m/s while a steady casual walk often registers below the old 5 km/h
+ * threshold. Both effects made stored moving times far too short, which in
+ * turn made the average speed (distance / moving time) wildly exceed the
+ * windowed max speed.
+ *
+ * Segments that look like GPS lock jumps are skipped, mirroring the
+ * distance plausibility test in computeTrackSegmentTotals.
+ */
+function computeMovingTimeS(points: GpxPoint[]): number {
+  const timed = points.filter(
+    (p): p is GpxPoint & { time: Date } => p.time != null
+  );
+  if (timed.length < 2) return 0;
+
+  let movingTimeS = 0;
+  let windowStart = 0;
+  for (let i = 1; i < timed.length; i++) {
+    const prev = timed[i - 1];
+    const curr = timed[i];
+    const dtS = (curr.time.getTime() - prev.time.getTime()) / 1000;
+    if (dtS <= 0) continue;
+
+    if (haversineM(prev, curr) / dtS > MAX_PLAUSIBLE_SEGMENT_SPEED_MPS) {
+      continue;
+    }
+
+    // Oldest point still within the trailing window (moves forward only).
+    while (
+      windowStart < i &&
+      (curr.time.getTime() - timed[windowStart].time.getTime()) / 1000 >
+        MOVING_SPEED_WINDOW_S
+    ) {
+      windowStart++;
+    }
+    const winTimeS =
+      (curr.time.getTime() - timed[windowStart].time.getTime()) / 1000;
+    // Too little history (track start, or a gap longer than the window):
+    // fall back to the segment's own speed.
+    const speed =
+      winTimeS >= Math.min(MOVING_SPEED_WINDOW_S / 2, 4)
+        ? haversineM(timed[windowStart], curr) / winTimeS
+        : haversineM(prev, curr) / dtS;
+
+    if (speed >= MOVING_SPEED_THRESHOLD_MPS) movingTimeS += dtS;
+  }
+
+  return movingTimeS;
 }
 
 /**
@@ -321,7 +398,13 @@ export function computeTrackStats(
   if (movingTimeS > elapsedTimeS) movingTimeS = elapsedTimeS;
   movingTimeS = Math.round(movingTimeS);
 
-  const avgSpeedMps = movingTimeS > 0 ? distanceM / movingTimeS : 0;
+  let avgSpeedMps = movingTimeS > 0 ? distanceM / movingTimeS : 0;
+
+  // Average speed is based on path length while max speed is based on net
+  // displacement over a window, so on a winding trail the average can
+  // structurally exceed the max. An average above the max is impossible, so
+  // cap it.
+  if (maxSpeedMps > 0 && avgSpeedMps > maxSpeedMps) avgSpeedMps = maxSpeedMps;
 
   // --- Heart rate ---
   const hrs = points

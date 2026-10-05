@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGpx, computeTrackSegmentTotals, type GpxPoint } from '../services/gpx';
+import { parseGpx, computeTrackSegmentTotals, computeTrackStats, type GpxPoint } from '../services/gpx';
 
 const GPX = `<?xml version="1.0"?>
 <gpx version="1.1" creator="test">
@@ -120,6 +120,54 @@ describe('parseGpx average speed', () => {
     const stats = parseGpx(buildGpx(lats), 'Fallback');
     expect(stats.avgSpeedMps).toBeLessThanOrEqual(stats.maxSpeedMps);
     expect(stats.avgSpeedMps).toBeCloseTo(10, 0);
+  });
+});
+
+describe('parseGpx moving time', () => {
+  it('counts a slow steady walk as moving (window speed, not per-second speed)', () => {
+    // 21 fixes, 1/s, at 1.1 m/s (~4 km/h). That is below the old 1.4 m/s
+    // per-second threshold, so the old logic reported ~0 moving time, which
+    // in turn made the average speed (distance / moving time) absurd.
+    // The trailing-window net-displacement speed is a steady 1.1 m/s.
+    const step = 0.11 * DEGREES_PER_10M; // 1.1 m per second
+    const lats = Array.from({ length: 21 }, (_, i) => i * step);
+    const stats = parseGpx(buildGpx(lats), 'Fallback');
+    expect(stats.movingTimeS).toBeCloseTo(20, 0);
+    expect(stats.avgSpeedMps).toBeCloseTo(1.1, 1);
+    expect(stats.avgSpeedMps).toBeLessThanOrEqual(stats.maxSpeedMps);
+  });
+
+  it('caps the average speed at the max speed on winding paths', () => {
+    // Steady 2 m/s north with a +/-1.5 m lateral zigzag every second: path
+    // speed ~3.6 m/s, but the 10 s net-displacement max speed is ~2 m/s.
+    // Without the cap, the path-length-based average would exceed the max.
+    const m = DEGREES_PER_10M / 10; // degrees per 1 m
+    const t0 = Date.UTC(2024, 0, 1, 10);
+    const pts: GpxPoint[] = Array.from({ length: 21 }, (_, i) => ({
+      lat: i * 2 * m,
+      lon: (i % 2 === 0 ? 1.5 : -1.5) * m,
+      ele: null,
+      hr: null,
+      time: new Date(t0 + i * 1000),
+    }));
+    const stats = computeTrackStats(pts, 'Fallback', null);
+    expect(stats.avgSpeedMps).toBeLessThanOrEqual(stats.maxSpeedMps);
+    expect(stats.avgSpeedMps).toBeGreaterThan(0);
+  });
+
+  it('does not count a jittery stationary receiver as moving', () => {
+    // First 31 fixes are exactly still (longer than the trailing window, so
+    // every window has full stationary history), then the position jitters
+    // +/-~3 m inside a 6 m box. Any 30 s window's net displacement stays
+    // <= ~6 m (0.2 m/s), below the 0.4 m/s threshold.
+    const lats = [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0.00003, 0, -0.00003, 0.00003, 0, -0.00003, 0.00003, 0, -0.00003, 0.00003, 0, -0.00003,
+      0.00003, 0, -0.00003, 0.00003, 0, -0.00003, 0.00003, 0, -0.00003, 0.00003, 0, -0.00003,
+      0.00003, 0, -0.00003, 0.00003, 0, -0.00003,
+    ];
+    const stats = parseGpx(buildGpx(lats), 'Fallback');
+    expect(stats.movingTimeS).toBe(0);
   });
 });
 
