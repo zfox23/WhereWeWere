@@ -6,7 +6,7 @@
  * instead of the hard-coded constant.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MapContainer, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import { Clock, Gauge, Heart, Map as MapIcon, Mountain, Route, TrendingUp } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
@@ -83,6 +83,51 @@ function TrackInfoPopup({
   );
 }
 
+export interface MapBounds {
+  minLat: number;
+  minLng: number;
+  maxLat: number;
+  maxLng: number;
+}
+
+function BoundsReporter({ onBounds }: { onBounds: (b: MapBounds) => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const report = () => {
+      const b = map.getBounds();
+      onBounds({
+        minLat: b.getSouth(),
+        minLng: b.getWest(),
+        maxLat: b.getNorth(),
+        maxLng: b.getEast(),
+      });
+    };
+    report();
+    map.on('moveend', report);
+    map.on('zoomend', report);
+    return () => {
+      map.off('moveend', report);
+      map.off('zoomend', report);
+    };
+  }, [map, onBounds]);
+
+  return null;
+}
+
+/** Ids of tracks whose bounds partially or fully overlap the given map view. */
+function visibleTrackIds(mapTracks: TrackMapEntry[], view: MapBounds): Set<string> {
+  const ids = new Set<string>();
+  for (const track of mapTracks) {
+    const b = track.bounds;
+    if (!b) continue;
+    if (b.minLng < view.maxLng && b.maxLng > view.minLng && b.minLat < view.maxLat && b.maxLat > view.minLat) {
+      ids.add(track.id);
+    }
+  }
+  return ids;
+}
+
 function FitToAllTracks({ tracks }: { tracks: TrackMapEntry[] }) {
   const map = useMap();
   const boundsKey = tracks.map((t) => t.id).join(',');
@@ -117,9 +162,11 @@ function FitToAllTracks({ tracks }: { tracks: TrackMapEntry[] }) {
 function TracksMap({
   tracks,
   distanceUnit,
+  onBoundsChange,
 }: {
   tracks: TrackMapEntry[];
   distanceUnit: DistanceUnit;
+  onBoundsChange?: (b: MapBounds) => void;
 }) {
   const { resolvedTheme } = useTheme();
 
@@ -171,6 +218,7 @@ function TracksMap({
           );
         })}
         <FitToAllTracks tracks={drawTracks} />
+        {onBoundsChange && <BoundsReporter onBounds={onBoundsChange} />}
       </MapContainer>
     </div>
   );
@@ -263,11 +311,13 @@ function ActivityBreakdown({
   distanceUnit,
   from,
   to,
+  emptyText = 'No tracks in this period.',
 }: {
   activities: { type: string; count: number; distanceM: number }[];
   distanceUnit: DistanceUnit;
   from?: string;
   to?: string;
+  emptyText?: string;
 }) {
   const max = Math.max(...activities.map((a) => a.count), 1);
 
@@ -286,7 +336,7 @@ function ActivityBreakdown({
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Activity Breakdown</h3>
       {activities.length === 0 ? (
-        <p className="text-sm text-gray-400">No tracks in this period.</p>
+        <p className="text-sm text-gray-400">{emptyText}</p>
       ) : (
         <div className="space-y-2">
           {activities.map((activity) => (
@@ -347,6 +397,16 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
   const [earliestTrackDate, setEarliestTrackDate] = useState<string | null>(null);
   const [trackList, setTrackList] = useState<TrackEntry[]>([]);
   const [mapTracks, setMapTracks] = useState<TrackMapEntry[]>([]);
+  const [statsFollowMap, setStatsFollowMap] = useState(false);
+  const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
+
+  const handleMapBoundsChange = useCallback((b: MapBounds) => setMapBounds(b), []);
+
+  const statsTracks = useMemo(() => {
+    if (!statsFollowMap || !mapBounds) return trackList;
+    const ids = visibleTrackIds(mapTracks, mapBounds);
+    return trackList.filter((t) => ids.has(t.id));
+  }, [statsFollowMap, mapBounds, trackList, mapTracks]);
 
   useEffect(() => {
     settings
@@ -369,33 +429,33 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
   );
 
   const summary = useMemo(() => {
-    const count = trackList.length;
-    const totalDistance = trackList.reduce((sum, t) => sum + (Number(t.distance_m) || 0), 0);
-    const totalMovingS = trackList.reduce((sum, t) => sum + (Number(t.moving_time_s) || 0), 0);
-    const totalElevation = trackList.reduce((sum, t) => sum + (Number(t.elevation_gain_m) || 0), 0);
+    const count = statsTracks.length;
+    const totalDistance = statsTracks.reduce((sum, t) => sum + (Number(t.distance_m) || 0), 0);
+    const totalMovingS = statsTracks.reduce((sum, t) => sum + (Number(t.moving_time_s) || 0), 0);
+    const totalElevation = statsTracks.reduce((sum, t) => sum + (Number(t.elevation_gain_m) || 0), 0);
 
-    const withSpeed = trackList.filter(
+    const withSpeed = statsTracks.filter(
       (t) => (Number(t.distance_m) || 0) > 0 && (Number(t.avg_speed_mps) || 0) > 0
     );
     const fastestAvg = withSpeed.length > 0
       ? Math.max(...withSpeed.map((t) => Number(t.avg_speed_mps) || 0))
       : 0;
-    const maxSpeed = trackList.length > 0
-      ? Math.max(...trackList.map((t) => Number(t.max_speed_mps) || 0))
+    const maxSpeed = statsTracks.length > 0
+      ? Math.max(...statsTracks.map((t) => Number(t.max_speed_mps) || 0))
       : 0;
 
-    const avgHrValues = trackList
+    const avgHrValues = statsTracks
       .map((t) => t.avg_hr)
       .filter((v): v is number => v != null && Number.isFinite(Number(v)));
     const avgHr = avgHrValues.length > 0
       ? avgHrValues.reduce((sum, v) => sum + Number(v), 0) / avgHrValues.length
       : null;
-    const maxHrValues = trackList
+    const maxHrValues = statsTracks
       .map((t) => t.max_hr)
       .filter((v): v is number => v != null && Number.isFinite(Number(v)));
     const maxHr = maxHrValues.length > 0 ? Math.max(...maxHrValues.map(Number)) : null;
 
-    const longest = [...trackList]
+    const longest = [...statsTracks]
       .sort((a, b) => (Number(b.distance_m) || 0) - (Number(a.distance_m) || 0) || b.started_at.localeCompare(a.started_at))
       .slice(0, 10);
 
@@ -404,7 +464,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
       .slice(0, 10);
 
     const byActivity = new Map<string, { type: string; count: number; distanceM: number }>();
-    for (const track of trackList) {
+    for (const track of statsTracks) {
       const type = track.activity_type && track.activity_type.trim() ? track.activity_type.trim() : 'Other';
       const entry = byActivity.get(type) ?? { type, count: 0, distanceM: 0 };
       entry.count += 1;
@@ -429,7 +489,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
       fastest,
       activities,
     };
-  }, [trackList]);
+  }, [statsTracks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -563,26 +623,58 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
       )}
 
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3">
-        {mapTracks.some((t) => t.coordinates.length >= 2) ? (
-          <TracksMap tracks={mapTracks} distanceUnit={distanceUnit} />
-        ) : (
-          <div className="flex items-center justify-center h-64 text-sm text-gray-400">
-            No tracks in this period.
-          </div>
-        )}
+        <div className="flex items-center justify-between px-4 pt-3">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Map</h3>
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 select-none">
+            Stats follow map
+            <button
+              type="button"
+              role="switch"
+              aria-checked={statsFollowMap}
+              onClick={() => setStatsFollowMap((v) => !v)}
+              className={`relative h-5 w-9 rounded-full transition-colors ${
+                statsFollowMap ? 'bg-rose-500' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                  statsFollowMap ? 'translate-x-4' : ''
+                }`}
+              />
+            </button>
+          </label>
+        </div>
+        <div className="px-4 pb-4 pt-3">
+          {mapTracks.some((t) => t.coordinates.length >= 2) ? (
+            <TracksMap
+              tracks={mapTracks}
+              distanceUnit={distanceUnit}
+              onBoundsChange={handleMapBoundsChange}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-sm text-gray-400">
+              No tracks in this period.
+            </div>
+          )}
+          {statsFollowMap && mapBounds && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              Stats show the {statsTracks.length} track{statsTracks.length === 1 ? '' : 's'} visible in the current map view.
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
         <TrackRankedList
           title="Longest Tracks"
           items={summary.longest}
-          emptyText="No tracks in this period."
+          emptyText={statsFollowMap && mapBounds ? 'No tracks visible in the current map view.' : 'No tracks in this period.'}
           valueLabel={(track) => formatDistance(track.distance_m, distanceUnit)}
         />
         <TrackRankedList
           title="Fastest Tracks"
           items={summary.fastest}
-          emptyText="No timed tracks in this period."
+          emptyText={statsFollowMap && mapBounds ? 'No timed tracks visible in the current map view.' : 'No timed tracks in this period.'}
           valueLabel={(track) => formatSpeed(track.avg_speed_mps, distanceUnit)}
           barValue={(track) => Number(track.avg_speed_mps) || 0}
         />
@@ -591,6 +683,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
           distanceUnit={distanceUnit}
           from={visibleRange.from}
           to={visibleRange.to}
+          emptyText={statsFollowMap && mapBounds ? 'No tracks visible in the current map view.' : 'No tracks in this period.'}
         />
       </div>
     </div>
