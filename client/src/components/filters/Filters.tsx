@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { X, ArrowLeftRight } from 'lucide-react';
+import { X, ArrowLeftRight, ArrowRight, ArrowLeft } from 'lucide-react';
 import type { CheckinTypeClient, PluginFilterSectionProps } from 'wwp-shared';
 import PluginFilterShell from './PluginFilterShell';
 
@@ -135,6 +135,26 @@ export default function Filters(props: FiltersProps) {
     }
   };
 
+  const hasFrom = fromDateInput.length > 0;
+  const hasTo = toDateInput.length > 0;
+  const copyDirection: 'to-before' | 'to-after' | null =
+    hasTo && !hasFrom ? 'to-after' : hasFrom && !hasTo ? 'to-before' : hasFrom && hasTo ? 'to-before' : null;
+
+  const handleCopyDate = () => {
+    if (!copyDirection) return;
+    if (copyDirection === 'to-before') {
+      setToDateInput(fromDateInput);
+      if (COMPLETE_DATE_PATTERN.test(fromDateInput)) {
+        onSetDateFilter('to', fromDateInput);
+      }
+    } else {
+      setFromDateInput(toDateInput);
+      if (COMPLETE_DATE_PATTERN.test(toDateInput)) {
+        onSetDateFilter('from', toDateInput);
+      }
+    }
+  };
+
   const commitDateInput = (key: 'from' | 'to') => {
     const value = key === 'from' ? fromDateInput : toDateInput;
     if (!value) {
@@ -180,7 +200,7 @@ export default function Filters(props: FiltersProps) {
           </button>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-end">
         <div>
           <label className="text-xs text-gray-500 mb-1 block">After</label>
           <input
@@ -195,6 +215,31 @@ export default function Filters(props: FiltersProps) {
             }}
             className="input"
           />
+        </div>
+        <div className="flex items-end justify-center">
+          <span className="mb-1 block h-4" />
+          <button
+            type="button"
+            onClick={handleCopyDate}
+            disabled={!copyDirection}
+            title={
+              copyDirection === 'to-before'
+                ? 'Copy After date to Before'
+                : copyDirection === 'to-after'
+                  ? 'Copy Before date to After'
+                  : 'Populate a date to enable copying'
+            }
+            aria-label={
+              copyDirection === 'to-before'
+                ? 'Copy After date to Before'
+                : copyDirection === 'to-after'
+                  ? 'Copy Before date to After'
+                  : 'Copy date'
+            }
+            className="input flex items-center justify-center text-gray-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:text-primary-400 dark:hover:bg-primary-900/20 disabled:text-gray-300 dark:disabled:text-gray-600 disabled:hover:bg-transparent cursor-default"
+          >
+            {copyDirection === 'to-after' ? <ArrowLeft size={16} /> : <ArrowRight size={16} />}
+          </button>
         </div>
         <div>
           <label className="text-xs text-gray-500 mb-1 block">Before</label>
@@ -212,6 +257,7 @@ export default function Filters(props: FiltersProps) {
           />
         </div>
       </div>
+
       <div className="grid gap-3 lg:grid-cols-2">
         {pluginFilterSpecs.map((spec) => (
           <PluginFilterSlot key={spec.plugin.id} spec={spec} />
