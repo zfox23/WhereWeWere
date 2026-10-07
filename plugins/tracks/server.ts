@@ -318,6 +318,91 @@ tracksRouter.get('/activity-types', async (req: Request, res: Response) => {
   }
 });
 
+// GET /activity-types/summary - activity types with per-type track counts,
+// for the Settings activity-types pane
+tracksRouter.get('/activity-types/summary', async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.query;
+
+    const params: unknown[] = [];
+    const conditions: string[] = ['activity_type IS NOT NULL'];
+    let paramIndex = 1;
+
+    if (user_id) {
+      conditions.push(`user_id = $${paramIndex}`);
+      params.push(user_id);
+      paramIndex++;
+    }
+
+    const result = await query(
+      `SELECT activity_type, COUNT(*)::int AS count
+       FROM tracks
+       WHERE ${conditions.join(' AND ')}
+       GROUP BY activity_type
+       ORDER BY LOWER(activity_type), activity_type`,
+      params
+    );
+
+    res.json(
+      result.rows.map((r: any) => ({ name: r.activity_type, count: Number(r.count) }))
+    );
+  } catch (err) {
+    console.error('Error listing activity type summary:', err);
+    res.status(500).json({ error: 'Failed to list activity types' });
+  }
+});
+
+// PUT /activity-types - rename an activity type across all tracks that use it.
+// Names are matched case-sensitively. When the target name already exists and
+// `merge` is not true, the request fails with 409; retry with merge: true to
+// fold the old type's tracks into the existing one.
+tracksRouter.put('/activity-types', async (req: Request, res: Response) => {
+  try {
+    const { from, to, merge } = req.body ?? {};
+    const fromName = String(from ?? '').trim();
+    const toName = String(to ?? '').trim();
+
+    if (!fromName) {
+      return res.status(400).json({ error: 'The current activity type name is required' });
+    }
+    if (!toName) {
+      return res.status(400).json({ error: 'Activity type name cannot be empty' });
+    }
+    if (toName.length > 100) {
+      return res.status(400).json({ error: 'Activity type is too long (max 100 characters)' });
+    }
+    if (fromName === toName) {
+      return res.json({ updated: 0, merged: false });
+    }
+
+    // Case-sensitive exact match: only a DIFFERENT type carrying the exact
+    // same name conflicts.
+    const clash = await query(
+      'SELECT COUNT(*)::int AS count FROM tracks WHERE activity_type = $1',
+      [toName]
+    );
+    const clashCount = Number(clash.rows[0]?.count ?? 0);
+    if (clashCount > 0 && merge !== true) {
+      return res.status(409).json({
+        error: `An activity type named "${toName}" already exists with ${clashCount} track${clashCount === 1 ? '' : 's'}. Send merge: true to combine them.`,
+      });
+    }
+
+    const result = await query(
+      `UPDATE tracks
+       SET activity_type = $1, updated_at = NOW()
+       WHERE activity_type = $2
+       RETURNING id`,
+      [toName, fromName]
+    );
+
+    res.json({ updated: result.rowCount ?? 0, merged: merge === true });
+  } catch (err) {
+    console.error('Error renaming activity type:', err);
+    res.status(500).json({ error: 'Failed to rename activity type' });
+  }
+});
+
 /**
  * Fetch a track including its geometry and per-point series, shaped like the
  * GET /:id response. Returns null when the track doesn't exist.

@@ -466,3 +466,93 @@ describe('track companions (endpoints)', () => {
     expect(values).toEqual(['tracks', ['t1']]);
   });
 });
+
+describe('activity types (settings pane)', () => {
+  function app() {
+    const a = express();
+    a.use(express.json());
+    a.use('/tracks', tracksRouter);
+    return a;
+  }
+
+  it('GET /activity-types/summary returns names with track counts', async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        { activity_type: 'Biking', count: '4' },
+        { activity_type: 'Hiking', count: '2' },
+      ],
+    });
+
+    const res = await request(app()).get('/tracks/activity-types/summary');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { name: 'Biking', count: 4 },
+      { name: 'Hiking', count: 2 },
+    ]);
+    const [sql] = queryMock.mock.calls[0];
+    expect(String(sql)).toContain('GROUP BY activity_type');
+    expect(String(sql)).toContain('activity_type IS NOT NULL');
+  });
+
+  it('PUT /activity-types rejects a missing or empty target name', async () => {
+    const missingFrom = await request(app()).put('/tracks/activity-types').send({ to: 'Cycling' });
+    expect(missingFrom.status).toBe(400);
+
+    const emptyTo = await request(app()).put('/tracks/activity-types').send({ from: 'Cycling', to: '   ' });
+    expect(emptyTo.status).toBe(400);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('PUT /activity-types is a no-op when the name is unchanged', async () => {
+    const res = await request(app())
+      .put('/tracks/activity-types')
+      .send({ from: 'Cycling', to: 'Cycling' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ updated: 0, merged: false });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('PUT /activity-types renames all tracks of the old type', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ count: '0' }] }) // clash check
+      .mockResolvedValueOnce({ rowCount: 5 }); // update
+
+    const res = await request(app())
+      .put('/tracks/activity-types')
+      .send({ from: 'Bike', to: 'Cycling' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ updated: 5, merged: false });
+
+    const [updSql, updValues] = queryMock.mock.calls[1];
+    expect(String(updSql)).toContain('UPDATE tracks');
+    expect(String(updSql)).toContain('WHERE activity_type = $2');
+    expect(updValues).toEqual(['Cycling', 'Bike']);
+  });
+
+  it('PUT /activity-types 409s on a case-sensitive name clash without merge', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ count: '3' }] }); // clash check
+
+    const res = await request(app())
+      .put('/tracks/activity-types')
+      .send({ from: 'cycling', to: 'Cycling' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('already exists');
+    expect(queryMock).toHaveBeenCalledTimes(1); // no UPDATE issued
+  });
+
+  it('PUT /activity-types merges into the existing type when merge is true', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ count: '3' }] }) // clash check
+      .mockResolvedValueOnce({ rowCount: 2 }); // update
+
+    const res = await request(app())
+      .put('/tracks/activity-types')
+      .send({ from: 'cycling', to: 'Cycling', merge: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ updated: 2, merged: true });
+
+    const [updSql, updValues] = queryMock.mock.calls[1];
+    expect(String(updSql)).toContain('UPDATE tracks');
+    expect(updValues).toEqual(['Cycling', 'cycling']);
+  });
+});

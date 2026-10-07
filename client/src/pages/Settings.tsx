@@ -12,8 +12,9 @@ import type { CheckinTypeClient } from 'wwp-shared';
 
 /**
  * Check-in plugins that ship a `settings` component (e.g. the mood plugin's
- * icon pack + activities). Only these get a Settings tab; plugins without
- * settings (e.g. tracks) are omitted from the tab bar entirely.
+ * icon pack + activities, the tracks plugin's activity types). Only these
+ * get a Settings tab; plugins without settings are omitted from the tab bar
+ * entirely.
  */
 const SETTINGS_PLUGINS = allClientPlugins().filter((p) => p.client.settings);
 

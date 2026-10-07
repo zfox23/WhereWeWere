@@ -33,6 +33,16 @@ export const tracks = {
       body: JSON.stringify({ start_index, end_index }),
     }),
   activityTypes: () => request<string[]>(`${BASE}/activity-types`),
+  // Activity types with per-type track counts (Settings pane).
+  activityTypeSummary: () =>
+    request<{ name: string; count: number }[]>(`${BASE}/activity-types/summary`),
+  // Rename an activity type across all tracks. `merge` folds the old type's
+  // tracks into an existing type of the same name (server 409s without it).
+  renameActivityType: (from: string, to: string, merge = false) =>
+    request<{ updated: number; merged: boolean }>(`${BASE}/activity-types`, {
+      method: 'PUT',
+      body: JSON.stringify({ from, to, merge }),
+    }),
   delete: (id: string) =>
     request<{ message: string; id: string }>(`${BASE}/${id}`, { method: 'DELETE' }),
   download: async (id: string): Promise<{ blob: Blob; filename: string }> => {

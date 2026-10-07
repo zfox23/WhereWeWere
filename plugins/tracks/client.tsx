@@ -2,8 +2,8 @@
  * Tracks check-in type — client half.
  *
  * Ships full custom UIs for every integration point: check-in (upload) page,
- * detail page (map + graph + stats), timeline card, Home filter section, and
- * the Profile tab. The components under `ui/` were adapted from the former
+ * detail page (map + graph + stats), timeline card, Home filter section,
+ * the Profile tab, and the Settings activity-types pane. The components under `ui/` were adapted from the former
  * core components (pages/TrackCheckIn, pages/TrackDetail,
  * components/TrackCard, components/TrackGraph, components/TracksTab,
  * filters/TrackFilter) to the plugin prop contracts.
@@ -24,6 +24,7 @@ import TrackCheckInPage from './ui/TrackCheckIn';
 import TrackDetailPage from './ui/TrackDetail';
 import { TrackCard } from './ui/TrackCard';
 import { TrackFilter } from './ui/TrackFilter';
+import { TracksSettings } from './ui/TracksSettings';
 import { TracksTab } from './ui/TracksTab';
 import { TrackReflectionCard } from './ui/TrackReflectionCard';
 
@@ -41,6 +42,7 @@ export const client: CheckinTypeClientPlugin = {
   timelineCard: (props: CheckinCardProps) => <TrackCard {...props} />,
   filterSection: (props: PluginFilterSectionProps) => <TrackFilter {...props} />,
   profileTab: (props: PluginProfileTabProps) => <TracksTab {...props} />,
+  settings: TracksSettings,
   reflectionCard: (props: PluginReflectionCardProps) => <TrackReflectionCard {...props} />,
 };
 
