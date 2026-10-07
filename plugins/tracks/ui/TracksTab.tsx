@@ -6,7 +6,7 @@
  * instead of the hard-coded constant.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import { Clock, Gauge, Heart, Map as MapIcon, Mountain, Route, TrendingUp } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
@@ -133,11 +133,41 @@ function visibleTrackIds(mapTracks: TrackMapEntry[], view: MapBounds): Set<strin
   return ids;
 }
 
-function FitToAllTracks({ tracks }: { tracks: TrackMapEntry[] }) {
+/** True when any track's bounds overlap the map's current view. */
+function anyTrackInView(tracks: TrackMapEntry[], view: MapBounds): boolean {
+  for (const track of tracks) {
+    const b = track.bounds;
+    if (!b) continue;
+    if (b.minLng < view.maxLng && b.maxLng > view.minLng && b.minLat < view.maxLat && b.maxLat > view.minLat) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Fits the map to all drawn tracks when the underlying data set changes
+ * (initial load, period change). If only the filtered set changed (e.g. an
+ * activity checkbox toggle) and at least one track is still visible, the
+ * current view is preserved; the map only re-fits when the toggle leaves
+ * no tracks visible in the current view.
+ */
+function FitToAllTracks({ tracks, fitKey }: { tracks: TrackMapEntry[]; fitKey: string }) {
   const map = useMap();
   const boundsKey = tracks.map((t) => t.id).join(',');
+  const prevFitKey = useRef<string | null>(null);
 
   useEffect(() => {
+    const dataSetChanged = prevFitKey.current !== fitKey;
+    prevFitKey.current = fitKey;
+
+    if (!dataSetChanged) {
+      const view = map.getBounds();
+      if (anyTrackInView(tracks, { minLat: view.getSouth(), minLng: view.getWest(), maxLat: view.getNorth(), maxLng: view.getEast() })) {
+        return; // keep the user's current pan/zoom
+      }
+    }
+
     let minLat = Infinity;
     let minLng = Infinity;
     let maxLat = -Infinity;
@@ -159,7 +189,7 @@ function FitToAllTracks({ tracks }: { tracks: TrackMapEntry[] }) {
       { padding: [40, 40] }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundsKey, map]);
+  }, [boundsKey, fitKey, map]);
 
   return null;
 }
@@ -168,10 +198,14 @@ function TracksMap({
   tracks,
   distanceUnit,
   onBoundsChange,
+  fitKey,
 }: {
   tracks: TrackMapEntry[];
   distanceUnit: DistanceUnit;
   onBoundsChange?: (b: MapBounds) => void;
+  /** Changes only when the underlying data set changes (period), not when
+   *  the activity filter does, so checkbox toggles don't re-fit the map. */
+  fitKey: string;
 }) {
   const { resolvedTheme } = useTheme();
 
@@ -222,7 +256,7 @@ function TracksMap({
             </Polyline>
           );
         })}
-        <FitToAllTracks tracks={drawTracks} />
+        <FitToAllTracks tracks={drawTracks} fitKey={fitKey} />
         {onBoundsChange && <BoundsReporter onBounds={onBoundsChange} />}
       </MapContainer>
     </div>
@@ -447,6 +481,10 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
     () => mapTracks.filter((t) => !excludedActivities.has(activityKey(t))),
     [mapTracks, excludedActivities]
   );
+
+  // Keyed on the unfiltered period data so activity checkbox toggles don't
+  // trigger a map re-fit; only period/data changes do.
+  const mapFitKey = useMemo(() => mapTracks.map((t) => t.id).join(','), [mapTracks]);
 
   useEffect(() => {
     settings
@@ -693,6 +731,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
               tracks={visibleMapTracks}
               distanceUnit={distanceUnit}
               onBoundsChange={handleMapBoundsChange}
+              fitKey={mapFitKey}
             />
           ) : (
             <div className="flex items-center justify-center h-64 text-sm text-gray-400">
