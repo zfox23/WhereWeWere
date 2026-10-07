@@ -115,6 +115,11 @@ function BoundsReporter({ onBounds }: { onBounds: (b: MapBounds) => void }) {
   return null;
 }
 
+/** Activity type label for a track; untyped tracks bucket into 'Other'. */
+function activityKey(track: { activity_type: string | null }): string {
+  return track.activity_type && track.activity_type.trim() ? track.activity_type.trim() : 'Other';
+}
+
 /** Ids of tracks whose bounds partially or fully overlap the given map view. */
 function visibleTrackIds(mapTracks: TrackMapEntry[], view: MapBounds): Set<string> {
   const ids = new Set<string>();
@@ -312,12 +317,16 @@ function ActivityBreakdown({
   from,
   to,
   emptyText = 'No tracks in this period.',
+  excludedActivities,
+  onToggleActivity,
 }: {
   activities: { type: string; count: number; distanceM: number }[];
   distanceUnit: DistanceUnit;
   from?: string;
   to?: string;
   emptyText?: string;
+  excludedActivities: Set<string>;
+  onToggleActivity: (type: string) => void;
 }) {
   const max = Math.max(...activities.map((a) => a.count), 1);
 
@@ -341,6 +350,14 @@ function ActivityBreakdown({
         <div className="space-y-2">
           {activities.map((activity) => (
             <div key={activity.type} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!excludedActivities.has(activity.type)}
+                onChange={() => onToggleActivity(activity.type)}
+                title={excludedActivities.has(activity.type) ? 'Include in stats and map' : 'Exclude from stats and map'}
+                className="h-4 w-4 shrink-0 accent-rose-500"
+                aria-label={`Include ${activity.type} in stats and map`}
+              />
               <button
                 type="button"
                 onClick={() => openOnHome(activity.type)}
@@ -399,14 +416,37 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
   const [mapTracks, setMapTracks] = useState<TrackMapEntry[]>([]);
   const [statsFollowMap, setStatsFollowMap] = useState(false);
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
+  const [excludedActivities, setExcludedActivities] = useState<Set<string>>(new Set());
 
   const handleMapBoundsChange = useCallback((b: MapBounds) => setMapBounds(b), []);
+
+  const handleToggleActivity = useCallback((type: string) => {
+    setExcludedActivities((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }, []);
 
   const statsTracks = useMemo(() => {
     if (!statsFollowMap || !mapBounds) return trackList;
     const ids = visibleTrackIds(mapTracks, mapBounds);
     return trackList.filter((t) => ids.has(t.id));
   }, [statsFollowMap, mapBounds, trackList, mapTracks]);
+
+  const filteredTracks = useMemo(
+    () => statsTracks.filter((t) => !excludedActivities.has(activityKey(t))),
+    [statsTracks, excludedActivities]
+  );
+
+  const visibleMapTracks = useMemo(
+    () => mapTracks.filter((t) => !excludedActivities.has(activityKey(t))),
+    [mapTracks, excludedActivities]
+  );
 
   useEffect(() => {
     settings
@@ -429,33 +469,33 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
   );
 
   const summary = useMemo(() => {
-    const count = statsTracks.length;
-    const totalDistance = statsTracks.reduce((sum, t) => sum + (Number(t.distance_m) || 0), 0);
-    const totalMovingS = statsTracks.reduce((sum, t) => sum + (Number(t.moving_time_s) || 0), 0);
-    const totalElevation = statsTracks.reduce((sum, t) => sum + (Number(t.elevation_gain_m) || 0), 0);
+    const count = filteredTracks.length;
+    const totalDistance = filteredTracks.reduce((sum, t) => sum + (Number(t.distance_m) || 0), 0);
+    const totalMovingS = filteredTracks.reduce((sum, t) => sum + (Number(t.moving_time_s) || 0), 0);
+    const totalElevation = filteredTracks.reduce((sum, t) => sum + (Number(t.elevation_gain_m) || 0), 0);
 
-    const withSpeed = statsTracks.filter(
+    const withSpeed = filteredTracks.filter(
       (t) => (Number(t.distance_m) || 0) > 0 && (Number(t.avg_speed_mps) || 0) > 0
     );
     const fastestAvg = withSpeed.length > 0
       ? Math.max(...withSpeed.map((t) => Number(t.avg_speed_mps) || 0))
       : 0;
-    const maxSpeed = statsTracks.length > 0
-      ? Math.max(...statsTracks.map((t) => Number(t.max_speed_mps) || 0))
+    const maxSpeed = filteredTracks.length > 0
+      ? Math.max(...filteredTracks.map((t) => Number(t.max_speed_mps) || 0))
       : 0;
 
-    const avgHrValues = statsTracks
+    const avgHrValues = filteredTracks
       .map((t) => t.avg_hr)
       .filter((v): v is number => v != null && Number.isFinite(Number(v)));
     const avgHr = avgHrValues.length > 0
       ? avgHrValues.reduce((sum, v) => sum + Number(v), 0) / avgHrValues.length
       : null;
-    const maxHrValues = statsTracks
+    const maxHrValues = filteredTracks
       .map((t) => t.max_hr)
       .filter((v): v is number => v != null && Number.isFinite(Number(v)));
     const maxHr = maxHrValues.length > 0 ? Math.max(...maxHrValues.map(Number)) : null;
 
-    const longest = [...statsTracks]
+    const longest = [...filteredTracks]
       .sort((a, b) => (Number(b.distance_m) || 0) - (Number(a.distance_m) || 0) || b.started_at.localeCompare(a.started_at))
       .slice(0, 10);
 
@@ -463,9 +503,12 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
       .sort((a, b) => (Number(b.avg_speed_mps) || 0) - (Number(a.avg_speed_mps) || 0) || b.started_at.localeCompare(a.started_at))
       .slice(0, 10);
 
+    // The breakdown lists every activity in scope (before the activity
+    // checkbox filter is applied) so excluded types stay visible and can be
+    // re-included; counts/distance reflect the unfiltered set as well.
     const byActivity = new Map<string, { type: string; count: number; distanceM: number }>();
     for (const track of statsTracks) {
-      const type = track.activity_type && track.activity_type.trim() ? track.activity_type.trim() : 'Other';
+      const type = activityKey(track);
       const entry = byActivity.get(type) ?? { type, count: 0, distanceM: 0 };
       entry.count += 1;
       entry.distanceM += Number(track.distance_m) || 0;
@@ -489,7 +532,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
       fastest,
       activities,
     };
-  }, [statsTracks]);
+  }, [filteredTracks, statsTracks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -645,9 +688,9 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
           </label>
         </div>
         <div className="px-4 pb-4 pt-3">
-          {mapTracks.some((t) => t.coordinates.length >= 2) ? (
+          {visibleMapTracks.some((t) => t.coordinates.length >= 2) ? (
             <TracksMap
-              tracks={mapTracks}
+              tracks={visibleMapTracks}
               distanceUnit={distanceUnit}
               onBoundsChange={handleMapBoundsChange}
             />
@@ -658,7 +701,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
           )}
           {statsFollowMap && mapBounds && (
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              Stats show the {statsTracks.length} track{statsTracks.length === 1 ? '' : 's'} visible in the current map view.
+              Stats show the {filteredTracks.length} track{filteredTracks.length === 1 ? '' : 's'} visible in the current map view.
             </p>
           )}
         </div>
@@ -684,6 +727,8 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
           from={visibleRange.from}
           to={visibleRange.to}
           emptyText={statsFollowMap && mapBounds ? 'No tracks visible in the current map view.' : 'No tracks in this period.'}
+          excludedActivities={excludedActivities}
+          onToggleActivity={handleToggleActivity}
         />
       </div>
     </div>
