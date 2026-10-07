@@ -29,6 +29,7 @@ import { config } from '../../server/src/config';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { getVenueTimezone } from '../location/services/geoTimezone';
+import { NO_ACTIVITY_TYPE } from './constants';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 import {
   getCompanions,
@@ -933,7 +934,13 @@ export const server: CheckinTypeServerPlugin = {
       search: (c, q) => c.push(`t.name ILIKE '%' || ? || '%'`, q),
     });
     if (ctx.filterParams.track_activity) {
-      conds.push(`t.activity_type ILIKE ?`, ctx.filterParams.track_activity);
+      if (ctx.filterParams.track_activity === NO_ACTIVITY_TYPE) {
+        // ILIKE cannot match NULL, so the "no type" sentinel maps onto an
+        // explicit null/blank condition.
+        conds.push(`(t.activity_type IS NULL OR TRIM(t.activity_type) = '')`);
+      } else {
+        conds.push(`t.activity_type ILIKE ?`, ctx.filterParams.track_activity);
+      }
     }
     return conds.build();
   },

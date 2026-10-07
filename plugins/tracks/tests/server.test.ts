@@ -13,6 +13,7 @@ vi.mock('../../../server/src/db', () => ({
 }));
 
 import { server, tracksRouter } from '../server';
+import { NO_ACTIVITY_TYPE } from '../constants';
 import { TIMELINE_COLUMNS } from '../../../server/src/plugins/timeline';
 import type { PluginTimelineContext } from 'wwp-shared';
 
@@ -71,6 +72,17 @@ describe('tracks plugin — buildTimelineWhere', () => {
     });
     expect(sql).toBe('t.user_id = $1 AND t.activity_type ILIKE $2');
     expect(values).toEqual(['u1', 'Cycling']);
+  });
+
+  it('maps the no-type sentinel to a NULL/blank activity_type condition', () => {
+    const { sql, values } = server.buildTimelineWhere!({
+      ...baseCtx,
+      filterParams: { track_activity: NO_ACTIVITY_TYPE },
+    });
+    expect(sql).toBe(
+      `t.user_id = $1 AND (t.activity_type IS NULL OR TRIM(t.activity_type) = '')`
+    );
+    expect(values).toEqual(['u1']);
   });
 
   it('ignores unknown filter params', () => {

@@ -32,6 +32,7 @@ import {
   formatSpeed,
   type DistanceUnit,
 } from '../../location/ui/geo';
+import { NO_ACTIVITY_TYPE } from '../constants';
 import type { TrackEntry, TrackMapEntry } from './types';
 
 const PAGE_SIZE = 500;
@@ -275,9 +276,9 @@ function ActivityBreakdown({
     params.set('type', 'track');
     if (from) params.set('from', from);
     if (to) params.set('to', to);
-    // "Other" is the bucket for tracks without an activity type, which the
-    // track_activity filter (ILIKE) cannot match, so omit it for that row.
-    if (type !== 'Other') params.set('track_activity', type);
+    // "Other" is the bucket for tracks without an activity type; map it onto
+    // the no-type sentinel so Home filters to those tracks.
+    params.set('track_activity', type === 'Other' ? NO_ACTIVITY_TYPE : type);
     window.open(`/?${params.toString()}`, '_blank', 'noopener,noreferrer');
   };
 
@@ -295,7 +296,7 @@ function ActivityBreakdown({
                 onClick={() => openOnHome(activity.type)}
                 title={
                   activity.type === 'Other'
-                    ? 'View all tracks in this period on Home'
+                    ? 'View tracks without an activity type in this period on Home'
                     : `View ${activity.type} tracks in this period on Home`
                 }
                 className="text-xs w-24 truncate text-left text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"

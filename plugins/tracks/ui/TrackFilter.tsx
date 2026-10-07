@@ -13,7 +13,14 @@ import { Route } from 'lucide-react';
 import PluginFilterShell from '../../../client/src/components/filters/PluginFilterShell';
 import type { PluginFilterSectionProps } from 'wwp-shared';
 import { findExactOption } from '../../../client/src/components/filters/filterUtils';
+import { NO_ACTIVITY_TYPE, NO_ACTIVITY_TYPE_LABEL } from '../constants';
 import { tracks } from './api';
+
+/** Display value for a stored track_activity param: the "no type" sentinel
+ *  shows as its user-facing label. */
+function displayTrackActivity(param: string): string {
+  return param === NO_ACTIVITY_TYPE ? NO_ACTIVITY_TYPE_LABEL : param;
+}
 
 export function TrackFilter({
   included,
@@ -25,11 +32,11 @@ export function TrackFilter({
   onSetParam,
 }: PluginFilterSectionProps) {
   const trackActivity = params.track_activity ?? '';
-  const [trackActivityInput, setTrackActivityInput] = useState(trackActivity);
+  const [trackActivityInput, setTrackActivityInput] = useState(() => displayTrackActivity(trackActivity));
   const [trackActivityOptions, setTrackActivityOptions] = useState<string[]>([]);
 
   useEffect(() => {
-    setTrackActivityInput(trackActivity);
+    setTrackActivityInput(displayTrackActivity(trackActivity));
   }, [trackActivity]);
 
   useEffect(() => {
@@ -47,9 +54,25 @@ export function TrackFilter({
 
   const filteredTrackActivityOptions = useMemo(() => {
     const needle = trackActivityInput.trim().toLowerCase();
-    if (!needle) return trackActivityOptions.slice(0, 30);
-    return trackActivityOptions.filter((opt) => opt.toLowerCase().includes(needle)).slice(0, 30);
+    const typeMatches = needle
+      ? trackActivityOptions.filter((opt) => opt.toLowerCase().includes(needle))
+      : trackActivityOptions;
+    const labelMatched = !needle || NO_ACTIVITY_TYPE_LABEL.toLowerCase().includes(needle);
+    return [
+      ...(labelMatched ? [NO_ACTIVITY_TYPE_LABEL] : []),
+      ...typeMatches,
+    ].slice(0, 30);
   }, [trackActivityInput, trackActivityOptions]);
+
+  const applyTrackActivity = (value: string) => {
+    if (value === NO_ACTIVITY_TYPE_LABEL) {
+      if (trackActivity !== NO_ACTIVITY_TYPE) onSetParam('track_activity', NO_ACTIVITY_TYPE);
+      return;
+    }
+    const match = findExactOption(value, trackActivityOptions);
+    if (match && trackActivity !== match) onSetParam('track_activity', match);
+    if (!match && trackActivity) onSetParam('track_activity', '');
+  };
 
   return (
     <PluginFilterShell
@@ -71,12 +94,14 @@ export function TrackFilter({
           onChange={(e) => {
             const next = e.target.value;
             setTrackActivityInput(next);
-            const match = findExactOption(next, trackActivityOptions);
-            if (match && trackActivity !== match) onSetParam('track_activity', match);
-            if (!match && trackActivity) onSetParam('track_activity', '');
+            applyTrackActivity(next);
           }}
           onBlur={() => {
             if (!trackActivityInput.trim()) return;
+            if (trackActivityInput === NO_ACTIVITY_TYPE_LABEL) {
+              applyTrackActivity(NO_ACTIVITY_TYPE_LABEL);
+              return;
+            }
             const match = findExactOption(trackActivityInput, trackActivityOptions);
             if (match) {
               setTrackActivityInput(match);

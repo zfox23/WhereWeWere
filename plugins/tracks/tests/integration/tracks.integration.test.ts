@@ -12,6 +12,7 @@ import {
   removeBackupTempDir,
   zipDirectory,
 } from '../../../../server/src/services/backupArchive';
+import { NO_ACTIVITY_TYPE } from '../../constants';
 import {
   gpsTracksDir,
   storedTrackPath,
@@ -347,13 +348,17 @@ describe('Tracks plugin API', () => {
         'Cycling',
         id,
       ]);
+      const untypedId = await insertTrimTestTrack();
+      await query('UPDATE tracks SET name = $1, activity_type = NULL WHERE id = $2', [
+        'Mystery Ride',
+        untypedId,
+      ]);
 
       const all = await request(app).get('/api/v1/timeline').query({ user_id: DEFAULT_USER_ID });
       expect(all.status).toBe(200);
       const trackRows = all.body.filter((row: any) => row.type === 'tracks');
-      expect(trackRows).toHaveLength(1);
-      const row = trackRows[0];
-      expect(row.id).toBe(id);
+      expect(trackRows).toHaveLength(2);
+      const row = trackRows.find((r: any) => r.id === id);
       expect(row.notes).toBe('Evening Spin');
       expect(row.track_name).toBe('Evening Spin');
       expect(row.track_timezone).toBe('UTC');
@@ -371,6 +376,13 @@ describe('Tracks plugin API', () => {
         .get('/api/v1/timeline')
         .query({ user_id: DEFAULT_USER_ID, track_activity: 'Running' });
       expect(noMatch.body).toHaveLength(0);
+
+      const noType = await request(app)
+        .get('/api/v1/timeline')
+        .query({ user_id: DEFAULT_USER_ID, track_activity: NO_ACTIVITY_TYPE });
+      expect(noType.body).toHaveLength(1);
+      expect(noType.body[0].id).toBe(untypedId);
+      expect(noType.body[0].track_name).toBe('Mystery Ride');
     });
   });
 
