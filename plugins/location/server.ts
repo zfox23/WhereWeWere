@@ -2084,6 +2084,72 @@ venuesRouter.post('/:id/merge-into', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Background enrichment for an imported OSM venue: reverse-geocode to fill in
+ * missing country/state/city, and link the venue to an enclosing parent venue
+ * (e.g. the airport that contains a terminal).
+ *
+ * Both steps hit slow external services (Nominatim and Overpass) that can each
+ * take tens of seconds when a mirror is loaded or hung. They are purely
+ * cosmetic for the check-in flow, so we run them after the response is sent
+ * rather than blocking the client on them. The caller is expected to invoke
+ * this fire-and-forget; failures are logged and never surface to the user.
+ */
+async function enrichImportedVenue(
+  venue: GeocodableVenue & { id: string },
+  osmId: string,
+): Promise<void> {
+  const latNum = toNumberOrNull(venue.latitude);
+  const lngNum = toNumberOrNull(venue.longitude);
+
+  // Reverse-geocode to fill in any missing country/state/city.
+  await geocodeVenueLocationIfMissing(venue).catch((err) => {
+    console.error('Background geocode failed (non-fatal):', err);
+  });
+
+  // Link to an enclosing parent venue (e.g. the airport containing a terminal).
+  if (latNum != null && lngNum != null) {
+    try {
+      const enclosing = await findEnclosingVenue(latNum, lngNum, osmId);
+      if (!enclosing) return;
+
+      let parentVenue;
+      const existingParent = await query(
+        'SELECT id, name FROM venues WHERE osm_id = $1',
+        [enclosing.osm_id]
+      );
+      if (existingParent.rows.length > 0) {
+        parentVenue = existingParent.rows[0];
+      } else {
+        let parentCategoryId: string | null = null;
+        if (enclosing.category) {
+          const catRes = await query(
+            'SELECT id FROM venue_categories WHERE name = $1',
+            [enclosing.category]
+          );
+          if (catRes.rows.length > 0) parentCategoryId = catRes.rows[0].id;
+        }
+        const parentInsert = await query(
+          `INSERT INTO venues (name, category_id, address, latitude, longitude, osm_id)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, name`,
+          [enclosing.name, parentCategoryId, enclosing.address,
+           enclosing.latitude, enclosing.longitude, enclosing.osm_id]
+        );
+        parentVenue = parentInsert.rows[0];
+      }
+
+      await query(
+        'UPDATE venues SET parent_venue_id = $1 WHERE id = $2 AND parent_venue_id IS NULL',
+        [parentVenue.id, venue.id]
+      );
+    } catch (parentErr) {
+      // Non-fatal — venue was created, just no parent link
+      console.error('Parent venue lookup failed (non-fatal):', parentErr);
+    }
+  }
+}
+
 // POST /import-osm - import a venue from OSM data
 venuesRouter.post('/import-osm', async (req: Request, res: Response) => {
   try {
@@ -2133,62 +2199,15 @@ venuesRouter.post('/import-osm', async (req: Request, res: Response) => {
       osm_id,
     });
 
-    const geocodedChildVenue = await geocodeVenueLocationIfMissing(childVenue) as typeof childVenue & {
-      parent_venue_id?: string | null;
-      parent_venue_name?: string | null;
-    };
+    // The venue is now safely in the local DB. Respond immediately so the
+    // client can proceed to the check-in form, and kick off the slow external
+    // enrichment (reverse geocoding + enclosing-venue parent link) in the
+    // background. These can each take tens of seconds on a loaded/hung
+    // Overpass or Nominatim mirror; blocking the response on them is what made
+    // the check-in row spin forever and eventually surface a "NetworkError".
+    void enrichImportedVenue(childVenue, osm_id);
 
-    // Try to find an enclosing parent venue (e.g. the airport containing a terminal)
-    if (latitude && longitude) {
-      try {
-        const latNum = parseFloat(String(latitude));
-        const lngNum = parseFloat(String(longitude));
-        const enclosing = await findEnclosingVenue(
-          latNum, lngNum, osm_id
-        );
-        if (enclosing) {
-          // Upsert the parent venue
-          let parentVenue;
-          const existingParent = await query(
-            'SELECT id, name FROM venues WHERE osm_id = $1',
-            [enclosing.osm_id]
-          );
-          if (existingParent.rows.length > 0) {
-            parentVenue = existingParent.rows[0];
-          } else {
-            let parentCategoryId: string | null = null;
-            if (enclosing.category) {
-              const catRes = await query(
-                'SELECT id FROM venue_categories WHERE name = $1',
-                [enclosing.category]
-              );
-              if (catRes.rows.length > 0) parentCategoryId = catRes.rows[0].id;
-            }
-            const parentInsert = await query(
-              `INSERT INTO venues (name, category_id, address, latitude, longitude, osm_id)
-               VALUES ($1, $2, $3, $4, $5, $6)
-               RETURNING id, name`,
-              [enclosing.name, parentCategoryId, enclosing.address,
-               enclosing.latitude, enclosing.longitude, enclosing.osm_id]
-            );
-            parentVenue = parentInsert.rows[0];
-          }
-
-          // Link child to parent
-          await query(
-            'UPDATE venues SET parent_venue_id = $1 WHERE id = $2 AND parent_venue_id IS NULL',
-            [parentVenue.id, geocodedChildVenue.id]
-          );
-          geocodedChildVenue.parent_venue_id = parentVenue.id;
-          geocodedChildVenue.parent_venue_name = parentVenue.name;
-        }
-      } catch (parentErr) {
-        // Non-fatal — venue was created, just no parent link
-        console.error('Parent venue lookup failed (non-fatal):', parentErr);
-      }
-    }
-
-    res.status(201).json(serializeVenue(geocodedChildVenue));
+    res.status(201).json(serializeVenue(childVenue));
   } catch (err) {
     console.error('Error importing OSM venue:', err);
     res.status(500).json({ error: 'Failed to import OSM venue' });
