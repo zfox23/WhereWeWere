@@ -42,7 +42,7 @@ const NEARBY_TAG_KEYS = PLACE_TAG_KEYS.filter(
 ) as (typeof PLACE_TAG_KEYS)[number][];
 
 const GENERIC_CATEGORY_VALUES = new Set(['yes']);
-const MIN_NEARBY_SEARCH_RADIUS_METERS = 5000;
+const MIN_NEARBY_SEARCH_RADIUS_METERS = 2500;
 const QUERY_SEARCH_RADIUS_METERS = 5000;
 const SEARCHABLE_NAME_KEY_PATTERN = '^(name|official_name|brand|short_name|alt_name|operator)$';
 

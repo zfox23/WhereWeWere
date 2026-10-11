@@ -8,8 +8,8 @@ import type { NearbyVenue, VenueCategory } from '../../../client/src/types';
 import type { DistanceUnit } from './geo';
 
 const NEARBY_PAGE_SIZE = 20;
-const DEFAULT_NEARBY_RADIUS_METERS = 5000;
-const QUERY_NEARBY_RADIUS_METERS = 10000;
+const DEFAULT_NEARBY_RADIUS_METERS = 2500;
+const QUERY_NEARBY_RADIUS_METERS = 5000;
 
 interface PlaceSearchResult {
   name: string;
