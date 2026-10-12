@@ -7,7 +7,7 @@
  */
 
 import type { PluginReflectionCardProps } from 'wwp-shared';
-import { MOOD_LABELS, MoodIcon } from './MoodIcons';
+import { MOOD_LABELS, MOOD_COLORS, MoodIcon } from './MoodIcons';
 import { pluginDetailPath } from '../../../client/src/plugins/registry';
 import { ReflectionCard } from '../../../client/src/components/reflection/ReflectionCard';
 
@@ -24,6 +24,7 @@ export function MoodReflectionCard({ item }: PluginReflectionCardProps) {
       to={detailPath}
       icon={mood ? <MoodIcon mood={mood} pack="emoji" size={13} /> : undefined}
       title={label}
+      titleClassName={mood ? `font-medium ${MOOD_COLORS[mood]}` : undefined}
       note={item.note}
       checkedInAt={item.checked_in_at}
       timezone={moodTimezone}

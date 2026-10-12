@@ -27,6 +27,8 @@ interface ReflectionCardProps {
   /** Optional leading icon (plugin accent). */
   icon?: ReactNode;
   title: string;
+  /** Title classes (plugin accent color); defaults to neutral. */
+  titleClassName?: string;
   /** Optional secondary text on the title row (e.g. category, distance). */
   meta?: ReactNode;
   /** Optional quoted note line. */
@@ -37,9 +39,10 @@ interface ReflectionCardProps {
   timeTo?: string | null;
 }
 
-export function ReflectionCard({ to, icon, title, meta, note, checkedInAt, timezone, timeTo }: ReflectionCardProps) {
+export function ReflectionCard({ to, icon, title, titleClassName, meta, note, checkedInAt, timezone, timeTo }: ReflectionCardProps) {
   const titleHref = to ?? null;
   const timestampHref = timeTo ?? titleHref;
+  const titleClass = titleClassName ?? 'font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors';
 
   return (
     <div className="text-xs space-y-0">
@@ -50,12 +53,12 @@ export function ReflectionCard({ to, icon, title, meta, note, checkedInAt, timez
             to={titleHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-medium text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+            className={titleClass}
           >
             {title}
           </Link>
         ) : (
-          <span className="font-medium text-gray-900 dark:text-gray-100">{title}</span>
+          <span className={titleClass}>{title}</span>
         )}
         {meta ? <span className="text-gray-500 dark:text-gray-400">{meta}</span> : null}
       </div>

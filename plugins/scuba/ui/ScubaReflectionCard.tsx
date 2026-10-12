@@ -36,6 +36,7 @@ export function ScubaReflectionCard({ item }: PluginReflectionCardProps) {
       to={pluginDetailPath('scuba', item.id)}
       icon={<Waves size={13} className="shrink-0 text-cyan-600 dark:text-cyan-400" />}
       title={`Dived ${site || 'a dive'}`}
+      titleClassName="font-medium text-cyan-700 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 transition-colors"
       meta={bits}
       checkedInAt={item.checked_in_at}
     />

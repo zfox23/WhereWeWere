@@ -1,3 +1,4 @@
+import { MapPin } from 'lucide-react';
 import type { PluginReflectionCardProps, ReflectionEntry } from 'wwp-shared';
 import { ReflectionCard } from '../../../client/src/components/reflection/ReflectionCard';
 
@@ -20,6 +21,7 @@ export function LocationReflectionCard({ item }: PluginReflectionCardProps) {
     <ReflectionCard
       to={detailHref}
       timeTo={timeHref}
+      icon={<MapPin size={13} className="shrink-0 text-orange-500 dark:text-orange-400" />}
       title={it.venue_name || 'Unknown venue'}
       meta={locationBits.join(' · ')}
       note={it.note}

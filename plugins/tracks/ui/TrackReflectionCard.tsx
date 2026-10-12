@@ -56,6 +56,7 @@ export function TrackReflectionCard({ item }: PluginReflectionCardProps) {
       to={`/tracks/${item.id}`}
       icon={<Route size={13} className="shrink-0 text-rose-500" />}
       title={`${activityType}${name}`}
+      titleClassName="font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 transition-colors"
       meta={`${formatDistance(distanceM, distanceUnit)} in ${formatDuration(elapsedS)}`}
       checkedInAt={item.checked_in_at}
       timezone={data.timezone}

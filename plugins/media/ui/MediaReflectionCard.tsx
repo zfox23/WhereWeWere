@@ -47,6 +47,7 @@ export function MediaReflectionCard({ item }: PluginReflectionCardProps) {
       to={detail}
       icon={<Clapperboard size={13} className="shrink-0 text-violet-600 dark:text-violet-400" />}
       title={title}
+      titleClassName="font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 transition-colors"
       meta={[checkinLabel, episodeSuffix].filter(Boolean).join(' · ')}
       note={item.note}
       checkedInAt={item.checked_in_at}

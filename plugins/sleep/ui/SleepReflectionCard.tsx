@@ -36,6 +36,7 @@ export function SleepReflectionCard({ item }: PluginReflectionCardProps) {
       to={`/sleep-entries/${item.id}`}
       icon={<Moon size={13} className="shrink-0 text-indigo-500" />}
       title={`Slept for ${formatSleepDuration(startedAt, endedAt)}`}
+      titleClassName="font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
       checkedInAt={startedAt}
       timezone={data.sleep_timezone}
     />
