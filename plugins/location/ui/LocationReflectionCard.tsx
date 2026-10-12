@@ -23,6 +23,7 @@ export function LocationReflectionCard({ item }: PluginReflectionCardProps) {
       timeTo={timeHref}
       icon={<MapPin size={13} className="shrink-0 text-orange-500 dark:text-orange-400" />}
       title={it.venue_name || 'Unknown venue'}
+      titleClassName="font-medium text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 transition-colors"
       meta={locationBits.join(' · ')}
       note={it.note}
       checkedInAt={it.checked_in_at}
