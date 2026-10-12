@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import {
   MapPin, Tag, Navigation, Loader2, AlertCircle,
   Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink,
-  Navigation2, List, Plus, Trash2
+  Navigation2, List, Plus, Trash2, LocateFixed
 } from 'lucide-react';
 import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi, venueLists } from '../../../client/src/api/client';
 import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset, VenueList } from '../../../client/src/types';
@@ -622,10 +622,27 @@ export default function VenueDetail() {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Pin location</span>
-              <span className="font-mono text-xs text-gray-400">{safeEditLat.toFixed(6)}, {safeEditLng.toFixed(6)}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-gray-400">{safeEditLat.toFixed(6)}, {safeEditLng.toFixed(6)}</span>
+                {coords && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditLat(coords.lat);
+                      setEditLng(coords.lon);
+                    }}
+                    disabled={editSaving}
+                    aria-label="Reset pin to current location"
+                    title="Reset pin to current location"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-white text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-primary-400"
+                  >
+                    <LocateFixed size={12} />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="h-56 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-              <VenueEditMap initialCenter={[safeEditLat, safeEditLng]} zoom={15}
+              <VenueEditMap initialCenter={[safeEditLat, safeEditLng]} viewCenter={[safeEditLat, safeEditLng]} zoom={15}
                 onChange={(lat, lng) => { setEditLat(lat); setEditLng(lng); }} className="h-56 w-full" />
             </div>
           </div>
