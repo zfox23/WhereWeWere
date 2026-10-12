@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import type { TimelineItem } from '../../../client/src/types';
 import { CompanionName } from '../../../client/src/components/CompanionName';
+import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import Stars from '../../../client/src/components/Stars';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
 import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
@@ -41,7 +42,7 @@ export default function MediaCard({ item, compact = false }: MediaCardProps) {
 
   if (compact) {
     return (
-      <div className="bg-white/60 dark:bg-gray-900/60 rounded-xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-2.5">
+      <CardShell compact>
         <div className="flex items-center gap-2 min-w-0">
           <Link to={detailHref} className="shrink-0 group">
             {item.media_image_url ? (
@@ -80,12 +81,12 @@ export default function MediaCard({ item, compact = false }: MediaCardProps) {
             classNameOverride="mt-0 shrink-0"
           />
         </div>
-      </div>
+      </CardShell>
     );
   }
 
   return (
-    <div className="bg-white/70 dark:bg-gray-900/70 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+    <CardShell>
       <div className="flex gap-3">
         <Link to={detailHref} className="shrink-0 group">
           {item.media_image_url ? (
@@ -150,6 +151,6 @@ export default function MediaCard({ item, compact = false }: MediaCardProps) {
         timezone={item.media_timezone}
         mode="time"
       />
-    </div>
+    </CardShell>
   );
 }

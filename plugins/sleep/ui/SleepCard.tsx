@@ -7,9 +7,10 @@
  * legacy `sleep_*` timeline columns.
  */
 
-import { Moon, Pencil, Star } from 'lucide-react';
+import { Moon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { CheckinCardProps } from 'wwp-shared';
+import Stars from '../../../client/src/components/Stars';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 
@@ -32,13 +33,6 @@ function formatDuration(startedAt: string, endedAt: string): string {
   if (hours === 0) return `${minutes}m`;
   if (minutes === 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
-}
-
-function renderStars(rating: number): string {
-  const clamped = Math.max(0, Math.min(5, rating));
-  const full = Math.floor(clamped);
-  const half = clamped - full >= 0.5;
-  return `${'★'.repeat(full)}${half ? '½' : ''}`;
 }
 
 function getTimezoneAbbreviation(dateTime: string, timezone: string): string {
@@ -124,7 +118,7 @@ export function SleepCard({ item, compact = false }: CheckinCardProps) {
             Slept {formatDuration(startedAt, endedAt)}
           </Link>
           {rating > 0 && (
-            <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">{renderStars(rating)}</span>
+            <Stars value={rating} size={10} max={5} />
           )}
           <Link
             to={`/sleep-entries/${item.id}`}
@@ -145,12 +139,7 @@ export function SleepCard({ item, compact = false }: CheckinCardProps) {
           <div className="flex items-center gap-2 flex-wrap">
             <Moon size={16} className="text-indigo-500 shrink-0" />
             <span className="text-base font-semibold text-indigo-700 dark:text-indigo-300">Slept for {formatDuration(startedAt, endedAt)}</span>
-            {rating > 0 && (
-              <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
-                <Star size={12} className="fill-current" />
-                {renderStars(rating)}
-              </div>
-            )}
+            {rating > 0 && <Stars value={rating} size={12} max={5} />}
           </div>
 
           {data.comment && (
@@ -167,16 +156,6 @@ export function SleepCard({ item, compact = false }: CheckinCardProps) {
               {formatClockTime(startedAt, timezone)} - {endedAt && formatTimeWithShortDate(endedAt, timezone)} {timezoneLabel}
             </Link>
           </div>
-        </div>
-
-        <div className="flex items-center gap-1 shrink-0">
-          <Link
-            to={`/sleep-check-in?edit=${item.id}`}
-            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-all opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
-            title="Edit"
-          >
-            <Pencil size={14} />
-          </Link>
         </div>
       </div>
     </CardShell>

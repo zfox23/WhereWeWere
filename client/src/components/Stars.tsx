@@ -1,15 +1,17 @@
 import { Star } from 'lucide-react';
 
 interface StarsProps {
-  value: number; // 0-4
+  value: number;
   size?: number;
+  max?: number; // number of star positions (default 4)
 }
 
-/** Read-only 0-4 star display. */
-export default function Stars({ value, size = 14 }: StarsProps) {
+/** Read-only star display (default 0-4 scale). */
+export default function Stars({ value, size = 14, max = 4 }: StarsProps) {
+  const clamped = Math.max(0, Math.min(max, Math.round(value)));
   return (
-    <span className="inline-flex items-center gap-0.5" aria-label={`${value} of 4 stars`}>
-      {[1, 2, 3, 4].map((star) => (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${clamped} of ${max} stars`}>
+      {Array.from({ length: max }, (_, i) => i + 1).map((star) => (
         <Star
           key={star}
           size={size}

@@ -1,4 +1,4 @@
-import { Camera, Calendar, Map, MapPin, Pencil, Users } from 'lucide-react';
+import { Camera, Calendar, Map, MapPin, Users } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import type { CheckIn, Scrobble, ImmichAsset } from '../../../client/src/types';
 import Stars from '../../../client/src/components/Stars';
@@ -148,13 +148,6 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
               <Calendar size={14} />
             </Link>
           }
-          <Link
-            to={`/location-check-in?edit=${checkin.id}`}
-            className="pressable p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-all opacity-0 translate-x-1 scale-95 group-hover:opacity-100 group-focus-within:opacity-100 group-hover:translate-x-0 group-focus-within:translate-x-0 group-hover:scale-100 group-focus-within:scale-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
-            title="Edit"
-          >
-            <Pencil size={14} />
-          </Link>
         </div>
       </div>
     </CardShell>
