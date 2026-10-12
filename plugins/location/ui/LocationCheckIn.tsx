@@ -141,7 +141,7 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-        {editId ? 'Edit Check In' : 'Check In'}
+        {editId ? 'Edit Location Check In' : 'Location Check In'}
       </h1>
 
       {!selectedVenue && !editId ? (

@@ -52,6 +52,14 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [refreshingBrowserLocation, setRefreshingBrowserLocation] = useState(false);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
   const usedPrefetchRef = useRef(false);
+  // Once the user explicitly moves the search center (map click, place
+  // lookup, etc.), we must not overwrite it with the initial query params or
+  // the prefetched browser coordinates. The coord-initialization effect below
+  // depends on `searchNearby`, whose identity changes whenever `coords`
+  // changes — without this guard, that effect re-applies the
+  // initial/prefetched coordinates right after a map click, snapping the map
+  // back to the current location.
+  const userMovedCenterRef = useRef(false);
 
   // Custom venue form state
   const [customName, setCustomName] = useState('');
@@ -241,7 +249,9 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
   // Determine coordinates from explicit params or LocationContext prefetch.
   // Avoid a second geolocation flow here, which can duplicate nearby requests.
+  // Skips overwriting once the user has moved the center themselves.
   useEffect(() => {
+    if (userMovedCenterRef.current) return;
     if (initialLat !== undefined && initialLon !== undefined) {
       setCoords({ lat: initialLat, lon: initialLon });
       return;
@@ -410,6 +420,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
   const handleMapClick = useCallback((lat: number, lng: number) => {
     const newCoords = { lat, lon: lng };
+    userMovedCenterRef.current = true;
     setCoords(newCoords);
 
     // Clear any pending debounced search to search immediately
@@ -423,6 +434,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
   const handlePlaceSelect = useCallback((lat: number, lon: number) => {
     const newCoords = { lat, lon };
+    userMovedCenterRef.current = true;
     setLocationError(null);
     setCoords(newCoords);
 
@@ -552,6 +564,11 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
 
   return (
     <div className="space-y-3">
+      {/* Unified map and search center controls, venue search field, and
+          results list. Hidden while the custom venue form is open — those
+          controls aren't needed during venue creation. */}
+      {!showCreateForm && (
+      <>
       {/* Unified map and search center controls */}
       <div className="space-y-1.5 rounded-lg border border-gray-200 dark:border-gray-700 p-2.5">
         {/* Search by place name */}
@@ -642,10 +659,9 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           </div>
         ) : null}
       </div>
-      
-      <div className="space-y-1.5 rounded-lg border border-gray-200 dark:border-gray-700 p-2.5">
 
-      {/* Search input for venue filtering */}
+      <div className="space-y-1.5 rounded-lg border border-gray-200 dark:border-gray-700 p-2.5">
+        {/* Search input for venue filtering */}
       <div className="relative">
         <Search
           size={16}
@@ -779,6 +795,9 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           No venues found. Try a different search or create a custom venue.
         </p>
       )}
+      </div>
+      </>
+      )}
 
       {/* Create custom venue toggle */}
       {!showCreateForm ? (
@@ -786,6 +805,10 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           type="button"
           onClick={() => {
             setShowCreateForm(true);
+            // Pre-fill the venue name with the current search query, so a
+            // venue that wasn't found via search can be created without
+            // re-typing its name.
+            setCustomName(query.trim());
             if (coords) {
               setCustomLat(coords.lat);
               setCustomLng(coords.lon);
@@ -846,17 +869,43 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           )}
           {customLat != null && customLng != null && (
             <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Pin location</span>
+              <div className="mb-1.5 flex items-center justify-start gap-2">
                 <span className="font-mono text-xs text-gray-400">
                   {customLat.toFixed(6)}, {customLng.toFixed(6)}
                 </span>
+                {browserCoords && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomLat(browserCoords.lat);
+                      setCustomLng(browserCoords.lon);
+                    }}
+                    disabled={creatingCustom}
+                    aria-label="Reset pin to current location"
+                    title="Reset pin to current location"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-white text-gray-600 transition-colors hover:bg-gray-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-primary-400"
+                  >
+                    <LocateFixed size={12} />
+                  </button>
+                )}
               </div>
               <div className="h-96 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
                 <VenueEditMap
                   initialCenter={[customLat, customLng]}
                   viewCenter={customMapCenter}
                   zoom={15}
+                  markers={
+                    browserCoords
+                      ? [
+                          {
+                            lat: browserCoords.lat,
+                            lng: browserCoords.lon,
+                            label: 'Your current location',
+                            variant: 'current' as const,
+                          },
+                        ]
+                      : undefined
+                  }
                   onMapClick={(lat, lng) => {
                     setCustomLat(lat);
                     setCustomLng(lng);
@@ -888,7 +937,6 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           </div>
         </form>
       )}
-      </div>
     </div>
   );
 }

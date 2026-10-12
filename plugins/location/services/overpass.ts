@@ -219,7 +219,6 @@ const OVERPASS_USER_AGENT = 'WhereWeWere/1.0 (self-hosted checkin app)';
 // server, so each retry attempt moves to the next endpoint in the list.
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
 ];
 
