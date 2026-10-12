@@ -105,7 +105,7 @@ export function ScubaCard({ item, compact = false }: CheckinCardProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Waves size={16} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
-            <Link to={detailTo} className="text-base font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
+            <Link to={detailTo} className="text-base font-semibold text-cyan-700 dark:text-cyan-300 hover:text-cyan-800 dark:hover:text-cyan-200 transition-colors">
               {siteLabel(data)}
             </Link>
             {data.country && (

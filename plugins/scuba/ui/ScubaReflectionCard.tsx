@@ -7,9 +7,9 @@
  */
 
 import { Waves } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import type { PluginReflectionCardProps } from 'wwp-shared';
 import { pluginDetailPath } from '../../../client/src/plugins/registry';
+import { ReflectionCard } from '../../../client/src/components/reflection/ReflectionCard';
 import { formatDepth, useScubaUnits } from './units';
 
 interface ScubaReflectionData {
@@ -32,17 +32,12 @@ export function ScubaReflectionCard({ item }: PluginReflectionCardProps) {
     .join(' · ');
 
   return (
-    <Link
+    <ReflectionCard
       to={pluginDetailPath('scuba', item.id)}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 text-xs font-medium text-cyan-700 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 transition-colors"
-    >
-      <Waves size={13} className="shrink-0" />
-      <span>
-        Dived {site || 'a dive'}
-        {bits ? ` (${bits})` : ''}
-      </span>
-    </Link>
+      icon={<Waves size={13} className="shrink-0 text-cyan-600 dark:text-cyan-400" />}
+      title={`Dived ${site || 'a dive'}`}
+      meta={bits}
+      checkedInAt={item.checked_in_at}
+    />
   );
 }

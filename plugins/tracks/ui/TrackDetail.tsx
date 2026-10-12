@@ -11,7 +11,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import type { CheckInDetailProps } from 'wwp-shared';
 import {
   AlertCircle,
-  ArrowLeft,
   CalendarDays,
   Clock,
   Download,
@@ -37,6 +36,7 @@ import { settings } from '../../../client/src/api/client';
 import type { TrackEntry } from './types';
 import TrackGraph from './TrackGraph';
 import DualRangeSlider from '../../../client/src/components/DualRangeSlider';
+import { BackButton } from '../../../client/src/components/BackButton';
 import CompanionChipInput from '../../../client/src/components/CompanionChipInput';
 import { formatDistance, formatSpeed, type DistanceUnit } from '../../location/ui/geo';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../location/ui/geo';
@@ -541,13 +541,7 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
 
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-      >
-        <ArrowLeft size={14} />
-        Back
-      </Link>
+      <BackButton />
 
       {isEditing ? (
         <form

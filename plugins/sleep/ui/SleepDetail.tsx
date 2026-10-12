@@ -7,7 +7,8 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, CalendarDays, Clock, Loader2, Moon, Pencil, Trash2 } from 'lucide-react';
+import { AlertCircle, CalendarDays, Clock, Loader2, Moon, Pencil, Trash2 } from 'lucide-react';
+import { BackButton } from '../../../client/src/components/BackButton';
 import Stars from '../../../client/src/components/Stars';
 import { sleepEntries } from './api';
 import type { SleepEntry } from './types';
@@ -126,10 +127,7 @@ export default function SleepDetail({ id }: CheckInDetailProps) {
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
-      <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-        <ArrowLeft size={14} />
-        Back
-      </Link>
+      <BackButton />
 
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
         <div className="flex items-center gap-2 flex-wrap">

@@ -44,7 +44,7 @@ export function AutoProfileTab({ pluginId }: { pluginId: string }) {
       <StatCard icon={Smile} label="Check-ins" value={total.toLocaleString()} />
 
       {latest && (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-900/60 p-4">
+        <div className="rounded-xl border border-white/40 dark:border-gray-700/40 bg-white/60 dark:bg-gray-900/60 shadow-sm shadow-black/3 p-4">
           <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             Most recent
           </div>

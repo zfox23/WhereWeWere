@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, ArrowLeft, CalendarDays, Users, List } from 'lucide-react';
+import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, CalendarDays, Users, List } from 'lucide-react';
+import { BackButton } from '../../../client/src/components/BackButton';
 import Stars from '../../../client/src/components/Stars';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
 import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi, checkinLists } from '../../../client/src/api/client';
@@ -162,11 +163,8 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
-      {/* Back link */}
-      <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-        <ArrowLeft size={14} />
-        Back
-      </Link>
+      {/* Back button */}
+      <BackButton />
 
       {/* Main card */}
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">

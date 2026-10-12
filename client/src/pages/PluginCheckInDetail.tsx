@@ -8,7 +8,8 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Pencil } from 'lucide-react';
+import { Loader2, Pencil } from 'lucide-react';
+import { BackButton } from '../components/BackButton';
 import { plugins, type GenericCheckin } from '../plugins/api';
 import { getClientPlugin } from '../plugins/registry';
 import { autoChips } from '../plugins/autoCard';
@@ -78,15 +79,9 @@ export default function PluginCheckInDetail() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400"
-      >
-        <ArrowLeft size={16} />
-        Back to timeline
-      </Link>
+      <BackButton />
 
-      <div className="mt-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-900/60 p-6">
+      <div className="mt-4 rounded-2xl border border-white/40 dark:border-gray-700/40 bg-white/60 dark:bg-gray-900/60 shadow-sm shadow-black/3 p-6">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
             {plugin.strings.title}

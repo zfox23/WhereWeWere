@@ -6,19 +6,10 @@
  * (built by the server's `reflectionBranch`).
  */
 
-import { Link } from 'react-router-dom';
 import type { PluginReflectionCardProps } from 'wwp-shared';
-import { MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
+import { MOOD_LABELS, MoodIcon } from './MoodIcons';
 import { pluginDetailPath } from '../../../client/src/plugins/registry';
-
-function formatReflectionTime(dateStr: string, timeZone?: string | null) {
-  return new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZoneName: 'short',
-    ...(timeZone ? { timeZone } : {}),
-  }).format(new Date(dateStr));
-}
+import { ReflectionCard } from '../../../client/src/components/reflection/ReflectionCard';
 
 export function MoodReflectionCard({ item }: PluginReflectionCardProps) {
   const data = (item.data ?? {}) as Record<string, unknown>;
@@ -29,29 +20,13 @@ export function MoodReflectionCard({ item }: PluginReflectionCardProps) {
   const detailPath = pluginDetailPath(item.type, item.id);
 
   return (
-    <div className="text-xs space-y-0">
-      <div className="flex flex-wrap items-center gap-2">
-        {mood ? (
-          <span className={`font-semibold ${MOOD_COLORS[mood] || 'text-gray-700 dark:text-gray-300'}`}>
-            {label}
-          </span>
-        ) : null}
-      </div>
-      {item.note ? (
-        <p className="text-gray-600 dark:text-gray-400 italic leading-relaxed">
-          {`"${item.note}"`}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-        <Link
-          to={detailPath}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-        >
-          {formatReflectionTime(item.checked_in_at, moodTimezone)}
-        </Link>
-      </div>
-    </div>
+    <ReflectionCard
+      to={detailPath}
+      icon={mood ? <MoodIcon mood={mood} pack="emoji" size={13} /> : undefined}
+      title={label}
+      note={item.note}
+      checkedInAt={item.checked_in_at}
+      timezone={moodTimezone}
+    />
   );
 }

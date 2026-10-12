@@ -7,9 +7,10 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Pencil, Waves } from 'lucide-react';
+import { CalendarDays, Loader2, Pencil, Waves } from 'lucide-react';
+import { BackButton } from '../../../client/src/components/BackButton';
 import { plugins, type GenericCheckin } from '../../../client/src/plugins/api';
-import { formatDate, formatTime } from '../../../client/src/utils/checkin';
+import { formatDate, formatTime, normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 import { formatDepth, formatPressure, formatTemp, formatWeight, useScubaUnits } from './units';
 
 const PLUGIN_ID = 'scuba';
@@ -77,18 +78,17 @@ export default function ScubaDetail() {
   const bool = (key: string): unknown => (d[key] === true ? 'Yes' : null);
 
   const site = [txt('place'), txt('city')].filter(Boolean).join(', ');
+  const dayTimezone = normalizeTimezoneForDisplay(row.checkin_timezone);
+  const dayKey = new Date(row.checked_in_at).toLocaleDateString('en-CA', {
+    ...(dayTimezone ? { timeZone: dayTimezone } : {}),
+  });
+  const dayTimelinePath = `/?from=${dayKey}&to=${dayKey}`;
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400"
-      >
-        <ArrowLeft size={16} />
-        Back to timeline
-      </Link>
+      <BackButton />
 
-      <div className="mt-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-900/60 p-6">
+      <div className="mt-4 rounded-2xl border border-white/40 dark:border-gray-700/40 bg-white/60 dark:bg-gray-900/60 shadow-sm shadow-black/3 p-6">
         <div className="flex items-center gap-3">
           <Waves size={22} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
           <div className="min-w-0">
@@ -101,13 +101,23 @@ export default function ScubaDetail() {
               {txt('country') ? ` · ${txt('country')}` : ''}
             </div>
           </div>
-          <Link
-            to={`/scuba-dive?edit=${row.id}`}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:border-primary-400 shrink-0"
-          >
-            <Pencil size={14} />
-            Edit
-          </Link>
+          <div className="ml-auto flex items-center gap-1 shrink-0">
+            <Link
+              to={dayTimelinePath}
+              aria-label="View this day on Home"
+              title="View this day on Home"
+              className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <CalendarDays size={16} />
+            </Link>
+            <Link
+              to={`/scuba-dive?edit=${row.id}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:border-primary-400"
+            >
+              <Pencil size={14} />
+              Edit
+            </Link>
+          </div>
         </div>
 
         <div className="mt-6 space-y-6">

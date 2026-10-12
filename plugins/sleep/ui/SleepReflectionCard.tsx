@@ -7,8 +7,8 @@
  */
 
 import { Moon } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import type { PluginReflectionCardProps } from 'wwp-shared';
+import { ReflectionCard } from '../../../client/src/components/reflection/ReflectionCard';
 
 interface SleepReflectionData {
   started_at?: string | null;
@@ -32,14 +32,12 @@ export function SleepReflectionCard({ item }: PluginReflectionCardProps) {
   if (!startedAt || !endedAt) return null;
 
   return (
-    <Link
+    <ReflectionCard
       to={`/sleep-entries/${item.id}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 text-xs font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
-    >
-      <Moon size={13} className="shrink-0" />
-      <span>Slept for {formatSleepDuration(startedAt, endedAt)}</span>
-    </Link>
+      icon={<Moon size={13} className="shrink-0 text-indigo-500" />}
+      title={`Slept for ${formatSleepDuration(startedAt, endedAt)}`}
+      checkedInAt={startedAt}
+      timezone={data.sleep_timezone}
+    />
   );
 }

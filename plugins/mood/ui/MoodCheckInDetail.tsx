@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Clock, Pencil, Trash2, Loader2, AlertCircle, ArrowLeft, CalendarDays } from 'lucide-react';
+import { Clock, Pencil, Trash2, Loader2, AlertCircle, CalendarDays } from 'lucide-react';
+import { BackButton } from '../../../client/src/components/BackButton';
 import { moodCheckins } from './api';
 import { plugins } from '../../../client/src/plugins/api';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
@@ -95,9 +96,7 @@ export default function MoodCheckInDetail() {
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
       {/* Back button */}
-      <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white mb-4">
-        <ArrowLeft size={16} /> Back
-      </button>
+      <BackButton />
 
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-6 space-y-4">
         {/* Mood */}

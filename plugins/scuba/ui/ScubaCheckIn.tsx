@@ -220,7 +220,7 @@ function RatingField({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-900/60 p-4 space-y-3">
+    <section className="rounded-2xl border border-white/40 dark:border-gray-700/40 bg-white/60 dark:bg-gray-900/60 shadow-sm shadow-black/3 p-4 space-y-3">
       <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{title}</h2>
       {children}
     </section>
@@ -489,7 +489,7 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
           </div>
         </Section>
 
-        <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-900/60 overflow-hidden">
+        <div className="rounded-2xl border border-white/40 dark:border-gray-700/40 bg-white/60 dark:bg-gray-900/60 shadow-sm shadow-black/3 overflow-hidden">
           <button
             type="button"
             onClick={() => setShowAdvanced((s) => !s)}
