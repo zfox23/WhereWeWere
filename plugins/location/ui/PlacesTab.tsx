@@ -20,6 +20,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { stats } from '../../../client/src/api/client';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import { getThemeDefinition } from '../../../client/src/themes';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
 import { CategoryChart, TopVenuesList } from './LocationStats';
@@ -88,22 +89,21 @@ const TIME_COLORS: Record<string, string> = {
   Night: 'bg-slate-500',
 };
 
-function getVenuePinIcon(checkinCount: number, resolvedTheme: 'light' | 'dark'): L.DivIcon {
+function getVenuePinIcon(
+  checkinCount: number,
+  resolvedTheme: 'light' | 'dark',
+  palette: Record<string, string>
+): L.DivIcon {
+  const rgb = (step: string) => `rgb(${palette[step]})`;
   const badge = checkinCount > 99 ? '99+' : String(checkinCount);
   const size = checkinCount >= 25 ? 42 : checkinCount >= 10 ? 38 : 34;
   const pointerHeight = 12;
-  const background = resolvedTheme === 'dark'
-    ? checkinCount >= 25
-      ? 'linear-gradient(135deg, #fdba74 0%, #f97316 100%)'
-      : checkinCount >= 10
-        ? 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)'
-        : 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)'
-    : checkinCount >= 25
-      ? 'linear-gradient(135deg, #c2410c 0%, #f97316 100%)'
-      : checkinCount >= 10
-        ? 'linear-gradient(135deg, #ea580c 0%, #fb923c 100%)'
-        : 'linear-gradient(135deg, #f97316 0%, #fdba74 100%)';
-  const pointerColor = resolvedTheme === 'dark' ? '#f97316' : '#c2410c';
+  const background = checkinCount >= 25
+    ? `linear-gradient(135deg, ${rgb('400')} 0%, ${rgb('500')} 100%)`
+    : checkinCount >= 10
+      ? `linear-gradient(135deg, ${rgb('500')} 0%, ${rgb('600')} 100%)`
+      : `linear-gradient(135deg, ${rgb('500')} 0%, ${rgb('700')} 100%)`;
+  const pointerColor = rgb(resolvedTheme === 'dark' ? '500' : '600');
 
   return L.divIcon({
     className: 'venue-pin-icon',
@@ -146,44 +146,203 @@ function getClusterRadius(venueCount: number, checkinCount: number): number {
   return 16;
 }
 
+const MAX_CLUSTER_RADIUS_PX = 28; // must match the max returned by getClusterRadius
+
 function buildClusteredVenueItems(map: L.Map, data: MapDataPoint[], zoom: number, maxZoom: number): ClusteredVenueItem[] {
   if (zoom >= maxZoom) {
     return data.map((venue) => ({ kind: 'venue', venue }));
   }
 
-  // Cluster any pins whose projected pixel coordinates fall in the same ~44 px cell.
-  // 44 px matches the largest pin diameter so visually-overlapping pins always merge,
-  // and this threshold applies at every zoom level without any early exit.
-  const CLUSTER_CELL_PX = 44;
-  const buckets = new Map<string, MapDataPoint[]>();
+  // ── Pass 0: project each point exactly once and cull to the padded viewport.
+  // Points far off-screen never need to be clustered or drawn; with a half-viewport
+  // margin, circles at the screen edge stay stable while the user pans a little.
+  const bounds = map.getBounds();
+  const nw = map.project(bounds.getNorthWest(), zoom);
+  const se = map.project(bounds.getSouthEast(), zoom);
+  const size = map.getSize();
+  const marginX = size.x * 0.5;
+  const marginY = size.y * 0.5;
+  const minX = Math.min(nw.x, se.x) - marginX;
+  const maxX = Math.max(nw.x, se.x) + marginX;
+  const minY = Math.min(nw.y, se.y) - marginY;
+  const maxY = Math.max(nw.y, se.y) + marginY;
 
+  interface ProjectedVenue {
+    venue: MapDataPoint;
+    x: number;
+    y: number;
+    weight: number;
+  }
+
+  const projected: ProjectedVenue[] = [];
   for (const venue of data) {
     const point = map.project([venue.latitude, venue.longitude], zoom);
-    const key = `${Math.floor(point.x / CLUSTER_CELL_PX)}:${Math.floor(point.y / CLUSTER_CELL_PX)}`;
+    if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) {
+      continue;
+    }
+    projected.push({
+      venue,
+      x: point.x,
+      y: point.y,
+      weight: venue.checkin_count > 0 ? venue.checkin_count : 1,
+    });
+  }
+
+  if (projected.length === 0) {
+    return [];
+  }
+
+  // ── Pass 1: bucket into ~44 px grid cells. 44 px matches the largest pin diameter
+  // so visually-overlapping pins always merge, at every zoom level.
+  const CLUSTER_CELL_PX = 44;
+  const buckets = new Map<string, ProjectedVenue[]>();
+  for (const pv of projected) {
+    const key = `${Math.floor(pv.x / CLUSTER_CELL_PX)}:${Math.floor(pv.y / CLUSTER_CELL_PX)}`;
     const bucket = buckets.get(key);
     if (bucket) {
-      bucket.push(venue);
+      bucket.push(pv);
     } else {
-      buckets.set(key, [venue]);
+      buckets.set(key, [pv]);
     }
   }
 
-  return Array.from(buckets.entries()).map(([key, venues]) => {
-    if (venues.length === 1) {
-      return { kind: 'venue', venue: venues[0] };
+  // ── Pass 2: merge clusters whose circles overlap.
+  // A grid cell only guarantees that *pins* merge; it says nothing about circle radii,
+  // so clusters in adjacent cells can still have intersecting circles. Iteratively merge
+  // any two clusters whose weighted bounding disks overlap until all circles are
+  // disjoint. Nodes cache their weighted pixel sums so centroids are O(1) and a merge
+  // is a handful of additions; a spatial hash (cell size = 2x max radius) means each
+  // node is only compared with nodes in its own and neighboring cells, and all
+  // non-conflicting merges in a pass are applied together. Every merge pass strictly
+  // reduces the node count, so this terminates in ~O(n) work per pass.
+  interface ClusterNode {
+    venues: MapDataPoint[];
+    sumX: number;
+    sumY: number;
+    weight: number;
+    checkins: number;
+  }
+
+  const nodes: ClusterNode[] = Array.from(buckets.values()).map((pvs) => {
+    let sumX = 0;
+    let sumY = 0;
+    let weight = 0;
+    let checkins = 0;
+    const venues = new Array<MapDataPoint>(pvs.length);
+    for (let i = 0; i < pvs.length; i++) {
+      const pv = pvs[i];
+      venues[i] = pv.venue;
+      sumX += pv.x * pv.weight;
+      sumY += pv.y * pv.weight;
+      weight += pv.weight;
+      checkins += pv.venue.checkin_count;
+    }
+    return { venues, sumX, sumY, weight, checkins };
+  });
+
+  const nodeRadius = (node: ClusterNode): number => getClusterRadius(node.venues.length, node.checkins);
+
+  const HASH_CELL_PX = MAX_CLUSTER_RADIUS_PX * 2;
+
+  let mergedAny = true;
+  while (mergedAny) {
+    mergedAny = false;
+
+    const centroids = nodes.map((node) => L.point(node.sumX / node.weight, node.sumY / node.weight));
+
+    const grid = new Map<string, number[]>();
+    for (let i = 0; i < nodes.length; i++) {
+      const key = `${Math.floor(centroids[i].x / HASH_CELL_PX)}:${Math.floor(centroids[i].y / HASH_CELL_PX)}`;
+      const cell = grid.get(key);
+      if (cell) {
+        cell.push(i);
+      } else {
+        grid.set(key, [i]);
+      }
     }
 
-    const totalCheckins = venues.reduce((sum, venue) => sum + venue.checkin_count, 0);
-    const weightedLat = venues.reduce((sum, venue) => sum + (venue.latitude * venue.checkin_count), 0) / totalCheckins;
-    const weightedLng = venues.reduce((sum, venue) => sum + (venue.longitude * venue.checkin_count), 0) / totalCheckins;
+    // Find a maximal set of non-conflicting overlapping pairs, then apply them together.
+    const consumed = new Set<number>();
+    const targets = new Map<number, number[]>();
+
+    for (let i = 0; i < nodes.length; i++) {
+      if (consumed.has(i)) continue;
+      const ci = centroids[i];
+      const hx = Math.floor(ci.x / HASH_CELL_PX);
+      const hy = Math.floor(ci.y / HASH_CELL_PX);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const cell = grid.get(`${hx + dx}:${hy + dy}`);
+          if (!cell) continue;
+          for (const j of cell) {
+            if (j <= i || consumed.has(j)) continue;
+            if (ci.distanceTo(centroids[j]) < nodeRadius(nodes[i]) + nodeRadius(nodes[j])) {
+              consumed.add(i);
+              consumed.add(j);
+              const list = targets.get(i);
+              if (list) {
+                list.push(j);
+              } else {
+                targets.set(i, [j]);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (targets.size === 0) {
+      break;
+    }
+
+    mergedAny = true;
+    const targetSet = new Set<number>();
+    for (const ts of targets.values()) {
+      for (const t of ts) {
+        targetSet.add(t);
+      }
+    }
+
+    const merged: ClusterNode[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      if (targetSet.has(i)) continue;
+      let node = nodes[i];
+      const ts = targets.get(i);
+      if (ts) {
+        for (const t of ts) {
+          const other = nodes[t];
+          node = {
+            venues: [...node.venues, ...other.venues],
+            sumX: node.sumX + other.sumX,
+            sumY: node.sumY + other.sumY,
+            weight: node.weight + other.weight,
+            checkins: node.checkins + other.checkins,
+          };
+        }
+      }
+      merged.push(node);
+    }
+    nodes.length = 0;
+    for (const node of merged) {
+      nodes.push(node);
+    }
+  }
+
+  return nodes.map((node, index) => {
+    if (node.venues.length === 1) {
+      return { kind: 'venue' as const, venue: node.venues[0] };
+    }
+
+    const center = map.unproject(L.point(node.sumX / node.weight, node.sumY / node.weight), zoom);
 
     return {
-      kind: 'cluster',
-      id: key,
-      latitude: weightedLat,
-      longitude: weightedLng,
-      checkinCount: totalCheckins,
-      venues: [...venues].sort((a, b) => b.checkin_count - a.checkin_count),
+      kind: 'cluster' as const,
+      id: `cluster-${index}`,
+      latitude: center.lat,
+      longitude: center.lng,
+      checkinCount: node.checkins,
+      venues: [...node.venues].sort((a, b) => b.checkin_count - a.checkin_count),
     };
   });
 }
@@ -202,6 +361,27 @@ function splitFormattedTimestamp(value: string): { datePart: string; timePart: s
 
 function buildMaxZoomPlacements(map: L.Map, venues: MapDataPoint[], zoom: number): VenueMarkerPlacement[] {
   const MIN_MARKER_SPACING_PX = 44;
+
+  // Cull to the padded viewport: off-screen pins never need a DOM node or
+  // a placement search. They come back via the moveend-driven recompute.
+  const bounds = map.getBounds();
+  const nw = map.project(bounds.getNorthWest(), zoom);
+  const se = map.project(bounds.getSouthEast(), zoom);
+  const size = map.getSize();
+  const minX = Math.min(nw.x, se.x) - size.x * 0.5;
+  const maxX = Math.max(nw.x, se.x) + size.x * 0.5;
+  const minY = Math.min(nw.y, se.y) - size.y * 0.5;
+  const maxY = Math.max(nw.y, se.y) + size.y * 0.5;
+
+  const visibleVenues: MapDataPoint[] = [];
+  for (const venue of venues) {
+    const point = map.project([venue.latitude, venue.longitude], zoom);
+    if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) {
+      continue;
+    }
+    visibleVenues.push(venue);
+  }
+
   const placedPoints: L.Point[] = [];
 
   const overlaps = (candidate: L.Point): boolean => {
@@ -232,7 +412,7 @@ function buildMaxZoomPlacements(map: L.Map, venues: MapDataPoint[], zoom: number
     return basePoint;
   };
 
-  return venues.map((venue) => {
+  return visibleVenues.map((venue) => {
     const basePoint = map.project([venue.latitude, venue.longitude], zoom);
     const placedPoint = findPlacementPoint(basePoint);
     placedPoints.push(placedPoint);
@@ -254,11 +434,16 @@ function VenueMapMarkers({
   data: MapDataPoint[];
 }) {
   const map = useMap();
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, resolvedThemeId } = useTheme();
+  const themePalette = getThemeDefinition(resolvedThemeId).palette;
   const [zoom, setZoom] = useState(() => map.getZoom());
+  // Bump when the viewport moves so the (viewport-culled) clustering recomputes
+  // after pans settle, without reworking mid-gesture.
+  const [viewportVersion, setViewportVersion] = useState(0);
 
   useMapEvents({
     zoomend: () => setZoom(map.getZoom()),
+    moveend: () => setViewportVersion((v) => v + 1),
   });
 
   const maxZoom = map.getMaxZoom();
@@ -266,7 +451,7 @@ function VenueMapMarkers({
 
   const items = useMemo(
     () => buildClusteredVenueItems(map, data, zoom, maxZoom),
-    [data, zoom, maxZoom]
+    [data, map, zoom, maxZoom, viewportVersion]
   );
 
   const markerPlacements = useMemo(() => {
@@ -301,18 +486,21 @@ function VenueMapMarkers({
   }, [data]);
 
   // Memoize polyline pathOptions to avoid object creation on every render
-  const polylinePathOptions = useMemo(() => ({
-    light: {
-      color: '#c2410c',
-      weight: 2,
-      opacity: 0.65,
-    },
-    dark: {
-      color: '#fb923c',
-      weight: 2,
-      opacity: 0.65,
-    },
-  }), []);
+  const polylinePathOptions = useMemo(() => {
+    const color = `rgb(${themePalette[resolvedTheme === 'dark' ? '400' : '600']})`;
+    return {
+      light: {
+        color,
+        weight: 2,
+        opacity: 0.65,
+      },
+      dark: {
+        color,
+        weight: 2,
+        opacity: 0.65,
+      },
+    };
+  }, [themePalette, resolvedTheme]);
 
   return (
     <>
@@ -332,7 +520,7 @@ function VenueMapMarkers({
               )}
               <Marker
                 position={markerPosition}
-                icon={getVenuePinIcon(venue.checkin_count, resolvedTheme)}
+                icon={getVenuePinIcon(venue.checkin_count, resolvedTheme, themePalette)}
               >
                 <LeafletPopup>
                   <div className="p-2 text-sm min-w-[220px] max-w-[260px] space-y-1.5 rounded-md border border-gray-200 bg-white text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
@@ -379,9 +567,9 @@ function VenueMapMarkers({
             center={[item.latitude, item.longitude]}
             radius={getClusterRadius(item.venues.length, item.checkinCount)}
             pathOptions={{
-              color: resolvedTheme === 'dark' ? '#fb923c' : '#c2410c',
+              color: `rgb(${themePalette[resolvedTheme === 'dark' ? '400' : '600']})`,
               weight: 2,
-              fillColor: resolvedTheme === 'dark' ? '#f97316' : '#ea580c',
+              fillColor: `rgb(${themePalette['500']})`,
               fillOpacity: 0.34,
             }}
             eventHandlers={{
