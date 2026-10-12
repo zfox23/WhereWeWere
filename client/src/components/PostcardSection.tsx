@@ -295,9 +295,23 @@ function PostcardCard({
           <div className="flex h-full gap-2 p-2">
             {/* Collage */}
             <div
-              className="flex-1 grid gap-1.5 overflow-hidden"
+              className="relative flex-1 grid gap-1.5 overflow-hidden"
               style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))' }}
             >
+              {/* Immich deep-link overlay */}
+              {immichUrl && (
+                <a
+                  href={buildImmichPeriodUrl(immichUrl, postcard.from, postcard.to)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 rounded-md bg-white/80 dark:bg-gray-900/80 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-gray-800 hover:underline backdrop-blur-sm"
+                >
+                  <ExternalLink size={10} />
+                  View in Immich
+                </a>
+              )}
               {postcard.images.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center gap-1 text-gray-400 bg-amber-900/5 dark:bg-white/5 rounded-lg">
                   <ImageOff size={20} />
