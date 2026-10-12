@@ -7,7 +7,8 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, CalendarDays, Clock, Loader2, Moon, Pencil, Star, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, CalendarDays, Clock, Loader2, Moon, Pencil, Trash2 } from 'lucide-react';
+import Stars from '../../../client/src/components/Stars';
 import { sleepEntries } from './api';
 import type { SleepEntry } from './types';
 import type { CheckInDetailProps } from 'wwp-shared';
@@ -64,13 +65,6 @@ function getTimezoneAbbreviation(dateTime: string, timezone: string): string {
   } catch {
     return timezone;
   }
-}
-
-function renderStars(rating: number): string {
-  const clamped = Math.max(0, Math.min(5, rating));
-  const full = Math.floor(clamped);
-  const half = clamped - full >= 0.5;
-  return `${'★'.repeat(full)}${half ? '½' : ''}`;
 }
 
 export default function SleepDetail({ id }: CheckInDetailProps) {
@@ -149,9 +143,8 @@ export default function SleepDetail({ id }: CheckInDetailProps) {
         </div>
 
         {entry.rating > 0 && (
-          <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
-            <Star size={12} className="fill-current" />
-            {renderStars(entry.rating)}
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+            <Stars value={entry.rating} size={12} max={5} />
             <span className="text-[11px] text-amber-600/80 dark:text-amber-300/80">({entry.rating.toFixed(1)})</span>
           </div>
         )}

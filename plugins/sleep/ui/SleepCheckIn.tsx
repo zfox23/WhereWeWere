@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Moon, Star, Trash2 } from 'lucide-react';
+import Stars from '../../../client/src/components/Stars';
 import { sleepEntries } from './api';
 import type { SleepEntry } from './types';
 import type { CheckInFormProps } from 'wwp-shared';
@@ -68,11 +69,6 @@ function getLocalTimeZoneAbbreviation(localDateTime: string): string {
     .find((part) => part.type === 'timeZoneName');
 
   return timeZonePart?.value ?? '';
-}
-
-function renderStars(rating: number): string {
-  const clamped = Math.max(0, Math.min(5, Math.round(rating)));
-  return clamped === 0 ? 'Unrated' : `${'★'.repeat(clamped)} (${clamped})`;
 }
 
 export default function SleepCheckIn({ editId, dateParam, onCreated, onUpdated }: CheckInFormProps) {
@@ -274,7 +270,16 @@ export default function SleepCheckIn({ editId, dateParam, onCreated, onUpdated }
           ))}
         </div>
 
-        <p className="text-xs text-gray-500 dark:text-gray-400">{renderStars(rating)}</p>
+        <p className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+          {rating > 0 ? (
+            <>
+              <Stars value={rating} size={12} max={5} />
+              <span>{rating}/5</span>
+            </>
+          ) : (
+            'Unrated'
+          )}
+        </p>
       </div>
 
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 p-4">
