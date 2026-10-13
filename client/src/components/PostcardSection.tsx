@@ -343,7 +343,13 @@ function PostcardCard({
                 {rows.map((row) => {
                   const rowImages = row.imageIds.map((id) => postcard.images.find((i) => i.id === id)!).filter(Boolean);
                   return (
-                    <div key={row.imageIds.join('-')} className="flex w-full" style={{ height: `${row.heightPct}%` }}>
+                    <div
+                      key={row.imageIds.join('-')}
+                      className="flex w-full"
+                      // Capped rows (a very portrait lone image) center their
+                      // uncropped image with side margins on the paper bg.
+                      style={{ height: `${row.heightPct}%`, justifyContent: row.capped ? 'center' : 'flex-start' }}
+                    >
                       {rowImages.map((img, i) =>
                         brokenImages.has(img.id) ? (
                           <div

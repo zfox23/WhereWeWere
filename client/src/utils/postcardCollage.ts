@@ -9,14 +9,22 @@
  *   image width w_i = W · a_i / Σ a_i   (widths sum to exactly W)
  *   row height  h  = W / Σ a_i          (row is 1/Σ a_i of the card wide-tall)
  *
- * Rows are formed greedily in narrative order: an image is added to the
- * current row while the running aspect sum stays at or below TARGET_ASPECT;
- * otherwise a new row starts.
+ * Row structure: the number of rows is chosen first (≈ n /
+ * TARGET_IMAGES_PER_ROW, clamped to 1..MAX_ROWS) and the images are
+ * distributed **evenly by count** across those rows in narrative order.
+ * That way no row is a lonely single image (except when the postcard has
+ * just one image), so rows stay visually balanced instead of one image
+ * spanning the full card width and becoming huge.
  *
- * The layout is expressed entirely in percentages and one container
- * aspect ratio (height / width), so it is resolution-independent — the
- * postcard front just gets `aspect-ratio: 1 / S` and grows taller as the
- * images demand.
+ * Safety net: a row taller than MAX_ROW_HEIGHT_FRACTION of the card width
+ * (possible with 1–2 very portrait images) is height-capped: its images
+ * are laid out uncropped at the capped height and centered, with side
+ * margins on the paper background.
+ *
+ * The layout is expressed entirely in percentages and one container aspect
+ * ratio (height / width), so it is resolution-independent — the postcard
+ * front just gets `aspect-ratio: 1 / S` and grows taller as the images
+ * demand.
  */
 
 export interface CollageInputImage {
@@ -27,22 +35,36 @@ export interface CollageInputImage {
 
 export interface CollageRow {
   imageIds: string[];
-  /** Each image's share of the row width, as a percentage (sums to 100). */
+  /**
+   * Each image's share of the card width, as a percentage. Sums to 100 for
+   * uncapped rows; less than 100 for capped rows (centered, with margins).
+   */
   widthPcts: number[];
   /** Row height as a percentage of the total collage height (sums to 100). */
   heightPct: number;
+  /** Row height as a fraction of the card width (clamped to the cap). */
+  heightFactor: number;
   /** Σ a_i of the row's images. */
   aspectSum: number;
+  /** True when the row was height-capped; images are centered. */
+  capped: boolean;
 }
 
 /** Aspect ratio assumed until a real one is known (EXIF or onLoad). */
 export const DEFAULT_ASPECT = 4 / 3;
 
+/** Target images per row when choosing how many rows the collage gets. */
+export const TARGET_IMAGES_PER_ROW = 3;
+
+/** Never use more rows than this (keeps the card from getting very tall). */
+export const MAX_ROWS = 5;
+
 /**
- * Target total aspect per row. 4.5 means 3 landscape (3:2) images or 6
- * portrait (2:3) images fit on a row, which keeps rows visually balanced.
+ * Maximum row height as a fraction of the card width. A row that would be
+ * taller than this (e.g. a single very portrait photo) is capped and its
+ * images are centered within the capped band.
  */
-export const TARGET_ASPECT = 4.5;
+export const MAX_ROW_HEIGHT_FRACTION = 1;
 
 /** Clamp an unknown/invalid aspect to something sane (0.2 .. 5). */
 export function sanitizeAspect(aspect: number | undefined | null): number {
@@ -51,49 +73,52 @@ export function sanitizeAspect(aspect: number | undefined | null): number {
     : DEFAULT_ASPECT;
 }
 
+/** How many rows a collage of `n` images should have (0 for none). */
+export function chooseRowCount(n: number, targetImagesPerRow: number = TARGET_IMAGES_PER_ROW): number {
+  if (n <= 0) return 0;
+  return Math.min(MAX_ROWS, Math.max(1, Math.round(n / targetImagesPerRow)));
+}
+
 /**
- * Lay out images into rows. Returns [] for no images. The returned rows
- * tile a box whose height-to-width ratio is `collageHeightFactor(rows)`.
+ * Lay out images into evenly-populated rows. Returns [] for no images.
+ * The returned rows tile a box whose height-to-width ratio is
+ * `collageHeightFactor(rows)`.
  */
 export function computeCollageRows(
   images: CollageInputImage[],
-  targetAspect: number = TARGET_ASPECT
+  targetImagesPerRow: number = TARGET_IMAGES_PER_ROW
 ): CollageRow[] {
   if (images.length === 0) return [];
 
-  // Greedy packing: start a new row when the next image would push the
-  // row's aspect sum past the target (an oversized single image still gets
-  // its own row, so the layout always terminates).
-  const packed: { img: CollageInputImage; a: number; sum: number }[][] = [];
-  let current: { img: CollageInputImage; a: number; sum: number }[] = [];
-  let currentSum = 0;
+  const rowCount = chooseRowCount(images.length, targetImagesPerRow);
 
-  const flush = () => {
-    if (current.length > 0) {
-      packed.push(current);
-      current = [];
-      currentSum = 0;
-    }
-  };
-
-  for (const img of images) {
-    const a = sanitizeAspect(img.aspect);
-    if (current.length > 0 && currentSum + a > targetAspect) flush();
-    current.push({ img, a, sum: currentSum + a });
-    currentSum += a;
+  // Even distribution: the first (n % rowCount) rows get one extra image.
+  const base = Math.floor(images.length / rowCount);
+  const remainder = images.length % rowCount;
+  const rows: CollageInputImage[][] = [];
+  let start = 0;
+  for (let r = 0; r < rowCount; r++) {
+    const size = base + (r < remainder ? 1 : 0);
+    if (size > 0) rows.push(images.slice(start, start + size));
+    start += size;
   }
-  flush();
 
-  // Collage height (in units of card width) = Σ (1 / aspectSum_row).
-  const totalInvAspect = packed.reduce((s, row) => s + 1 / row[row.length - 1].sum, 0);
+  const aspects = rows.map((row) => row.map((i) => sanitizeAspect(i.aspect)));
+  const sums = aspects.map((a) => a.reduce((s, x) => s + x, 0));
+  const factors = sums.map((s) => Math.min(1 / s, MAX_ROW_HEIGHT_FRACTION));
+  const total = factors.reduce((s, x) => s + x, 0);
 
-  return packed.map((row) => {
-    const aspectSum = row[row.length - 1].sum;
+  return rows.map((row, r) => {
+    const sum = sums[r];
+    const factor = factors[r];
+    const capped = 1 / sum > MAX_ROW_HEIGHT_FRACTION;
     return {
-      imageIds: row.map((r) => r.img.id),
-      widthPcts: row.map((r) => (r.a / aspectSum) * 100),
-      heightPct: (1 / aspectSum) / totalInvAspect * 100,
-      aspectSum,
+      imageIds: row.map((i) => i.id),
+      widthPcts: aspects[r].map((a) => (capped ? a * factor : a / sum) * 100),
+      heightPct: (factor / total) * 100,
+      heightFactor: factor,
+      aspectSum: sum,
+      capped,
     };
   });
 }
@@ -103,5 +128,5 @@ export function computeCollageRows(
  * The collage container should use `aspect-ratio: 1 / factor`.
  */
 export function collageHeightFactor(rows: CollageRow[]): number {
-  return rows.reduce((s, row) => s + 1 / row.aspectSum, 0);
+  return rows.reduce((s, r) => s + r.heightFactor, 0);
 }
