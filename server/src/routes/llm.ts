@@ -15,6 +15,7 @@ import { buildChronologicalEntries } from '../services/llmCompaction';
 import {
   addDays,
   currentMonthRange,
+  pickCollage,
   pickRandomTop,
   randomMacroWindow,
   randomSample,
@@ -356,7 +357,7 @@ interface PostcardPayload {
 
 const POSTCARD_SYSTEM_PROMPT = `You write postcards from a person's past to their present-day self.
 
-You'll receive journal data from a particular period in the user's life. This may include location check-ins, moods, activities, fitness, sleep, media, and dates associated with photographs. Use this information to write a postcard that makes the past feel close again: a small, personal dispatch from a life the recipient once lived.
+You'll receive journal data from a particular period in the user's life. This may include location check-ins, moods, activities, fitness, sleep, and media. Use this information to write a postcard that makes the past feel close again: a small, personal dispatch from a life the recipient once lived.
 
 Write as though you're someone who knows the recipient intimately because you have access to the details of this particular chapter of their life. You're not an outside observer summarizing their history, a therapist interpreting their feelings, or a narrator trying to make everything meaningful. You're simply reaching across time to share something worth remembering.
 
@@ -400,6 +401,8 @@ const POSTCARD_MAX_IMAGES = 10;
 const POSTCARD_IMAGE_POOL = 40;
 // LLM output budget for the postcard message (≈ 2 short paragraphs).
 const POSTCARD_MAX_TOKENS = 16384;
+// LLM output budget for visual-query extraction (a short JSON array).
+const POSTCARD_QUERY_MAX_TOKENS = 256;
 
 /**
  * Strip the `id = ANY($1::uuid[])` predicate (and a dangling AND/WHERE) that
@@ -496,21 +499,29 @@ async function pickInterestingPeriod(): Promise<CandidateWindow | null> {
   return pickRandomTop(candidates, POSTCARD_TOP_N);
 }
 
-/** Immich images for the period (random sample of up to 10). Null-safe. */
-async function postcardImages(from: string, to: string): Promise<PostcardImage[]> {
+/** The user's Immich connection settings, or null when unconfigured. */
+async function readImmichSettings(): Promise<{ url: string; apiKey: string } | null> {
   const settingsResult = await query(
     'SELECT immich_url, immich_api_key FROM user_settings WHERE user_id = $1',
     [USER_ID]
   );
   const row = settingsResult.rows[0];
-  if (!row?.immich_url || !row?.immich_api_key) return [];
-  const immichUrl = String(row.immich_url).replace(/\/+$/, '');
-  const immichApiKey = String(row.immich_api_key);
+  if (!row?.immich_url || !row?.immich_api_key) return null;
+  return {
+    url: String(row.immich_url).replace(/\/+$/, ''),
+    apiKey: String(row.immich_api_key),
+  };
+}
+
+/** Immich images for the period (random sample of up to 10). Null-safe. */
+async function postcardImages(from: string, to: string): Promise<PostcardImage[]> {
+  const immich = await readImmichSettings();
+  if (!immich) return [];
 
   try {
-    const response = await fetch(`${immichUrl}/api/search/metadata`, {
+    const response = await fetch(`${immich.url}/api/search/metadata`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': immichApiKey },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': immich.apiKey },
       body: JSON.stringify({
         takenAfter: `${from}T00:00:00.000Z`,
         takenBefore: `${to}T23:59:59.999Z`,
@@ -533,6 +544,79 @@ async function postcardImages(from: string, to: string): Promise<PostcardImage[]
     console.error('Postcard Immich search failed:', err);
     return [];
   }
+}
+
+/**
+ * The top Immich smart-search (context/CLIP) result for a query, restricted
+ * to the period. Null-safe: null on unconfigured, network error, non-OK
+ * response, or an empty result set.
+ */
+async function smartSearchTop(queryText: string, from: string, to: string): Promise<PostcardImage | null> {
+  const immich = await readImmichSettings();
+  if (!immich) return null;
+
+  try {
+    const response = await fetch(`${immich.url}/api/search/smart`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': immich.apiKey },
+      body: JSON.stringify({
+        query: queryText,
+        filter: {
+          takenAt: { gte: `${from}T00:00:00.000Z`, lte: `${to}T23:59:59.999Z` },
+          type: { eq: 'IMAGE' },
+        },
+        size: 1,
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as {
+      assets?: { items?: PostcardImage[] };
+    };
+    const item = (data.assets?.items || [])[0];
+    if (!item?.id) return null;
+    return {
+      id: item.id,
+      originalFileName: item.originalFileName,
+      localDateTime: item.localDateTime,
+    };
+  } catch (err) {
+    console.error('Postcard Immich smart search failed:', err);
+    return null;
+  }
+}
+
+const VISUAL_QUERY_SYSTEM_PROMPT = `You turn postcard text into short image-search phrases. From the given postcard text, list up to 10 short, concrete, photographable search phrases (each at most 12 words). Each phrase should target a different subject, place, object, scene, or activity the text mentions or evokes — something a photo taken during that period would plausibly show. Reply ONLY with a JSON array of strings, with no prose or markdown. Use fewer phrases than 10 only if the text genuinely has fewer distinct visual subjects; reply with [] if it has none.`;
+
+/**
+ * Derive up to POSTCARD_MAX_IMAGES short visual queries from a postcard
+ * message (a small, cheap LLM call). Returns [] on any failure so the
+ * caller can fall back to date-range sampling.
+ */
+async function extractVisualQueries(llm: LlmSettings, message: string): Promise<string[]> {
+  let raw: string;
+  try {
+    raw = await callLlm(llm, VISUAL_QUERY_SYSTEM_PROMPT, message, POSTCARD_QUERY_MAX_TOKENS);
+  } catch (err) {
+    console.error('Postcard visual query extraction failed:', err);
+    return [];
+  }
+  // Tolerate code fences or stray prose around the JSON array.
+  const start = raw.indexOf('[');
+  const end = raw.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((q): q is string => typeof q === 'string')
+    .map((q) => q.trim())
+    .filter((q) => q.length > 0)
+    .map((q) => q.split(/\s+/).slice(0, 12).join(' '))
+    .slice(0, POSTCARD_MAX_IMAGES);
 }
 
 /** City the user was in at (or just before) the end of the period. */
@@ -575,8 +659,7 @@ router.post('/postcard', async (_req: Request, res: Response) => {
     }
     const { from: fromStr, to: toStr } = period;
 
-    const [images, stampCity, toName, data] = await Promise.all([
-      postcardImages(fromStr, toStr),
+    const [stampCity, toName, data] = await Promise.all([
       stampCityAt(toStr),
       addressedTo(),
       gatherLifeData(fromStr, toStr),
@@ -589,14 +672,9 @@ router.post('/postcard', async (_req: Request, res: Response) => {
     const condensed = await condenseLifeData(llm, data.entries, finalBudget);
 
     const countsLine = formatCounts(data.totals) ? `\nCheck-ins in the period — ${formatCounts(data.totals)}.` : '';
-    const photosLine =
-      images.length > 0
-        ? ` Photos from the period were taken on: ${[...new Set(images.map((i) => (i.localDateTime || '').slice(0, 10)))].sort().join(', ')}.`
-        : '';
     const header =
       `Write the back of a postcard about my life from ${fromStr} to ${toStr}.` +
       countsLine +
-      photosLine +
       (condensed.mode === 'map-reduce'
         ? ' The data below is a condensed digest of ALL my check-ins in the period.'
         : '') +
@@ -614,6 +692,25 @@ router.post('/postcard', async (_req: Request, res: Response) => {
     if (!message) {
       return res.status(502).json({ error: 'LLM returned an empty postcard.' });
     }
+
+    // Context search: derive short visual queries from the message, then let
+    // each query's top smart-search result become a collage image (in query
+    // order), so the photos on the front match the text on the back. Any
+    // shortfall is backfilled with a random sample from the period.
+    const queries = await extractVisualQueries(llm, message);
+    let smartPicks: PostcardImage[] = [];
+    if (queries.length > 0) {
+      const results = await Promise.allSettled(
+        queries.map((q) => smartSearchTop(q, fromStr, toStr))
+      );
+      smartPicks = results
+        .map((r) => (r.status === 'fulfilled' ? r.value : null))
+        .filter((p): p is PostcardImage => p !== null);
+      console.log(
+        `Postcard context search — ${queries.length} quer(ies), ${smartPicks.length} image(s) matched.`
+      );
+    }
+    const images = pickCollage(smartPicks, await postcardImages(fromStr, toStr), POSTCARD_MAX_IMAGES);
 
     const senderLine = `${toName}, ${ymOf(toStr)}`;
     const inserted = await query(

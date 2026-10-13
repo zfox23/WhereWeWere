@@ -5,6 +5,7 @@ import {
   pickRandomTop,
   randomMacroWindow,
   randomSample,
+  pickCollage,
   scoreWindows,
   ymOf,
   type CandidateWindow,
@@ -191,6 +192,40 @@ describe('addDays / ymOf', () => {
 
   it('extracts YYYY-MM', () => {
     expect(ymOf('2024-07-02')).toBe('2024-07');
+  });
+});
+
+describe('pickCollage', () => {
+  const img = (id: string) => ({ id, originalFileName: `${id}.jpg`, localDateTime: '2026-01-05T10:00:00Z' });
+
+  it('keeps smart picks first, in query order', () => {
+    const picks = [img('a'), img('b'), img('c')];
+    const out = pickCollage(picks, [img('d')], 10);
+    expect(out.map((i) => i.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('drops duplicate ids, keeping the earliest occurrence', () => {
+    const out = pickCollage([img('a'), img('b')], [img('a'), img('c')], 10);
+    expect(out.map((i) => i.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('backfills only enough to reach max, and never re-adds used ids', () => {
+    const out = pickCollage([img('a')], [img('x'), img('a'), img('b'), img('c')], 3);
+    expect(out.map((i) => i.id)).toEqual(['a', 'x', 'b']);
+  });
+
+  it('caps the total at max even when smart picks alone exceed it', () => {
+    const out = pickCollage([img('a'), img('b'), img('c'), img('d')], [img('e')], 2);
+    expect(out.map((i) => i.id)).toEqual(['a', 'b']);
+  });
+
+  it('returns pure backfill when smart picks are empty', () => {
+    const out = pickCollage([], [img('p'), img('q')], 10);
+    expect(out.map((i) => i.id)).toEqual(['p', 'q']);
+  });
+
+  it('returns [] when both lists are empty', () => {
+    expect(pickCollage([], [], 10)).toEqual([]);
   });
 });
 

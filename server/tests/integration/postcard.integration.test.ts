@@ -21,23 +21,54 @@ const fakeLlm = {
   image_support: false,
 };
 
-function mockImmichFetch() {
-  return vi.fn(async (_url: unknown, _init?: unknown) => {
-    // The postcard route only calls fetch for Immich metadata (the LLM is
-    // mocked via the llmClient module). Return a small pool of images.
+const POSTCARD_MESSAGE =
+  'Hello there. This was a remarkable stretch of your life.\n\nTake a moment to remember it fondly.';
+
+interface MockAsset {
+  id: string;
+  originalFileName: string;
+  localDateTime: string;
+}
+
+/** The metadata-search pool (12 period images) used as the backfill source. */
+const METADATA_POOL: MockAsset[] = Array.from({ length: 12 }, (_, i) => ({
+  id: `img-${i}`,
+  originalFileName: `IMG_${i}.jpg`,
+  localDateTime: `2026-03-0${(i % 5) + 1}T10:00:00.000Z`,
+}));
+
+function mockImmichFetch(smartSearchByQuery?: Map<string, MockAsset[]>) {
+  return vi.fn(async (url: unknown, init?: unknown) => {
+    const u = String(url);
+    if (u.endsWith('/api/search/smart')) {
+      const body = JSON.parse((init as { body: string }).body) as { query: string };
+      const items = smartSearchByQuery?.get(body.query) ?? [];
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ assets: { items }, albums: { items: [] } }),
+      };
+    }
+    // /api/search/metadata — return the small pool of period images.
     return {
       ok: true,
       status: 200,
-      json: async () => ({
-        assets: {
-          items: Array.from({ length: 12 }, (_, i) => ({
-            id: `img-${i}`,
-            originalFileName: `IMG_${i}.jpg`,
-            localDateTime: `2026-03-0${(i % 5) + 1}T10:00:00.000Z`,
-          })),
-        },
-      }),
+      json: async () => ({ assets: { items: METADATA_POOL } }),
     };
+  });
+}
+
+/**
+ * Mock the two LLM calls in the postcard flow by inspecting the user
+ * content: the postcard call starts with "Write the back of a postcard",
+ * the query-extraction call receives the generated message verbatim.
+ */
+function mockLlmCalls(queries: string[]) {
+  vi.spyOn(llmClient, 'callLlm').mockImplementation(async (_llm, _system, user) => {
+    if (typeof user === 'string' && user.startsWith('Write the back of a postcard')) {
+      return POSTCARD_MESSAGE;
+    }
+    return JSON.stringify(queries);
   });
 }
 
@@ -50,10 +81,15 @@ describe('Postcard From Your Past (integration)', () => {
     await resetIntegrationDatabase();
     vi.spyOn(llmClient, 'getLlmSettings').mockResolvedValue(fakeLlm);
     // The data is small (well within budget), so no digest call happens; the
-    // single postcard call returns a fixed two-paragraph message.
-    vi.spyOn(llmClient, 'callLlm').mockResolvedValue(
-      'Hello there. This was a remarkable stretch of your life.\n\nTake a moment to remember it fondly.'
-    );
+    // postcard call returns a fixed two-paragraph message, and the
+    // query-extraction call returns [] (no visual subjects) so the collage
+    // falls back to the metadata date-range sample.
+    vi.spyOn(llmClient, 'callLlm').mockImplementation(async (_llm, _system, user) => {
+      if (typeof user === 'string' && user.startsWith('Write the back of a postcard')) {
+        return POSTCARD_MESSAGE;
+      }
+      return '[]';
+    });
     vi.stubGlobal('fetch', mockImmichFetch());
   });
 
@@ -204,5 +240,68 @@ describe('Postcard From Your Past (integration)', () => {
       '/api/v1/llm/postcards/00000000-0000-0000-0000-000000000099'
     );
     expect(unknown.status).toBe(404);
+  });
+
+  it('sources each collage image from its own smart search, in query order, with backfill', async () => {
+    await seedHistory();
+    mockLlmCalls(['supercar on a street', 'cafe in Lisbon', 'beach sunset']);
+    // "cafe in Lisbon"'s top result duplicates the first query's, and
+    // "beach sunset" has no results — both must be handled (dedup / backfill).
+    const fetchMock = mockImmichFetch(
+      new Map<string, MockAsset[]>([
+        ['supercar on a street', [{ id: 'smart-car', originalFileName: 'car.jpg', localDateTime: '2026-01-10T09:00:00Z' }]],
+        ['cafe in Lisbon', [{ id: 'smart-car', originalFileName: 'car.jpg', localDateTime: '2026-01-10T09:00:00Z' }]],
+        ['beach sunset', []],
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app).post('/api/v1/llm/postcard').send({});
+    expect(res.status).toBe(200);
+    const body = res.body;
+
+    // The first collage image is the first smart-search result…
+    expect(body.images[0].id).toBe('smart-car');
+    // …every id is unique…
+    const ids = body.images.map((i: { id: string }) => i.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // …and the remaining slots are backfilled from the metadata pool.
+    expect(body.images.length).toBe(10);
+    for (const id of ids.slice(1)) expect(id).toMatch(/^img-/);
+
+    // One smart search per query, each restricted to the period as IMAGEs.
+    const smartCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/search/smart'));
+    expect(smartCalls).toHaveLength(3);
+    for (const [, init] of smartCalls) {
+      const sent = JSON.parse((init as { body: string }).body) as {
+        filter: { takenAt: { gte: string; lte: string }; type: { eq: string } };
+        size: number;
+      };
+      expect(sent.size).toBe(1);
+      expect(sent.filter.type.eq).toBe('IMAGE');
+      expect(sent.filter.takenAt.gte).toBe(`${body.from}T00:00:00.000Z`);
+      expect(sent.filter.takenAt.lte).toBe(`${body.to}T23:59:59.999Z`);
+    }
+  });
+
+  it('falls back fully to the metadata sample when every smart search fails', async () => {
+    await seedHistory();
+    mockLlmCalls(['supercar on a street', 'cafe in Lisbon']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: unknown) => {
+        const u = String(url);
+        if (u.endsWith('/api/search/smart')) {
+          return { ok: false, status: 500, json: async () => ({}) };
+        }
+        return { ok: true, status: 200, json: async () => ({ assets: { items: METADATA_POOL } }) };
+      })
+    );
+
+    const res = await request(app).post('/api/v1/llm/postcard').send({});
+    expect(res.status).toBe(200);
+    const ids = res.body.images.map((i: { id: string }) => i.id);
+    expect(ids).toHaveLength(10);
+    for (const id of ids) expect(id).toMatch(/^img-/);
   });
 });

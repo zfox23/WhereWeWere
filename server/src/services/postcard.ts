@@ -6,7 +6,7 @@
  *   1. picks a random 6-month macro-window inside the user's overall
  *      check-in history,
  *   2. scores every day-aligned candidate sub-window (7 / 30 / 90 days) in
- *      that macro-window by density `count / sqrt(length)`,
+ *      that macro-window by density `count / length`,
  *   3. drops any window overlapping the current calendar month, and
  *   4. picks uniformly at random among the top 7 candidates.
  *
@@ -31,7 +31,7 @@ export interface CandidateWindow {
   to: string; // YYYY-MM-DD (inclusive)
   /** Total check-ins in the window. */
   count: number;
-  /** count / sqrt(length in days). */
+  /** count / length in days. */
   score: number;
 }
 
@@ -82,7 +82,7 @@ export function scoreWindows(
         from: dayStr(start),
         to: dayStr(end),
         count,
-        score: count / Math.sqrt(length),
+        score: count / length,
       });
     }
   }
@@ -159,4 +159,26 @@ export function randomSample<T>(arr: T[], n: number): T[] {
 /** YYYY-MM of a YYYY-MM-DD date (the "from" line suffix). */
 export function ymOf(date: string): string {
   return date.slice(0, 7);
+}
+
+/**
+ * Assemble a postcard collage: context-search picks first (in query order,
+ * so the collage mirrors the narrative order of the postcard text), then
+ * backfill images (e.g. a random date-range sample) to reach `max`.
+ * Duplicates by id are dropped, keeping the earliest occurrence.
+ */
+export function pickCollage<T extends { id: string }>(
+  smartPicks: T[],
+  backfill: T[],
+  max: number
+): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const img of [...smartPicks, ...backfill]) {
+    if (out.length >= max) break;
+    if (!img?.id || seen.has(img.id)) continue;
+    seen.add(img.id);
+    out.push(img);
+  }
+  return out;
 }
