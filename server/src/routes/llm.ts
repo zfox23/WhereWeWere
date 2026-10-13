@@ -340,6 +340,31 @@ interface PostcardImage {
   id: string;
   originalFileName: string;
   localDateTime: string;
+  /** Natural pixel dimensions (from EXIF) for aspect-ratio collage layout. */
+  width?: number;
+  height?: number;
+}
+
+/** Immich search-result asset shape (with optional EXIF dimensions). */
+interface ImmichAssetItem {
+  id: string;
+  originalFileName: string;
+  localDateTime: string;
+  exifImageWidth?: number | null;
+  exifImageHeight?: number | null;
+}
+
+/** Map an Immich search-result asset to a PostcardImage (EXIF dims included). */
+function toPostcardImage(a: ImmichAssetItem): PostcardImage {
+  const width = Number(a.exifImageWidth);
+  const height = Number(a.exifImageHeight);
+  return {
+    id: a.id,
+    originalFileName: a.originalFileName,
+    localDateTime: a.localDateTime,
+    ...(Number.isFinite(width) && width > 0 ? { width } : {}),
+    ...(Number.isFinite(height) && height > 0 ? { height } : {}),
+  };
 }
 
 interface PostcardPayload {
@@ -528,17 +553,14 @@ async function postcardImages(from: string, to: string): Promise<PostcardImage[]
         type: 'IMAGE',
         size: POSTCARD_IMAGE_POOL,
         order: 'asc',
+        withExif: true,
       }),
     });
     if (!response.ok) return [];
     const data = await response.json() as {
-      assets?: { items?: PostcardImage[] };
+      assets?: { items?: ImmichAssetItem[] };
     };
-    const all = (data.assets?.items || []).map((a) => ({
-      id: a.id,
-      originalFileName: a.originalFileName,
-      localDateTime: a.localDateTime,
-    }));
+    const all = (data.assets?.items || []).map(toPostcardImage);
     return randomSample(all, POSTCARD_MAX_IMAGES);
   } catch (err) {
     console.error('Postcard Immich search failed:', err);
@@ -566,19 +588,16 @@ async function smartSearchTop(queryText: string, from: string, to: string): Prom
           type: { eq: 'IMAGE' },
         },
         size: 1,
+        withExif: true,
       }),
     });
     if (!response.ok) return null;
     const data = await response.json() as {
-      assets?: { items?: PostcardImage[] };
+      assets?: { items?: ImmichAssetItem[] };
     };
     const item = (data.assets?.items || [])[0];
     if (!item?.id) return null;
-    return {
-      id: item.id,
-      originalFileName: item.originalFileName,
-      localDateTime: item.localDateTime,
-    };
+    return toPostcardImage(item);
   } catch (err) {
     console.error('Postcard Immich smart search failed:', err);
     return null;

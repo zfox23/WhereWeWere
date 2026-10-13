@@ -28,6 +28,8 @@ interface MockAsset {
   id: string;
   originalFileName: string;
   localDateTime: string;
+  exifImageWidth?: number;
+  exifImageHeight?: number;
 }
 
 /** The metadata-search pool (12 period images) used as the backfill source. */
@@ -35,6 +37,8 @@ const METADATA_POOL: MockAsset[] = Array.from({ length: 12 }, (_, i) => ({
   id: `img-${i}`,
   originalFileName: `IMG_${i}.jpg`,
   localDateTime: `2026-03-0${(i % 5) + 1}T10:00:00.000Z`,
+  exifImageWidth: 4000,
+  exifImageHeight: 3000,
 }));
 
 function mockImmichFetch(smartSearchByQuery?: Map<string, MockAsset[]>) {
@@ -193,6 +197,9 @@ describe('Postcard From Your Past (integration)', () => {
     for (const img of body.images) {
       expect(img.id).toMatch(/^img-/);
       expect(img.originalFileName).toMatch(/^IMG_/);
+      // EXIF dimensions are captured for the client's aspect-ratio collage.
+      expect(img.width).toBe(4000);
+      expect(img.height).toBe(3000);
     }
 
     // Persisted.

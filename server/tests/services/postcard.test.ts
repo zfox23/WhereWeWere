@@ -75,12 +75,12 @@ describe('scoreWindows', () => {
     const cBurst = scoreWindows(burst, [7], macro.from, macro.to);
     expect(cSustained.length).toBeGreaterThan(0);
     expect(cBurst.length).toBeGreaterThan(0);
-    // A 90-day sustained period (180 check-ins) scores 180/sqrt(90) ≈ 18.97;
-    // the 7-day burst (182 check-ins) scores 182/sqrt(7) ≈ 68.8 at its own
-    // length. The density metric compares windows of the SAME length, so
+    // A 90-day sustained period (180 check-ins) scores 180/90 = 2;
+    // the 7-day burst (182 check-ins) scores 182/7 ≈ 26 at its own length.
+    // The density metric compares windows of the SAME length, so
     // verify a sustained 30-day window (60 check-ins) scores as expected.
     const sameLength = scoreWindows(sustained, [30], macro.from, macro.to);
-    expect(sameLength[0].score).toBeCloseTo(60 / Math.sqrt(30), 5);
+    expect(sameLength[0].score).toBeCloseTo(60 / 30, 5);
   });
 
   it('ranks candidates by density, descending, at equal length', () => {
@@ -90,7 +90,7 @@ describe('scoreWindows', () => {
     for (const d of days('2024-01-20', 7)) daily.set(d, 2);
     const cands = scoreWindows(daily, [7], '2024-01-01', '2024-01-31', '', '');
     expect(cands[0].count).toBe(70);
-    expect(cands[0].score).toBeCloseTo(70 / Math.sqrt(7), 5);
+    expect(cands[0].score).toBeCloseTo(70 / 7, 5);
     // The lowest-scoring candidate is a window that only grazes the sparse
     // (2/day) cluster — its count is at most 14, and the sort order holds.
     const last = cands[cands.length - 1];
