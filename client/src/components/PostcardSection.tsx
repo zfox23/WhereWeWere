@@ -306,7 +306,9 @@ function PostcardCard({
           style={{ backfaceVisibility: 'hidden' }}
         >
           <div className="relative">
-            {/* Immich deep-link overlay */}
+            {/* Immich deep-link overlay — front only. Hidden by state as
+                well as the face's backface-visibility (backdrop-filter can
+                defeat the latter in some browsers). */}
             {immichUrl && (
               <a
                 href={buildImmichPeriodUrl(immichUrl, postcard.from, postcard.to)}
@@ -315,6 +317,10 @@ function PostcardCard({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
                 className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 rounded-md bg-white/80 dark:bg-gray-900/80 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-gray-800 hover:underline backdrop-blur-sm"
+                style={{
+                  visibility: flipped ? 'hidden' : 'visible',
+                  pointerEvents: flipped ? 'none' : 'auto',
+                }}
               >
                 <ExternalLink size={10} />
                 View in Immich
