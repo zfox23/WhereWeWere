@@ -1,12 +1,21 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, Plus, X, ExternalLink, Star, AlertTriangle } from 'lucide-react';
 import { media } from '../api';
-import type { MediaSearchHit } from '../types';
+import type { MediaLibraryItem, MediaSearchHit } from '../types';
 import type { MediaSubtype } from '../../../../client/src/types';
-import { MEDIA_SUBTYPES } from '../../utils/media';
+import { MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, formatCheckinDate } from '../../utils/media';
 import { slugify } from '../../../../client/src/utils/slugify';
 import Stars from '../../../../client/src/components/Stars';
+
+const SUGGESTION_COUNT = 10;
+
+const BADGE_CLASSES: Record<string, string> = {
+  completed: 'bg-green-100 text-green-700/90 dark:bg-green-900/90 dark:text-green-300',
+  in_progress: 'bg-amber-100 text-amber-700/90 dark:bg-amber-900/90 dark:text-amber-300',
+  started: 'bg-amber-100 text-amber-700/90 dark:bg-amber-900/90 dark:text-amber-300',
+  dropped: 'bg-red-100 text-red-700/90 dark:bg-red-900/90 dark:text-red-300',
+};
 
 interface MediaSearchProps {
   subtype: MediaSubtype;
@@ -29,6 +38,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
   const [customImageUrl, setCustomImageUrl] = useState('');
   const [savingCustom, setSavingCustom] = useState(false);
   const [customError, setCustomError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<MediaLibraryItem[]>([]);
   // Latest search wins: overlapping searches (e.g. repeated Enter) could
   // otherwise resolve out of order and show the older query's results.
   const searchSeqRef = useRef(0);
@@ -49,6 +59,39 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
       setResults(null);
     } finally {
       if (seq === searchSeqRef.current) setSearching(false);
+    }
+  };
+
+  // Suggestions: the items from this type's most recent check-ins.
+  useEffect(() => {
+    let cancelled = false;
+    setSuggestions([]);
+    media
+      .library(undefined, undefined, [subtype], SUGGESTION_COUNT)
+      .then((items) => {
+        if (cancelled) return;
+        setSuggestions(
+          items
+            .filter((i) => i.last_checkin_at)
+            .sort((a, b) => (b.last_checkin_at! > a.last_checkin_at! ? 1 : -1))
+            .slice(0, SUGGESTION_COUNT)
+        );
+      })
+      .catch(() => {
+        // Suggestions are a convenience; fail silently.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [subtype]);
+
+  const goToCheckIn = (id: string, title: string) => {
+    const slug = slugify(title);
+    if (subtype === 'tv_show') {
+      // Intermediate episode picker
+      navigate(`/media-check-in/tv/${id}/${slug}`);
+    } else {
+      navigate(`${config.searchPath}/${id}/${slug}`);
     }
   };
 
@@ -79,13 +122,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
       }
     }
     if (!id) return;
-    const slug = slugify(hit.title);
-    if (subtype === 'tv_show') {
-      // Intermediate episode picker
-      navigate(`/media-check-in/tv/${id}/${slug}`);
-    } else {
-      navigate(`${config.searchPath}/${id}/${slug}`);
-    }
+    goToCheckIn(id, hit.title);
   };
 
   const handleAddCustom = async () => {
@@ -154,6 +191,58 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
       )}
       {searchError && (
         <div className="text-sm text-red-600 dark:text-red-400">{searchError}</div>
+      )}
+
+      {/* Suggestions: recently checked-in items */}
+      {!results && suggestions.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400">Recent</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            {suggestions.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => goToCheckIn(item.id, item.title)}
+                className="group text-left flex flex-col bg-white/70 dark:bg-gray-900/70 rounded-lg border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 transition-shadow hover:ring-2 hover:ring-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+              >
+                <div className="relative">
+                  {item.image_url ? (
+                    <img
+                      src={item.image_url}
+                      alt=""
+                      className="w-full aspect-[2/3] object-cover rounded-t-lg shadow-sm"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full aspect-[2/3] rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-3xl">
+                      {config.icon}
+                    </div>
+                  )}
+                  {item.last_checkin_type && (
+                    <span
+                      className={`absolute top-2 right-2 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${BADGE_CLASSES[item.last_checkin_type] || BADGE_CLASSES.completed}`}
+                    >
+                      {item.last_checkin_type === 'completed' && item.completed_count > 1
+                        ? `${CHECKIN_TYPE_LABELS.completed} ${item.completed_count}x`
+                        : CHECKIN_TYPE_LABELS[item.last_checkin_type] || item.last_checkin_type}
+                    </span>
+                  )}
+                </div>
+                <div className="p-2.5">
+                  <p className="text-xs font-semibold leading-tight line-clamp-2 text-gray-800 dark:text-gray-200 group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                    {item.title}
+                  </p>
+                  {item.author && <p className="text-[11px] text-gray-400 truncate">{item.author}</p>}
+                  {item.last_checkin_at && (
+                    <p className="mt-1 text-[11px] text-gray-400 truncate">
+                      {formatCheckinDate(item.last_checkin_at, item.last_checkin_timezone)}
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Results table */}

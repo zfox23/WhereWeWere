@@ -1537,7 +1537,8 @@ async function refreshEpisodesFromTmdb(
   }
 }
 
-// GET /library?from=YYYY-MM-DD&to=YYYY-MM-DD&types=movie,tv_show
+// GET /library?from=YYYY-MM-DD&to=YYYY-MM-DD&types=movie,tv_show&limit=10
+// `limit` caps the rows returned (most recently checked-in first).
 // Media library view: one row per media item with at least one check-in in range,
 // including the latest rating, most recent check-in timestamp, and its type.
 router.get('/library', async (req: Request, res: Response) => {
@@ -1545,6 +1546,7 @@ router.get('/library', async (req: Request, res: Response) => {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
     const typesParam = req.query.types as string | undefined;
+    const limit = Number.parseInt(req.query.limit as string, 10);
 
     const requestedTypes = (typesParam ? typesParam.split(',') : [])
       .map((t) => t.trim())
@@ -1584,7 +1586,7 @@ router.get('/library', async (req: Request, res: Response) => {
        ${where}
        GROUP BY mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
                 mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status
-       ORDER BY last_checkin_at DESC NULLS LAST`,
+       ORDER BY last_checkin_at DESC NULLS LAST${Number.isInteger(limit) && limit > 0 ? ` LIMIT ${Math.min(limit, 1000)}` : ''}`,
       params
     );
 

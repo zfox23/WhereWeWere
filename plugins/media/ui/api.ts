@@ -120,11 +120,12 @@ export const media = {
     if (to) qp.set('to', to);
     return request<MediaStats>(`/media/stats?${qp.toString()}`);
   },
-  library: (from?: string, to?: string, types?: MediaSubtype[]) => {
+  library: (from?: string, to?: string, types?: MediaSubtype[], limit?: number) => {
     const qp = new URLSearchParams();
     if (from) qp.set('from', from);
     if (to) qp.set('to', to);
     if (types && types.length > 0) qp.set('types', types.join(','));
+    if (limit) qp.set('limit', String(limit));
     const qs = qp.toString();
     return request<MediaLibraryItem[]>(`/media/library${qs ? `?${qs}` : ''}`);
   },
