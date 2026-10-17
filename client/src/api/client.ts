@@ -411,6 +411,9 @@ export interface PostcardImage {
   id: string;
   originalFileName: string;
   localDateTime: string;
+  /** Natural pixel dimensions (EXIF, when available) for collage layout. */
+  width?: number;
+  height?: number;
 }
 
 export interface Postcard {

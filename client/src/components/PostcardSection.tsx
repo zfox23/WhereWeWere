@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Mail, Loader2, AlertCircle, RefreshCw, Trash2, ExternalLink, ImageOff } from 'lucide-react';
 import { llm as llmApi, immich as immichApi } from '../api/client';
-import type { Postcard, PostcardSummary } from '../api/client';
+import type { Postcard, PostcardImage, PostcardSummary } from '../api/client';
+import { DEFAULT_ASPECT, computeCollageRows, collageHeightFactor, sanitizeAspect } from '../utils/postcardCollage';
 
 interface LlmConfig {
   configured: boolean;
@@ -261,6 +262,20 @@ function PostcardCard({
   immichUrl: string | null;
 }) {
   const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
+  const [measured, setMeasured] = useState<Map<string, number>>(new Map());
+
+  const aspectOf = useCallback(
+    (img: PostcardImage) => {
+      const fromExif = img.width && img.height ? img.width / img.height : null;
+      return sanitizeAspect(measured.get(img.id) ?? fromExif ?? DEFAULT_ASPECT);
+    },
+    [measured]
+  );
+
+  const rows = computeCollageRows(postcard.images.map((img) => ({ id: img.id, aspect: aspectOf(img) })));
+  // Collage height relative to card width → the front face grows taller as
+  // needed; the back (absolute inset-0) always matches.
+  const heightFactor = collageHeightFactor(rows);
 
   return (
     <div
@@ -283,72 +298,107 @@ function PostcardCard({
         style={{
           transformStyle: 'preserve-3d',
           transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-          // Fixed aspect so both faces have the same height during the flip.
-          aspectRatio: '3 / 2',
         }}
       >
-        {/* ---- Front ---- */}
+        {/* ---- Front (defines the card's height; the mosaic fills it) ---- */}
         <div
-          className="absolute inset-0 overflow-hidden rounded-xl border border-amber-900/20 bg-[#fdf8ee] dark:bg-[#2a2620] shadow-lg"
+          className="relative overflow-hidden rounded-xl border border-amber-900/20 bg-[#fdf8ee] dark:bg-[#2a2620] shadow-lg"
           style={{ backfaceVisibility: 'hidden' }}
         >
-          <div className="flex h-full gap-2 p-2">
-            {/* Collage */}
-            <div
-              className="relative flex-1 grid gap-1.5 overflow-hidden"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))' }}
-            >
-              {/* Immich deep-link overlay */}
-              {immichUrl && (
-                <a
-                  href={buildImmichPeriodUrl(immichUrl, postcard.from, postcard.to)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 rounded-md bg-white/80 dark:bg-gray-900/80 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-gray-800 hover:underline backdrop-blur-sm"
-                >
-                  <ExternalLink size={10} />
-                  View in Immich
-                </a>
-              )}
-              {postcard.images.length === 0 ? (
-                <div className="col-span-full flex flex-col items-center justify-center gap-1 text-gray-400 bg-amber-900/5 dark:bg-white/5 rounded-lg">
-                  <ImageOff size={20} />
-                  <span className="text-xs">
-                    {postcard.from} → {postcard.to}
-                  </span>
-                </div>
-              ) : (
-                postcard.images.map((img) =>
-                  brokenImages.has(img.id) ? (
+          <div className="relative">
+            {/* Immich deep-link overlay — front only. Hidden by state as
+                well as the face's backface-visibility (backdrop-filter can
+                defeat the latter in some browsers). */}
+            {immichUrl && (
+              <a
+                href={buildImmichPeriodUrl(immichUrl, postcard.from, postcard.to)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 rounded-md bg-white/80 dark:bg-gray-900/80 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-gray-800 hover:underline backdrop-blur-sm"
+                style={{
+                  visibility: flipped ? 'hidden' : 'visible',
+                  pointerEvents: flipped ? 'none' : 'auto',
+                }}
+              >
+                <ExternalLink size={10} />
+                View in Immich
+              </a>
+            )}
+            {postcard.images.length === 0 ? (
+              // No photos: keep a classic postcard silhouette.
+              <div
+                className="flex flex-col items-center justify-center gap-1 text-gray-400"
+                style={{ aspectRatio: '3 / 2' }}
+              >
+                <ImageOff size={20} />
+                <span className="text-xs">
+                  {postcard.from} → {postcard.to}
+                </span>
+              </div>
+            ) : (
+              /* Mosaic: rows of exact-size, uncropped images that tile the
+                 card edge-to-edge; the card grows as tall as needed. */
+              <div
+                style={{
+                  aspectRatio: `1 / ${heightFactor}`,
+                }}
+                className="flex flex-col"
+              >
+                {rows.map((row) => {
+                  const rowImages = row.imageIds.map((id) => postcard.images.find((i) => i.id === id)!).filter(Boolean);
+                  return (
                     <div
-                      key={img.id}
-                      className="aspect-square rounded-md bg-amber-900/10 dark:bg-white/10 flex items-center justify-center"
-                      title={img.originalFileName}
+                      key={row.imageIds.join('-')}
+                      className="flex w-full"
+                      // Capped rows (a very portrait lone image) center their
+                      // uncropped image with side margins on the paper bg.
+                      style={{ height: `${row.heightPct}%`, justifyContent: row.capped ? 'center' : 'flex-start' }}
                     >
-                      <ImageOff size={16} className="text-amber-900/40" />
+                      {rowImages.map((img, i) =>
+                        brokenImages.has(img.id) ? (
+                          <div
+                            key={img.id}
+                            title={img.originalFileName}
+                            className="flex items-center justify-center bg-amber-900/10 dark:bg-white/10"
+                            style={{ width: `${row.widthPcts[i]}%`, height: '100%' }}
+                          >
+                            <ImageOff size={16} className="text-amber-900/40" />
+                          </div>
+                        ) : (
+                          <img
+                            key={img.id}
+                            src={immichApi.thumbnailUrl(img.id, 'preview')}
+                            alt={img.originalFileName}
+                            title={`${img.originalFileName} — ${img.localDateTime || postcard.from}`}
+                            loading="lazy"
+                            className="h-full object-cover"
+                            style={{ width: `${row.widthPcts[i]}%` }}
+                            onLoad={(e) => {
+                              const t = e.target as HTMLImageElement;
+                              if (t.naturalWidth > 0 && t.naturalHeight > 0) {
+                                const a = t.naturalWidth / t.naturalHeight;
+                                setMeasured((prev) =>
+                                  prev.get(img.id) === a ? prev : new Map(prev).set(img.id, a)
+                                );
+                              }
+                            }}
+                            onError={() =>
+                              setBrokenImages((prev) => {
+                                const next = new Set(prev);
+                                next.add(img.id);
+                                return next;
+                              })
+                            }
+                          />
+                        )
+                      )}
                     </div>
-                  ) : (
-                    <img
-                      key={img.id}
-                      src={immichApi.thumbnailUrl(img.id, 'preview')}
-                      alt={img.originalFileName}
-                      title={`${img.originalFileName} — ${img.localDateTime || postcard.from}`}
-                      loading="lazy"
-                      className="aspect-square w-full object-cover rounded-md"
-                      onError={() =>
-                        setBrokenImages((prev) => {
-                          const next = new Set(prev);
-                          next.add(img.id);
-                          return next;
-                        })
-                      }
-                    />
-                  )
-                )
-              )}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
