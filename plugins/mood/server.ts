@@ -138,6 +138,10 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+function validTimeZoneOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value && isValidTimeZone(value) ? value : null;
+}
+
 // POST / - create mood checkin
 router.post('/', async (req: Request, res: Response) => {
   const client = await pool.connect();
@@ -154,7 +158,7 @@ router.post('/', async (req: Request, res: Response) => {
       `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone)
        VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
        RETURNING *`,
-      [USER_ID, mood, note || null, checked_in_at || null, mood_timezone || null]
+      [USER_ID, mood, note || null, checked_in_at || null, validTimeZoneOrNull(mood_timezone)]
     );
 
     const moodCheckin = result.rows[0];
@@ -198,12 +202,19 @@ router.put('/:id', async (req: Request, res: Response) => {
     const result = await client.query(
       `UPDATE mood_checkins
        SET mood = COALESCE($2, mood),
-           note = COALESCE($3, note),
+           note = CASE WHEN $6::boolean THEN $3 ELSE note END,
            checked_in_at = COALESCE($4::timestamptz, checked_in_at),
            mood_timezone = COALESCE($5, mood_timezone)
        WHERE id = $1
        RETURNING *`,
-      [id, mood ?? null, note, checked_in_at || null, mood_timezone || null]
+      [
+        id,
+        mood ?? null,
+        typeof note === 'string' && note.trim() ? note : null,
+        checked_in_at || null,
+        validTimeZoneOrNull(mood_timezone),
+        'note' in req.body,
+      ]
     );
 
     if (result.rows.length === 0) {
@@ -1394,6 +1405,11 @@ export const server: CheckinTypeServerPlugin = {
     try {
       for (const row of rows) {
         if (!row || typeof row.id !== 'string') continue;
+        // mood and checked_in_at are NOT NULL; one bad row must not abort
+        // the whole restore transaction.
+        const rowMood = Number(row.mood);
+        if (!Number.isInteger(rowMood) || rowMood < 1 || rowMood > 5) continue;
+        if (!row.checked_in_at || Number.isNaN(new Date(row.checked_in_at).getTime())) continue;
         const result = await client.query(
           `INSERT INTO mood_checkins (id, user_id, mood, note, checked_in_at, mood_timezone, created_at, updated_at, daylio_hash)
            VALUES ($1, $2, $3, $4, $5::timestamptz, $6, COALESCE($7::timestamptz, NOW()), COALESCE($8::timestamptz, NOW()), $9)
@@ -1401,10 +1417,10 @@ export const server: CheckinTypeServerPlugin = {
           [
             row.id,
             user_id,
-            row.mood,
+            rowMood,
             row.note ?? null,
             row.checked_in_at,
-            row.mood_timezone ?? null,
+            validTimeZoneOrNull(row.mood_timezone),
             row.created_at ?? null,
             row.updated_at ?? null,
             row.daylio_hash ?? null,
@@ -1646,10 +1662,10 @@ export const server: CheckinTypeServerPlugin = {
       );
       return result.rows;
     },
-    apply: async (id, suggested_timezone) => {
+    apply: async (id, suggested_timezone, executor) => {
       // Label-only: the stored instant is the true moment; reconciliation
       // only corrects the stored timezone label.
-      const result = await query(
+      const result = await (executor ?? { query }).query(
         `UPDATE mood_checkins
          SET mood_timezone = $2, updated_at = NOW()
          WHERE id = $1

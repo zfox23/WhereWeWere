@@ -802,16 +802,16 @@ router.put('/:id', async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    // Build the SET clause. notes / checked_in_at keep their historical
-    // "null means no change" behavior; rating uses explicit key presence so
-    // the client can clear it back to unrated (null).
+    // Build the SET clause. checked_in_at keeps its historical "null means no
+    // change" behavior; notes and rating use explicit key presence so the
+    // client can clear them (null / blank).
     const setClauses: string[] = [];
     const params: unknown[] = [id];
     let paramIndex = 1;
 
     if (notes !== undefined) {
-      setClauses.push(`notes = COALESCE($${++paramIndex}, notes)`);
-      params.push(notes);
+      setClauses.push(`notes = $${++paramIndex}`);
+      params.push(typeof notes === 'string' && notes.trim() ? notes : null);
     }
     if (checked_in_at !== undefined) {
       setClauses.push(`checked_in_at = COALESCE($${++paramIndex}::timestamptz, checked_in_at)`);
@@ -2065,14 +2065,48 @@ venuesRouter.post('/:id/merge-into', async (req: Request, res: Response) => {
     if (!srcCheck.rows.length) return res.status(404).json({ error: 'Source venue not found' });
     if (!tgtCheck.rows.length) return res.status(404).json({ error: 'Target venue not found' });
 
-    // Move all check-ins from the source venue to the target
-    await query('UPDATE checkins SET venue_id = $1 WHERE venue_id = $2', [target_id, id]);
+    // All-or-nothing: a failure midway must not leave check-ins moved but the
+    // source half-deleted (or the hierarchy rewritten).
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    // Re-parent any child venues that pointed to the source
-    await query('UPDATE venues SET parent_venue_id = $1 WHERE parent_venue_id = $2', [target_id, id]);
+      // Move all check-ins from the source venue to the target
+      await client.query('UPDATE checkins SET venue_id = $1 WHERE venue_id = $2', [target_id, id]);
 
-    // Delete the source venue
-    await query('DELETE FROM venues WHERE id = $1', [id]);
+      // Carry list memberships over (cascade-delete would silently drop them)
+      await client.query(
+        `INSERT INTO venue_list_items (list_id, venue_id, position, added_at)
+         SELECT list_id, $1, position, added_at FROM venue_list_items WHERE venue_id = $2
+         ON CONFLICT (list_id, venue_id) DO NOTHING`,
+        [target_id, id]
+      );
+
+      // If the target was a child of the source, hoist it to the source's
+      // parent first so re-parenting below can't make it its own parent.
+      await client.query(
+        `UPDATE venues
+         SET parent_venue_id = (SELECT parent_venue_id FROM venues WHERE id = $2)
+         WHERE id = $1 AND parent_venue_id = $2`,
+        [target_id, id]
+      );
+
+      // Re-parent any child venues that pointed to the source
+      await client.query(
+        'UPDATE venues SET parent_venue_id = $1 WHERE parent_venue_id = $2 AND id <> $1',
+        [target_id, id]
+      );
+
+      // Delete the source venue
+      await client.query('DELETE FROM venues WHERE id = $1', [id]);
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
 
     // Return the updated target venue
     const result = await query(
@@ -2573,11 +2607,15 @@ swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, 
 // (moved from the core jobs service; behavior unchanged)
 // ---------------------------------------------------------------------------
 
-async function geocodeBatch(jobId: string, remainingBefore: number, totalUpdatedBefore: number) {
+// Venues the job has already tried this run are excluded from later batches;
+// otherwise unresolvable ones are re-selected forever and starve the rest.
+async function geocodeBatch(jobId: string, attempted: string[]) {
   const result = await query(
     `SELECT id, latitude, longitude FROM venues
-     WHERE country IS NULL OR TRIM(country) = ''
-     LIMIT 100`
+     WHERE (country IS NULL OR TRIM(country) = '')
+       AND id <> ALL($1::uuid[])
+     LIMIT 100`,
+    [attempted]
   );
   const total = result.rows.length;
 
@@ -2608,18 +2646,28 @@ async function geocodeBatch(jobId: string, remainingBefore: number, totalUpdated
     console.log(`[jobs] geocode ${jobId} venue ${processed}/${total}`);
   }
 
+  const attemptedNow = [...attempted, ...result.rows.map((r: { id: string }) => r.id)];
   const remaining = await query(
-    `SELECT COUNT(*)::int AS count FROM venues WHERE country IS NULL OR TRIM(country) = ''`
+    `SELECT COUNT(*)::int AS count FROM venues
+     WHERE (country IS NULL OR TRIM(country) = '') AND id <> ALL($1::uuid[])`,
+    [attemptedNow]
   );
 
-  return { updated, failed: failedIds.length, remaining: remaining.rows[0].count };
+  return {
+    updated,
+    failed: failedIds.length,
+    attemptedIds: result.rows.map((r: { id: string }) => r.id),
+    remaining: remaining.rows[0].count as number,
+  };
 }
 
-async function categorizeBatch(jobId: string, remainingBefore: number, totalUpdatedBefore: number) {
+async function categorizeBatch(jobId: string, attempted: string[]) {
   const result = await query(
     `SELECT id, name, latitude, longitude FROM venues
      WHERE category_id IS NULL
-     LIMIT 20`
+       AND id <> ALL($1::uuid[])
+     LIMIT 20`,
+    [attempted]
   );
 
   let updated = 0;
@@ -2661,11 +2709,17 @@ async function categorizeBatch(jobId: string, remainingBefore: number, totalUpda
     }
   }
 
+  const attemptedNow = [...attempted, ...result.rows.map((r: { id: string }) => r.id)];
   const remaining = await query(
-    'SELECT COUNT(*)::int AS count FROM venues WHERE category_id IS NULL'
+    'SELECT COUNT(*)::int AS count FROM venues WHERE category_id IS NULL AND id <> ALL($1::uuid[])',
+    [attemptedNow]
   );
 
-  return { updated, remaining: remaining.rows[0].count };
+  return {
+    updated,
+    attemptedIds: result.rows.map((r: { id: string }) => r.id),
+    remaining: remaining.rows[0].count as number,
+  };
 }
 
 /**
@@ -2682,9 +2736,11 @@ async function venueBackfillHandler(ctx: PluginJobContext): Promise<void> {
     `SELECT COUNT(*)::int AS count FROM venues WHERE country IS NULL OR TRIM(country) = ''`
   );
   let geoRemaining = geoRemainingInit.rows[0].count;
+  const geoAttempted: string[] = [];
   while (geoRemaining > 0) {
     if (ctx.isCancelled()) throw new Error('cancelled');
-    const batch = await geocodeBatch(ctx.jobId, geoRemaining, totalGeoUpdated);
+    const batch = await geocodeBatch(ctx.jobId, geoAttempted);
+    geoAttempted.push(...batch.attemptedIds);
     totalGeoUpdated += batch.updated;
     geoRemaining = batch.remaining;
     await ctx.updateProgress({
@@ -2693,13 +2749,13 @@ async function venueBackfillHandler(ctx: PluginJobContext): Promise<void> {
       updated: totalGeoUpdated,
       remaining: geoRemaining,
     });
-    if (batch.updated === 0) {
+    if (batch.failed > 0) {
       console.warn(
-        `[jobs] backfill geocode batch made NO progress (remaining=${geoRemaining}, failed=${batch.failed}). ` +
-        `These venues likely have ungeocodable coordinates or Nominatim is failing; the loop will now exit.`
+        `[jobs] backfill geocode batch could not resolve ${batch.failed} venues (skipped for the rest of this run). ` +
+        `They likely have ungeocodable coordinates or Nominatim is failing.`
       );
-      break;
     }
+    if (batch.attemptedIds.length === 0) break;
   }
 
   await ctx.updateProgress({
@@ -2714,9 +2770,11 @@ async function venueBackfillHandler(ctx: PluginJobContext): Promise<void> {
     `SELECT COUNT(*)::int AS count FROM venues WHERE category_id IS NULL`
   );
   let catRemaining = catRemainingInit.rows[0].count;
+  const catAttempted: string[] = [];
   while (catRemaining > 0) {
     if (ctx.isCancelled()) throw new Error('cancelled');
-    const batch = await categorizeBatch(ctx.jobId, catRemaining, totalCatUpdated);
+    const batch = await categorizeBatch(ctx.jobId, catAttempted);
+    catAttempted.push(...batch.attemptedIds);
     totalCatUpdated += batch.updated;
     catRemaining = batch.remaining;
     await ctx.updateProgress({
@@ -2725,7 +2783,7 @@ async function venueBackfillHandler(ctx: PluginJobContext): Promise<void> {
       updated: totalCatUpdated,
       remaining: catRemaining,
     });
-    if (batch.updated === 0) break;
+    if (batch.attemptedIds.length === 0) break;
   }
 
   await ctx.updateProgress({
@@ -2997,9 +3055,11 @@ export const server: CheckinTypeServerPlugin = {
         );
       }
       for (const venue of venues) {
-        if (!venue.parent_venue_id) continue;
+        if (!venue.parent_venue_id || venue.parent_venue_id === venue.id) continue;
+        // Only fill in missing parents: an already-existing local venue keeps
+        // the hierarchy the user has set up since.
         await client.query(
-          `UPDATE venues SET parent_venue_id = $2 WHERE id = $1`,
+          `UPDATE venues SET parent_venue_id = $2 WHERE id = $1 AND parent_venue_id IS NULL`,
           [venue.id, venue.parent_venue_id]
         );
       }
@@ -3095,8 +3155,14 @@ export const server: CheckinTypeServerPlugin = {
        // A re-run of the same restore must be idempotent even when the
        // local row already carries a (different) rank.
        await client.query(
+         // A rank already held by another item in this list (non-deferrable
+         // unique index) would abort the whole restore: import it unranked.
          `INSERT INTO checkin_list_items (list_id, checkin_id, rank, added_at)
-          VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
+          VALUES ($1, $2,
+            CASE WHEN EXISTS (
+              SELECT 1 FROM checkin_list_items WHERE list_id = $1 AND rank = $3::int AND checkin_id <> $2
+            ) THEN NULL ELSE $3::int END,
+            COALESCE($4::timestamptz, NOW()))
           ON CONFLICT (list_id, checkin_id) DO UPDATE SET
             rank = COALESCE(EXCLUDED.rank, checkin_list_items.rank)`,
          [li.list_id, li.checkin_id, rank, li.added_at || null]
@@ -3379,9 +3445,9 @@ export const server: CheckinTypeServerPlugin = {
       }
       return { suggestions, uninferable };
     },
-    apply: async (id, suggested_timezone) => {
+    apply: async (id, suggested_timezone, executor) => {
       if (!isValidTimeZone(suggested_timezone)) return false;
-      const result = await query(
+      const result = await (executor ?? { query }).query(
         `UPDATE checkins
          SET checkin_timezone = $2, updated_at = NOW()
          WHERE id = $1

@@ -235,8 +235,15 @@ export interface PluginReconciliationHook {
   /**
    * Validate and persist a suggested timezone label. Returns false when the
    * suggestion cannot be applied (row missing, invalid timezone, ...).
+   *
+   * `executor` is the caller's transaction client when applying a batch; the
+   * write must go through it (not the pool) so a failed batch rolls back.
    */
-  apply: (id: string, suggested_timezone: string) => Promise<boolean>;
+  apply: (
+    id: string,
+    suggested_timezone: string,
+    executor?: { query: (sql: string, params?: unknown[]) => Promise<{ rowCount: number | null }> },
+  ) => Promise<boolean>;
 }
 
 /** One plugin-owned API mount: an Express Router mounted at `/api/v1<mount>`. */

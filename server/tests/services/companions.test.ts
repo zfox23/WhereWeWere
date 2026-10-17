@@ -262,7 +262,8 @@ describe('renameCompanionName', () => {
     const [sql, values] = queryMock.mock.calls[1];
     expect(sql).toContain('INSERT INTO companions (checkin_type, checkin_id, name)');
     expect(sql).toContain('ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING');
-    expect(sql).toContain('DELETE FROM companions WHERE name = $1');
+    expect(sql).toContain('UPDATE companions SET name = $2');
+    expect(sql).toContain('DELETE FROM companions WHERE name = $1 AND checkin_id IS NOT NULL');
     expect(values).toEqual(['ada', 'Ada Lovelace']);
   });
 });

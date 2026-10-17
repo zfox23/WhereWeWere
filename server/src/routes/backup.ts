@@ -262,11 +262,11 @@ async function runRestore(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (user_id) DO UPDATE SET
-          dawarich_url = EXCLUDED.dawarich_url,
-          dawarich_api_key = EXCLUDED.dawarich_api_key,
-          immich_url = EXCLUDED.immich_url,
-          immich_api_key = EXCLUDED.immich_api_key,
-          maloja_url = EXCLUDED.maloja_url,
+          dawarich_url = COALESCE(EXCLUDED.dawarich_url, user_settings.dawarich_url),
+          dawarich_api_key = COALESCE(EXCLUDED.dawarich_api_key, user_settings.dawarich_api_key),
+          immich_url = COALESCE(EXCLUDED.immich_url, user_settings.immich_url),
+          immich_api_key = COALESCE(EXCLUDED.immich_api_key, user_settings.immich_api_key),
+          maloja_url = COALESCE(EXCLUDED.maloja_url, user_settings.maloja_url),
           theme = COALESCE(EXCLUDED.theme, user_settings.theme),
           system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
           system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),

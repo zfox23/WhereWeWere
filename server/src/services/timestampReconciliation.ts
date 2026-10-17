@@ -405,7 +405,10 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
  * event happened, so applying a suggestion only replaces the stored timezone
  * label. This validates the target timezone and that the row exists.
  */
-export async function computeAppliedReconciliation(update: TimestampReconciliationUpdate): Promise<{ timeZone: string } | null> {
+export async function computeAppliedReconciliation(
+  update: TimestampReconciliationUpdate,
+  executor?: { query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number | null }> },
+): Promise<{ timeZone: string } | null> {
   if (!isValidTimeZone(update.suggested_timezone)) {
     return null;
   }
@@ -413,7 +416,7 @@ export async function computeAppliedReconciliation(update: TimestampReconciliati
   // The plugin's hook validates row existence and applies.
   const plugin = allPlugins().find((p) => p.id === update.type);
   if (plugin?.server.reconcile?.apply) {
-    const applied = await plugin.server.reconcile.apply(update.id, update.suggested_timezone);
+    const applied = await plugin.server.reconcile.apply(update.id, update.suggested_timezone, executor);
     return applied ? { timeZone: update.suggested_timezone } : null;
   }
 
@@ -425,8 +428,8 @@ export async function computeAppliedReconciliation(update: TimestampReconciliati
  * validates row existence and persists the label, so this returns true
  * after the hook succeeds.
  */
-export async function applyReconciliationUpdate(client: { query: (sql: string, values: unknown[]) => Promise<{ rowCount: number | null }> }, update: TimestampReconciliationUpdate): Promise<boolean> {
-  const applied = await computeAppliedReconciliation(update);
+export async function applyReconciliationUpdate(client: { query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number | null }> }, update: TimestampReconciliationUpdate): Promise<boolean> {
+  const applied = await computeAppliedReconciliation(update, client);
   if (!applied) return false;
 
   // Plugin types already persisted their label inside reconcile.apply.

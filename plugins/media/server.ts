@@ -30,6 +30,7 @@ import type {
   PluginReconciliationRow,
   PluginLlmRow,
 } from 'wwp-shared';
+import { isValidTimeZone } from 'wwp-shared';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
 import { tmdb } from './services/tmdb';
@@ -726,7 +727,8 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     if (rating !== undefined) {
       const v = typeof rating === 'number' && Number.isInteger(rating) && rating >= 0 && rating <= 4 ? rating : null;
       if (v == null && rating != null) return res.status(400).json({ error: 'rating must be an integer 0-4' });
-      add('rating', v);
+      // 0 means "no rating" in the UI; store it as unrated so it can't shadow a check-in rating.
+      add('rating', v || null);
     }
     if (raw_score !== undefined) {
       const v = raw_score != null && raw_score !== '' ? Number(raw_score) : null;
@@ -1122,6 +1124,9 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
     if (timezone && typeof timezone !== 'string') {
       return res.status(400).json({ error: 'timezone must be a string' });
     }
+    if (typeof timezone === 'string' && timezone && !isValidTimeZone(timezone)) {
+      return res.status(400).json({ error: 'timezone must be a valid IANA timezone' });
+    }
     const checkinTimezone = typeof timezone === 'string' && timezone ? timezone : 'UTC';
 
     const itemResult = await query(
@@ -1149,7 +1154,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
         USER_ID, req.params.id,
         season_number ?? null, episode_number ?? null, episode_title || null,
         checkin_type,
-        rating != null && Number.isInteger(rating) && rating >= 0 && rating <= 4 ? rating : null,
+        rating != null && Number.isInteger(rating) && rating >= 1 && rating <= 4 ? rating : null,
         raw_score != null && raw_score !== '' ? Number(raw_score) : null,
         notes || null,
         checked_in_at || null,
@@ -1205,7 +1210,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
     if (body.rating !== undefined) {
       const v = typeof body.rating === 'number' && Number.isInteger(body.rating) && body.rating >= 0 && body.rating <= 4 ? body.rating : null;
       if (v == null && body.rating != null) return res.status(400).json({ error: 'rating must be an integer 0-4' });
-      add('rating = $' + (params.length + 1), v);
+      add('rating = $' + (params.length + 1), v || null);
     }
     if (body.raw_score !== undefined) {
       const v = body.raw_score != null && body.raw_score !== '' ? Number(body.raw_score) : null;
@@ -1222,9 +1227,12 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
       }
       add('checked_in_at = $' + (params.length + 1) + (v ? '::timestamptz' : ''), v);
     }
-    if (body.timezone !== undefined) {
-      const v = typeof body.timezone === 'string' && body.timezone ? body.timezone : null;
-      add('checkin_timezone = $' + (params.length + 1), v);
+    // checkin_timezone is NOT NULL: a blank value means "no change".
+    if (typeof body.timezone === 'string' && body.timezone) {
+      if (!isValidTimeZone(body.timezone)) {
+        return res.status(400).json({ error: 'timezone must be a valid IANA timezone' });
+      }
+      add('checkin_timezone = $' + (params.length + 1), body.timezone);
     }
     if (body.time_played_minutes !== undefined) {
       const v = typeof body.time_played_minutes === 'number' && Number.isFinite(body.time_played_minutes) && body.time_played_minutes >= 0
@@ -2131,7 +2139,7 @@ function mediaCheckinInsertParams(
     backupToIntOrNull(row.time_played_minutes),
     row.checked_in_at || null,
     // Parity with the pre-plugin core import: a missing label is stored as UTC.
-    backupToStringOrNull(row.checkin_timezone) || 'UTC',
+    (isValidTimeZone(backupToStringOrNull(row.checkin_timezone) ?? '') ? (row.checkin_timezone as string) : 'UTC'),
     backupToStringOrNull(row.external_event_id),
     row.created_at || null,
     row.updated_at || null,
@@ -2564,7 +2572,7 @@ export const server: CheckinTypeServerPlugin = {
         d.season_number != null && d.episode_number != null
           ? ` S${d.season_number}E${d.episode_number}${d.episode_title ? ` "${d.episode_title}"` : ''}`
           : '';
-      const rating = d.rating != null ? ` (${d.rating}/5)` : '';
+      const rating = d.rating != null && Number(d.rating) > 0 ? ` (${d.rating}/4)` : '';
       const time =
         d.time_played_minutes != null && d.time_played_minutes > 0
           ? ` · ${formatLlmMinutes(Number(d.time_played_minutes))}`
@@ -2619,10 +2627,10 @@ export const server: CheckinTypeServerPlugin = {
       }
       return result.rows as PluginReconciliationRow[];
     },
-    apply: async (id, suggested_timezone) => {
+    apply: async (id, suggested_timezone, executor) => {
       // Label-only: the stored instant is the true moment; reconciliation
       // only corrects the stored timezone label.
-      const result = await query(
+      const result = await (executor ?? { query }).query(
         `UPDATE media_checkins
          SET checkin_timezone = $2, updated_at = NOW()
          WHERE id = $1

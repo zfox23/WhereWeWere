@@ -22,6 +22,8 @@ interface MalojaScrobble {
   duration?: number;
 }
 
+const EMPTY_RESULT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
 interface CachedScrobble {
   artists: string[];
   title: string;
@@ -124,13 +126,20 @@ router.get('/', async (req: Request, res: Response) => {
 
         matched.sort((a, b) => a.time - b.time);
 
-        // Cache result
-        await query(
-          `INSERT INTO checkin_scrobbles (checkin_id, scrobbles)
-           VALUES ($1, $2)
-           ON CONFLICT (checkin_id) DO UPDATE SET scrobbles = $2, fetched_at = NOW()`,
-          [id, JSON.stringify(matched)]
-        );
+        // Cache the result only when it can be trusted: every date was
+        // fetched, and an empty result isn't for a check-in so recent that
+        // Maloja may simply not have received its scrobbles yet. Otherwise
+        // "no music" would stick forever (the read path never re-checks).
+        const allDatesFetched = Array.from(relevantDates).every((d) => dateScrobbles.has(d));
+        const tooRecentToTrustEmpty = matched.length === 0 && Date.now() - time.getTime() < EMPTY_RESULT_MIN_AGE_MS;
+        if (allDatesFetched && !tooRecentToTrustEmpty) {
+          await query(
+            `INSERT INTO checkin_scrobbles (checkin_id, scrobbles)
+             VALUES ($1, $2)
+             ON CONFLICT (checkin_id) DO UPDATE SET scrobbles = $2, fetched_at = NOW()`,
+            [id, JSON.stringify(matched)]
+          );
+        }
 
         cached.set(id, matched);
       }

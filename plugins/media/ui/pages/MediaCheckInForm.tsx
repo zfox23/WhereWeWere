@@ -76,7 +76,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
         episode_number: episodeMode?.episodeNumber ?? null,
         episode_title: episodeMode?.episodeTitle ?? null,
         checkin_type: checkinType,
-        rating: score,
+        rating: score > 0 ? score : null,
         notes: notes.trim() || null,
         checked_in_at: localDatetimeToIso(dateTime),
         timezone: deviceTimezone(),

@@ -291,15 +291,21 @@ export async function renameCompanionName(
     throw err;
   }
   const result = await ex.query(
-    `WITH affected AS (
-       SELECT checkin_type, checkin_id FROM companions WHERE name = $1
+    // The standalone row (NULL check-in) is renamed in place: re-inserting it
+    // would hit the lower(name) unique index while the old row still exists,
+    // which is exactly what a case-only rename (sam -> Sam) does.
+    `WITH renamed_standalone AS (
+       UPDATE companions SET name = $2
+       WHERE checkin_id IS NULL AND name = $1
+       RETURNING id
      ),
      moved AS (
        INSERT INTO companions (checkin_type, checkin_id, name)
-       SELECT checkin_type, checkin_id, $2 FROM affected
+       SELECT checkin_type, checkin_id, $2 FROM companions
+       WHERE name = $1 AND checkin_id IS NOT NULL
        ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING
      )
-     DELETE FROM companions WHERE name = $1`,
+     DELETE FROM companions WHERE name = $1 AND checkin_id IS NOT NULL`,
     [from, to],
   );
   return result.rowCount ?? 0;

@@ -1313,10 +1313,10 @@ export const server: CheckinTypeServerPlugin = {
       );
       return result.rows;
     },
-    apply: async (id, suggested_timezone) => {
+    apply: async (id, suggested_timezone, executor) => {
       // Label-only: the stored instant is the true moment; reconciliation
       // only corrects the stored timezone label.
-      const result = await query(
+      const result = await (executor ?? { query }).query(
         `UPDATE tracks
          SET timezone = $2, updated_at = NOW()
          WHERE id = $1
@@ -1534,57 +1534,62 @@ async function insertTrackRowFromFile(
   const wktLineString =
     `LINESTRING(` + stats.coordinates.map(([lng, lat]) => `${lng} ${lat}`).join(', ') + `)`;
 
-  try {
-    const result = await client.query(
-      `INSERT INTO tracks (
-         id, user_id, name, activity_type, timezone, started_at, ended_at,
-         distance_m, elapsed_time_s, moving_time_s,
-         elevation_gain_m, avg_speed_mps, max_speed_mps,
-         avg_hr, max_hr, point_count, file_hash, source_filename,
-         created_at, updated_at, path, points
-       )
-       VALUES (
-         $1, $2, $3, $4, $5,
-         COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
-         $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-         COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()),
-         ST_SetSRID(ST_GeomFromText($21), 4326), $22::jsonb
-       )
-       ON CONFLICT (id) DO NOTHING`,
-      [
-        row.id,
-        user_id,
-        row.name,
-        toStringOrNull(row.activity_type),
-        row.timezone || 'UTC',
-        row.started_at || null,
-        row.ended_at || null,
-        stats.distanceM,
-        stats.elapsedTimeS,
-        stats.movingTimeS,
-        stats.elevationGainM,
-        stats.avgSpeedMps,
-        stats.maxSpeedMps,
-        stats.avgHr,
-        stats.maxHr,
-        stats.pointCount,
-        toStringOrNull(row.file_hash),
-        toStringOrNull(row.source_filename),
-        row.created_at || null,
-        row.updated_at || null,
-        wktLineString,
-        JSON.stringify(pointsSeries),
-      ],
+  // A failed statement aborts the surrounding restore transaction, so detect
+  // a duplicate original up front instead of catching the unique violation.
+  const fileHash = toStringOrNull(row.file_hash);
+  if (fileHash) {
+    const dup = await client.query(
+      'SELECT 1 FROM tracks WHERE user_id = $1 AND file_hash = $2 AND id <> $3 LIMIT 1',
+      [user_id, fileHash, row.id],
     );
-    return { insertedCount: result.rowCount ?? 0, ext };
-  } catch (err: any) {
-    if (err?.code === '23505') {
-      // Duplicate (user_id, file_hash): the same original already exists.
+    if ((dup.rowCount ?? 0) > 0) {
       errors.push(`Track "${row.name}": an identical track already exists; skipped`);
       return { insertedCount: 0, ext };
     }
-    throw err;
   }
+
+  const result = await client.query(
+    `INSERT INTO tracks (
+       id, user_id, name, activity_type, timezone, started_at, ended_at,
+       distance_m, elapsed_time_s, moving_time_s,
+       elevation_gain_m, avg_speed_mps, max_speed_mps,
+       avg_hr, max_hr, point_count, file_hash, source_filename,
+       created_at, updated_at, path, points
+     )
+     VALUES (
+       $1, $2, $3, $4, $5,
+       COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()),
+       $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+       COALESCE($19::timestamptz, NOW()), COALESCE($20::timestamptz, NOW()),
+       ST_SetSRID(ST_GeomFromText($21), 4326), $22::jsonb
+     )
+     ON CONFLICT DO NOTHING`,
+    [
+      row.id,
+      user_id,
+      row.name,
+      toStringOrNull(row.activity_type),
+      row.timezone || 'UTC',
+      row.started_at || null,
+      row.ended_at || null,
+      stats.distanceM,
+      stats.elapsedTimeS,
+      stats.movingTimeS,
+      stats.elevationGainM,
+      stats.avgSpeedMps,
+      stats.maxSpeedMps,
+      stats.avgHr,
+      stats.maxHr,
+      stats.pointCount,
+      toStringOrNull(row.file_hash),
+      toStringOrNull(row.source_filename),
+      row.created_at || null,
+      row.updated_at || null,
+      wktLineString,
+      JSON.stringify(pointsSeries),
+    ],
+  );
+  return { insertedCount: result.rowCount ?? 0, ext };
 }
 
 // ---------------------------------------------------------------------------

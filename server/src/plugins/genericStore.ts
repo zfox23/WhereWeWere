@@ -8,7 +8,12 @@
  */
 
 import type { CheckinTypeServer, PluginTimelineContext } from 'wwp-shared';
-import { validatePluginData } from 'wwp-shared';
+import { validatePluginData, isValidTimeZone } from 'wwp-shared';
+
+/** A stored zone must be one Postgres' AT TIME ZONE accepts; a bad label poisons every date query. */
+function validZoneOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value && isValidTimeZone(value) ? value : null;
+}
 import { query, pool } from '../db';
 import { timelineColumnList } from './timeline';
 import { timelineWhereConditions } from './sql';
@@ -124,7 +129,7 @@ export async function createGenericCheckin(
     `INSERT INTO plugin_checkins (plugin_id, user_id, checked_in_at, checkin_timezone, data)
      VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4, $5::jsonb)
      RETURNING *`,
-    [plugin.id, user_id, input.checked_in_at || null, input.checkin_timezone || null, JSON.stringify(data)],
+    [plugin.id, user_id, input.checked_in_at || null, validZoneOrNull(input.checkin_timezone), JSON.stringify(data)],
   );
   return result.rows[0];
 }
@@ -184,8 +189,8 @@ export async function updateGenericCheckin(
          WHERE id = $1 AND plugin_id = $2 AND user_id = $3
          RETURNING *`,
     data !== undefined
-      ? [id, plugin.id, user_id, JSON.stringify(data), input.checked_in_at || null, input.checkin_timezone || null]
-      : [id, plugin.id, user_id, input.checked_in_at || null, input.checkin_timezone || null],
+      ? [id, plugin.id, user_id, JSON.stringify(data), input.checked_in_at || null, validZoneOrNull(input.checkin_timezone)]
+      : [id, plugin.id, user_id, input.checked_in_at || null, validZoneOrNull(input.checkin_timezone)],
   );
   return result.rows[0] ?? null;
 }
@@ -271,7 +276,7 @@ export async function importGenericCheckins(
           row.plugin_id,
           user_id,
           row.checked_in_at,
-          row.checkin_timezone ?? null,
+          validZoneOrNull(row.checkin_timezone),
           JSON.stringify(row.data ?? {}),
           row.created_at ?? null,
           row.updated_at ?? null,

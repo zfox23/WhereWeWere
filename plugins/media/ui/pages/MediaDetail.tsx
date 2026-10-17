@@ -435,7 +435,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
       payload.external_id = d.external_id.trim() || null;
     }
     // Item-level user metadata (independent of check-ins).
-    payload.rating = d.rating;
+    payload.rating = d.rating > 0 ? d.rating : null;
     payload.notes = d.notes.trim() || null;
     if (subtype === 'game') {
       const h = parseInt(d.time_hours, 10);

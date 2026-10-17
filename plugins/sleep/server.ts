@@ -197,7 +197,7 @@ sleepEntriesRouter.put('/:id', async (req: Request, res: Response) => {
            started_at = COALESCE($3::timestamptz, started_at),
            ended_at = COALESCE($4::timestamptz, ended_at),
            rating = COALESCE($5, rating),
-           comment = $6,
+           comment = CASE WHEN $7::boolean THEN $6 ELSE comment END,
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -208,6 +208,7 @@ sleepEntriesRouter.put('/:id', async (req: Request, res: Response) => {
         ended_at || null,
         rating != null ? normalizeRating(rating) : null,
         normalizeComment(comment),
+        'comment' in req.body,
       ]
     );
 
@@ -1033,10 +1034,10 @@ export const server: CheckinTypeServerPlugin = {
       );
       return result.rows;
     },
-    apply: async (id, suggested_timezone) => {
+    apply: async (id, suggested_timezone, executor) => {
       // Label-only: the stored instant is the true moment; reconciliation
       // only corrects the stored timezone label.
-      const result = await query(
+      const result = await (executor ?? { query }).query(
         `UPDATE sleep_entries
          SET sleep_timezone = $2, updated_at = NOW()
          WHERE id = $1

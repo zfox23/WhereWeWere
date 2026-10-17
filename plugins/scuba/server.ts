@@ -572,8 +572,8 @@ export const server: CheckinTypeServerPlugin = {
       );
       return result.rows;
     },
-    apply: async (id, suggested_timezone) => {
-      const result = await query(
+    apply: async (id, suggested_timezone, executor) => {
+      const result = await (executor ?? { query }).query(
         `UPDATE plugin_checkins
          SET checkin_timezone = $2, updated_at = NOW()
          WHERE id = $1 AND plugin_id = $3
