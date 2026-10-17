@@ -675,24 +675,30 @@ importRouter.post('/', csvUpload.single('file'), async (req: Request, res: Respo
 
   try {
     const content = fs.readFileSync(file.path, 'utf-8');
-    const lines = content.split('\n');
+
+    // Parse the whole file as CSV (not line by line): a quoted comment may
+    // contain newlines, which a split on '\n' tore into broken records. The
+    // export interleaves several tables with different column counts, so keep
+    // the parser lenient and drop only the records it cannot read.
+    let allRows: string[][];
+    try {
+      allRows = parse(content, {
+        bom: true,
+        relax_column_count: true,
+        relax_quotes: true,
+        skip_empty_lines: true,
+        skip_records_with_error: true,
+        trim: true,
+      }) as string[][];
+    } catch (parseErr: any) {
+      return res.status(400).json({ error: `Could not parse CSV: ${parseErr.message || parseErr}` });
+    }
 
     let currentHeaders: string[] = [];
     const records: Record<string, string>[] = [];
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      let parsed: string[][];
-      try {
-        parsed = parse(trimmed, { relax_column_count: true, trim: true });
-      } catch {
-        continue;
-      }
-
-      if (!parsed.length || !parsed[0].length) continue;
-      const row = parsed[0];
+    for (const row of allRows) {
+      if (!row.length) continue;
 
       if (row[0] === 'Id') {
         currentHeaders = row;

@@ -180,3 +180,34 @@ describe('parseDivingLogBackup', () => {
     expect(() => parseDivingLogBackup(stray, 'UTC')).toThrow(/missing Logbook table/);
   });
 });
+
+describe('UtcOffset handling', () => {
+  function addDive(id: number, entry: string, offset: number) {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      INSERT INTO Logbook (ID, Number, Divedate, Entrytime, Place, Divetime, Depth, UtcOffset, UUID)
+      VALUES (${id}, ${id}, '2022-01-15', '${entry}', 'Somewhere', 30, 12, ${offset}, 'OFF-${id}');
+    `);
+    db.close();
+  }
+
+  it('labels a half-hour offset with its real zone instead of UTC', () => {
+    addDive(10, '09:15', 330); // India, +5:30
+    const row = parseDivingLogBackup(dbPath, 'UTC').rows.find((r) => r.data.source_uuid === 'OFF-10')!;
+    expect(row.checkin_timezone).toBe('Asia/Kolkata');
+    // 09:15 local at +5:30 == 03:45Z
+    expect(row.checked_in_at).toBe('2022-01-15T03:45:00.000Z');
+  });
+
+  it('falls back to UTC only for an offset with no fixed-offset zone', () => {
+    addDive(11, '09:15', 135); // +2:15, nothing real
+    const row = parseDivingLogBackup(dbPath, 'UTC').rows.find((r) => r.data.source_uuid === 'OFF-11')!;
+    expect(row.checkin_timezone).toBe('UTC');
+  });
+
+  it('parses a single-digit hour in the entry time the same way as two-digit ones', () => {
+    addDive(12, '9:05', 0);
+    const row = parseDivingLogBackup(dbPath, 'UTC').rows.find((r) => r.data.source_uuid === 'OFF-12')!;
+    expect(row.checked_in_at).toBe('2022-01-15T09:05:00.000Z');
+  });
+});

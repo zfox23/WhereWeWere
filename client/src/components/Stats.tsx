@@ -113,20 +113,19 @@ export function Heatmap({
       </div>
       <div className="overflow-x-auto">
         {/* Month labels */}
-        <div className="flex gap-[3px] mb-1 ml-0">
+        {/* Each label sits above the week column that contains the 1st of its
+            month (cell 12px + 3px gap = 15px per column). */}
+        <div className="relative mb-1 h-3" style={{ width: `${weeks.length * 15}px` }}>
           {monthLabels.map((m, i) => {
-            // Approximate position: each month ~4.3 weeks
-            const weekIndex = Math.floor((i * 52) / 12);
+            const dayOfYear = Math.round((new Date(year, i, 1).getTime() - startDate.getTime()) / 86_400_000);
+            const weekIndex = Math.floor((startDow + dayOfYear) / 7);
             return (
               <span
                 key={m}
-                className="text-[10px] text-gray-400"
-                style={{
-                  position: 'relative',
-                  left: `${weekIndex * 15}px`,
-                }}
+                className="absolute text-[10px] leading-3 text-gray-400"
+                style={{ left: `${weekIndex * 15}px` }}
               >
-                {i % 2 === 0 ? m : ''}
+                {m}
               </span>
             );
           })}
@@ -134,20 +133,25 @@ export function Heatmap({
         <div className="flex gap-[3px]">
           {weeks.map((week, wi) => (
             <div key={wi} className="flex flex-col gap-[3px]">
-              {week.map((day, di) => (
-                <div
-                  key={di}
-                  className={`w-[12px] h-[12px] rounded-sm ${
-                    day ? getColor(day.count) : 'bg-transparent'
-                  } ${day && day.count > 0 && onDayClick ? 'cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1' : ''}`}
-                  title={day ? `${day.date}: ${day.count} check-in${day.count !== 1 ? 's' : ''}` : ''}
-                  onClick={() => {
-                    if (day && day.count > 0 && onDayClick) {
-                      onDayClick(day.date);
-                    }
-                  }}
-                />
-              ))}
+              {week.map((day, di) => {
+                const label = day ? `${day.date}: ${day.count} check-in${day.count !== 1 ? 's' : ''}` : '';
+                const base = `w-[12px] h-[12px] rounded-sm ${day ? getColor(day.count) : 'bg-transparent'}`;
+                // Days that lead somewhere are real buttons (keyboard + screen reader
+                // reachable); empty days and read-only heatmaps stay plain cells.
+                if (day && day.count > 0 && onDayClick) {
+                  return (
+                    <button
+                      key={di}
+                      type="button"
+                      className={`${base} block p-0 border-0 cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 outline-none`}
+                      title={label}
+                      aria-label={label}
+                      onClick={() => onDayClick(day.date)}
+                    />
+                  );
+                }
+                return <div key={di} className={base} title={label} />;
+              })}
               {/* Pad incomplete weeks at the end */}
               {week.length < 7 &&
                 Array.from({ length: 7 - week.length }, (_, k) => (

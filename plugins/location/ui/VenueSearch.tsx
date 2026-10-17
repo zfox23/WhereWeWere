@@ -60,6 +60,12 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   // initial/prefetched coordinates right after a map click, snapping the map
   // back to the current location.
   const userMovedCenterRef = useRef(false);
+  // Query+center of the last search an explicit action (map click, place
+  // pick) already ran. Those actions change `coords`, which re-triggers the
+  // debounced-search effect below; without this the same search fired twice
+  // (a duplicate local + Overpass request).
+  const lastExplicitSearchRef = useRef<string | null>(null);
+  const searchKey = (q: string, c: { lat: number; lon: number }) => `${q.trim()}|${c.lat}|${c.lon}`;
 
   // Custom venue form state
   const [customName, setCustomName] = useState('');
@@ -409,6 +415,12 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       }
     }
 
+    // An explicit action already searched exactly this query + center.
+    if (lastExplicitSearchRef.current === searchKey(query, coords)) return;
+    // Past this point a normal search runs; forget the explicit one so
+    // returning to its exact query later still searches.
+    lastExplicitSearchRef.current = null;
+
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       searchNearby(query);
@@ -429,6 +441,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     }
 
     // Immediately search with the new coordinates and current query
+    lastExplicitSearchRef.current = searchKey(query, newCoords);
     void searchNearby(query, false, newCoords);
   }, [query, searchNearby]);
 
@@ -442,6 +455,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       clearTimeout(debounceRef.current);
     }
 
+    lastExplicitSearchRef.current = searchKey(query, newCoords);
     void searchNearby(query, false, newCoords);
   }, [query, searchNearby]);
 

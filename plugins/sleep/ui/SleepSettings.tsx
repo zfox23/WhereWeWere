@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { Moon, Check, Copy } from 'lucide-react';
 import { sleepWebhook } from './api';
 import { SleepAsAndroidImportSection } from './SleepAsAndroidImportSection';
+import { copyText } from '../../../client/src/utils/clipboard';
 
 export function SleepSettings() {
   const [webhookEventCount, setWebhookEventCount] = useState<number | null>(null);
@@ -25,7 +26,8 @@ export function SleepSettings() {
   }, []);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(webhookUrl).then(() => {
+    copyText(webhookUrl).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

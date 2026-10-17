@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Sparkles, Loader2, Lock, LockOpen, Shuffle, AlertCircle, Image, ImageOff, Copy, Check } from 'lucide-react';
+import { copyText } from '../utils/clipboard';
 import { llm as llmApi, immich as immichApi } from '../api/client';
 
 interface CandidateImage {
@@ -78,6 +79,9 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
   const [candidates, setCandidates] = useState<CandidateImage[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  // Which thumbnails are listed first. Frozen when photos load or are shuffled:
+  // sorting by live `selected` made thumbnails jump under the cursor on every click.
+  const [pinnedFirst, setPinnedFirst] = useState<Set<string>>(new Set());
   const [locked, setLocked] = useState<Set<string>>(new Set());
   const [summarizing, setSummarizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,13 +90,26 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
   const [includeImages, setIncludeImages] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const handleCopyMarkdown = () => {
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+  }, []);
+
+  const handleCopyMarkdown = async () => {
     if (!result) return;
-    navigator.clipboard.writeText(result.summary).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    if (!(await copyText(result.summary))) return;
+    setCopied(true);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
   };
+
+  // A generated summary belongs to a date range: clear it when the range
+  // changes, but not when photos are merely toggled on/off.
+  const rangeKeyForReset = `${from}|${to}`;
+  useEffect(() => {
+    setResult(null);
+    setError(null);
+  }, [rangeKeyForReset]);
 
   const rangeValid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
   const rangeKey = `${from}|${to}`;
@@ -119,10 +136,10 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
         setCandidates(assets);
 
         // Auto-select N evenly-spaced images for this range (resets on range change).
-        setSelected(evenIndices(assets.length, DEFAULT_IMAGE_COUNT).map((i) => assets[i].id));
+        const initial = evenIndices(assets.length, DEFAULT_IMAGE_COUNT).map((i) => assets[i].id);
+        setSelected(initial);
+        setPinnedFirst(new Set(initial));
         setLocked(new Set());
-        setResult(null);
-        setError(null);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -186,7 +203,9 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
           ).map((c) => c.id)
         : [];
 
-    setSelected([...lockedIds, ...freshPicks, ...stalePicks]);
+    const nextSelected = [...lockedIds, ...freshPicks, ...stalePicks];
+    setSelected(nextSelected);
+    setPinnedFirst(new Set(nextSelected));
     setError(null);
   };
 
@@ -316,8 +335,8 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {[...candidates]
                     .sort((a, b) => {
-                      const aSel = selected.includes(a.id) ? 0 : 1;
-                      const bSel = selected.includes(b.id) ? 0 : 1;
+                      const aSel = pinnedFirst.has(a.id) ? 0 : 1;
+                      const bSel = pinnedFirst.has(b.id) ? 0 : 1;
                       return aSel - bSel;
                     })
                     .map((asset) => {

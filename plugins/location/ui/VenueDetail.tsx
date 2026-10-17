@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   MapPin, Tag, Navigation, Loader2, AlertCircle,
   Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink,
@@ -79,6 +79,7 @@ function buildGoogleMapsUrl(
 
 export default function VenueDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   // This route isn't wrapped in LocationProvider (which would also prefetch
   // nearby venues we don't need here), so read the position directly.
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
@@ -165,8 +166,13 @@ export default function VenueDetail() {
     .map((l) => ({ id: l.id, name: l.name }));
   const availableLists = lists.filter((l) => !venueListItems.some((v) => v.id === l.id));
 
+  // Bumped per fetch: navigating between venues quickly must not let a slow
+  // response for the previous venue overwrite the current one.
+  const fetchGenRef = useRef(0);
+
   const fetchData = async () => {
     if (!id) return;
+    const gen = ++fetchGenRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -188,12 +194,14 @@ export default function VenueDetail() {
         return all;
       };
       const [venueData, checkinData] = await Promise.all([venues.get(id), fetchAllCheckins()]);
+      if (gen !== fetchGenRef.current) return;
       setVenue(venueData);
       setVenueCheckins(checkinData);
     } catch (err) {
+      if (gen !== fetchGenRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load venue');
     } finally {
-      setLoading(false);
+      if (gen === fetchGenRef.current) setLoading(false);
     }
   };
 
@@ -290,7 +298,15 @@ export default function VenueDetail() {
     setMergeError(null);
     try {
       await venues.mergeInto(id, mergeTarget.id);
-      window.location.href = `/venues/${mergeTarget.id}`;
+      // A client-side navigation (not a full reload) keeps this component's
+      // state, so close the merge UI before moving to the surviving venue.
+      const targetId = mergeTarget.id;
+      setMergeOpen(false);
+      setMergeTarget(null);
+      setMergeQuery('');
+      setMergeResults([]);
+      setMergeConfirming(false);
+      navigate(`/venues/${targetId}`);
     } catch (err) {
       setMergeError(err instanceof Error ? err.message : 'Merge failed.');
       setMergeConfirming(false);

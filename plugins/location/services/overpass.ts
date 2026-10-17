@@ -323,8 +323,8 @@ export async function findEnclosingVenue(
     [out:json][timeout:30];
     is_in(${lat},${lon})->.enclosing;
     (
-      way.enclosing${placeFilter}["name"];
-      relation.enclosing${placeFilter}["name"];
+      way(pivot.enclosing)${placeFilter}["name"];
+      relation(pivot.enclosing)${placeFilter}["name"];
     );
     out center;
   `;

@@ -1,4 +1,4 @@
-import { Routes, Route, useParams } from 'react-router-dom';
+import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Layout from './components/Layout';
 import Home from './pages/Home';
@@ -21,6 +21,7 @@ import MediaDetail from '../../plugins/media/ui/pages/MediaDetail';
 /** Check-in page for a specific plugin (create + edit via ?edit=<id>). */
 function PluginCheckInPage({ pluginId }: { pluginId: string }) {
   const { id } = useParams<{ id?: string }>();
+  const navigate = useNavigate();
   const searchParams = new URLSearchParams(window.location.search);
   const editId = searchParams.get('edit') ?? id ?? null;
   const plugin = getClientPlugin(pluginId);
@@ -31,7 +32,7 @@ function PluginCheckInPage({ pluginId }: { pluginId: string }) {
       <plugin.client.checkInForm
         editId={editId}
         dateParam={searchParams.get('date')}
-        onCreated={() => window.location.assign('/')}
+        onCreated={() => navigate('/')}
         onUpdated={() => {}}
       />
     );

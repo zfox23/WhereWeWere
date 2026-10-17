@@ -146,6 +146,7 @@ function NumberField({
   max,
   step,
   className,
+  onBlur,
 }: {
   label: string;
   value: unknown;
@@ -155,6 +156,7 @@ function NumberField({
   max?: number;
   step?: number;
   className?: string;
+  onBlur?: () => void;
 }) {
   return (
     <div className={className}>
@@ -169,6 +171,7 @@ function NumberField({
         max={max}
         step={step ?? 'any'}
         onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+        onBlur={onBlur}
         className={inputClass}
       />
     </div>
@@ -283,8 +286,6 @@ const UNIT_FIELDS = {
   start_pressure: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
   end_pressure: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
   weight_pressure: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
-  min_ppo2: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
-  max_ppo2: { toDisplay: pressureToDisplay, toStored: pressureToStored, metric: 'bar', imperial: 'psi' },
   weight: { toDisplay: weightToDisplay, toStored: weightToStored, metric: 'kg', imperial: 'lb' },
 } as const;
 
@@ -310,11 +311,21 @@ function UnitField({
   const spec = UNIT_FIELDS[name];
   const raw = values[name];
   const storedValue = typeof raw === 'number' ? raw : null;
+  // What the user is typing, verbatim. Round-tripping every keystroke through
+  // stored metric units and back snapped the input to the rounded display value
+  // ("60.5" became "60" in imperial); the converted value only replaces it once
+  // the field loses focus.
+  const [draft, setDraft] = useState<number | undefined | null>(null);
   return (
     <NumberField
       label={label}
-      value={spec.toDisplay(storedValue, unit)}
-      onChange={(v) => setField(name, v == null || typeof v !== 'number' ? undefined : spec.toStored(v, unit))}
+      value={draft !== null ? draft : spec.toDisplay(storedValue, unit)}
+      onBlur={() => setDraft(null)}
+      onChange={(v) => {
+        const typed = v == null || typeof v !== 'number' ? undefined : v;
+        setDraft(typed);
+        setField(name, typed === undefined ? undefined : spec.toStored(typed, unit));
+      }}
       unit={unit === 'imperial' ? spec.imperial : spec.metric}
       min={min}
       step={step}
@@ -409,7 +420,7 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
           checkin_timezone: browserTimezone,
           data,
         });
-        navigate(`/?highlight=${row.id}`);
+        navigate('/', { state: { newId: row.id } });
         return;
       }
       window.scrollTo(0, 0);
@@ -570,8 +581,9 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
                 <UnitField name="weight_pressure" label="Weighted pressure" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <UnitField name="min_ppo2" label="Min pPO₂" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
-                <UnitField name="max_ppo2" label="Max pPO₂" values={values} setField={setField} unit={unit} min={0} step={unit === 'imperial' ? 1 : 0.1} />
+                {/* pPO₂ is a partial pressure in bar: never converted to psi. */}
+                <NumberField label="Min pPO₂" unit="bar" value={values.min_ppo2} onChange={(v) => setField('min_ppo2', v)} min={0} step={0.01} />
+                <NumberField label="Max pPO₂" unit="bar" value={values.max_ppo2} onChange={(v) => setField('max_ppo2', v)} min={0} step={0.01} />
                 <Field label="Supply type" value={values.supply_type} onChange={(v) => setField('supply_type', v)} />
               </div>
               <div className="grid grid-cols-3 gap-3">

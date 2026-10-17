@@ -338,6 +338,26 @@ describe('Sleep plugin API', () => {
       expect(second.body).toEqual({ imported: 0, skipped: 2, errors: [], total_errors: 0 });
     });
 
+    it('keeps a quoted multi-line comment as one record and handles a repeated header block', async () => {
+      const csv = [
+        'Id,From,To,Rating,Tz,Comment',
+        '10,10.3.2026 23:30,11.3.2026 06:00,4,Europe/Lisbon,"woke up twice',
+        'then slept fine"',
+        'Id,Time,Hours',
+        ',noise row,1',
+        'Id,From,To,Rating,Tz,Comment',
+        '11,11.3.2026 23:30,12.3.2026 06:30,5,Europe/Lisbon,ok',
+        '',
+      ].join('\n');
+      const res = await request(app)
+        .post('/api/v1/import/sleep-as-android')
+        .field('file', Buffer.from(csv), 'export.csv');
+      expect(res.status).toBe(200);
+      expect(res.body.imported).toBe(2);
+      const row = await query('SELECT comment FROM sleep_entries WHERE sleep_as_android_id = 10');
+      expect(row.rows[0].comment).toBe('woke up twice\nthen slept fine');
+    });
+
     it('rejects non-CSV uploads', async () => {
       const res = await request(app)
         .post('/api/v1/import/sleep-as-android')

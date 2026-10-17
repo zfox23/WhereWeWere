@@ -21,6 +21,12 @@ import { parse } from 'csv-parse/sync';
 //   - movie/book + Planning/Paused               -> media_item only
 // ============================================================================
 
+/** Parse a whole-number string; null when absent or not a number (parseInt would give NaN). */
+function toIntOrNull(value: string | null): number | null {
+  if (!value || !/^\s*-?\d+\s*$/.test(value)) return null;
+  return parseInt(value, 10);
+}
+
 export type YamtrackMediaType = 'tv' | 'season' | 'episode' | 'movie' | 'game' | 'book';
 
 export interface YamtrackRow {
@@ -249,6 +255,30 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
       continue;
     }
 
+    // One malformed value used to abort the whole import transaction (the
+    // database rejects a bad timestamp). Skip just that row, with a reason.
+    if (row.end_date && Number.isNaN(Date.parse(row.end_date))) {
+      plans.push({
+        row,
+        disposition: 'skipped',
+        reason: `Invalid end_date "${row.end_date}"`,
+        media_type: null,
+        external_source: null,
+        external_id: null,
+        checkin_type: null,
+        season_number: null,
+        episode_number: null,
+        rating: null,
+        raw_score: null,
+        time_played_minutes: null,
+        item_status: null,
+        checked_in_at: null,
+        external_event_id: null,
+        duplicate_of_line: null,
+      });
+      continue;
+    }
+
     if (row.media_type === 'tv' || row.media_type === 'season') {
       plans.push({
         row,
@@ -258,7 +288,7 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
         external_source: externalSource,
         external_id: externalId,
         checkin_type: null,
-        season_number: row.season_number ? parseInt(row.season_number, 10) : null,
+        season_number: toIntOrNull(row.season_number),
         episode_number: null,
         rating: null,
         raw_score: null,
@@ -272,13 +302,13 @@ export function planYamtrackImport(rows: YamtrackRow[]): YamtrackPlanItem[] {
     }
 
     if (row.media_type === 'episode') {
-      const s = row.season_number ? parseInt(row.season_number, 10) : null;
-      const e = row.episode_number ? parseInt(row.episode_number, 10) : null;
+      const s = toIntOrNull(row.season_number);
+      const e = toIntOrNull(row.episode_number);
       if (s == null || e == null) {
         plans.push({
           row,
           disposition: 'skipped',
-          reason: 'Episode row missing season/episode number',
+          reason: 'Episode row missing or invalid season/episode number',
           media_type: 'tv_show',
           external_source: externalSource,
           external_id: externalId,

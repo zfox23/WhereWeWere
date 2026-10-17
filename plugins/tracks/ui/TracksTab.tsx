@@ -240,6 +240,9 @@ function TracksMap({
         <TileLayer
           key={resolvedTheme}
           attribution={TILE_ATTRIBUTION}
+          // CORS-enabled tile requests: opaque (no-cors) responses can't be cached
+          // by the service worker's tile cache.
+          crossOrigin="anonymous"
           url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
         />
         {drawTracks.map((track, i) => {

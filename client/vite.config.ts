@@ -15,7 +15,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' disables the plugin's unconditional reload on update; main.tsx
+      // reloads at a safe moment instead (see utils/swUpdate.ts).
+      registerType: 'prompt',
       srcDir: 'src',
       filename: 'sw-custom.ts',
       strategies: 'injectManifest',

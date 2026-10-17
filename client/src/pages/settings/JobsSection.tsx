@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Cog, Clock, Loader2, AlertCircle, CheckCircle2, XCircle, Ban, Play, StopCircle } from 'lucide-react';
 import { jobs } from '../../api/client';
 import type { Job } from '../../types';
@@ -69,6 +69,18 @@ export function JobsSection({ refreshKey }: { refreshKey: number }) {
     }
   };
 
+  // The cancel poll chains timeouts; stop it (and any state update) once the
+  // component is gone.
+  const mountedRef = useRef(true);
+  const cancelPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (cancelPollTimerRef.current) clearTimeout(cancelPollTimerRef.current);
+    };
+  }, []);
+
   const cancelJob = async (id: string) => {
     try {
       await jobs.cancel(id);
@@ -78,11 +90,17 @@ export function JobsSection({ refreshKey }: { refreshKey: number }) {
         )
       );
       const pollCancel = async (retries: number) => {
-        const data = await jobs.list();
+        let data: Job[];
+        try {
+          data = await jobs.list();
+        } catch {
+          return; // transient failure: the regular job refresh will catch up
+        }
+        if (!mountedRef.current) return;
         setJobList(data);
         const job = data.find((j: Job) => j.id === id);
         if (job && (job.status === 'pending' || job.status === 'running') && retries > 0) {
-          setTimeout(() => pollCancel(retries - 1), 1000);
+          cancelPollTimerRef.current = setTimeout(() => pollCancel(retries - 1), 1000);
         }
       };
       pollCancel(15);

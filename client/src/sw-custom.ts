@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
-import { precacheAndRoute } from 'workbox-precaching';
-import { registerRoute } from 'workbox-routing';
+import { createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { CacheFirst, NetworkFirst } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 
@@ -15,6 +15,14 @@ self.clients.claim();
 
 // Precache static assets injected by vite-plugin-pwa
 precacheAndRoute(self.__WB_MANIFEST);
+
+// Serve the precached app shell for SPA navigations (deep links, reloads) so
+// they work offline; API calls and real files are left to the network.
+registerRoute(
+  new NavigationRoute(createHandlerBoundToURL('index.html'), {
+    denylist: [/^\/api\//, /^\/healthz/, /\/[^/?]+\.[^/]+$/],
+  })
+);
 
 // Cache Leaflet CDN assets
 registerRoute(

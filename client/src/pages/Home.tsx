@@ -230,12 +230,13 @@ export default function Home() {
   }, []);
 
   const toggleTimelineDensity = useCallback(() => {
-    setTimelineDensity((prev) => {
-      const next = prev === 'compact' ? 'comfortable' : 'compact';
-      settings.update({ timeline_density: next }).catch(() => {});
-      return next;
-    });
-  }, []);
+    // Side effects don't belong in a state updater (StrictMode runs updaters
+    // twice, which sent two PUTs per click): compute the next value from the
+    // current state, then set and persist it.
+    const next = timelineDensity === 'compact' ? 'comfortable' : 'compact';
+    setTimelineDensity(next);
+    settings.update({ timeline_density: next }).catch(() => {});
+  }, [timelineDensity]);
 
 
   // Read filters from URL params
@@ -893,13 +894,20 @@ export default function Home() {
                       <Plus size={8} className={`text-white transition-opacity ${openTimelineDotDate === date ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
                     </span>
                   </button>
+                  {/* Rendered only for the open date: a hidden copy per date put
+                      hundreds of focusable controls (inside aria-hidden content) in the DOM. */}
+                  {openTimelineDotDate === date && (
                   <div
-                    className={`absolute left-[-9px] top-1/2 -translate-y-1/2 z-30 flex items-center gap-3 rounded-full border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 px-2 py-1 shadow-lg backdrop-blur-sm transition-all duration-200 ease-out ${openTimelineDotDate === date ? 'opacity-100 translate-x-0 scale-100 pointer-events-auto' : 'opacity-0 -translate-x-1 scale-95 pointer-events-none'}`}
-                    aria-hidden={openTimelineDotDate !== date}
+                    className="absolute left-[-9px] top-1/2 -translate-y-1/2 z-30 flex items-center gap-3 rounded-full border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 px-2 py-1 shadow-lg backdrop-blur-sm"
+                    role="group"
+                    aria-label={`Add a check-in on ${formatDateHeader(date)}`}
                   >
-                    <button className={`w-3 h-3 rounded-full bg-primary-500 ring-4 rotate-45 dark:ring-primary-900/30 flex items-center justify-center transition-transform group-hover:scale-110 ${openTimelineDotDate === date ? 'ring-primary-200 dark:ring-primary-800/70' : 'ring-primary-100'}`}
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      className="w-3 h-3 rounded-full bg-primary-500 ring-4 rotate-45 dark:ring-primary-900/30 ring-primary-200 dark:ring-primary-800/70 flex items-center justify-center transition-transform group-hover:scale-110"
                       onClick={() => setOpenTimelineDotDate(null)}>
-                      <Plus size={8} className={`text-white transition-opacity ${openTimelineDotDate === date ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                      <Plus size={8} className="text-white" />
                     </button>
                     {FAB_PLUGINS.map((plugin) => {
                       const Icon = plugin.client.icon as React.ElementType<{ size?: number; className?: string }>;
@@ -910,13 +918,13 @@ export default function Home() {
                           className={`p-1.5 rounded-full transition-colors hover:bg-gray-100 dark:hover:bg-gray-800`}
                           title={`${plugin.strings.title} check-in`}
                           onClick={() => setOpenTimelineDotDate(null)}
-                          tabIndex={openTimelineDotDate === date ? 0 : -1}
                         >
                           <Icon size={24} className={plugin.client.iconColor} />
                         </Link>
                       );
                     })}
                   </div>
+                  )}
                 </div>
                 <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                   <button

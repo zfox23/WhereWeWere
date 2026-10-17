@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import { settings } from '../../../client/src/api/client';
+import { onSettingsChanged } from '../../../client/src/utils/settingsEvents';
 
 export type DistanceUnit = 'metric' | 'imperial';
 
@@ -111,22 +112,36 @@ function loadDistanceUnit(): Promise<DistanceUnit> {
   if (!cached) {
     cached = settings
       .get()
-      .then((s) => (s?.distance_unit === 'imperial' ? 'imperial' : 'metric'))
-      .catch(() => 'metric');
+      .then((s) => (s?.distance_unit === 'imperial' ? 'imperial' : 'metric') as DistanceUnit)
+      .catch(() => {
+        // A failed load must not pin 'metric' for the rest of the session.
+        cached = null;
+        return 'metric' as DistanceUnit;
+      });
   }
   return cached;
 }
+
+// Registered at import time (before any hook's listener): drop the memoized
+// preference when settings are saved.
+onSettingsChanged(() => {
+  cached = null;
+});
 
 /** The user's imperial/metric preference (defaults to metric while loading). */
 export function useScubaUnits(): DistanceUnit {
   const [unit, setUnit] = useState<DistanceUnit>('metric');
   useEffect(() => {
     let active = true;
-    loadDistanceUnit().then((u) => {
-      if (active) setUnit(u);
-    });
+    const load = () =>
+      loadDistanceUnit().then((u) => {
+        if (active) setUnit(u);
+      });
+    load();
+    const unsubscribe = onSettingsChanged(load);
     return () => {
       active = false;
+      unsubscribe();
     };
   }, []);
   return unit;

@@ -35,7 +35,11 @@ export default function Profile() {
 
   const getTabFromLocation = (): ProfileTab => {
     const tabParam = new URLSearchParams(window.location.search).get('tab');
-    return isProfileTab(tabParam) ? tabParam : 'plugin:location';
+    if (isProfileTab(tabParam)) return tabParam;
+    // Default to the location tab when that plugin exists, otherwise the first
+    // available tab (the page used to render blank without the location plugin).
+    if (PROFILE_PLUGINS.some((p) => p.id === 'location')) return 'plugin:location';
+    return PROFILE_PLUGINS.length > 0 ? `plugin:${PROFILE_PLUGINS[0].id}` : 'reflect';
   };
 
   const [activeTab, setActiveTab] = useState<ProfileTab>(getTabFromLocation);

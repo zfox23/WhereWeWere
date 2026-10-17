@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, X } from 'lucide-react';
 import { ICON_LIBRARY, ICON_NAMES, resolveActivityIcon } from '../utils/icons';
 
@@ -10,6 +10,40 @@ interface IconPickerProps {
 
 export default function IconPicker({ value, onChange, onClose }: IconPickerProps) {
   const [search, setSearch] = useState('');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  // Modal behaviour: Escape closes, Tab stays inside the dialog, and focus
+  // returns to whatever opened it.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      opener?.focus?.();
+    };
+  }, [onClose]);
 
   const filteredIcons = useMemo(() => {
     if (!search.trim()) return ICON_LIBRARY;
@@ -23,11 +57,19 @@ export default function IconPicker({ value, onChange, onClose }: IconPickerProps
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="icon-picker-title"
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Select Icon</h3>
+          <h3 id="icon-picker-title" className="text-lg font-semibold text-gray-900 dark:text-white">Select Icon</h3>
           <button
+            type="button"
+            aria-label="Close"
             onClick={onClose}
             className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
           >
@@ -59,6 +101,8 @@ export default function IconPicker({ value, onChange, onClose }: IconPickerProps
                 return (
                   <button
                     key={icon}
+                    type="button"
+                    aria-pressed={value === icon}
                     onClick={() => onChange(icon)}
                     title={ICON_NAMES[icon] || icon}
                     className={`flex flex-col items-center justify-center p-3 rounded-lg transition ${

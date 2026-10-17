@@ -344,3 +344,24 @@ describe('end-to-end parse + plan on a real-shaped CSV', () => {
     expect(movie.checked_in_at).toBe('2023-04-05 01:50:00+00:00');
   });
 });
+
+describe('malformed rows are skipped individually', () => {
+  it('skips a row with an unparseable end_date instead of letting it abort the import', () => {
+    const plans = planYamtrackImport([
+      row({ line: 2, media_type: 'movie', title: 'Bad date', status: 'Completed', end_date: 'not a date' }),
+      row({ line: 3, media_id: '2', media_type: 'movie', title: 'Good', status: 'Completed', end_date: '2023-04-05 01:50:00+00:00' }),
+    ]);
+    expect(plans[0].disposition).toBe('skipped');
+    expect(plans[0].reason).toMatch(/Invalid end_date/);
+    expect(plans[1].disposition).toBe('create_checkin');
+  });
+
+  it('skips an episode with a non-numeric season/episode rather than producing NaN', () => {
+    const plans = planYamtrackImport([
+      row({ line: 2, media_type: 'episode', title: 'X', season_number: 'abc', episode_number: '1', end_date: '2023-04-05 01:50:00+00:00' }),
+      row({ line: 3, media_type: 'season', title: 'Show', season_number: 'x' }),
+    ]);
+    expect(plans[0].disposition).toBe('skipped');
+    expect(plans[1].season_number).toBeNull();
+  });
+});

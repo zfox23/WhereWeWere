@@ -56,3 +56,24 @@ describe('api client request()', () => {
     await expect(request('/anything')).resolves.toEqual({ hello: 'world' });
   });
 });
+
+describe('api client request() edge cases', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('resolves undefined for a 204 instead of throwing on res.json()', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(request<void>('/x', { method: 'DELETE' })).resolves.toBeUndefined();
+  });
+
+  it('keeps Content-Type when the caller passes its own headers', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    await request('/x', { method: 'POST', headers: { 'X-Custom': '1' }, body: '{}' });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json', 'X-Custom': '1' });
+  });
+});

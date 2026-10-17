@@ -3,6 +3,7 @@ import { Check, Copy, Clapperboard, Tv, Film, Gamepad2, BookOpen } from 'lucide-
 import { plugins } from '../../../client/src/plugins/api';
 import { plexWebhook } from './api';
 import { YamtrackImportSection } from './YamtrackImportSection';
+import { copyText } from '../../../client/src/utils/clipboard';
 
 interface MediaPluginSettings {
   plex_usernames?: string | null;
@@ -62,7 +63,8 @@ export function MediaSettings() {
   }, []);
 
   const handlePlexCopy = () => {
-    navigator.clipboard.writeText(plexWebhookUrl).then(() => {
+    copyText(plexWebhookUrl).then((ok) => {
+      if (!ok) return;
       setPlexCopied(true);
       setTimeout(() => setPlexCopied(false), 2000);
     });

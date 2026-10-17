@@ -127,8 +127,13 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
           plan.imported_checkin_id = insertedRow.id;
           importedCheckins += 1;
         } else if (ins.rowCount && ins.rowCount > 0) {
-          // Existed already: refresh the stored id for result links.
+          // Already imported (same external event id): keep the id for result
+          // links, and report it as a duplicate rather than silently counting
+          // it as neither imported nor skipped.
           plan.imported_checkin_id = ins.rows[0].id;
+          plan.disposition = 'duplicate';
+          plan.reason = 'Check-in already exists (same external event id)';
+          duplicatesSkipped += 1;
         } else {
           plan.imported_checkin_id = null;
           plan.disposition = 'duplicate';

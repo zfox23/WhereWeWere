@@ -40,6 +40,14 @@ class SmoothWheelZoom extends L.Handler {
 
     removeHooks(): void {
         L.DomEvent.off(this._map.getContainer(), 'wheel', this._onWheelScroll, this);
+        // Stop any in-flight animation frame / pending wheel-end timer so
+        // neither fires against a map that has been torn down.
+        window.cancelAnimationFrame(this._zoomAnimationId);
+        if (this._timeoutId) {
+            clearTimeout(this._timeoutId);
+            this._timeoutId = null;
+        }
+        this._isWheeling = false;
     }
 
     private _onWheelScroll(e: Event): void {
@@ -107,12 +115,12 @@ class SmoothWheelZoom extends L.Handler {
         const zoom = Math.floor((map.getZoom() + (this._goalZoom - map.getZoom()) * 0.3) * 100) / 100;
         const delta = this._wheelMousePosition.subtract(this._centerPoint);
 
-        if (delta.x === 0 && delta.y === 0) {
-            return;
-        }
-
-        const nextCenter = map.options.smoothWheelZoom === 'center'
-            ? this._startLatLng
+        // With the cursor exactly on the map center there is nothing to pan
+        // toward, but the zoom must still proceed: returning here ended the
+        // frame loop and silently dropped the whole gesture.
+        const atCenter = delta.x === 0 && delta.y === 0;
+        const nextCenter = atCenter || map.options.smoothWheelZoom === 'center'
+            ? (atCenter ? map.getCenter() : this._startLatLng)
             : map.unproject(map.project(this._wheelMouseLatLng, zoom).subtract(delta), zoom);
 
         if (!this._moved) {

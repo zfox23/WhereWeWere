@@ -163,8 +163,9 @@ export default function ScubaDetail() {
               ['Start pressure', formatPressure(num('start_pressure'), unit)],
               ['End pressure', formatPressure(num('end_pressure'), unit)],
               ['Weighted pressure', formatPressure(num('weight_pressure'), unit)],
-              ['Min pPO₂', formatPressure(num('min_ppo2'), unit)],
-              ['Max pPO₂', formatPressure(num('max_ppo2'), unit)],
+              // Partial pressure of oxygen is always bar (never psi) and needs 2 decimals.
+              ['Min pPO₂', num('min_ppo2') != null ? `${num('min_ppo2')} bar` : null],
+              ['Max pPO₂', num('max_ppo2') != null ? `${num('max_ppo2')} bar` : null],
               ['Supply type', txt('supply_type')],
               ['Doubles', bool('dbl_tank')],
               ['Weight belt', formatWeight(num('weight'), unit)],

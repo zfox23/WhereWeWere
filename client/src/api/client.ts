@@ -3,6 +3,8 @@ import type {
   TimestampReconciliationScanResult,
 } from '../types';
 
+import { notifySettingsChanged } from '../utils/settingsEvents';
+
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
 
@@ -12,15 +14,24 @@ export function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
 }
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  // Headers are merged explicitly and placed after the spread: the old order
+  // let a caller-supplied `options.headers` replace Content-Type and the auth
+  // header wholesale.
+  const { headers: extraHeaders, ...rest } = options ?? {};
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: withAuthHeader({ 'Content-Type': 'application/json', ...options?.headers }),
-    ...options,
+    ...rest,
+    headers: withAuthHeader({
+      'Content-Type': 'application/json',
+      ...(extraHeaders as Record<string, string> | undefined),
+    }),
   });
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: res.statusText }));
     // Server error bodies use { error: "..." }; fall back to `message`, then status.
     throw new Error(error.error || error.message || `Request failed: ${res.status}`);
   }
+  // 204 No Content has no body to parse (res.json() would throw on it).
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -370,8 +381,12 @@ export const timeline = {
 // Settings
 export const settings = {
   get: () => request<any>('/settings'),
-  update: (data: any) =>
-    request<any>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  update: async (data: any) => {
+    const result = await request<any>('/settings', { method: 'PUT', body: JSON.stringify(data) });
+    // Memoized settings readers (Immich enabled, distance unit) re-read now.
+    notifySettingsChanged();
+    return result;
+  },
   updateProfile: (data: any) =>
     request<any>('/settings/profile', { method: 'PUT', body: JSON.stringify(data) }),
   timestampReconciliationPreview: () =>

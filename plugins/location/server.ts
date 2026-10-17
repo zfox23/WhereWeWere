@@ -67,7 +67,7 @@ function addTimezone(row: any): any {
 
 type QueryExecutor = { query: (sql: string, values?: any[]) => Promise<{ rows: any[] }> };
 
-async function inferVenueTimezone(venueId: string, executor: QueryExecutor = query as unknown as QueryExecutor): Promise<string | null> {
+async function inferVenueTimezone(venueId: string, executor: QueryExecutor = { query } as unknown as QueryExecutor): Promise<string | null> {
   const venueResult = await executor.query(
     'SELECT latitude, longitude FROM venues WHERE id = $1',
     [venueId]
@@ -885,6 +885,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // The shared companion table has no FK into checkins; clean up explicitly.
     await deleteCompanionsForCheckins('location', [String(id)]);
+    // Likewise the Maloja scrobble cache (its FK was dropped in migration 017).
+    await query('DELETE FROM checkin_scrobbles WHERE checkin_id = $1', [id]);
 
     res.json({ message: 'Check-in deleted', id });
   } catch (err) {
@@ -2527,26 +2529,29 @@ swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, 
     for (const file of files) {
       const content = fs.readFileSync(file.path, 'utf-8');
 
-      // The Swarm CSV export has repeated header rows between records.
-      // Split by lines, find all header rows, and parse each block.
-      const lines = content.split('\n');
+      // The Swarm CSV export has repeated header rows between records, and
+      // `shout` values may contain quoted newlines, so parse the whole file as
+      // CSV (a split on '\n' tore those records apart and silently dropped
+      // them) and then walk the rows, switching headers at each header row.
+      let allRows: string[][];
+      try {
+        allRows = parse(content, {
+          bom: true,
+          relax_column_count: true,
+          relax_quotes: true,
+          skip_empty_lines: true,
+          skip_records_with_error: true,
+          trim: true,
+        }) as string[][];
+      } catch (parseErr: any) {
+        errors.push(`${file.originalname}: could not parse CSV (${parseErr.message || parseErr})`);
+        continue;
+      }
       let currentHeaders: string[] = [];
       const records: Record<string, string>[] = [];
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        // Parse the line as CSV
-        let parsed: string[][];
-        try {
-          parsed = parse(trimmed, { relax_column_count: true, trim: true });
-        } catch {
-          continue;
-        }
-
-        if (parsed.length === 0 || parsed[0].length === 0) continue;
-        const row = parsed[0];
+      for (const row of allRows) {
+        if (row.length === 0) continue;
 
         // Detect header row: starts with "id" as first field
         if (row[0] === 'id') {
@@ -2591,10 +2596,13 @@ swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, 
 
           const venueId = await findOrCreateVenue(venueName, lat, lng, swarmVenueId);
 
+          // Without a timezone the check-in reads as UTC in stats and date
+          // filters until the separate backfill script runs.
+          const checkinTimezone = await inferVenueTimezone(venueId);
           await query(
-            `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, swarm_id)
-             VALUES ($1, $2, $3, $4::timestamptz, $5)`,
-            [USER_ID, venueId, shout, createdAt, swarmId]
+            `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, swarm_id)
+             VALUES ($1, $2, $3, $4::timestamptz, $5, $6)`,
+            [USER_ID, venueId, shout, createdAt, checkinTimezone, swarmId]
           );
 
           imported++;
@@ -2604,10 +2612,6 @@ swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, 
         }
       }
 
-      // Clean up temp file
-      try {
-        fs.unlinkSync(file.path);
-      } catch { /* ignore */ }
     }
 
     res.json({
@@ -2619,6 +2623,13 @@ swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, 
   } catch (err: any) {
     console.error('Import error:', err);
     res.status(500).json({ error: 'Import failed', details: err.message || String(err) });
+  } finally {
+    // Clean up every uploaded temp file, including after an error mid-loop.
+    for (const file of files) {
+      try {
+        fs.unlinkSync(file.path);
+      } catch { /* ignore */ }
+    }
   }
 });
 
@@ -2890,8 +2901,13 @@ export const server: CheckinTypeServerPlugin = {
       ),
     });
     if (ctx.filterParams.venue_id) conds.push('c.venue_id = ?', ctx.filterParams.venue_id);
-    if (ctx.filterParams.category) conds.push('vc.name = ?', ctx.filterParams.category);
-    if (ctx.filterParams.country) conds.push('v.country = ?', ctx.filterParams.country);
+    // The stats lists label venues without a category/country 'Uncategorized' /
+    // 'Unknown' (COALESCE in SQL); clicking one links here with that label, so
+    // map it back to the NULL case instead of matching a literal name.
+    if (ctx.filterParams.category === 'Uncategorized') conds.push('vc.id IS NULL');
+    else if (ctx.filterParams.category) conds.push('vc.name = ?', ctx.filterParams.category);
+    if (ctx.filterParams.country === 'Unknown') conds.push(`(v.country IS NULL OR TRIM(v.country) = '')`);
+    else if (ctx.filterParams.country) conds.push('v.country = ?', ctx.filterParams.country);
     return conds.build();
   },
 

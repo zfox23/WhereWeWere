@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, Plus, X, ExternalLink, Star, AlertTriangle } from 'lucide-react';
 import { media } from '../api';
@@ -28,20 +28,27 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
   const [customYear, setCustomYear] = useState('');
   const [customImageUrl, setCustomImageUrl] = useState('');
   const [savingCustom, setSavingCustom] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
+  // Latest search wins: overlapping searches (e.g. repeated Enter) could
+  // otherwise resolve out of order and show the older query's results.
+  const searchSeqRef = useRef(0);
 
   const runSearch = async (q: string) => {
     if (!q.trim()) return;
+    const seq = ++searchSeqRef.current;
     setSearching(true);
     setSearchError(null);
     try {
       const res = await media.search(subtype, q.trim());
+      if (seq !== searchSeqRef.current) return;
       setResults(res.results);
       setDegraded(res.degraded);
     } catch (err) {
+      if (seq !== searchSeqRef.current) return;
       setSearchError(err instanceof Error ? err.message : 'Search failed');
       setResults(null);
     } finally {
-      setSearching(false);
+      if (seq === searchSeqRef.current) setSearching(false);
     }
   };
 
@@ -84,6 +91,7 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
   const handleAddCustom = async () => {
     if (!customTitle.trim()) return;
     setSavingCustom(true);
+    setCustomError(null);
     try {
       const year = customYear ? parseInt(customYear, 10) : null;
       const item = await media.createItem({
@@ -100,6 +108,9 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
       } else {
         navigate(`${config.searchPath}/${item.id}/${slug}`);
       }
+    } catch (err) {
+      // Surface the failure (it used to be an unhandled rejection with no feedback).
+      setCustomError(err instanceof Error ? err.message : 'Could not save this entry. Please try again.');
     } finally {
       setSavingCustom(false);
     }
@@ -294,6 +305,11 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
                 {savingCustom && <Loader2 size={14} className="animate-spin mr-2" />}
                 Save & Continue
               </button>
+              {customError && (
+                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                  {customError}
+                </p>
+              )}
             </div>
           )}
         </div>

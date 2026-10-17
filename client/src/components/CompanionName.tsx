@@ -18,9 +18,11 @@ interface CompanionPhotoProps {
  */
 export function CompanionPhoto({ name, size = 16, className = '' }: CompanionPhotoProps) {
   const enabled = useImmichEnabled();
-  const [failed, setFailed] = useState(false);
+  // Keyed by name so a failed photo for one person isn't carried over when the
+  // same component instance is re-used for another.
+  const [failedName, setFailedName] = useState<string | null>(null);
 
-  if (!enabled || failed) return null;
+  if (!enabled || failedName === name) return null;
 
   return (
     <img
@@ -30,7 +32,7 @@ export function CompanionPhoto({ name, size = 16, className = '' }: CompanionPho
       width={size}
       height={size}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => setFailedName(name)}
       className={`shrink-0 rounded-full object-cover ${className}`}
       style={{ width: size, height: size }}
     />

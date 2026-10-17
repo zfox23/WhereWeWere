@@ -219,6 +219,39 @@ describe('Location plugin API (integration)', () => {
     });
   });
 
+  describe('timeline filters for unlabelled venues', () => {
+    it("maps the stats lists' 'Uncategorized' / 'Unknown' labels back to NULL", async () => {
+      const cat = await query(`INSERT INTO venue_categories (name) VALUES ('Cafe') RETURNING id`);
+      const plain = await insertVenue('No Category', 10, 10);
+      const cafe = await insertVenue('A Cafe', 11, 11);
+      await query('UPDATE venues SET category_id = $1, country = $2 WHERE id = $3', [cat.rows[0].id, 'France', cafe]);
+      await insertCheckin(plain, '2024-01-01T12:00:00Z', 'UTC');
+      await insertCheckin(cafe, '2024-01-02T12:00:00Z', 'UTC');
+
+      const uncategorized = await request(app)
+        .get('/api/v1/timeline')
+        .query({ user_id: DEFAULT_USER_ID, category: 'Uncategorized' });
+      expect(uncategorized.body.map((r: { venue_name: string }) => r.venue_name)).toEqual(['No Category']);
+
+      const unknown = await request(app)
+        .get('/api/v1/timeline')
+        .query({ user_id: DEFAULT_USER_ID, country: 'Unknown' });
+      expect(unknown.body.map((r: { venue_name: string }) => r.venue_name)).toEqual(['No Category']);
+    });
+  });
+
+  describe('check-in delete', () => {
+    it('removes the cached scrobbles for the deleted check-in', async () => {
+      const venueId = await insertVenue('Scrobbly', 10, 10);
+      const id = await insertCheckin(venueId, '2024-01-01T12:00:00Z', 'UTC');
+      await query(`INSERT INTO checkin_scrobbles (checkin_id, scrobbles) VALUES ($1, '[]'::jsonb)`, [id]);
+      const res = await request(app).delete(`/api/v1/location-checkins/${id}`);
+      expect(res.status).toBe(200);
+      const left = await query('SELECT COUNT(*)::int AS n FROM checkin_scrobbles WHERE checkin_id = $1', [id]);
+      expect(left.rows[0].n).toBe(0);
+    });
+  });
+
   describe('unified timeline paging', () => {
     it('pages across plugin branches in order without duplicates or gaps', async () => {
       const venueId = await insertVenue('Timeline', 10, 10);
@@ -255,6 +288,25 @@ describe('Location plugin API (integration)', () => {
       expect(junk.status).toBe(200);
       const huge = await request(app).get('/api/v1/timeline').query({ limit: '99999999' });
       expect(huge.status).toBe(200);
+    });
+  });
+
+  describe('Swarm CSV import', () => {
+    it('keeps shouts with quoted newlines, sets the check-in timezone, and removes the upload', async () => {
+      const csv = [
+        'id,venue.name,venue.id,lat,lng,createdAt,shout',
+        'sw1,Cafe Uno,v1,40.7128,-74.0060,2024-05-03T14:00:00Z,"great coffee',
+        'and a long chat"',
+        'sw2,Cafe Dos,v2,34.0522,-118.2437,2024-05-04T14:00:00Z,',
+        '',
+      ].join('\n');
+      const res = await request(app).post('/api/v1/import/swarm').attach('files', Buffer.from(csv), 'swarm.csv');
+      expect(res.status).toBe(200);
+      expect(res.body.imported).toBe(2);
+      const rows = await query('SELECT notes, checkin_timezone, swarm_id FROM checkins ORDER BY swarm_id');
+      expect(rows.rows[0].notes).toBe('great coffee\nand a long chat');
+      expect(rows.rows[0].checkin_timezone).toBe('America/New_York');
+      expect(rows.rows[1].checkin_timezone).toBe('America/Los_Angeles');
     });
   });
 

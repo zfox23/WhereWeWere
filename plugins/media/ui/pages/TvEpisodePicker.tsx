@@ -31,7 +31,10 @@ export default function TvEpisodePicker() {
         setItem(showData);
         setSeasons(seasonsData.seasons);
         if (seasonsData.seasons.length > 0) {
-          setSelectedSeason(seasonsData.seasons[0].season_number);
+          // Season 0 is "Specials" for most shows: default to the first real
+          // season so the user doesn't have to change the dropdown every time.
+          const firstRegular = seasonsData.seasons.find((s: { season_number: number }) => s.season_number >= 1);
+          setSelectedSeason((firstRegular ?? seasonsData.seasons[0]).season_number);
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load show');

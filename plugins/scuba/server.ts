@@ -294,7 +294,11 @@ export async function parseLogbookForImport(
       const checkedInAt = localTimeToIso(row.local_date, entryTime, override);
       if (!checkedInAt) {
         const label = `Dive ${row.data.source_number ?? row.data.source_id ?? '?'}`;
-        parsed.errors.push(`${label}: could not build a timestamp for ${row.local_date} ${entryTime} in ${override}`);
+        parsed.errors.push(`${label}: could not build a timestamp for ${row.local_date} ${entryTime} in ${override}; kept its original zone`);
+        // Keep the row (un-overridden) instead of dropping it: the preview
+        // lists every row and maps import results back to it by position, so
+        // dropping one here would shift every later dive's result link.
+        rows.push(row);
         continue;
       }
       rows.push({ ...row, checkin_timezone: override, checked_in_at: checkedInAt });
@@ -305,9 +309,18 @@ export async function parseLogbookForImport(
   return { rows, errors: parsed.errors };
 }
 
+/** Identity of a dive without a source UUID: the same instant, site and depth. */
+function naturalDiveKey(checkedInAt: string, data: Record<string, unknown>): string {
+  const instant = new Date(checkedInAt).toISOString();
+  const place = typeof data.place === 'string' ? data.place.trim().toLowerCase() : '';
+  const depth = typeof data.depth === 'number' ? String(data.depth) : '';
+  return `${instant}|${place}|${depth}`;
+}
+
 /**
- * Execute an import: skips dives whose `source_uuid` already exists
- * (idempotent re-imports) and creates the rest as generic check-ins.
+ * Execute an import: skips dives that already exist (by `source_uuid`, or for
+ * dives without one by instant + site + depth, so re-imports stay idempotent)
+ * and creates the rest as generic check-ins.
  * Returns the stored check-in id for imported rows.
  */
 export async function executeScubaLogbookImport(rows: ScubaLogbookRow[]): Promise<{
@@ -326,21 +339,28 @@ export async function executeScubaLogbookImport(rows: ScubaLogbookRow[]): Promis
   const errors: string[] = [];
   const importedIds: (string | null)[] = [];
 
+  // One lookup of what already exists (instead of a JSON-path scan per dive).
+  const existingRows = await query(
+    `SELECT checked_in_at, data FROM plugin_checkins WHERE plugin_id = $1 AND user_id = $2`,
+    [PLUGIN_ID, USER_ID],
+  );
+  const knownUuids = new Set<string>();
+  const knownNatural = new Set<string>();
+  for (const e of existingRows.rows as { checked_in_at: string; data: Record<string, unknown> | null }[]) {
+    const data = e.data ?? {};
+    if (typeof data.source_uuid === 'string' && data.source_uuid) knownUuids.add(data.source_uuid);
+    else knownNatural.add(naturalDiveKey(e.checked_in_at, data));
+  }
+
   for (const row of rows) {
-    const sourceUuid = row.data.source_uuid;
+    const sourceUuid = typeof row.data.source_uuid === 'string' ? row.data.source_uuid : '';
+    const naturalKey = sourceUuid ? null : naturalDiveKey(row.checked_in_at, row.data);
 
     // Idempotent re-import: skip dives already imported from this backup.
-    if (typeof sourceUuid === 'string' && sourceUuid) {
-      const existing = await query(
-        `SELECT id FROM plugin_checkins
-         WHERE plugin_id = $1 AND user_id = $2 AND data->>'source_uuid' = $3`,
-        [PLUGIN_ID, USER_ID, sourceUuid],
-      );
-      if (existing.rows.length > 0) {
-        skipped++;
-        importedIds.push(null);
-        continue;
-      }
+    if ((sourceUuid && knownUuids.has(sourceUuid)) || (naturalKey && knownNatural.has(naturalKey))) {
+      skipped++;
+      importedIds.push(null);
+      continue;
     }
 
     try {
@@ -351,6 +371,8 @@ export async function executeScubaLogbookImport(rows: ScubaLogbookRow[]): Promis
       });
       imported++;
       importedIds.push(created.id);
+      if (sourceUuid) knownUuids.add(sourceUuid);
+      else if (naturalKey) knownNatural.add(naturalKey);
     } catch (rowErr) {
       errors.push(`Dive ${row.data.source_number ?? row.data.source_id ?? '?'}: ${(rowErr as Error).message}`);
       skipped++;

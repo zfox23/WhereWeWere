@@ -113,7 +113,6 @@ export function ScubaTab(_props: PluginProfileTabProps) {
 
   useEffect(() => {
     scubaStats.earliest(USER_ID).then((d) => setEarliestDiveDate(d.date)).catch(console.error);
-    scubaStats.byYear(USER_ID).then(setByYear).catch(console.error);
   }, []);
 
   const visibleRange = useMemo(
@@ -132,9 +131,13 @@ export function ScubaTab(_props: PluginProfileTabProps) {
       scubaStats.byWater(USER_ID, from, to),
       scubaStats.byType(USER_ID, from, to),
       scubaStats.topSites(USER_ID, from, to),
+      // Refreshed with every load (it used to be fetched once on mount, so the
+      // by-year chart went stale as dives were added).
+      scubaStats.byYear(USER_ID),
     ])
-      .then(([summaryData, waterData, typeData, sitesData]) => {
+      .then(([summaryData, waterData, typeData, sitesData, yearData]) => {
         if (cancelled) return;
+        setByYear(yearData);
         setSummary(summaryData);
         setByWater(waterData);
         setByType(typeData);
@@ -241,14 +244,16 @@ export function ScubaTab(_props: PluginProfileTabProps) {
         />
       </div>
 
-      {loading && (
+      {/* Full-page spinner only for the very first load; on a period change the
+          current stats stay visible (dimmed) instead of being replaced. */}
+      {loading && !initialLoaded && (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="animate-spin text-primary-600" size={24} />
         </div>
       )}
 
-      {!loading && (
-        <>
+      {(!loading || initialLoaded) && (
+        <div className={`space-y-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-3">
             <StatCard icon={Waves} label="Dives" value={summary?.total_dives ?? 0} />
             <StatCard icon={Timer} label="Total bottom time" value={formatDuration(summary?.total_bottom_time ?? 0)} />
@@ -339,7 +344,7 @@ export function ScubaTab(_props: PluginProfileTabProps) {
               )}
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

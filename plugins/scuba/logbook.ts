@@ -156,13 +156,37 @@ export function localTimeToIso(
   return new Date(utcMs).toISOString();
 }
 
-/** IANA label for a whole-hour (or null) UTC offset in minutes east. */
+/**
+ * Fixed-offset (no-DST) zones for the half/quarter-hour offsets in use, so a
+ * logbook row's offset keeps its real local day/time instead of being labelled
+ * 'UTC' (which showed e.g. Indian dives on the wrong local day).
+ */
+// Only zones without DST (historical or current), so the label can't shift a
+// stored instant's displayed local time by an hour.
+const FRACTIONAL_OFFSET_ZONES: Record<number, string> = {
+  270: 'Asia/Kabul', //         +4:30
+  330: 'Asia/Kolkata', //       +5:30
+  345: 'Asia/Kathmandu', //     +5:45
+  390: 'Asia/Yangon', //        +6:30
+  525: 'Australia/Eucla', //    +8:45
+  570: 'Australia/Darwin', //   +9:30
+  '-570': 'Pacific/Marquesas', // -9:30
+};
+
+/** IANA label for a UTC offset in minutes east ('UTC' when there is no fixed-offset zone for it). */
 function offsetMinutesToIana(offsetMinutes: number): string {
-  if (offsetMinutes % 60 !== 0) return 'UTC';
+  if (offsetMinutes % 60 !== 0) return FRACTIONAL_OFFSET_ZONES[offsetMinutes] ?? 'UTC';
   const hours = offsetMinutes / 60;
   if (hours === 0) return 'UTC';
   // Etc/GMT sign is inverted relative to the UTC offset.
   return `Etc/GMT${hours > 0 ? '-' : '+'}${Math.abs(hours)}`;
+}
+
+/** Parse "H:MM" / "HH:MM[:SS]" into hours and minutes (0:00 when missing or malformed). */
+function parseEntryTime(text: string | null | undefined): { hours: number; minutes: number } {
+  const m = (text ?? '').trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return { hours: 0, minutes: 0 };
+  return { hours: Number(m[1]), minutes: Number(m[2]) };
 }
 
 // ---------------------------------------------------------------------------
@@ -367,9 +391,7 @@ export function parseDivingLogBackup(
         timezoneSource = 'utc_offset';
         // The logbook row carries an explicit UTC offset in minutes east:
         // wall clock - offset = the UTC instant.
-        const entryTime = asText(row.Entrytime) ?? '00:00';
-        const hours = Number(entryTime.slice(0, 2)) || 0;
-        const minutes = Number(entryTime.slice(3, 5)) || 0;
+        const { hours, minutes } = parseEntryTime(asText(row.Entrytime));
         checkedInAt = new Date(
           Date.UTC(
             Number(date.slice(0, 4)),

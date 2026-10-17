@@ -43,7 +43,14 @@ function DefaultPluginFilterSection({ spec }: { spec: PluginFilterSpec }) {
     >
       {!spec.sectionDisabled &&
         params.map((param) => {
-          const field = plugin.fields.find((f) => f.name === param || (f.options && f.options.length > 0));
+          // Prefer the field named like the param. Only when none matches AND
+          // exactly one field has options is that field an unambiguous stand-in
+          // (the old `||` returned the first field with options, which could
+          // belong to a different param).
+          const withOptions = plugin.fields.filter((f) => f.options && f.options.length > 0);
+          const field =
+            plugin.fields.find((f) => f.name === param) ??
+            (withOptions.length === 1 ? withOptions[0] : undefined);
           const options = field?.options ?? [];
           return (
             <div key={param}>

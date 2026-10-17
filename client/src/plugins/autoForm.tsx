@@ -248,7 +248,7 @@ export function AutoCheckInForm({ plugin, editId = null }: CheckInFormProps & { 
           checked_in_at: checkedInAt,
           data,
         });
-        navigate(`/?highlight=${row.id}`);
+        navigate('/', { state: { newId: row.id } });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
