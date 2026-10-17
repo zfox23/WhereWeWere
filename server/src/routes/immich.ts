@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { query } from '../db';
 import { pluginTimestampUnion } from '../plugins/registry';
 import { config } from '../config';
@@ -237,16 +238,41 @@ interface PersonPhotoMeta {
   fetchedAt: number;
 }
 
-function personCachePath(name: string): { dir: string; meta: string } {
-  const slug =
-    name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80) || 'unknown';
+function normalizeName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Cache key unique per normalized name (slug for readability, hash to avoid collisions). */
+function personCacheKey(name: string): string {
+  const norm = normalizeName(name);
+  const slug = norm.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'unknown';
+  const hash = createHash('sha1').update(norm).digest('hex').slice(0, 10);
+  return `${slug}-${hash}`;
+}
+
+function personCachePath(name: string): { dir: string; key: string; meta: string } {
+  const key = personCacheKey(name);
   const dir = path.join(config.dataDir, 'cache', 'immich-people');
-  return { dir, meta: path.join(dir, `${slug}.json`) };
+  return { dir, key, meta: path.join(dir, `${key}.json`) };
+}
+
+/**
+ * Immich's name search is a fuzzy substring match, so "Sam" also returns
+ * "Samantha" and the order is not stable. Only accept a case-insensitive exact
+ * name match; among several people with the identical name pick the lowest id
+ * so the choice is deterministic.
+ */
+function pickPerson(people: { id: string; name: string }[], name: string) {
+  const want = normalizeName(name);
+  return people
+    .filter((p) => typeof p?.name === 'string' && normalizeName(p.name) === want)
+    .sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+
+async function writeFileAtomic(file: string, data: string | Buffer) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  await fs.writeFile(tmp, data);
+  await fs.rename(tmp, file);
 }
 
 function photoExt(contentType: string | null): string {
@@ -267,8 +293,8 @@ async function readPersonMeta(metaPath: string): Promise<PersonPhotoMeta | null>
 }
 
 /**
- * GET /person-photo?name=John%20Doe — the featured photo of the first Immich
- * person matching the name (used next to companion names). Disk-cached under
+ * GET /person-photo?name=John%20Doe — the featured photo of the Immich
+ * person whose name exactly matches (used next to companion names). Disk-cached under
  * `<dataDir>/cache/immich-people/`; the browser is told to cache it for an
  * hour so re-renders don't even reach the server.
  */
@@ -279,7 +305,7 @@ router.get('/person-photo', async (req: Request, res: Response) => {
   const immich = await getImmichSettings();
   if (!immich) return res.status(404).send('Immich not configured');
 
-  const { dir, meta: metaPath } = personCachePath(name);
+  const { dir, key, meta: metaPath } = personCachePath(name);
   const now = Date.now();
 
   try {
@@ -313,15 +339,16 @@ router.get('/person-photo', async (req: Request, res: Response) => {
     const people = (await search.json()) as { id: string; name: string }[];
 
     await fs.mkdir(dir, { recursive: true });
-    if (!people || people.length === 0) {
+    const person = pickPerson(people ?? [], name);
+    if (!person) {
       // Negative cache so absent people don't hit Immich on every render.
-      await fs.writeFile(metaPath, JSON.stringify({ found: false, fetchedAt: now } satisfies PersonPhotoMeta));
+      await writeFileAtomic(metaPath, JSON.stringify({ found: false, fetchedAt: now } satisfies PersonPhotoMeta));
       res.setHeader('Cache-Control', 'public, max-age=300');
       return res.status(404).send('Person not found');
     }
 
     // 2. Fetch the person's featured thumbnail.
-    const personId = people[0].id;
+    const personId = person.id;
     const thumb = await fetch(`${immich.url}/api/people/${personId}/thumbnail`, {
       headers: { 'x-api-key': immich.apiKey },
     });
@@ -332,9 +359,9 @@ router.get('/person-photo', async (req: Request, res: Response) => {
     const contentType = thumb.headers.get('content-type') || 'image/jpeg';
     const buf = Buffer.from(await thumb.arrayBuffer());
 
-    const file = `person-${photoExt(contentType)}`;
-    await fs.writeFile(path.join(dir, file), buf);
-    await fs.writeFile(
+    const file = `${key}.${photoExt(contentType)}`;
+    await writeFileAtomic(path.join(dir, file), buf);
+    await writeFileAtomic(
       metaPath,
       JSON.stringify({ found: true, personId, contentType, file, fetchedAt: now } satisfies PersonPhotoMeta)
     );

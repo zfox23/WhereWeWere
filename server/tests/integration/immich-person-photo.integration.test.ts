@@ -135,4 +135,46 @@ describe('Immich person photos', () => {
     expect(res2.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(callsAfterJohn + 1);
   });
+
+  it('serves each companion their own photo and prefers exact name matches', async () => {
+    await setImmichConfigured();
+    fetchMock.mockImplementation(async (input: unknown) => {
+      const url = String(input);
+      if (url.startsWith(`${IMMICH_URL}/api/search/person`)) {
+        const n = new URL(url).searchParams.get('name');
+        // Fuzzy search: the wrong person comes back first.
+        const all = [
+          { id: 'p-samantha', name: 'Samantha' },
+          { id: 'p-sam', name: 'Sam' },
+          { id: 'p-john', name: 'John' },
+        ];
+        return { ok: true, status: 200, json: async () => all.filter((p) => p.name.includes(n!)), headers: new Headers() };
+      }
+      const id = url.split('/api/people/')[1].split('/')[0];
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => new Uint8Array(Buffer.from(id)).buffer,
+        headers: new Headers({ 'content-type': 'image/jpeg' }),
+      };
+    });
+
+    const sam = await request(app).get('/api/v1/immich/person-photo?name=Sam');
+    const john = await request(app).get('/api/v1/immich/person-photo?name=John');
+    expect(Buffer.from(sam.body).toString()).toBe('p-sam');
+    expect(Buffer.from(john.body).toString()).toBe('p-john');
+
+    // Cached repeats still return the right person's image.
+    const sam2 = await request(app).get('/api/v1/immich/person-photo?name=sam');
+    expect(Buffer.from(sam2.body).toString()).toBe('p-sam');
+    const john2 = await request(app).get('/api/v1/immich/person-photo?name=John');
+    expect(Buffer.from(john2.body).toString()).toBe('p-john');
+  });
+
+  it('404s when only fuzzy (non-exact) matches exist', async () => {
+    await setImmichConfigured();
+    stubImmich([{ id: 'p-samantha', name: 'Samantha' }]);
+    const res = await request(app).get('/api/v1/immich/person-photo?name=Sam');
+    expect(res.status).toBe(404);
+  });
 });
