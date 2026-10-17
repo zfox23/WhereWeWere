@@ -1,12 +1,11 @@
 /**
  * Shared pieces of the Profile > Places > Lists UI: the lists index and the
- * rank cell / "Unranked" drop zone used by both list detail tables.
+ * rank badge used by both list detail views.
  */
 
 import { useState } from 'react';
 import { List, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { formatDate } from '../../../client/src/utils/checkin';
-import type { DragEvent } from 'react';
 
 export interface ListSummary {
   id: string;
@@ -209,37 +208,5 @@ export function RankBadge({ rank }: { rank: number | null }) {
     </span>
   ) : (
     <span className="text-gray-300 dark:text-gray-600">—</span>
-  );
-}
-
-/** Drop zone below a list table; dropping a row here clears its rank. */
-export function UnrankedDropZone({
-  active,
-  count,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-}: {
-  active: boolean;
-  count: number;
-  onDragOver: (e: DragEvent) => void;
-  onDragLeave: () => void;
-  onDrop: (e: DragEvent) => void;
-}) {
-  return (
-    <div
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-      className={[
-        'mt-2 rounded-xl border-2 border-dashed px-4 py-3 text-sm text-center transition-colors',
-        active
-          ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-          : 'border-gray-200 dark:border-gray-700 text-gray-400',
-      ].join(' ')}
-    >
-      {active ? 'Drop here to remove the rank' : 'Unranked'}
-      {count > 0 && !active && <span className="ml-1 text-xs">({count})</span>}
-    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { MemoryRouter } from 'react-router-dom';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { CheckinListsSection } from '../../ui/CheckinListsSection';
@@ -158,7 +158,8 @@ describe('CheckinListsSection', () => {
     await openListDetail(user, 'Concerts');
     await waitFor(() => expect(screen.getByText('Apollo')).toBeTruthy());
 
-    await user.click(screen.getByRole('button', { name: 'Remove Apollo from Concerts' }));
+    await user.click(screen.getByRole('button', { name: 'Actions for Apollo' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
 
     expect(confirmSpy).toHaveBeenCalledWith(
       'Remove "Apollo" from "Concerts"? The check-in itself is kept.'
@@ -177,54 +178,80 @@ describe('CheckinListsSection', () => {
     await openListDetail(user, 'Concerts');
     await waitFor(() => expect(screen.getByText('Apollo')).toBeTruthy());
 
-    await user.click(screen.getByRole('button', { name: 'Remove Apollo from Concerts' }));
+    await user.click(screen.getByRole('button', { name: 'Actions for Apollo' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
 
     expect(apiMocks.listsRemoveCheckin).not.toHaveBeenCalled();
     expect(screen.getByText('Apollo')).toBeTruthy();
   });
 
-  it('shows draggable rows and the unranked drop zone when sorted by rank (default)', async () => {
+  it('shows drag handles on ranked rows and an Unranked section when sorted by rank (default)', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
 
     await openListDetail(user, 'Concerts');
     await waitFor(() => expect(screen.getByText('Fillmore')).toBeTruthy());
 
-    const fillmoreRow = screen.getByText('Fillmore').closest('tr') as HTMLElement;
-    expect(fillmoreRow.getAttribute('draggable')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Drag to reorder Fillmore' })).toBeTruthy();
+    // Unranked rows have no handle; they are ranked via the menu.
+    expect(screen.queryByRole('button', { name: 'Drag to reorder Apollo' })).toBeNull();
     expect(screen.getByText(/^Unranked/)).toBeTruthy();
   });
 
-  it('persists a re-rank when a row is dropped after another ranked row', async () => {
+  it('ranks an unranked row via the menu ("Rank this" appends to the ranked block)', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
 
     await openListDetail(user, 'Concerts');
     await waitFor(() => expect(screen.getByText('Apollo')).toBeTruthy());
 
-    const apolloRow = screen.getByText('Apollo').closest('tr') as HTMLElement;
-    const fillmoreRow = screen.getByText('Fillmore').closest('tr') as HTMLElement;
-
-    // Simulate: drag "Apollo" (unranked) and drop it after "Fillmore" (rank 1).
-    // Plain Events lack dataTransfer, so attach a minimal mock.
-    const makeDragEvent = (type: string) => {
-      const ev = new Event(type, { bubbles: true, cancelable: true }) as Event & { dataTransfer: unknown };
-      ev.dataTransfer = { setData: vi.fn(), getData: vi.fn(() => ''), effectAllowed: '', dropEffect: '' };
-      return ev;
-    };
-
-    await act(async () => {
-      apolloRow.dispatchEvent(makeDragEvent('dragstart'));
-    });
-    await act(async () => {
-      fillmoreRow.dispatchEvent(makeDragEvent('dragover'));
-    });
-    await act(async () => {
-      fillmoreRow.dispatchEvent(makeDragEvent('drop'));
-    });
+    await user.click(screen.getByRole('button', { name: 'Actions for Apollo' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Rank this' }));
 
     await waitFor(() => {
       expect(apiMocks.listsReRank).toHaveBeenCalledWith('cl1', ['c1', 'c2']);
     });
+  });
+
+  it('moves a row to a typed rank via "Move to rank…"', async () => {
+    const user = userEvent.setup();
+    apiMocks.listsItems.mockResolvedValue([
+      ITEM({ rank: 1 }),
+      ITEM({ checkin_id: 'c2', venue_name: 'Apollo', rank: 2 }),
+      ITEM({ checkin_id: 'c3', venue_name: 'Beacon', rank: 3 }),
+    ]);
+    render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
+
+    await openListDetail(user, 'Concerts');
+    await waitFor(() => expect(screen.getByText('Beacon')).toBeTruthy());
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Beacon' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Move to rank…' }));
+    await user.type(screen.getByLabelText(/Rank for Beacon/), '1');
+    await user.click(screen.getByRole('button', { name: 'Go' }));
+
+    await waitFor(() => {
+      expect(apiMocks.listsReRank).toHaveBeenCalledWith('cl1', ['c3', 'c1', 'c2']);
+    });
+  });
+
+  it('moves a ranked row up and unranks it from the menu', async () => {
+    const user = userEvent.setup();
+    apiMocks.listsItems.mockResolvedValue([
+      ITEM({ rank: 1 }),
+      ITEM({ checkin_id: 'c2', venue_name: 'Apollo', rank: 2 }),
+    ]);
+    render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
+
+    await openListDetail(user, 'Concerts');
+    await waitFor(() => expect(screen.getByText('Apollo')).toBeTruthy());
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Apollo' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Move up' }));
+    await waitFor(() => expect(apiMocks.listsReRank).toHaveBeenLastCalledWith('cl1', ['c2', 'c1']));
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Fillmore' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Mark unranked' }));
+    await waitFor(() => expect(apiMocks.listsReRank).toHaveBeenLastCalledWith('cl1', ['c2']));
   });
 });

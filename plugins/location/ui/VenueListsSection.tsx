@@ -8,16 +8,14 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowUp, Loader2, X } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { venueLists } from '../../../client/src/api/client';
 import { formatDate } from '../../../client/src/utils/checkin';
 import Stars from '../../../client/src/components/Stars';
-import { useRankDrag } from './useRankDrag';
-import { ListsIndex, RankBadge, UnrankedDropZone } from './ListsShared';
+import { RankedListView } from './RankedListView';
+import type { RankedColumn, RankedSortOption } from './RankedListView';
+import { ListsIndex } from './ListsShared';
 import type { VenueList, VenueListItem } from '../../../client/src/types';
-
-type SortKey = 'rank' | 'venue' | 'category' | 'location' | 'rating' | 'checkins' | 'last_checkin';
-type SortDir = 'asc' | 'desc';
 
 const getVenueId = (i: VenueListItem) => i.venue_id;
 const getVenueRank = (i: VenueListItem) => i.rank;
@@ -26,7 +24,7 @@ const compareByName = (a: VenueListItem, b: VenueListItem) => a.venue_name.local
 const locationLabel = (i: VenueListItem) => [i.city, i.state].filter(Boolean).join(', ');
 const lastCheckinTime = (i: VenueListItem) => (i.last_checkin_at ? new Date(i.last_checkin_at).getTime() : -Infinity);
 
-function compareBy(key: SortKey, a: VenueListItem, b: VenueListItem): number {
+function compareBy(key: string, a: VenueListItem, b: VenueListItem): number {
   switch (key) {
     case 'rank': {
       if (a.rank == null && b.rank == null) return compareByName(a, b);
@@ -49,14 +47,95 @@ function compareBy(key: SortKey, a: VenueListItem, b: VenueListItem): number {
       const bt = lastCheckinTime(b);
       return at === bt ? 0 : at < bt ? -1 : 1;
     }
+    default:
+      return 0;
   }
 }
+
+const VENUE_SORT_OPTIONS: RankedSortOption[] = [
+  { key: 'rank', label: 'Rank', defaultDir: 'asc' },
+  { key: 'venue', label: 'Venue name', defaultDir: 'asc' },
+  { key: 'category', label: 'Category', defaultDir: 'asc' },
+  { key: 'location', label: 'Location', defaultDir: 'asc' },
+  { key: 'rating', label: 'Rating', defaultDir: 'desc' },
+  { key: 'checkins', label: 'Check-ins', defaultDir: 'desc' },
+  { key: 'last_checkin', label: 'Last check-in', defaultDir: 'desc' },
+];
+
+const dash = <span className="text-gray-300 dark:text-gray-600">—</span>;
+
+const VENUE_COLUMNS: RankedColumn<VenueListItem>[] = [
+  {
+    key: 'venue',
+    label: 'Venue name',
+    className: 'max-w-[16rem]',
+    render: (item) => (
+      <a
+        href={`/venues/${item.venue_id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 transition-colors line-clamp-2"
+      >
+        {item.venue_name || 'Unknown Venue'}
+      </a>
+    ),
+  },
+  {
+    key: 'category',
+    label: 'Category',
+    className: 'text-gray-600 dark:text-gray-300',
+    render: (item) => item.category_name ?? dash,
+  },
+  {
+    key: 'location',
+    label: 'Location',
+    className: 'max-w-[12rem] text-gray-600 dark:text-gray-300',
+    render: (item) => <span className="line-clamp-2">{locationLabel(item) || dash}</span>,
+  },
+  {
+    key: 'rating',
+    label: 'Rating',
+    render: (item) => (item.rating != null && item.rating >= 1 ? <Stars value={item.rating} size={12} /> : dash),
+  },
+  {
+    key: 'checkins',
+    label: 'Check-ins',
+    className: 'tabular-nums text-gray-600 dark:text-gray-300',
+    render: (item) => item.checkin_count,
+  },
+  {
+    key: 'last_checkin',
+    label: 'Last check-in',
+    className: 'whitespace-nowrap text-gray-600 dark:text-gray-300',
+    render: (item) =>
+      item.last_checkin_at ? formatDate(item.last_checkin_at, item.last_checkin_timezone) : dash,
+  },
+];
+
+const renderVenueCard = (item: VenueListItem) => (
+  <>
+    <a
+      href={`/venues/${item.venue_id}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate"
+    >
+      {item.venue_name || 'Unknown Venue'}
+    </a>
+    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+      {[item.category_name, locationLabel(item)].filter(Boolean).join(' · ') || '—'}
+    </p>
+    {item.rating != null && item.rating >= 1 && (
+      <div className="mt-0.5">
+        <Stars value={item.rating} size={12} />
+      </div>
+    )}
+  </>
+);
 
 function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void }) {
   const [items, setItems] = useState<VenueListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<SortKey>('rank');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -78,27 +157,6 @@ function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void
     };
   }, [list.id]);
 
-  const visibleItems = useMemo(() => {
-    const sorted = [...items].sort((a, b) => {
-      const cmp = compareBy(sortBy, a, b);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    // "Rank" sorts keep unranked items at the bottom in both directions.
-    if (sortBy !== 'rank') return sorted;
-    return [...sorted.filter((i) => i.rank != null), ...sorted.filter((i) => i.rank == null)];
-  }, [items, sortBy, sortDir]);
-
-  const canDrag = sortBy === 'rank';
-
-  const handleSort = (key: SortKey) => {
-    if (sortBy === key) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(key);
-      setSortDir(key === 'rating' || key === 'checkins' || key === 'last_checkin' ? 'desc' : 'asc');
-    }
-  };
-
   const persistOrder = async (rankedIds: string[]) => {
     setSaving(true);
     try {
@@ -114,15 +172,6 @@ function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void
       setSaving(false);
     }
   };
-
-  const rankDrag = useRankDrag({
-    items,
-    getId: getVenueId,
-    getRank: getVenueRank,
-    compareUnranked: compareByName,
-    canDrag,
-    persistOrder,
-  });
 
   const handleRemoveFromList = async (item: VenueListItem) => {
     if (!window.confirm(`Remove "${item.venue_name}" from "${list.name}"? The venue itself is kept.`)) return;
@@ -143,23 +192,6 @@ function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void
       console.error('Failed to remove venue from list:', err);
     }
   };
-
-  const headerCell = (key: SortKey, label: string, extraClass = '') => (
-    <th
-      scope="col"
-      aria-sort={sortBy === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className={`py-2 pr-3 font-semibold ${extraClass}`}
-    >
-      <button
-        type="button"
-        onClick={() => handleSort(key)}
-        className="inline-flex items-center gap-1 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
-      >
-        {label}
-        {sortBy === key && (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
-      </button>
-    </th>
-  );
 
   return (
     <div>
@@ -188,114 +220,24 @@ function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void
         <div className="flex items-center justify-center py-8">
           <Loader2 className="animate-spin text-primary-600" size={24} />
         </div>
-      ) : visibleItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <p className="text-sm text-gray-400">
           No venues in this list yet. Add venues to lists from a venue's page.
         </p>
       ) : (
-        <>
-          <div className="overflow-x-auto -mx-1 px-1">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {canDrag && <th scope="col" className="py-2 pr-2 w-8" aria-label="Drag handle" />}
-                  {headerCell('rank', 'Rank', 'pl-0')}
-                  {headerCell('venue', 'Venue name')}
-                  {headerCell('category', 'Category')}
-                  {headerCell('location', 'Location')}
-                  {headerCell('rating', 'Rating')}
-                  {headerCell('checkins', 'Check-ins')}
-                  {headerCell('last_checkin', 'Last check-in')}
-                  <th scope="col" className="py-2 pl-3 w-8" aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {visibleItems.map((item) => (
-                  <tr
-                    key={item.venue_id}
-                    draggable={canDrag}
-                    onDragStart={(e) => rankDrag.onRowDragStart(e, item.venue_id)}
-                    onDragEnd={rankDrag.onDragEnd}
-                    onDragOver={(e) => rankDrag.onRowDragOver(e, item.venue_id)}
-                    onDrop={(e) => rankDrag.onRowDrop(e, item.venue_id)}
-                    className={[
-                      'border-b border-gray-100 dark:border-gray-800 last:border-0 transition-colors',
-                      canDrag ? 'cursor-grab active:cursor-grabbing' : '',
-                      rankDrag.dragId === item.venue_id ? 'opacity-40' : 'hover:bg-gray-50 dark:hover:bg-gray-800/60',
-                      rankDrag.dropIndicator(item.venue_id),
-                    ].join(' ')}
-                  >
-                    {canDrag && (
-                      <td className="py-2.5 pr-2">
-                        <span className="inline-flex text-gray-300 dark:text-gray-600" title="Drag to rank" aria-hidden>
-                          ⠿
-                        </span>
-                      </td>
-                    )}
-                    <td className="py-2.5 pr-3 tabular-nums w-12">
-                      <RankBadge rank={item.rank} />
-                    </td>
-                    <td className="py-2.5 pr-3 max-w-[16rem]">
-                      <a
-                        href={`/venues/${item.venue_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 transition-colors line-clamp-2"
-                      >
-                        {item.venue_name || 'Unknown Venue'}
-                      </a>
-                    </td>
-                    <td className="py-2.5 pr-3 text-gray-600 dark:text-gray-300">
-                      {item.category_name ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
-                    </td>
-                    <td className="py-2.5 pr-3 max-w-[12rem] text-gray-600 dark:text-gray-300">
-                      <span className="line-clamp-2">
-                        {locationLabel(item) || <span className="text-gray-300 dark:text-gray-600">—</span>}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      {item.rating != null && item.rating >= 1 ? (
-                        <Stars value={item.rating} size={12} />
-                      ) : (
-                        <span className="text-gray-300 dark:text-gray-600">—</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-3 tabular-nums text-gray-600 dark:text-gray-300">{item.checkin_count}</td>
-                    <td className="py-2.5 pr-3 whitespace-nowrap text-gray-600 dark:text-gray-300">
-                      {item.last_checkin_at ? (
-                        formatDate(item.last_checkin_at, item.last_checkin_timezone)
-                      ) : (
-                        <span className="text-gray-300 dark:text-gray-600">—</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pl-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => void handleRemoveFromList(item)}
-                        className="p-1 rounded-md text-gray-300 hover:text-red-600 dark:text-gray-600 dark:hover:text-red-400 transition-colors"
-                        title="Remove from this list"
-                        aria-label={`Remove ${item.venue_name} from ${list.name}`}
-                      >
-                        <X size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Unranked drop zone (visible only while ranking by Rank sort) */}
-          {canDrag && (
-            <UnrankedDropZone
-              active={rankDrag.unrankedZoneActive}
-              count={rankDrag.unranked.length}
-              onDragOver={rankDrag.onUnrankedDragOver}
-              onDragLeave={rankDrag.onUnrankedDragLeave}
-              onDrop={rankDrag.onUnrankedDrop}
-            />
-          )}
-        </>
+        <RankedListView
+          items={items}
+          getId={getVenueId}
+          getRank={getVenueRank}
+          getLabel={(i) => i.venue_name || 'Unknown Venue'}
+          columns={VENUE_COLUMNS}
+          renderCard={renderVenueCard}
+          sortOptions={VENUE_SORT_OPTIONS}
+          compareBy={compareBy}
+          compareUnranked={compareByName}
+          onReorder={persistOrder}
+          onRemove={(item) => void handleRemoveFromList(item)}
+        />
       )}
     </div>
   );

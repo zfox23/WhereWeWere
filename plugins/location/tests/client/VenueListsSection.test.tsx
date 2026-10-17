@@ -98,7 +98,8 @@ describe('VenueListsSection', () => {
     ]);
     render(<VenueListsSection />);
     await user.click(await screen.findByRole('button', { name: /^Favorite coasters/ }));
-    await user.click(await screen.findByRole('button', { name: /Remove Steel Vengeance/ }));
+    await user.click(await screen.findByRole('button', { name: 'Actions for Steel Vengeance' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
 
     await waitFor(() => expect(apiMocks.removeVenue).toHaveBeenCalledWith('vl1', 'v1'));
     await waitFor(() => expect(apiMocks.reRank).toHaveBeenCalledWith('vl1', ['v2']));
