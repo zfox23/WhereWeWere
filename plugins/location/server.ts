@@ -487,12 +487,7 @@ router.put('/lists/:id/items/:checkinId/rank', async (req: Request, res: Respons
         return res.json({ rank: rankValue });
       }
       if (rankValue != null) {
-        await client.query(
-          `UPDATE checkin_list_items
-           SET rank = rank + 1
-           WHERE list_id = $1 AND rank IS NOT NULL AND rank >= $2`,
-          [req.params.id, rankValue]
-        );
+        await shiftRanks(client, String(req.params.id), rankValue, 1);
       }
       try {
         const updateResult = await client.query(
@@ -511,12 +506,7 @@ router.put('/lists/:id/items/:checkinId/rank', async (req: Request, res: Respons
         throw updateErr;
       }
       if (rankValue == null && oldRank != null) {
-        await client.query(
-          `UPDATE checkin_list_items
-           SET rank = rank - 1
-           WHERE list_id = $1 AND rank IS NOT NULL AND rank > $2`,
-          [req.params.id, oldRank]
-        );
+        await shiftRanks(client, String(req.params.id), oldRank + 1, -1);
       }
       await client.query('COMMIT');
       res.json({ rank: rankValue });
@@ -709,11 +699,33 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Rank shifts must not trip the (non-deferrable) unique rank index mid-statement:
+// the index is checked row by row, so `rank = rank + 1` can collide with a
+// neighbour that hasn't moved yet. Park the affected rows far above any real
+// rank first, then move them to their final values.
+const RANK_PARK_OFFSET = 1_000_000;
+async function shiftRanks(
+  client: import('pg').PoolClient,
+  listId: string,
+  fromRank: number,
+  delta: 1 | -1
+): Promise<void> {
+  await client.query(
+    `UPDATE checkin_list_items SET rank = rank + $3
+     WHERE list_id = $1 AND rank IS NOT NULL AND rank >= $2`,
+    [listId, fromRank, RANK_PARK_OFFSET]
+  );
+  await client.query(
+    `UPDATE checkin_list_items SET rank = rank - $2 + $3
+     WHERE list_id = $1 AND rank >= $2`,
+    [listId, RANK_PARK_OFFSET, delta]
+  );
+}
+
 // POST / - create check-in
 router.post('/', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
     const { user_id, venue_id, notes, checked_in_at, also_checkin_parent, rating } = req.body;
     const companions = normalizeCompanions(req.body.companions);
     const checkinRating = normalizeRating(rating);
@@ -723,6 +735,8 @@ router.post('/', async (req: Request, res: Response) => {
     if (!user_id || !venue_id) {
       return res.status(400).json({ error: 'user_id and venue_id are required' });
     }
+
+    await client.query('BEGIN');
 
     const checkinTimezone = await inferVenueTimezone(venue_id, client);
 

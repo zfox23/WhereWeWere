@@ -29,6 +29,15 @@ function initialValuesForFields(fields: PluginField[]): FormValues {
   return out;
 }
 
+/** ISO instant -> `YYYY-MM-DDTHH:mm` in the browser's local zone, as datetime-local expects. */
+function isoToLocalInputValue(value: unknown): string {
+  if (!value) return '';
+  const d = new Date(value as string);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function FieldInput({ field, value, onChange }: { field: PluginField; value: unknown; onChange: (v: unknown) => void }) {
   switch (field.kind) {
     case 'text':
@@ -100,7 +109,7 @@ function FieldInput({ field, value, onChange }: { field: PluginField; value: unk
       return (
         <input
           type="datetime-local"
-          value={value ? new Date(value as string).toISOString().slice(0, 16) : ''}
+          value={isoToLocalInputValue(value)}
           onChange={(e) => onChange(e.target.value ? new Date(e.target.value).toISOString() : undefined)}
           className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
@@ -111,7 +120,7 @@ function FieldInput({ field, value, onChange }: { field: PluginField; value: unk
       const current = typeof value === 'number' ? value : null;
       return (
         <div className="flex items-center gap-1">
-          {Array.from({ length: max - min + 1 }, (_, i) => min + i + 1).map((n) => (
+          {Array.from({ length: max - min + 1 }, (_, i) => min + i).map((n) => (
             <button
               key={n}
               type="button"

@@ -47,6 +47,49 @@ function localDatePart(iso: string, timeZone: string | null): string {
   }
 }
 
+/** Offset (minutes east of UTC) of `timeZone` at the instant `utcMs`. */
+function zoneOffsetMinutes(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(utcMs));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const wallMs = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return Math.round((wallMs - Math.floor(utcMs / 60000) * 60000) / 60000);
+}
+
+/**
+ * Absolute instant for a wall-clock date/time in `timeZone` (falls back to the
+ * device zone when null). Iterates so the offset is probed near the result,
+ * which keeps DST boundaries right.
+ */
+function wallTimeToIso(date: string, time: string, timeZone: string | null): string | null {
+  const dm = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const tm = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!dm || !tm) return null;
+  const baseMs = Date.UTC(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]));
+  if (!timeZone) {
+    const local = new Date(`${date}T${tm[1].padStart(2, '0')}:${tm[2]}:00`);
+    return Number.isNaN(local.getTime()) ? null : local.toISOString();
+  }
+  try {
+    let utcMs = baseMs;
+    for (let i = 0; i < 3; i++) {
+      const next = baseMs - zoneOffsetMinutes(utcMs, timeZone) * 60000;
+      if (next === utcMs) break;
+      utcMs = next;
+    }
+    return new Date(utcMs).toISOString();
+  } catch {
+    return null;
+  }
+}
+
 function timePart(iso: string, timeZone: string | null): string {
   try {
     return new Intl.DateTimeFormat('en-US', {
@@ -292,6 +335,9 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
 
   const [date, setDate] = useState<string>(dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayIso());
   const [values, setValues] = useState<Values>({});
+  // Date/time/zone as loaded in edit mode, so an unrelated edit doesn't
+  // re-derive (and shift) the stored instant.
+  const [loaded, setLoaded] = useState<{ date: string; entryTime: string; timezone: string | null } | null>(null);
   const [loading, setLoading] = useState(Boolean(editId));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -303,9 +349,15 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
     plugins.checkins
       .get(PLUGIN_ID, editId)
       .then((row: GenericCheckin) => {
-        setDate(localDatePart(row.checked_in_at, row.checkin_timezone));
+        const loadedDate = localDatePart(row.checked_in_at, row.checkin_timezone);
+        setDate(loadedDate);
         const data = { ...(row.data ?? {}) };
         setValues(data);
+        setLoaded({
+          date: loadedDate,
+          entryTime: typeof data.entry_time === 'string' ? data.entry_time : '',
+          timezone: row.checkin_timezone,
+        });
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -323,9 +375,10 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
 
   const checkedInAt = useMemo(() => {
     const time = /^\d{1,2}:\d{2}$/.test(entryTime) ? entryTime : '12:00';
-    const parsed = new Date(`${date}T${time}:00`);
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-  }, [date, entryTime]);
+    // Interpret in the dive's own zone when editing; the browser zone is only
+    // right for dives created here.
+    return wallTimeToIso(date, time, loaded?.timezone ?? null);
+  }, [date, entryTime, loaded]);
 
   const browserTimezone = useMemo(() => {
     try {
@@ -344,8 +397,9 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
         if (v !== undefined && v !== '' && v !== false) data[k] = v;
       }
       if (editId) {
+        const timeUnchanged = loaded && loaded.date === date && loaded.entryTime === entryTime;
         await plugins.checkins.update(PLUGIN_ID, editId, {
-          checked_in_at: checkedInAt,
+          ...(timeUnchanged ? {} : { checked_in_at: checkedInAt }),
           data,
         });
         navigate(`/checkins/${PLUGIN_ID}/${editId}`);

@@ -25,7 +25,7 @@ cp .env.example .env
 - `CORS_ORIGINS`
   - Comma-separated list of allowed browser origins.
   - Example: `https://journal.example.com,https://www.journal.example.com`
-  - When unset, CORS enforcement is disabled — fine for local use, not recommended publicly.
+  - When unset, no cross-origin access is granted (same-origin only), which is what the bundled nginx proxy and the Vite dev proxy need. Set it only if a browser app on a different origin calls the API directly.
 - `API_ACCESS_TOKEN`
   - Optional API token guard.
   - When set, all `/api/v1/*` requests must include `X-WhereWeWere-Token` with the exact value.

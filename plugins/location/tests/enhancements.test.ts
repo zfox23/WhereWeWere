@@ -325,9 +325,23 @@ describe('checkin lists (endpoints)', () => {
     const res = await request(app()).put('/location-checkins/lists/cl1/items/c1/rank').send({ rank: null });
     expect(res.status).toBe(200);
     expect(res.body.rank).toBeNull();
-    // Ranks below the removed one are renumbered down.
-    const renumber = client.query.mock.calls.find((c) => c[0].includes('rank = rank - 1')) as unknown[];
-    expect(renumber[1]).toEqual(['cl1', 3]);
+    // Ranks below the removed one are renumbered down: parked above any real
+    // rank first (so the unique index can't collide mid-statement), then moved.
+    const calls = client.query.mock.calls as unknown as [string, unknown[]][];
+    const park = calls.find((c) => c[0].includes('SET rank = rank + $3'));
+    const settle = calls.find((c) => c[0].includes('SET rank = rank - $2 + $3'));
+    expect(park?.[1]).toEqual(['cl1', 4, 1_000_000]);
+    expect(settle?.[1]).toEqual(['cl1', 1_000_000, -1]);
+  });
+
+  it('POST /location-checkins rejects a missing venue_id without opening a transaction', async () => {
+    const client = { query: vi.fn(async () => ({ rows: [] })), release: vi.fn() };
+    poolConnectMock.mockResolvedValueOnce(client);
+
+    const res = await request(app()).post('/location-checkins').send({ user_id: 'u1' });
+    expect(res.status).toBe(400);
+    expect(client.query).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalled();
   });
 
   it('PUT /lists/:id/ranks bulk re-ranks the given order and clears the rest', async () => {

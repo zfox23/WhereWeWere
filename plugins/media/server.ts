@@ -1876,7 +1876,12 @@ function extractScrobble(metadata: Record<string, unknown> | null | undefined): 
       : null;
   if (!title) return null;
 
-  const guid = typeof metadata.guid === 'string' ? metadata.guid : null;
+  // For episodes `guid` identifies the episode, not the show, so the show's
+  // identity has to come from `grandparentGuid`.
+  const guid =
+    type === 'episode'
+      ? typeof metadata.grandparentGuid === 'string' ? metadata.grandparentGuid : null
+      : typeof metadata.guid === 'string' ? metadata.guid : null;
   let externalSource: string | null = null;
   let externalId: string | null = null;
   if (guid && guid.startsWith('tmdb://')) {
@@ -1940,9 +1945,18 @@ plexWebhookRouter.post('/', plexUpload.any(), async (req: Request, res: Response
     const file = files.find(
       (f) => f.fieldname === 'payload' || f.fieldname === 'json' || f.originalname.toLowerCase().endsWith('.json')
     );
-    if (file) {
-      body = JSON.parse(file.buffer.toString('utf8'));
-    } else if (req.is('application/json')) {
+    try {
+      if (file) {
+        body = JSON.parse(file.buffer.toString('utf8'));
+      } else if (typeof req.body?.payload === 'string') {
+        // Plex sends `payload` as a plain multipart text field, which multer
+        // exposes on req.body rather than req.files.
+        body = JSON.parse(req.body.payload);
+      }
+    } catch {
+      return res.status(400).json({ error: 'Invalid webhook payload' });
+    }
+    if (!body && req.is('application/json')) {
       body = (req.body as Record<string, unknown>) || {};
     }
 
@@ -1974,12 +1988,29 @@ plexWebhookRouter.post('/', plexUpload.any(), async (req: Request, res: Response
         return res.json({ ok: true, skipped: 'unsupported_metadata' });
       }
 
-      const itemId = await upsertMediaItem({
-        media_type: scrobble.mediaType,
-        external_source: scrobble.externalSource,
-        external_id: scrobble.externalId,
-        title: scrobble.title,
-      });
+      // Items without a tmdb identity (plex://, hulu://, ...) have no unique
+      // key to dedupe on, so reuse the local-only item with the same title
+      // instead of creating one per scrobble.
+      let itemId: string;
+      const localMatch = scrobble.externalId
+        ? null
+        : await query(
+            `SELECT id FROM media_items
+             WHERE user_id = $1 AND media_type = $2 AND external_source IS NULL
+               AND lower(title) = lower($3)
+             ORDER BY created_at LIMIT 1`,
+            [USER_ID, scrobble.mediaType, scrobble.title]
+          );
+      if (localMatch && localMatch.rows.length > 0) {
+        itemId = localMatch.rows[0].id as string;
+      } else {
+        itemId = await upsertMediaItem({
+          media_type: scrobble.mediaType,
+          external_source: scrobble.externalSource,
+          external_id: scrobble.externalId,
+          title: scrobble.title,
+        });
+      }
 
       const now = new Date();
       const timezone = await inferPlexTimezone(now);

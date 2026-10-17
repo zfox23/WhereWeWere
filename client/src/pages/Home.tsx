@@ -161,6 +161,9 @@ export default function Home() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Failure while appending the next page: keep the feed visible and stop
+  // auto-paging (otherwise the sentinel re-triggers the failing request forever).
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
   const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
@@ -406,8 +409,9 @@ export default function Home() {
         setLoadingMore(true);
       } else {
         setLoading(true);
+        setError(null);
       }
-      setError(null);
+      setLoadMoreError(null);
 
       try {
         const params: Record<string, string> = {
@@ -442,7 +446,13 @@ export default function Home() {
         setHasMore(data.length === PAGE_SIZE);
         offsetRef.current = offset + data.length;
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load check-ins');
+        const message = err instanceof Error ? err.message : 'Failed to load check-ins';
+        if (append) {
+          setLoadMoreError(message);
+          setHasMore(false);
+        } else {
+          setError(message);
+        }
         } finally {
           setLoading(false);
           setLoadingMore(false);
@@ -891,6 +901,20 @@ export default function Home() {
       {loadingMore && (
         <div className="flex items-center justify-center py-4">
           <Loader2 className="animate-spin text-gray-400" size={24} />
+        </div>
+      )}
+      {loadMoreError && (
+        <div className="text-center py-4">
+          <p className="text-sm text-red-600 mb-2">{loadMoreError}</p>
+          <button
+            onClick={() => {
+              setHasMore(true);
+              fetchTimeline(offsetRef.current, true);
+            }}
+            className="btn-primary"
+          >
+            Retry
+          </button>
         </div>
       )}
 

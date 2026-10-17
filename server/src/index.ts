@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { config } from './config';
 import { statsRouter } from './routes/stats';
@@ -15,6 +16,12 @@ import { companionsRouter } from './routes/companions';
 import { runMigrations } from './db/runMigrations';
 import { pluginsRouter } from './plugins/routes';
 import { allPlugins } from './plugins/registry';
+
+function tokensMatch(provided: string, expected: string): boolean {
+  const a = crypto.createHash('sha256').update(provided).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
 
 export function createApp() {
   const app = express();
@@ -40,10 +47,17 @@ export function createApp() {
         callback(new Error('Origin not allowed by CORS'));
       },
     }
-    : {};
+    // No allowlist configured: same-origin only (the bundled nginx proxy and
+    // the Vite dev proxy both serve the API from the page's own origin), so
+    // arbitrary websites can't read responses from a local instance.
+    : { origin: false };
 
   app.use(cors(corsOptions));
-  app.use(express.json({ limit: '500mb' }));
+  // Only the legacy JSON backup import needs a huge body; everything else
+  // gets a modest limit. body-parser skips already-parsed requests, so the
+  // order below matters.
+  app.use('/api/v1/backup/import', express.json({ limit: '500mb' }));
+  app.use(express.json({ limit: '10mb' }));
 
   // Container health endpoint for compose/orchestrators.
   app.get('/healthz', (_req, res) => {
@@ -52,8 +66,8 @@ export function createApp() {
 
   if (config.apiAccessToken) {
     app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
-      const token = req.header('x-wherewewere-token');
-      if (token !== config.apiAccessToken) {
+      const token = req.header('x-wherewewere-token') ?? '';
+      if (!tokensMatch(token, config.apiAccessToken)) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }

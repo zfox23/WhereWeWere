@@ -413,9 +413,18 @@ importRouter.post('/', logbookUpload.single('file'), async (req: Request, res: R
   }
 
   try {
+    // Multipart bodies deliver `timezones` as a JSON string.
+    let rawTimezones: unknown = req.body?.timezones;
+    if (typeof rawTimezones === 'string') {
+      try {
+        rawTimezones = JSON.parse(rawTimezones);
+      } catch {
+        return res.status(400).json({ error: 'timezones must be valid JSON' });
+      }
+    }
     const timezones =
-      req.body?.timezones && typeof req.body.timezones === 'object' && !Array.isArray(req.body.timezones)
-        ? (req.body.timezones as Record<string, string>)
+      rawTimezones && typeof rawTimezones === 'object' && !Array.isArray(rawTimezones)
+        ? (rawTimezones as Record<string, string>)
         : undefined;
 
     let result;
