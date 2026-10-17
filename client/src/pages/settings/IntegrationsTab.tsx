@@ -14,6 +14,7 @@ interface IntegrationsTabProps {
   initialLlmReasoningLevel: string;
   initialLlmContextWindow: string;
   initialLlmImageSupport: boolean;
+  onSaved?: (patch: Record<string, unknown>) => void;
 }
 
 export function IntegrationsTab({
@@ -27,6 +28,7 @@ export function IntegrationsTab({
   initialLlmReasoningLevel,
   initialLlmContextWindow,
   initialLlmImageSupport,
+  onSaved,
 }: IntegrationsTabProps) {
   const [dawarichUrl, setDawarichUrl] = useState(initialDawarichUrl);
   const [dawarichApiKey, setDawarichApiKey] = useState(initialDawarichApiKey);
@@ -46,7 +48,7 @@ export function IntegrationsTab({
     setIntegrationMsg(null);
     try {
       const contextWindowNum = parseInt(llmContextWindow, 10);
-      await settings.update({
+      const payload = {
         dawarich_url: dawarichUrl || null,
         dawarich_api_key: dawarichApiKey || null,
         immich_url: immichUrl || null,
@@ -57,7 +59,9 @@ export function IntegrationsTab({
         llm_reasoning_level: llmReasoningLevel || null,
         llm_context_window: Number.isFinite(contextWindowNum) && contextWindowNum > 0 ? contextWindowNum : null,
         llm_image_support: llmImageSupport,
-      });
+      };
+      await settings.update(payload);
+      onSaved?.(payload);
       setIntegrationMsg({ type: 'success', text: 'Integration settings saved.' });
     } catch (err) {
       setIntegrationMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });

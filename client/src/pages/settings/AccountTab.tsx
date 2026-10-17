@@ -5,11 +5,14 @@ import { settings } from '../../api/client';
 interface AccountTabProps {
   initialUsername: string;
   initialDisplayName: string;
+  /** Called with the saved values so the parent's cached settings stay current. */
+  onSaved?: (patch: { username: string; display_name: string }) => void;
 }
 
 export function AccountTab({
   initialUsername,
   initialDisplayName,
+  onSaved,
 }: AccountTabProps) {
   const [username, setUsername] = useState(initialUsername);
   const [displayName, setDisplayName] = useState(initialDisplayName);
@@ -21,6 +24,7 @@ export function AccountTab({
     setProfileMsg(null);
     try {
       await settings.updateProfile({ username, display_name: displayName });
+      onSaved?.({ username, display_name: displayName });
       setProfileMsg({ type: 'success', text: 'Profile updated.' });
     } catch (err) {
       setProfileMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });

@@ -632,11 +632,12 @@ router.get('/', async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    params.push(parseInt(limit as string, 10));
+    // Clamp: NaN/negative values would 500 in Postgres, and no cap loads everything.
+    params.push(Math.min(Math.max(parseInt(limit as string, 10) || 50, 1), 500));
     const limitParam = `$${paramIndex}`;
     paramIndex++;
 
-    params.push(parseInt(offset as string, 10));
+    params.push(Math.max(parseInt(offset as string, 10) || 0, 0));
     const offsetParam = `$${paramIndex}`;
 
     const sql = `
@@ -1393,11 +1394,12 @@ venuesRouter.get('/', async (req: Request, res: Response) => {
       : '';
     const orderBy = search ? 'ORDER BY rank DESC' : 'ORDER BY v.created_at DESC';
 
-    params.push(parseInt(limit as string, 10));
+    // Clamp: NaN/negative values would 500 in Postgres, and no cap loads everything.
+    params.push(Math.min(Math.max(parseInt(limit as string, 10) || 50, 1), 500));
     const limitParam = `$${paramIndex}`;
     paramIndex++;
 
-    params.push(parseInt(offset as string, 10));
+    params.push(Math.max(parseInt(offset as string, 10) || 0, 0));
     const offsetParam = `$${paramIndex}`;
 
     const sql = `
@@ -1648,7 +1650,7 @@ venuesRouter.get('/lists', async (_req: Request, res: Response) => {
       `SELECT l.id AS list_id,
               json_agg(json_build_object(
                 'id', v.id, 'name', v.name, 'added_at', vli.added_at
-              ) ORDER BY vli.added_at, vli.position) AS items
+              ) ORDER BY vli.added_at, vli.position) FILTER (WHERE v.id IS NOT NULL) AS items
        FROM venue_lists l
        LEFT JOIN venue_list_items vli ON vli.list_id = l.id
        LEFT JOIN venues v ON vli.venue_id = v.id

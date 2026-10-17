@@ -363,23 +363,22 @@ export const igdb = {
   },
 
   /**
-   * Search games by name and return strict same-game title matches (exact
-   * or edition; exact ordered first) with each match's full platform list,
-   * for candidate selection (see pickIgdbCandidate). Returns null when
-   * credentials are missing or the API call fails.
+   * Search IGDB and return every title-relevant hit ranked: exact title
+   * matches, then edition matches, then partial (all query words in the
+   * title), each group in IGDB relevance order. Shared by the
+   * strict candidate lookup and the loose interactive search.
    */
-  async searchCandidates(
+  async _searchRanked(
     clientId: string | null,
     clientSecret: string | null,
     query: string
-  ): Promise<IgdbCandidate[] | null> {
+  ): Promise<{ result: IgdbGameResult; platforms: string[]; rel: 'exact' | 'edition' | 'partial' }[] | null> {
     if (!this.hasCredentials(clientId, clientSecret)) return null;
     const id = clientId as string;
     const secret = clientSecret as string;
 
     // IGDB `search` also matches description text; the version_parent filter
-    // keeps editions/versions out, and the post-filter below keeps
-    // description-only hits out.
+    // keeps editions/versions out.
     const apicalypse =
       `search ${apicalypseQuote(query)}; ` +
       `where version_parent = null; ` +
@@ -393,17 +392,30 @@ export const igdb = {
         });
 
         const qKey = normalizeTitle(query);
-        const matched: { result: IgdbGameResult; platforms: string[]; rel: 'exact' | 'edition' }[] = [];
+        const ranked: { result: IgdbGameResult; platforms: string[]; rel: 'exact' | 'edition' | 'partial' }[] = [];
+        const qTokens = qKey.split(' ').filter(Boolean);
         for (const row of rows) {
           const result = rowToResult(row);
           if (!result) continue;
-          const rel = titleRelation(qKey, normalizeTitle(result.title));
-          if (rel === 'none') continue;
+          const titleKey = normalizeTitle(result.title);
+          const strict = titleRelation(qKey, titleKey);
+          // 'partial': every query word appears in the title (e.g. "zelda" ->
+          // "The Legend of Zelda"). Hits matching only IGDB's description text
+          // are still dropped.
+          const rel: 'exact' | 'edition' | 'partial' | null =
+            strict !== 'none'
+              ? strict
+              : qTokens.length > 0 && qTokens.every((t) => titleKey.includes(t))
+                ? 'partial'
+                : null;
+          if (!rel) continue;
           const platforms = (row.platforms ?? []).map((p) => p.name ?? '').filter(Boolean);
-          matched.push({ result, platforms, rel });
+          ranked.push({ result, platforms, rel });
         }
-        matched.sort((a, b) => (a.rel === b.rel ? 0 : a.rel === 'exact' ? -1 : 1));
-        return matched.map((m) => ({ result: m.result, platforms: m.platforms }));
+        const rank = { exact: 0, edition: 1, partial: 2 } as const;
+        // Array.prototype.sort is stable, so IGDB's order is kept within a rank.
+        ranked.sort((a, b) => rank[a.rel] - rank[b.rel]);
+        return ranked;
       },
       null,
       `IGDB game search "${query}"`
@@ -411,10 +423,30 @@ export const igdb = {
   },
 
   /**
-   * Search games by name. When `platform` is given, rows are filtered to
-   * candidates released on that platform; if the filter yields nothing, the
-   * unfiltered list is served so a quirky stored platform string never
-   * blocks a match.
+   * Search games by name and return strict same-game title matches (exact
+   * or edition; exact ordered first) with each match's full platform list,
+   * for candidate selection (see pickIgdbCandidate). Returns null when
+   * credentials are missing or the API call fails.
+   */
+  async searchCandidates(
+    clientId: string | null,
+    clientSecret: string | null,
+    query: string
+  ): Promise<IgdbCandidate[] | null> {
+    const ranked = await this._searchRanked(clientId, clientSecret, query);
+    if (!ranked) return null;
+    return ranked
+      .filter((m) => m.rel !== 'partial')
+      .map((m) => ({ result: m.result, platforms: m.platforms }));
+  },
+
+  /**
+   * Interactive game search: every hit, best title matches first, so a loose
+   * query like "zelda" or "witcher 3" still returns results (the strict
+   * matcher in searchCandidates is for re-keying rows, not for browsing).
+   * When `platform` is given, rows are filtered to candidates released on
+   * that platform; if the filter yields nothing, the unfiltered list is
+   * served so a quirky stored platform string never blocks a match.
    */
   async searchGames(
     clientId: string | null,
@@ -422,13 +454,13 @@ export const igdb = {
     query: string,
     platform?: string | null
   ): Promise<IgdbGameResult[] | null> {
-    const candidates = await this.searchCandidates(clientId, clientSecret, query);
-    if (!candidates) return null;
+    const ranked = await this._searchRanked(clientId, clientSecret, query);
+    if (!ranked) return null;
     if (platform?.trim()) {
-      const filtered = candidates.filter((c) => platformMatches(platform, c.platforms));
+      const filtered = ranked.filter((c) => platformMatches(platform, c.platforms));
       if (filtered.length > 0) return filtered.map((c) => c.result);
     }
-    return candidates.map((c) => c.result);
+    return ranked.map((c) => c.result);
   },
 
   /**

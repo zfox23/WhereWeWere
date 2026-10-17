@@ -57,6 +57,12 @@ router.get('/timestamp-reconciliation', async (_req: Request, res: Response) => 
 });
 
 // PUT / - update integration settings
+// Order matches the $19.. flag parameters in the settings upsert below.
+const CLEARABLE_SETTINGS = [
+  'dawarich_url', 'dawarich_api_key', 'immich_url', 'immich_api_key',
+  'maloja_url', 'llm_api_url', 'llm_model',
+] as const;
+
 router.put('/', async (req: Request, res: Response) => {
   try {
     const {
@@ -110,18 +116,18 @@ router.put('/', async (req: Request, res: Response) => {
                $7, COALESCE($8, $17), COALESCE($9, $18), $10,
                $11, $12, $13, $14, $15, $16)
        ON CONFLICT (user_id) DO UPDATE SET
-         dawarich_url = COALESCE($2, user_settings.dawarich_url),
-         dawarich_api_key = COALESCE($3, user_settings.dawarich_api_key),
-         immich_url = COALESCE($4, user_settings.immich_url),
-         immich_api_key = COALESCE($5, user_settings.immich_api_key),
-         maloja_url = COALESCE($6, user_settings.maloja_url),
+         dawarich_url = CASE WHEN $19::boolean THEN $2 ELSE user_settings.dawarich_url END,
+         dawarich_api_key = CASE WHEN $20::boolean THEN $3 ELSE user_settings.dawarich_api_key END,
+         immich_url = CASE WHEN $21::boolean THEN $4 ELSE user_settings.immich_url END,
+         immich_api_key = CASE WHEN $22::boolean THEN $5 ELSE user_settings.immich_api_key END,
+         maloja_url = CASE WHEN $23::boolean THEN $6 ELSE user_settings.maloja_url END,
          theme = COALESCE($7, user_settings.theme),
          system_light_theme = COALESCE($8, user_settings.system_light_theme, $17),
          system_dark_theme = COALESCE($9, user_settings.system_dark_theme, $18),
          distance_unit = COALESCE($10, user_settings.distance_unit),
          timeline_density = COALESCE($11, user_settings.timeline_density),
-         llm_api_url = COALESCE($12, user_settings.llm_api_url),
-         llm_model = COALESCE($13, user_settings.llm_model),
+         llm_api_url = CASE WHEN $24::boolean THEN $12 ELSE user_settings.llm_api_url END,
+         llm_model = CASE WHEN $25::boolean THEN $13 ELSE user_settings.llm_model END,
          llm_reasoning_level = COALESCE($14, user_settings.llm_reasoning_level),
          llm_context_window = COALESCE($15, user_settings.llm_context_window),
          llm_image_support = COALESCE($16, user_settings.llm_image_support),
@@ -146,6 +152,9 @@ router.put('/', async (req: Request, res: Response) => {
         llm_image_support ?? null,
         DEFAULT_SYSTEM_LIGHT_THEME,
         DEFAULT_SYSTEM_DARK_THEME,
+        // $19..$25: for the integration text fields an explicit null/'' in the
+        // body clears the stored value; an absent key keeps it.
+        ...CLEARABLE_SETTINGS.map((key) => key in req.body),
       ]
     );
 

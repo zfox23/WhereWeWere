@@ -132,7 +132,7 @@ describe('igdb.searchGames', () => {
     expect(body).toContain('limit 25;');
   });
 
-  it('filters out description-only hits (no strict title match)', async () => {
+  it('keeps partial title matches but drops description-only hits', async () => {
     mockTokenThenQuery(
       { access_token: 'tok', expires_in: 5_184_000 },
       [
@@ -143,7 +143,20 @@ describe('igdb.searchGames', () => {
     );
 
     const result = await igdb.searchGames(CLIENT_ID, CLIENT_SECRET, 'halo');
-    expect(result?.map((r) => r.title)).toEqual(['Halo']);
+    expect(result?.map((r) => r.title)).toEqual(['Halo', 'Halo Wars 2']);
+  });
+
+  it('finds a game from a loose query (all words in the title)', async () => {
+    mockTokenThenQuery(
+      { access_token: 'tok', expires_in: 5_184_000 },
+      [
+        gameRow({ id: 5, name: 'The Legend of Zelda: Breath of the Wild', slug: 'botw' }),
+        gameRow({ id: 6, name: 'Hyrule Warriors', slug: 'hw' }),
+      ]
+    );
+
+    const result = await igdb.searchGames(CLIENT_ID, CLIENT_SECRET, 'zelda');
+    expect(result?.map((r) => r.title)).toEqual(['The Legend of Zelda: Breath of the Wild']);
   });
 
   it('orders exact matches before edition matches', async () => {

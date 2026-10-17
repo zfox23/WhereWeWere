@@ -34,9 +34,21 @@ registerRoute(
   })
 );
 
-// Cache API responses
+// Cache API responses, except anything holding secrets or bulk personal data:
+// settings (Immich/Dawarich API keys), backups, integration proxies (Immich
+// images), LLM/jobs/import endpoints, webhooks and per-plugin settings (e.g.
+// TMDB keys). Those must always hit the network and never land in CacheStorage.
+const UNCACHED_API_PATHS =
+  /^\/api\/v1\/(?:settings|backup|immich|llm|jobs|import|webhook)(?:\/|$)|^\/api\/v1\/plugins\/[^/]+\/settings(?:\/|$)/;
+
+// Earlier builds cached every API GET; drop whatever they stored (it may
+// include API keys or a full backup archive).
+self.addEventListener('activate', (event) => {
+  event.waitUntil(caches.delete('api-cache'));
+});
+
 registerRoute(
-  /\/api\/v1\//,
+  ({ url }) => url.pathname.startsWith('/api/v1/') && !UNCACHED_API_PATHS.test(url.pathname),
   new NetworkFirst({
     cacheName: 'api-cache',
     plugins: [new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 5 })],

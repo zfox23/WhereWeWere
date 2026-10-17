@@ -59,6 +59,24 @@ describe('CompanionChipInput', () => {
     expect(onChange).toHaveBeenCalledWith(['Linus']);
   });
 
+  it('Enter commits the typed text, not the first suggestion, until the user arrows into the list', async () => {
+    setCompanionNames(['Alice']);
+    const { onChange, input } = renderInput();
+    await userEvent.type(input, 'Al');
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Alice' })).toBeTruthy());
+    await userEvent.keyboard('{Enter}');
+    expect(onChange).toHaveBeenCalledWith(['Al']);
+  });
+
+  it('Enter commits the highlighted suggestion after ArrowDown', async () => {
+    setCompanionNames(['Alice']);
+    const { onChange, input } = renderInput();
+    await userEvent.type(input, 'Al');
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Alice' })).toBeTruthy());
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(onChange).toHaveBeenCalledWith(['Alice']);
+  });
+
   it('autocompletes from previously-entered names after the debounce', async () => {
     setCompanionNames(['Ada', 'Adam', 'Grace']);
     const { input } = renderInput({ value: [] });

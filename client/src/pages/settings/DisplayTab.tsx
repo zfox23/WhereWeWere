@@ -13,9 +13,10 @@ import {
 
 interface DisplayTabProps {
   initialDistanceUnit: 'metric' | 'imperial';
+  onSaved?: (patch: { distance_unit: 'metric' | 'imperial' }) => void;
 }
 
-export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
+export function DisplayTab({ initialDistanceUnit, onSaved }: DisplayTabProps) {
   const {
     theme: currentTheme,
     setTheme,
@@ -34,6 +35,7 @@ export function DisplayTab({ initialDistanceUnit }: DisplayTabProps) {
     setDisplayMsg(null);
     try {
       await settings.update({ distance_unit: distanceUnit });
+      onSaved?.({ distance_unit: distanceUnit });
       setDisplayMsg({ type: 'success', text: 'Display settings saved.' });
     } catch (err) {
       setDisplayMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });

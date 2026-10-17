@@ -12,7 +12,6 @@ import Stars from '../../../client/src/components/Stars';
 import VenueEditMap from './VenueEditMap';
 import CheckInCard from './LocationCard';
 import MapView from './MapView';
-import { useLocation } from './LocationContext';
 import { buildImmichMapUrl } from '../../../client/src/utils/checkin';
 import { haversineDistance, getBearingDegrees, formatDistance } from './geo';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
@@ -80,7 +79,17 @@ function buildGoogleMapsUrl(
 
 export default function VenueDetail() {
   const { id } = useParams<{ id: string }>();
-  const { coords } = useLocation();
+  // This route isn't wrapped in LocationProvider (which would also prefetch
+  // nearby venues we don't need here), so read the position directly.
+  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, []);
   const [venue, setVenue] = useState<Venue | null>(null);
   const [venueCheckins, setVenueCheckins] = useState<CheckIn[]>([]);
   const [loading, setLoading] = useState(true);
@@ -161,10 +170,24 @@ export default function VenueDetail() {
     setLoading(true);
     setError(null);
     try {
-      const [venueData, checkinData] = await Promise.all([
-        venues.get(id),
-        checkins.list({ venue_id: id, user_id: USER_ID }),
-      ]);
+      // The list endpoint pages (default 50); a frequently visited venue
+      // (home, work) has many more, so walk the pages.
+      const PAGE_SIZE = 200;
+      const fetchAllCheckins = async () => {
+        const all: CheckIn[] = [];
+        for (let offset = 0; ; offset += PAGE_SIZE) {
+          const page: CheckIn[] = await checkins.list({
+            venue_id: id,
+            user_id: USER_ID,
+            limit: String(PAGE_SIZE),
+            offset: String(offset),
+          });
+          all.push(...page);
+          if (page.length < PAGE_SIZE) break;
+        }
+        return all;
+      };
+      const [venueData, checkinData] = await Promise.all([venues.get(id), fetchAllCheckins()]);
       setVenue(venueData);
       setVenueCheckins(checkinData);
     } catch (err) {

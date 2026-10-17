@@ -1058,11 +1058,16 @@ async function findOrCreateActivity(
 async function extractBackupFromZip(zipPath: string): Promise<DaylioBackup> {
   return new Promise((resolve, reject) => {
     let backupContent = '';
+    let foundEntry = false;
 
-    fs.createReadStream(zipPath)
-      .pipe(unzipper.Parse())
+    const source = fs.createReadStream(zipPath);
+    const parser = unzipper.Parse();
+    source.on('error', reject);
+    source
+      .pipe(parser)
       .on('entry', (entry: any) => {
         if (entry.path === 'backup.daylio') {
+          foundEntry = true;
           entry.on('data', (data: Buffer) => {
             backupContent += data.toString('utf-8');
           });
@@ -1079,6 +1084,11 @@ async function extractBackupFromZip(zipPath: string): Promise<DaylioBackup> {
         } else {
           entry.autodrain();
         }
+      })
+      // A zip without backup.daylio (wrong or renamed file) would otherwise
+      // never settle and hang the request.
+      .on('close', () => {
+        if (!foundEntry) reject(new Error('backup.daylio not found in the uploaded file'));
       })
       .on('error', reject);
   });
@@ -1123,6 +1133,14 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
     const cacheGroupId = new Map<string, string>();
     const cacheActivityId = new Map<string, string>();
 
+    // One lookup instead of a SELECT per entry; also catches duplicate
+    // datetimes inside the same file.
+    const importedHashes = new Set<string>(
+      (await query('SELECT daylio_hash FROM mood_checkins WHERE daylio_hash IS NOT NULL')).rows.map(
+        (r: { daylio_hash: string }) => r.daylio_hash
+      )
+    );
+
     for (const entry of backup.dayEntries) {
       try {
         const { datetime, timeZoneOffset, mood, tags: tagIds = [], note = null } = entry;
@@ -1143,11 +1161,7 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
           .slice(0, 16);
 
         // Check for duplicate
-        const existing = await query(
-          'SELECT id FROM mood_checkins WHERE daylio_hash = $1',
-          [daylioHash]
-        );
-        if (existing.rows.length > 0) {
+        if (importedHashes.has(daylioHash)) {
           skipped++;
           continue;
         }
@@ -1189,24 +1203,16 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
         );
 
         const moodCheckinId = insertResult.rows[0].id;
+        importedHashes.add(daylioHash);
 
         // Link activities (from tags)
         if (tagIds && tagIds.length > 0) {
-          const tagNameSet = new Set<string>();
-
-          for (const tagId of tagIds) {
+          // Iterate tag ids (not names): two Daylio tags can share a name in
+          // different groups and must each land in their own group.
+          for (const tagId of new Set<number>(tagIds)) {
             const tagName = tagMap.get(tagId);
             if (!tagName) continue;
-
-            tagNameSet.add(tagName);
-          }
-
-          for (const tagName of tagNameSet) {
             try {
-              // Find the tag and its group
-              const tagId = [...tagMap.entries()].find(([_, name]) => name === tagName)?.[0];
-              if (!tagId) continue;
-
               const groupId = tagToGroupMap.get(tagId);
               if (!groupId) continue;
 
@@ -1240,9 +1246,6 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
       }
     }
 
-    // Clean up temp file
-    removeImportFile(file.path);
-
     res.json({
       imported,
       skipped,
@@ -1251,7 +1254,10 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
     });
   } catch (err: any) {
     console.error('Daylio import error:', err);
-    res.status(500).json({ error: 'Import failed', details: err.message || String(err) });
+    const status = err?.message === 'backup.daylio not found in the uploaded file' ? 400 : 500;
+    res.status(status).json({ error: status === 400 ? err.message : 'Import failed', details: err.message || String(err) });
+  } finally {
+    removeImportFile(file.path);
   }
 });
 

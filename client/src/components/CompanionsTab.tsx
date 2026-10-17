@@ -177,7 +177,7 @@ export function CompanionsTab() {
           value={addValue}
           onChange={(e) => setAddValue(e.target.value)}
           placeholder="Add a companion name…"
-          className="flex-1 px-3 py-2 bg-white/70 dark:bg-gray-900/70 border border-white/40 dark:border-gray-700/40 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-gray-100 dark:text-gray-100"
+          className="flex-1 px-3 py-2 bg-white/70 dark:bg-gray-900/70 border border-white/40 dark:border-gray-700/40 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-gray-900 dark:text-gray-100"
         />
         <button
           type="submit"

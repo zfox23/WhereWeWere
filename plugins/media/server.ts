@@ -214,12 +214,15 @@ export async function upsertMediaItemWithClient(
     if (existing.rows.length > 0) {
       return { id: existing.rows[0].id as string, created: false };
     }
-    // External miss: fold into an existing item with the same strict title
-    // (e.g. a re-import where the provider id changed between exports)
-    // instead of creating a duplicate row.
+    // External miss: fold into an existing LOCAL-only item with the same
+    // strict title (e.g. an earlier import that had no provider id) instead
+    // of creating a duplicate row. Items that already carry a different
+    // external id are different works (remakes, same-named shows) and must
+    // not absorb this one; restricting to external_source IS NULL also keeps
+    // this per-row lookup small.
     const siblings = await client.query(
       `SELECT id, title FROM media_items
-       WHERE user_id = $1 AND media_type = $2`,
+       WHERE user_id = $1 AND media_type = $2 AND external_source IS NULL`,
       [USER_ID, input.media_type]
     );
     const key = normalizeTitle(input.title);
@@ -305,7 +308,7 @@ export async function upsertMediaItem(input: MediaItemInput): Promise<string> {
       // Page count/series columns backfill from null but never clobber existing values.
       await query(
         `UPDATE media_items
-         SET title = $2,
+         SET title = COALESCE(NULLIF(title, ''), $2),
              author = COALESCE($3, author),
              release_year = COALESCE($4, release_year),
              image_url = COALESCE($5, image_url),
@@ -1362,9 +1365,10 @@ router.post('/items/bulk-delete', async (req: Request, res: Response) => {
 
 // GET /tv/:itemId/seasons - cached season list for the episode picker
 router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
-  const client = await pool.connect();
+  // No pooled connection is held across the TMDB round-trips below: reads go
+  // through the pool, and the write phase checks out its own client briefly.
   try {
-    const itemResult = await client.query(
+    const itemResult = await query(
       `SELECT mi.id, mi.external_source, mi.external_id,
               MAX(mte.cached_at) AS episodes_cached_at
        FROM media_items mi
@@ -1377,7 +1381,7 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'TV show not found' });
     }
     const item = itemResult.rows[0];
-    const cachedRows = await client.query(
+    const cachedRows = await query(
       'SELECT DISTINCT season_number FROM media_tv_episodes WHERE media_item_id = $1 ORDER BY season_number',
       [item.id]
     );
@@ -1390,7 +1394,7 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
         (Date.now() - new Date(cachedAt).getTime()) > EPISODE_CACHE_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 
       if (!stale) {
-        const epRows = await client.query(
+        const epRows = await query(
           'SELECT season_number, episode_number, episode_title FROM media_tv_episodes WHERE media_item_id = $1 ORDER BY season_number, episode_number',
           [item.id]
         );
@@ -1402,8 +1406,8 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
           ? await tmdb.getShowSeasons(keys.tmdb_api_key, item.external_id)
           : null;
         if (fresh && fresh.length > 0) {
-          await refreshEpisodesFromTmdb(client, item, keys, fresh);
-          const epRows = await client.query(
+          await refreshEpisodesFromTmdb(item, keys, fresh);
+          const epRows = await query(
             'SELECT season_number, episode_number, episode_title FROM media_tv_episodes WHERE media_item_id = $1 ORDER BY season_number, episode_number',
             [item.id]
           );
@@ -1412,7 +1416,7 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
           // TMDB unavailable (or nothing fresh returned): serve the cached
           // episode rows as-is instead of zeroed placeholders, which
           // buildSeasonList would drop entirely (F3).
-          const epRows = await client.query(
+          const epRows = await query(
             'SELECT season_number, episode_number, episode_title FROM media_tv_episodes WHERE media_item_id = $1 ORDER BY season_number, episode_number',
             [item.id]
           );
@@ -1423,8 +1427,8 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
       // No cached episodes: fetch from TMDB.
       const keys = await getApiKeys();
       if (item.external_source === 'tmdb' && item.external_id) {
-        await refreshEpisodesFromTmdb(client, item, keys);
-        const epRows = await client.query(
+        await refreshEpisodesFromTmdb(item, keys);
+        const epRows = await query(
           'SELECT season_number, episode_number, episode_title FROM media_tv_episodes WHERE media_item_id = $1 ORDER BY season_number, episode_number',
           [item.id]
         );
@@ -1438,8 +1442,6 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error fetching TV seasons:', err);
     res.status(500).json({ error: 'Failed to fetch TV seasons' });
-  } finally {
-    client.release();
   }
 });
 
@@ -1465,40 +1467,72 @@ function buildSeasonList(rows: { season_number: number; episode_number?: number;
  * media_tv_episodes. Skipped entirely when no TMDB key is available.
  */
 async function refreshEpisodesFromTmdb(
-  client: import('pg').PoolClient,
   item: { id: string; external_source: string | null; external_id: string | null },
   keys: SettingsKeys,
   prefetchedSeasons?: import('./services/tmdb').TmdbSeasonInfo[] | null
 ): Promise<void> {
   if (item.external_source !== 'tmdb' || !item.external_id || !keys.tmdb_api_key) return;
+  const apiKey = keys.tmdb_api_key;
+  const tmdbId = item.external_id;
 
   // Use the caller's already-fetched seasons when available to avoid a
   // duplicate getShowSeasons round-trip (the stale path fetches them first
   // to decide whether a refresh is worth doing).
-  const seasons = prefetchedSeasons ?? (await tmdb.getShowSeasons(keys.tmdb_api_key, item.external_id));
+  const seasons = prefetchedSeasons ?? (await tmdb.getShowSeasons(apiKey, tmdbId));
   if (!seasons) return;
 
-  // Wrap the per-episode upserts in a transaction so a mid-refresh failure
-  // cannot leave the cache with partial season data.
-  await client.query('BEGIN');
-  try {
-    for (const season of seasons) {
-      const episodes = await tmdb.getShowEpisodes(keys.tmdb_api_key, item.external_id, season.seasonNumber);
-      if (!episodes) continue;
-      for (const ep of episodes) {
-        await client.query(
-          `INSERT INTO media_tv_episodes (media_item_id, season_number, episode_number, episode_title, cached_at)
-           VALUES ($1, $2, $3, $4, NOW())
-           ON CONFLICT (media_item_id, season_number, episode_number)
-           DO UPDATE SET episode_title = COALESCE($4, media_tv_episodes.episode_title), cached_at = NOW()`,
-          [item.id, season.seasonNumber, ep.episodeNumber, ep.episodeTitle]
-        );
-      }
+  // Network first (bounded concurrency), then one short write transaction:
+  // a slow or failing TMDB must not hold a pooled connection open, and a
+  // mid-refresh failure still cannot leave partial season data in the cache.
+  const fetched: { seasonNumber: number; episodes: { episodeNumber: number; episodeTitle: string | null }[] }[] = [];
+  const CONCURRENCY = 4;
+  for (let i = 0; i < seasons.length; i += CONCURRENCY) {
+    const batch = seasons.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (season) => ({
+        seasonNumber: season.seasonNumber,
+        episodes: await tmdb.getShowEpisodes(apiKey, tmdbId, season.seasonNumber),
+      }))
+    );
+    for (const r of results) {
+      if (r.episodes) fetched.push({ seasonNumber: r.seasonNumber, episodes: r.episodes });
     }
+  }
+
+  // Dedupe on (season, episode): ON CONFLICT cannot touch one row twice in a
+  // single statement.
+  const rows = new Map<string, { s: number; e: number; t: string | null }>();
+  for (const season of fetched) {
+    for (const ep of season.episodes) {
+      rows.set(`${season.seasonNumber}:${ep.episodeNumber}`, {
+        s: season.seasonNumber,
+        e: ep.episodeNumber,
+        t: ep.episodeTitle,
+      });
+    }
+  }
+  const seasonNumbers = [...rows.values()].map((r) => r.s);
+  const episodeNumbers = [...rows.values()].map((r) => r.e);
+  const titles = [...rows.values()].map((r) => r.t);
+  if (seasonNumbers.length === 0) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO media_tv_episodes (media_item_id, season_number, episode_number, episode_title, cached_at)
+       SELECT $1, t.season_number, t.episode_number, t.episode_title, NOW()
+       FROM unnest($2::int[], $3::int[], $4::text[]) AS t(season_number, episode_number, episode_title)
+       ON CONFLICT (media_item_id, season_number, episode_number)
+       DO UPDATE SET episode_title = COALESCE(EXCLUDED.episode_title, media_tv_episodes.episode_title), cached_at = NOW()`,
+      [item.id, seasonNumbers, episodeNumbers, titles]
+    );
     await client.query('COMMIT');
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     throw err;
+  } finally {
+    client.release();
   }
 }
 
@@ -1669,7 +1703,7 @@ router.get('/lists', async (_req: Request, res: Response) => {
                 'id', mi.id, 'media_type', mi.media_type, 'title', mi.title,
                 'image_url', mi.image_url, 'author', mi.author,
                 'added_at', mli.added_at
-              ) ORDER BY mli.position, mli.added_at) AS items
+              ) ORDER BY mli.position, mli.added_at) FILTER (WHERE mi.id IS NOT NULL) AS items
        FROM media_lists l
        LEFT JOIN media_list_items mli ON mli.list_id = l.id
        LEFT JOIN media_items mi ON mli.media_item_id = mi.id

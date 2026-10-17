@@ -46,7 +46,14 @@ export default function Settings() {
   const [data, setData] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [jobRefreshKey, setJobRefreshKey] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>(getTabFromLocation);
+
+  // The tabs copy their initial values into local state on mount; keep the
+  // cached settings in sync with what they save so re-opening a tab shows the
+  // saved values instead of the ones loaded at page start.
+  const patchSettings = (patch: Partial<UserSettings>) =>
+    setData((prev) => (prev ? { ...prev, ...patch } : prev));
 
   useEffect(() => {
     async function loadSettings() {
@@ -55,6 +62,7 @@ export default function Settings() {
         setData(s);
       } catch (err) {
         console.error('Failed to load settings:', err);
+        setLoadError(err instanceof Error ? err.message : 'Failed to load settings');
       } finally {
         setLoading(false);
       }
@@ -106,6 +114,7 @@ export default function Settings() {
         <AccountTab
           initialUsername={data.username || ''}
           initialDisplayName={data.display_name || ''}
+          onSaved={patchSettings}
         />
       );
     }
@@ -113,6 +122,7 @@ export default function Settings() {
       return data && (
         <DisplayTab
           initialDistanceUnit={data.distance_unit === 'imperial' ? 'imperial' : 'metric'}
+          onSaved={patchSettings}
         />
       );
     }
@@ -129,6 +139,7 @@ export default function Settings() {
           initialLlmReasoningLevel={data.llm_reasoning_level || 'medium'}
           initialLlmContextWindow={data.llm_context_window ? String(data.llm_context_window) : '262144'}
           initialLlmImageSupport={data.llm_image_support !== false}
+          onSaved={patchSettings}
         />
       );
     }
@@ -166,6 +177,12 @@ export default function Settings() {
           ))}
         </div>
       </div>
+
+      {loadError && ['account', 'display', 'integrations'].includes(activeTab) && (
+        <div className="text-sm text-red-600">
+          Could not load your settings ({loadError}). Reload the page to edit them.
+        </div>
+      )}
 
       {renderBody()}
     </div>

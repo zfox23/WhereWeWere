@@ -265,10 +265,19 @@ export const importApi = {
   },
 };
 
+/** Drop the service worker's cached API responses (stale after a restore or wipe). */
+function clearApiCache(): void {
+  try {
+    if (typeof caches !== 'undefined') void caches.delete('api-cache');
+  } catch {
+    // CacheStorage unavailable (e.g. insecure context): nothing to clear
+  }
+}
+
 // Backup / Restore
 export const backupApi = {
   export: async () => {
-    const res = await fetch(`${API_BASE}/backup/export`);
+    const res = await fetch(`${API_BASE}/backup/export`, { headers: withAuthHeader() });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ message: res.statusText }));
       throw new Error(error.message || `Backup export failed: ${res.status}`);
@@ -285,12 +294,14 @@ export const backupApi = {
     form.append('file', file);
     const res = await fetch(`${API_BASE}/backup/import`, {
       method: 'POST',
+      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ message: res.statusText }));
       throw new Error(error.error || error.message || `Backup import failed: ${res.status}`);
     }
+    clearApiCache();
     return res.json();
   },
   startOver: async (
@@ -305,7 +316,7 @@ export const backupApi = {
       [key: string]: boolean;
     }
   ) => {
-    return request<{ message: string; counts: Record<string, number> }>('/backup/start-over', {
+    const result = await request<{ message: string; counts: Record<string, number> }>('/backup/start-over', {
       method: 'POST',
       body: JSON.stringify({
         first_confirmation: firstConfirmation,
@@ -313,6 +324,8 @@ export const backupApi = {
         options,
       }),
     });
+    clearApiCache();
+    return result;
   },
 };
 

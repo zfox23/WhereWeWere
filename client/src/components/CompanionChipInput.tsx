@@ -22,7 +22,9 @@ interface CompanionChipInputProps {
 export default function CompanionChipInput({ value, onChange, disabled = false }: CompanionChipInputProps) {
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
-  const [highlight, setHighlight] = useState(0);
+  // -1 = nothing highlighted: Enter commits the typed text, and only commits a
+  // suggestion once the user arrows into (or hovers) the list.
+  const [highlight, setHighlight] = useState(-1);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -33,10 +35,15 @@ export default function CompanionChipInput({ value, onChange, disabled = false }
   const [suggestions, setSuggestions] = useState<string[]>([]);
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    // Nothing to show while the dropdown is closed: skip the request (every
+    // form instance would otherwise hit the API on mount).
+    if (!open) return;
+    let cancelled = false;
     const q = text.trim();
     debounceRef.current = setTimeout(async () => {
       try {
         const names = await companions.names(q || undefined, 50);
+        if (cancelled) return;
         // Exclude names already selected (case-insensitive) and exact dups.
         const seen = new Set<string>();
         const filtered = (names || [])
@@ -49,17 +56,19 @@ export default function CompanionChipInput({ value, onChange, disabled = false }
           .slice(0, 8);
         setSuggestions(filtered);
       } catch {
-        setSuggestions([]);
+        if (!cancelled) setSuggestions([]);
       }
     }, 180);
     return () => {
+      // Ignore a response that lands after the query changed.
+      cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [text, lowerSet]);
+  }, [text, lowerSet, open]);
 
   // Reset highlight when the suggestion list changes.
   useEffect(() => {
-    setHighlight(0);
+    setHighlight(-1);
   }, [suggestions, text]);
 
   // Close the dropdown on outside click.
@@ -94,7 +103,7 @@ export default function CompanionChipInput({ value, onChange, disabled = false }
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (open && suggestions[highlight]) {
+      if (open && highlight >= 0 && suggestions[highlight]) {
         commit(suggestions[highlight]);
       } else if (text.trim()) {
         commit(text);
@@ -108,7 +117,7 @@ export default function CompanionChipInput({ value, onChange, disabled = false }
     }
     if (e.key === 'ArrowUp' && open) {
       e.preventDefault();
-      setHighlight((h) => Math.max(h - 1, 0));
+      setHighlight((h) => Math.max(h - 1, -1));
       return;
     }
     if (e.key === 'Escape') {

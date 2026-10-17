@@ -26,6 +26,8 @@ export function MediaSettings() {
   const [hardcoverApiKey, setHardcoverApiKey] = useState('');
   const [igdbClientId, setIgdbClientId] = useState('');
   const [igdbClientSecret, setIgdbClientSecret] = useState('');
+  // Saving before the current values arrive would overwrite stored API keys with blanks.
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -43,8 +45,14 @@ export function MediaSettings() {
         setHardcoverApiKey(settings.hardcover_api_key ?? '');
         setIgdbClientId(settings.igdb_client_id ?? '');
         setIgdbClientSecret(settings.igdb_client_secret ?? '');
+        setLoaded(true);
       })
-      .catch(() => {});
+      .catch((err) => {
+        setMsg({
+          type: 'error',
+          text: `Could not load media settings (${err instanceof Error ? err.message : 'unknown error'}). Reload to edit them.`,
+        });
+      });
   }, []);
 
   useEffect(() => {
@@ -217,7 +225,7 @@ export function MediaSettings() {
           {msg.text}
         </div>
       )}
-      <button onClick={save} disabled={saving} className="btn-primary">
+      <button onClick={save} disabled={saving || !loaded} className="btn-primary">
         {saving ? 'Saving…' : 'Save Media Settings'}
       </button>
     </div>
