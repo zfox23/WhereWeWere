@@ -1,4 +1,5 @@
 const PHOTON_BASE = 'https://photon.home.zachfox.io';
+const PHOTON_TIMEOUT_MS = 8_000;
 
 export interface ReverseGeocodeResult {
   country?: string;
@@ -18,7 +19,8 @@ export async function reverseGeocode(
 ): Promise<ReverseGeocodeResult> {
   try {
     const res = await fetch(
-      `${PHOTON_BASE}/reverse?lon=${lng}&lat=${lat}`
+      `${PHOTON_BASE}/reverse?lon=${lng}&lat=${lat}`,
+      { signal: AbortSignal.timeout(PHOTON_TIMEOUT_MS) }
     );
     if (!res.ok) return {};
     const data: any = await res.json();
@@ -53,7 +55,9 @@ export async function searchPlacesByName(
       q: query,
       limit: String(safeLimit),
     });
-    const res = await fetch(`${PHOTON_BASE}/api?${params.toString()}`);
+    const res = await fetch(`${PHOTON_BASE}/api?${params.toString()}`, {
+      signal: AbortSignal.timeout(PHOTON_TIMEOUT_MS),
+    });
     if (!res.ok) return [];
 
     const data: any = await res.json();

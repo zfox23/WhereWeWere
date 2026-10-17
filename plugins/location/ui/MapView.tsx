@@ -113,9 +113,13 @@ function getMarkerIcon(
 // Helper component to recenter map when center prop changes
 function RecenterMap({ center }: { center: [number, number] }) {
   const map = useMap();
+  const [lat, lng] = center;
+  // Depend on the coordinate values, not the array identity: callers pass a
+  // fresh inline array on every render, which would otherwise snap the map
+  // back to the center (discarding the user's pan) on any parent re-render.
   useEffect(() => {
-    map.setView(center);
-  }, [center, map]);
+    map.setView([lat, lng]);
+  }, [lat, lng, map]);
   return null;
 }
 

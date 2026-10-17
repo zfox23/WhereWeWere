@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent, type CSSProperties } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type ChangeEvent, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, AlignJustify, Rows3 } from 'lucide-react';
 import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
@@ -13,6 +13,24 @@ import { usePageTitle } from '../utils/pageTitle';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
+
+/**
+ * The feed survives navigating away and back (Layout remounts the page on
+ * every route change): the loaded items, paging state and scroll position are
+ * parked here on unmount and restored on the next mount with the same
+ * filters, then revalidated in the background. Module-level so it outlives
+ * the component; dropped after a few minutes or when it grows large.
+ */
+interface FeedSnapshot {
+  key: string;
+  items: TimelineItem[];
+  hasMore: boolean;
+  scrollY: number;
+  savedAt: number;
+}
+let feedSnapshot: FeedSnapshot | null = null;
+const FEED_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
+const FEED_SNAPSHOT_MAX_ITEMS = 500;
 
 /** Check-in plugins that should appear in the expandable FAB, by fabOrder. */
 const FAB_PLUGINS = allClientPlugins().slice().sort((a, b) => (a.client.fabOrder ?? 100) - (b.client.fabOrder ?? 100));
@@ -144,7 +162,22 @@ export default function Home() {
   const location = useLocation();
   const newId = (location.state as { newId?: string } | null)?.newId ?? null;
   const newIdAnimatedRef = useRef<string | null>(null);
-  const [items, setItems] = useState<TimelineItem[]>([]);
+  // Take (and clear) the parked feed once, on first render. A just-created
+  // check-in (location.state.newId) needs a fresh load, so it skips restore.
+  const restoredRef = useRef<FeedSnapshot | null | undefined>(undefined);
+  if (restoredRef.current === undefined) {
+    const snap = feedSnapshot;
+    feedSnapshot = null;
+    restoredRef.current =
+      snap &&
+      !newId &&
+      snap.key === `${searchParams.toString()}|` &&
+      Date.now() - snap.savedAt < FEED_SNAPSHOT_MAX_AGE_MS
+        ? snap
+        : null;
+  }
+  const restored = restoredRef.current;
+  const [items, setItems] = useState<TimelineItem[]>(restored?.items ?? []);
   // Inclusion state for each check-in plugin type.
   const [pluginIncludes, setPluginIncludes] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(NEW_PLUGINS.map((p) => [p.id, true])),
@@ -157,9 +190,9 @@ export default function Home() {
       NEW_PLUGINS.map((p) => [p.id, value && p.id === pluginId]),
     ));
   }, []);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!restored);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(restored?.hasMore ?? true);
   const [error, setError] = useState<string | null>(null);
   // Failure while appending the next page: keep the feed visible and stop
   // auto-paging (otherwise the sentinel re-triggers the failing request forever).
@@ -345,7 +378,12 @@ export default function Home() {
   const feedContainerRef = useRef<HTMLDivElement>(null);
   const revealObserverRef = useRef<IntersectionObserver | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const offsetRef = useRef(0);
+  const offsetRef = useRef(restored?.items.length ?? 0);
+  // Number of restored items to revalidate on the first load (0 = normal load).
+  const revalidateCountRef = useRef(restored?.items.length ?? 0);
+  // Bumped by every reload so a slow response for an old filter/query can't
+  // overwrite (or be appended to) the results of a newer one.
+  const loadGenRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Local value for the search input. The URL param is the source of truth,
   // but controlling the input directly from it lags a render behind while the
@@ -404,11 +442,15 @@ export default function Home() {
   }, [setFilter]);
 
   const fetchTimeline = useCallback(
-    async (offset: number, append: boolean) => {
+    async (offset: number, append: boolean, opts?: { count?: number }) => {
+      const pageSize = opts?.count ?? PAGE_SIZE;
+      // A reload starts a new generation; an append belongs to the current one.
+      const gen = append ? loadGenRef.current : ++loadGenRef.current;
       if (append) {
         setLoadingMore(true);
       } else {
-        setLoading(true);
+        // A revalidation (opts.count) keeps the restored feed on screen.
+        if (!opts?.count) setLoading(true);
         setError(null);
       }
       setLoadMoreError(null);
@@ -416,7 +458,7 @@ export default function Home() {
       try {
         const params: Record<string, string> = {
           user_id: USER_ID,
-          limit: String(PAGE_SIZE),
+          limit: String(pageSize),
           offset: String(offset),
         };
         if (searchQuery.trim()) params.q = searchQuery.trim();
@@ -438,14 +480,16 @@ export default function Home() {
           }
 
         const data = await timelineApi.list(params);
+        if (gen !== loadGenRef.current) return; // superseded by a newer reload
         if (append) {
           setItems((prev) => [...prev, ...data]);
         } else {
           setItems(data);
         }
-        setHasMore(data.length === PAGE_SIZE);
+        setHasMore(data.length === pageSize);
         offsetRef.current = offset + data.length;
       } catch (err) {
+        if (gen !== loadGenRef.current) return;
         const message = err instanceof Error ? err.message : 'Failed to load check-ins';
         if (append) {
           setLoadMoreError(message);
@@ -454,18 +498,48 @@ export default function Home() {
           setError(message);
         }
         } finally {
-          setLoading(false);
-          setLoadingMore(false);
+          // A superseded request leaves the loading flags to the newer one.
+          if (gen === loadGenRef.current) {
+            setLoading(false);
+            setLoadingMore(false);
+          }
         }
       },
       [searchQuery, fromDate, toDate, venueId, category, country, companion, pluginFilterParams, typesParam]
     );
+
+  // Park the feed for the next mount (see FeedSnapshot). A layout-effect
+  // cleanup runs before the DOM is torn down, so window.scrollY is still the
+  // feed's scroll position here.
+  const feedStateRef = useRef({ items, hasMore, key: '' });
+  feedStateRef.current = { items, hasMore, key: `${searchParams.toString()}|${typesParam ?? ''}` };
+  useLayoutEffect(() => {
+    return () => {
+      const { items: current, hasMore: more, key } = feedStateRef.current;
+      feedSnapshot =
+        current.length > 0 && current.length <= FEED_SNAPSHOT_MAX_ITEMS
+          ? { key, items: current, hasMore: more, scrollY: window.scrollY, savedAt: Date.now() }
+          : null;
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (restoredRef.current) window.scrollTo(0, restoredRef.current.scrollY);
+  }, []);
 
   // Initial load + reload on filter changes
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(() => {
+      const revalidateCount = revalidateCountRef.current;
+      revalidateCountRef.current = 0;
+      if (revalidateCount > 0) {
+        // First load after restoring the parked feed: refresh the same
+        // window in place so edits/deletes made meanwhile show up without
+        // resetting the scroll position.
+        fetchTimeline(0, false, { count: revalidateCount });
+        return;
+      }
       offsetRef.current = 0;
       fetchTimeline(0, false);
     }, 300);

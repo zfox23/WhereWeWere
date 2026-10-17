@@ -23,6 +23,8 @@ import {
   type CandidateWindow,
 } from '../services/postcard';
 
+const IMMICH_TIMEOUT_MS = 15_000;
+
 const router = Router();
 
 import { DEFAULT_USER_ID as USER_ID } from '../constants';
@@ -149,6 +151,7 @@ async function fetchImageParts(
               'x-api-key': String(immichRow.immich_api_key),
               Accept: 'image/jpeg',
             },
+            signal: AbortSignal.timeout(30_000),
           }
         );
         if (!imgRes.ok) return null;
@@ -201,6 +204,7 @@ router.get('/candidate-images', async (req: Request, res: Response) => {
     const immichApiKey = String(row.immich_api_key);
 
     const response = await fetch(`${immichUrl}/api/search/metadata`, {
+      signal: AbortSignal.timeout(IMMICH_TIMEOUT_MS),
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': immichApiKey },
       body: JSON.stringify({
@@ -509,6 +513,7 @@ async function postcardImages(from: string, to: string): Promise<PostcardImage[]
 
   try {
     const response = await fetch(`${immichUrl}/api/search/metadata`, {
+      signal: AbortSignal.timeout(IMMICH_TIMEOUT_MS),
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': immichApiKey },
       body: JSON.stringify({

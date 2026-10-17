@@ -240,7 +240,9 @@ tracksRouter.get('/map-data', async (req: Request, res: Response) => {
               t.avg_speed_mps, t.max_speed_mps,
               ST_XMin(t.path) AS min_lng, ST_YMin(t.path) AS min_lat,
               ST_XMax(t.path) AS max_lng, ST_YMax(t.path) AS max_lat,
-              ST_AsGeoJSON(t.path) AS geojson
+              -- Overview map only draws polylines: simplify (~5 m) and trim to
+              -- 5 decimals (~1 m) instead of shipping every 1 Hz fix.
+              ST_AsGeoJSON(ST_SimplifyPreserveTopology(t.path, 0.00005), 5) AS geojson
        FROM tracks t
        ${whereClause}
        ORDER BY t.started_at ASC`,

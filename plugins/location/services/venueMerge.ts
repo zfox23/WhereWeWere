@@ -342,31 +342,52 @@ export async function findBestVenueMatch(
 
   const maxDistanceMeters = options.maxDistanceMeters || DEFAULT_AUTO_MATCH_RADIUS_METERS;
   const limit = options.limit || 20;
+
+  // Bounding box first (uses idx_venues_lat_lng) so the trig and the check-in
+  // count run only on venues near the candidate, not on every venue in the DB
+  // (this runs once per row during a Swarm import). Longitude is left open
+  // near the poles / antimeridian where a simple box is wrong.
+  const latNum = Number(candidate.latitude);
+  const lngNum = Number(candidate.longitude);
+  const latDelta = maxDistanceMeters / 111320;
+  const cosLat = Math.cos((latNum * Math.PI) / 180);
+  const lngDelta = cosLat > 0.01 ? maxDistanceMeters / (111320 * cosLat) : null;
+  const useLngBox = lngDelta !== null && lngNum - lngDelta >= -180 && lngNum + lngDelta <= 180;
+
   const nearby = await client.query(
-    `SELECT v.id, v.name, v.category_id, v.address, v.city, v.state, v.country,
-            v.postal_code, v.latitude, v.longitude, v.osm_id, v.swarm_venue_id,
-            v.parent_venue_id, v.created_at, COUNT(c.id)::int AS checkin_count,
-            (6371000 * acos(
-              LEAST(1.0, GREATEST(-1.0,
-                cos(radians($1)) * cos(radians(v.latitude)) *
-                cos(radians(v.longitude) - radians($2)) +
-                sin(radians($1)) * sin(radians(v.latitude))
-              ))
-            )) AS distance_meters
-     FROM venues v
-     LEFT JOIN checkins c ON c.venue_id = v.id
-     WHERE ($3::uuid IS NULL OR v.id <> $3)
-     GROUP BY v.id
-     HAVING (6371000 * acos(
-              LEAST(1.0, GREATEST(-1.0,
-                cos(radians($1)) * cos(radians(v.latitude)) *
-                cos(radians(v.longitude) - radians($2)) +
-                sin(radians($1)) * sin(radians(v.latitude))
-              ))
-            )) <= $4
-     ORDER BY distance_meters ASC, checkin_count DESC, v.created_at ASC
+    `WITH candidates AS (
+       SELECT v.id, v.name, v.category_id, v.address, v.city, v.state, v.country,
+              v.postal_code, v.latitude, v.longitude, v.osm_id, v.swarm_venue_id,
+              v.parent_venue_id, v.created_at,
+              (6371000 * acos(
+                LEAST(1.0, GREATEST(-1.0,
+                  cos(radians($1)) * cos(radians(v.latitude)) *
+                  cos(radians(v.longitude) - radians($2)) +
+                  sin(radians($1)) * sin(radians(v.latitude))
+                ))
+              )) AS distance_meters
+       FROM venues v
+       WHERE ($3::uuid IS NULL OR v.id <> $3)
+         AND v.latitude BETWEEN $6::float8 AND $7::float8
+         AND ($8::float8 IS NULL OR v.longitude BETWEEN $8::float8 AND $9::float8)
+     )
+     SELECT n.*,
+            (SELECT COUNT(*)::int FROM checkins c WHERE c.venue_id = n.id) AS checkin_count
+     FROM candidates n
+     WHERE n.distance_meters <= $4
+     ORDER BY n.distance_meters ASC, checkin_count DESC, n.created_at ASC
      LIMIT $5`,
-    [candidate.latitude, candidate.longitude, options.excludeVenueId || null, maxDistanceMeters, limit]
+    [
+      candidate.latitude,
+      candidate.longitude,
+      options.excludeVenueId || null,
+      maxDistanceMeters,
+      limit,
+      latNum - latDelta,
+      latNum + latDelta,
+      useLngBox ? lngNum - (lngDelta as number) : null,
+      useLngBox ? lngNum + (lngDelta as number) : null,
+    ]
   );
 
   let bestMatch: VenueRecord | null = null;

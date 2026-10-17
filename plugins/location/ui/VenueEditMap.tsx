@@ -188,10 +188,14 @@ function InitialView({ center, zoom }: { center: [number, number]; zoom: number 
 
 function SyncedView({ center }: { center: [number, number] | null }) {
   const map = useMap();
+  const lat = center?.[0];
+  const lng = center?.[1];
+  // Keyed on the coordinate values so an inline array prop doesn't re-center
+  // (and undo the user's pan) on every parent render.
   useEffect(() => {
-    if (!center) return;
-    map.setView(center);
-  }, [map, center]);
+    if (lat == null || lng == null) return;
+    map.setView([lat, lng]);
+  }, [map, lat, lng]);
   return null;
 }
 

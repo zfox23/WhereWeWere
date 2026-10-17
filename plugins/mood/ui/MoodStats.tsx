@@ -1148,11 +1148,16 @@ export function MoodsTab() {
 
   // Year-scoped data
   useEffect(() => {
+    // Ignore a slow response for a year the user has already moved off.
+    let cancelled = false;
     moodStats.monthly(USER_ID, year)
       .then((monthly) => {
-        setMonthlyData(monthly);
+        if (!cancelled) setMonthlyData(monthly);
       })
       .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
   }, [year]);
 
   // Default selected month for the chosen year
@@ -1237,6 +1242,8 @@ export function MoodsTab() {
     const rangeStart = isAll ? undefined : visibleRange.from;
     const rangeEnd = isAll ? undefined : visibleRange.to;
 
+    // A slower response for a previous period must not overwrite the new one.
+    let cancelled = false;
     setMonthLoading(true);
     Promise.all([
       moodStats.daily(USER_ID, rangeStart, rangeEnd),
@@ -1247,6 +1254,7 @@ export function MoodsTab() {
       sleepStats.daily(USER_ID, rangeStart, rangeEnd),
     ])
       .then(([daily, counts, dow, corr, combos, sleepDaily]) => {
+        if (cancelled) return;
         setDailyData(daily);
         setMoodCounts(counts);
         setDowData(dow);
@@ -1255,7 +1263,12 @@ export function MoodsTab() {
         setSleepDailyData(sleepDaily);
       })
       .catch(console.error)
-      .finally(() => setMonthLoading(false));
+      .finally(() => {
+        if (!cancelled) setMonthLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [periodMode, visibleRange.from, visibleRange.to]);
 
   return (

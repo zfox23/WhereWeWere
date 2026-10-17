@@ -157,15 +157,36 @@ try {
       };
     });
 
-    params.push(parseInt(limit as string, 10));
+    // Clamp: NaN/negative values would 500 in Postgres, and no cap would let
+    // one request load the whole history.
+    const limitNum = Math.min(Math.max(parseInt(limit as string, 10) || 50, 1), 500);
+    const offsetNum = Math.max(parseInt(offset as string, 10) || 0, 0);
+    params.push(limitNum);
     const limitParam = `$${params.length}`;
-    params.push(parseInt(offset as string, 10));
+    params.push(offsetNum);
     const offsetParam = `$${params.length}`;
+
+    // Without a companion filter, no branch can contribute more than
+    // limit+offset rows to the final page, so cap each branch (sorted) before
+    // the UNION instead of materialising and sorting every plugin's full
+    // history for every page. With the companion filter the cap would be
+    // applied before filtering, so it stays off.
+    let perBranchLimitParam: string | null = null;
+    if (branches.length > 1 && !companionName) {
+      params.push(limitNum + offsetNum);
+      perBranchLimitParam = `$${params.length}`;
+    }
 
     const unionSql =
       branches.length === 1
         ? branchSqls[0].sql
-        : branchSqls.map((b) => `(\n${b.sql}\n)`).join('\nUNION ALL\n');
+        : branchSqls
+            .map((b) =>
+              perBranchLimitParam
+                ? `(\n${b.sql}\nORDER BY checked_in_at DESC, id DESC LIMIT ${perBranchLimitParam}\n)`
+                : `(\n${b.sql}\n)`
+            )
+            .join('\nUNION ALL\n');
 
     let sql: string;
     if (companionName) {
@@ -182,11 +203,11 @@ try {
           AND comp.checkin_id = timeline.id
           AND comp.name = ${companionParam}
       )
-      ORDER BY checked_in_at DESC
+      ORDER BY checked_in_at DESC, id DESC
       LIMIT ${limitParam} OFFSET ${offsetParam}`;
     } else {
       sql = `${unionSql}
-      ORDER BY checked_in_at DESC
+      ORDER BY checked_in_at DESC, id DESC
       LIMIT ${limitParam} OFFSET ${offsetParam}`;
     }
 

@@ -110,9 +110,16 @@ function formatDiffFromMs(diffMs: number): string {
   return `${hours} hour${hours === 1 ? '' : 's'} ${minutes} minute${minutes === 1 ? '' : 's'}`;
 }
 
-function findClosestAnchor<T extends { checkedInAtMs: number }>(
+/**
+ * Closest anchor to `timestampMs` in a list sorted by `checkedInAtMs`. With
+ * `skipId`, an anchor whose id matches is ignored (a row must not anchor
+ * itself) without copying the list per lookup: the nearest neighbour on each
+ * side of the insertion point is all that can be closest.
+ */
+function findClosestAnchor<T extends { checkedInAtMs: number; id?: string }>(
   timestampMs: number,
-  anchors: T[]
+  anchors: T[],
+  skipId?: string
 ): { anchor: T; diffMs: number } | null {
   if (anchors.length === 0) {
     return null;
@@ -130,7 +137,13 @@ function findClosestAnchor<T extends { checkedInAtMs: number }>(
     }
   }
 
-  const candidates = [anchors[low - 1], anchors[low], anchors[low + 1]].filter(Boolean) as T[];
+  let left = low - 1;
+  let right = low;
+  if (skipId !== undefined) {
+    while (left >= 0 && anchors[left].id === skipId) left--;
+    while (right < anchors.length && anchors[right].id === skipId) right++;
+  }
+  const candidates = [anchors[left], anchors[right]].filter(Boolean) as T[];
   let best: T | null = null;
   let bestDiff = Number.POSITIVE_INFINITY;
 
@@ -193,12 +206,7 @@ function resolveTimezoneAnchor(
   selfId: string,
   anchors: AnyTimezoneAnchor[]
 ): ResolvedTimezoneAnchor | null {
-  const candidates = anchors.filter((anchor) => anchor.id !== selfId);
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const nearest = findClosestAnchor(timestampMs, candidates);
+  const nearest = findClosestAnchor(timestampMs, anchors, selfId);
   if (!nearest) {
     return null;
   }

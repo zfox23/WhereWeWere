@@ -214,15 +214,16 @@ export async function upsertMediaItemWithClient(
     if (existing.rows.length > 0) {
       return { id: existing.rows[0].id as string, created: false };
     }
-    // External miss: fold into an existing LOCAL-only item with the same
-    // strict title (e.g. an earlier import that had no provider id) instead
-    // of creating a duplicate row. Items that already carry a different
-    // external id are different works (remakes, same-named shows) and must
-    // not absorb this one; restricting to external_source IS NULL also keeps
-    // this per-row lookup small.
+    // External miss: fold into an existing item with the same strict title
+    // (e.g. a re-import where the provider id changed between exports)
+    // instead of creating a duplicate row. For movies and shows an item that
+    // already carries a different TMDB id is a different work (remakes,
+    // same-named shows), so only local-only siblings may absorb the row;
+    // games/books keep matching across provider ids (editions share titles).
+    const localOnly = input.media_type === 'movie' || input.media_type === 'tv_show';
     const siblings = await client.query(
       `SELECT id, title FROM media_items
-       WHERE user_id = $1 AND media_type = $2 AND external_source IS NULL`,
+       WHERE user_id = $1 AND media_type = $2${localOnly ? ' AND external_source IS NULL' : ''}`,
       [USER_ID, input.media_type]
     );
     const key = normalizeTitle(input.title);
@@ -1646,20 +1647,26 @@ router.get('/stats', async (req: Request, res: Response) => {
     const c = countsResult.rows[0];
 
     const topResult = await query(
+      // Aggregate check-ins per item first, then look up the latest rating once
+      // per item (not once per check-in row before the GROUP BY).
       `SELECT mi.id, mi.media_type, mi.title, mi.image_url, mi.author,
               COALESCE(mi.rating, latest_mc.rating) AS rating,
-              COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
-       FROM media_checkins mc
-       JOIN media_items mi ON mc.media_item_id = mi.id
+              g.completed_count
+       FROM (
+         SELECT mc.media_item_id,
+                COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
+         FROM media_checkins mc
+         ${where}
+         GROUP BY mc.media_item_id
+       ) g
+       JOIN media_items mi ON mi.id = g.media_item_id
        LEFT JOIN LATERAL (
          SELECT mc2.rating FROM media_checkins mc2
          WHERE mc2.media_item_id = mi.id AND mc2.rating IS NOT NULL
          ORDER BY mc2.checked_in_at DESC, mc2.id DESC LIMIT 1
        ) latest_mc ON true
-       ${where}
-       GROUP BY mi.id, mi.media_type, mi.title, mi.image_url, mi.author, latest_mc.rating
-       HAVING COALESCE(mi.rating, latest_mc.rating) >= 3
-       ORDER BY rating DESC, completed_count DESC
+       WHERE COALESCE(mi.rating, latest_mc.rating) >= 3
+       ORDER BY rating DESC, g.completed_count DESC
        LIMIT 10`,
       params
     );

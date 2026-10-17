@@ -89,7 +89,28 @@ const TIME_COLORS: Record<string, string> = {
   Night: 'bg-slate-500',
 };
 
+// Pin icons only vary by badge text, size bucket and theme colors. Reusing the
+// same DivIcon instance keeps react-leaflet from calling setIcon (rebuilding
+// every marker's DOM) on each zoom/move re-render.
+const pinIconCache = new Map<string, L.DivIcon>();
+
 function getVenuePinIcon(
+  checkinCount: number,
+  resolvedTheme: 'light' | 'dark',
+  palette: Record<string, string>
+): L.DivIcon {
+  const badge = checkinCount > 99 ? '99+' : String(checkinCount);
+  const tier = checkinCount >= 25 ? 'l' : checkinCount >= 10 ? 'm' : 's';
+  const key = `${badge}|${tier}|${resolvedTheme}|${palette['400']}|${palette['500']}|${palette['600']}|${palette['700']}`;
+  let icon = pinIconCache.get(key);
+  if (!icon) {
+    icon = buildVenuePinIcon(checkinCount, resolvedTheme, palette);
+    pinIconCache.set(key, icon);
+  }
+  return icon;
+}
+
+function buildVenuePinIcon(
   checkinCount: number,
   resolvedTheme: 'light' | 'dark',
   palette: Record<string, string>

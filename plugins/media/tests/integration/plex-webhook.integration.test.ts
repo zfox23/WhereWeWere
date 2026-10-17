@@ -43,7 +43,9 @@ function episodeScrobblePayload(overrides: Record<string, unknown> = {}) {
       key: '/library/metadata/67891',
       parentRatingKey: '67890',
       grandparentRatingKey: '67889',
-      guid: 'tmdb://169',
+      // An episode's own guid identifies the episode; the show's identity is grandparentGuid.
+      guid: 'plex://episode/5d9c086e7d3cd2002095d6bf',
+      grandparentGuid: 'tmdb://169',
       type: 'episode',
       title: 'Pilot',
       grandparentTitle: 'Breaking Bad',
@@ -153,6 +155,35 @@ describe('Plex webhook API', () => {
       expect(checkin.rows[0].season_number).toBe(1);
       expect(checkin.rows[0].episode_number).toBe(1);
       expect(checkin.rows[0].episode_title).toBe('Pilot');
+    });
+
+    it('reuses one local show item across episodes of a show without a tmdb guid', async () => {
+      const noTmdb = (index: number) => {
+        const payload = episodeScrobblePayload();
+        const metadata = payload.Metadata as Record<string, unknown>;
+        delete metadata.grandparentGuid;
+        metadata.guid = `plex://episode/ep${index}`;
+        metadata.index = index;
+        metadata.title = `Episode ${index}`;
+        return payload;
+      };
+      await request(app).post('/api/v1/webhook/plex').send(noTmdb(1));
+      await request(app).post('/api/v1/webhook/plex').send(noTmdb(2));
+      await request(app).post('/api/v1/webhook/plex').send(noTmdb(3));
+
+      const items = await query(`SELECT id FROM media_items WHERE media_type = 'tv_show'`, []);
+      expect(items.rows).toHaveLength(1);
+      const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins WHERE media_item_id = $1', [items.rows[0].id]);
+      expect(checkins.rows[0].n).toBe(3);
+    });
+
+    it('accepts the payload as a multipart text field (as Plex sends it)', async () => {
+      const response = await request(app)
+        .post('/api/v1/webhook/plex')
+        .field('payload', JSON.stringify(movieScrobblePayload()));
+      expect(response.status).toBe(200);
+      const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins', []);
+      expect(checkins.rows[0].n).toBe(1);
     });
 
     it('logs every event to plex_webhook_events with the Plex username', async () => {

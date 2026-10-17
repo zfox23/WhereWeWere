@@ -156,7 +156,9 @@ describe('Tracks plugin API', () => {
       expect(map.status).toBe(200);
       expect(map.body).toHaveLength(1);
       expect(map.body[0].id).toBe(id);
-      expect(map.body[0].coordinates).toHaveLength(3);
+      // Simplified for the overview map: collinear interior points may be dropped, endpoints stay.
+      expect(map.body[0].coordinates.length).toBeGreaterThanOrEqual(2);
+      expect(map.body[0].coordinates.length).toBeLessThanOrEqual(3);
       expect(map.body[0].bounds).toMatchObject({ minLat: 37.8, maxLat: 37.802 });
     });
 

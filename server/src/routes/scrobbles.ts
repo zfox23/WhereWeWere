@@ -1,6 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
+import { mapWithConcurrency, parseCheckinIdList } from '../services/batching';
 import { pluginTimestampUnion } from '../plugins/registry';
+
+const MALOJA_TIMEOUT_MS = 10_000;
+const MALOJA_CONCURRENCY = 6;
 
 const router = Router();
 
@@ -33,8 +37,7 @@ interface CachedScrobble {
 // GET / - batch fetch scrobbles for check-ins
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const raw = req.query.checkin_ids as string | undefined;
-    const checkinIds = (raw || '').split(',').filter(Boolean);
+    const checkinIds = parseCheckinIdList(req.query.checkin_ids);
     if (checkinIds.length === 0) return res.json({});
 
     // Get maloja_url from settings
@@ -82,11 +85,13 @@ router.get('/', async (req: Request, res: Response) => {
       const dateScrobbles = new Map<string, MalojaScrobble[]>();
       const baseUrl = malojaUrl.replace(/\/+$/, '');
 
-      await Promise.all(
-        Array.from(datesToFetch).map(async (date) => {
+      await mapWithConcurrency(
+        Array.from(datesToFetch),
+        MALOJA_CONCURRENCY,
+        async (date) => {
           try {
             const url = `${baseUrl}/apis/mlj_1/scrobbles?in=${date}`;
-            const response = await fetch(url);
+            const response = await fetch(url, { signal: AbortSignal.timeout(MALOJA_TIMEOUT_MS) });
             if (response.ok) {
               const data = await response.json() as { list?: MalojaScrobble[] };
               dateScrobbles.set(date, data.list || []);
@@ -94,10 +99,11 @@ router.get('/', async (req: Request, res: Response) => {
           } catch (err) {
             console.error(`Failed to fetch Maloja scrobbles for ${date}:`, err);
           }
-        })
+        }
       );
 
       // Assign scrobbles to each check-in within ±10 min window
+      const rowsToCache: { id: string; matched: CachedScrobble[] }[] = [];
       for (const { id, time } of checkinData) {
         const windowStartMs = time.getTime() - 10 * 60 * 1000;
         const windowEndMs = time.getTime() + 10 * 60 * 1000;
@@ -133,15 +139,21 @@ router.get('/', async (req: Request, res: Response) => {
         const allDatesFetched = Array.from(relevantDates).every((d) => dateScrobbles.has(d));
         const tooRecentToTrustEmpty = matched.length === 0 && Date.now() - time.getTime() < EMPTY_RESULT_MIN_AGE_MS;
         if (allDatesFetched && !tooRecentToTrustEmpty) {
-          await query(
-            `INSERT INTO checkin_scrobbles (checkin_id, scrobbles)
-             VALUES ($1, $2)
-             ON CONFLICT (checkin_id) DO UPDATE SET scrobbles = $2, fetched_at = NOW()`,
-            [id, JSON.stringify(matched)]
-          );
+          rowsToCache.push({ id, matched });
         }
 
         cached.set(id, matched);
+      }
+
+      // One round-trip for the whole batch instead of an INSERT per check-in.
+      if (rowsToCache.length > 0) {
+        await query(
+          `INSERT INTO checkin_scrobbles (checkin_id, scrobbles)
+           SELECT t.id, t.scrobbles::jsonb
+           FROM unnest($1::uuid[], $2::text[]) AS t(id, scrobbles)
+           ON CONFLICT (checkin_id) DO UPDATE SET scrobbles = EXCLUDED.scrobbles, fetched_at = NOW()`,
+          [rowsToCache.map((r) => r.id), rowsToCache.map((r) => JSON.stringify(r.matched))]
+        );
       }
     }
 
@@ -176,7 +188,9 @@ router.get('/by-date', async (req: Request, res: Response) => {
 
     // Fetch scrobbles from Maloja for the date
     const baseUrl = malojaUrl.replace(/\/+$/, '');
-    const response = await fetch(`${baseUrl}/apis/mlj_1/scrobbles?in=${dateStr}`);
+    const response = await fetch(`${baseUrl}/apis/mlj_1/scrobbles?in=${dateStr}`, {
+      signal: AbortSignal.timeout(MALOJA_TIMEOUT_MS),
+    });
     
     if (!response.ok) {
       console.error(`Failed to fetch Maloja scrobbles for ${dateStr}:`, response.statusText);

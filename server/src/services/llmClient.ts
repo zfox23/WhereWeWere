@@ -55,6 +55,8 @@ export interface LlmContentPart {
   [key: string]: unknown;
 }
 
+const LLM_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+
 /** Call the configured chat-completions endpoint and return the text. */
 export async function callLlm(
   llm: LlmSettings,
@@ -85,6 +87,9 @@ async function attemptLlmCall(
   maxTokens: number
 ): Promise<string | null> {
   const llmResponse = await fetch(`${llm.api_url}/chat/completions`, {
+    // Generation on a local model can legitimately take minutes; the cap only
+    // keeps a dead endpoint from holding the request open indefinitely.
+    signal: AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

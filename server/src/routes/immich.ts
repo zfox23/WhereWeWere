@@ -5,6 +5,13 @@ import { createHash } from 'node:crypto';
 import { query } from '../db';
 import { pluginTimestampUnion } from '../plugins/registry';
 import { config } from '../config';
+import { mapWithConcurrency, parseCheckinIdList } from '../services/batching';
+
+// Without a timeout a hung Immich holds the request open forever.
+const IMMICH_TIMEOUT_MS = 15_000;
+const IMMICH_IMAGE_TIMEOUT_MS = 30_000;
+// Per-check-in searches run a few at a time rather than all at once.
+const IMMICH_SEARCH_CONCURRENCY = 6;
 
 const router = Router();
 
@@ -48,6 +55,7 @@ router.get('/photos/:checkinId', async (req: Request, res: Response) => {
     const takenBefore = new Date(t.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
     const response = await fetch(`${immich.url}/api/search/metadata`, {
+      signal: AbortSignal.timeout(IMMICH_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -94,8 +102,7 @@ interface ImmichAssetItem {
 // GET /photos - batch search Immich for photos around multiple check-ins, with deduplication
 router.get('/photos', async (req: Request, res: Response) => {
   try {
-    const raw = req.query.checkin_ids as string | undefined;
-    const checkinIds = (raw || '').split(',').filter(Boolean);
+    const checkinIds = parseCheckinIdList(req.query.checkin_ids);
     if (checkinIds.length === 0) return res.json({});
 
     const immich = await getImmichSettings();
@@ -120,13 +127,16 @@ router.get('/photos', async (req: Request, res: Response) => {
     // For each check-in, search Immich in parallel
     const perCheckinAssets = new Map<string, ImmichAssetItem[]>();
 
-    await Promise.all(
-      Array.from(checkinTimes.entries()).map(async ([checkinId, t]) => {
+    await mapWithConcurrency(
+      Array.from(checkinTimes.entries()),
+      IMMICH_SEARCH_CONCURRENCY,
+      async ([checkinId, t]) => {
         const takenAfter = new Date(t.getTime() - 20 * 60 * 1000).toISOString();
         const takenBefore = new Date(t.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
         try {
           const response = await fetch(`${immich.url}/api/search/metadata`, {
+            signal: AbortSignal.timeout(IMMICH_TIMEOUT_MS),
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -152,7 +162,7 @@ router.get('/photos', async (req: Request, res: Response) => {
         } catch {
           perCheckinAssets.set(checkinId, []);
         }
-      })
+      }
     );
 
     // Deduplicate: assign each asset to the latest check-in timestamp.
@@ -208,6 +218,7 @@ router.get('/thumbnail/:assetId', async (req: Request, res: Response) => {
       `${immich.url}/api/assets/${assetId}/thumbnail?size=${size}`,
       {
         headers: { 'x-api-key': immich.apiKey },
+        signal: AbortSignal.timeout(IMMICH_IMAGE_TIMEOUT_MS),
       }
     );
 
@@ -330,7 +341,7 @@ router.get('/person-photo', async (req: Request, res: Response) => {
     // 1. Search for the person by name to get their ID.
     const search = await fetch(
       `${immich.url}/api/search/person?name=${encodeURIComponent(name)}`,
-      { headers: { 'x-api-key': immich.apiKey } }
+      { headers: { 'x-api-key': immich.apiKey }, signal: AbortSignal.timeout(IMMICH_TIMEOUT_MS) }
     );
     if (!search.ok) {
       console.error('Immich person search failed:', search.status);
@@ -351,6 +362,7 @@ router.get('/person-photo', async (req: Request, res: Response) => {
     const personId = person.id;
     const thumb = await fetch(`${immich.url}/api/people/${personId}/thumbnail`, {
       headers: { 'x-api-key': immich.apiKey },
+      signal: AbortSignal.timeout(IMMICH_IMAGE_TIMEOUT_MS),
     });
     if (!thumb.ok) {
       console.error('Immich person thumbnail failed:', thumb.status);
