@@ -69,6 +69,8 @@ describe('Immich person photos', () => {
 
   beforeEach(async () => {
     fetchMock.mockReset();
+    // The person-photo disk cache persists across tests; start each one cold.
+    fs.rmSync(path.join(tmpDataDir, 'cache'), { recursive: true, force: true });
     await resetIntegrationDatabase();
   });
 
