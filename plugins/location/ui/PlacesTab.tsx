@@ -47,6 +47,7 @@ import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from './geo';
 import '../../../client/src/utils/smoothLeafletZoom';
 import { VenuesLibrarySection } from './VenuesLibrarySection';
 import { CheckinListsSection } from './CheckinListsSection';
+import { VenueListsSection } from './VenueListsSection';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -1125,7 +1126,22 @@ export function PlacesTab() {
         </>
       )}
 
-      {placesSection === 'lists' && <CheckinListsSection />}
+      {placesSection === 'lists' && (
+        <div className="space-y-6">
+          <section aria-labelledby="checkin-lists-heading" className="space-y-2">
+            <h3 id="checkin-lists-heading" className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              Checkin lists
+            </h3>
+            <CheckinListsSection />
+          </section>
+          <section aria-labelledby="venue-lists-heading" className="space-y-2">
+            <h3 id="venue-lists-heading" className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              Venue lists
+            </h3>
+            <VenueListsSection />
+          </section>
+        </div>
+      )}
 
       {placesSection === 'venues' && <VenuesLibrarySection from="" to="" />}
     </div>

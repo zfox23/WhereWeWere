@@ -42,13 +42,32 @@ export interface VenueListItemRef {
   id: string;
   name: string;
   added_at: string;
+  rank?: number | null;
 }
 
 export interface VenueList {
   id: string;
   name: string;
   created_at: string;
+  updated_at?: string;
   items: VenueListItemRef[];
+}
+
+/** One row of a venue list's detail view. */
+export interface VenueListItem {
+  venue_id: string;
+  venue_name: string;
+  rank: number | null;
+  added_at: string;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  rating: number | null;
+  category_name: string | null;
+  category_icon: string | null;
+  last_checkin_at: string | null;
+  last_checkin_timezone: string | null;
+  checkin_count: number;
 }
 
 /** A named list of location check-ins (e.g. "Concerts", "Broadway"). */

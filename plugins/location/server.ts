@@ -1647,13 +1647,13 @@ venuesRouter.get('/place-search', async (req: Request, res: Response) => {
 venuesRouter.get('/lists', async (_req: Request, res: Response) => {
   try {
     const listsResult = await query(
-      'SELECT id, name, created_at FROM venue_lists WHERE user_id = $1 ORDER BY created_at',
+      'SELECT id, name, created_at, updated_at FROM venue_lists WHERE user_id = $1 ORDER BY created_at',
       [USER_ID]
     );
     const itemsResult = await query(
       `SELECT l.id AS list_id,
               json_agg(json_build_object(
-                'id', v.id, 'name', v.name, 'added_at', vli.added_at
+                'id', v.id, 'name', v.name, 'added_at', vli.added_at, 'rank', vli.rank
               ) ORDER BY vli.added_at, vli.position) FILTER (WHERE v.id IS NOT NULL) AS items
        FROM venue_lists l
        LEFT JOIN venue_list_items vli ON vli.list_id = l.id
@@ -1729,6 +1729,84 @@ venuesRouter.delete('/lists/:id', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error deleting venue list:', err);
     res.status(500).json({ error: 'Failed to delete venue list' });
+  }
+});
+
+// GET /lists/:id/items - the venues in a list, with display fields and rank
+venuesRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
+  try {
+    const listResult = await query(
+      'SELECT id FROM venue_lists WHERE id = $1 AND user_id = $2',
+      [req.params.id, USER_ID]
+    );
+    if (listResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Venue list not found' });
+    }
+    const result = await query(
+      `SELECT vli.venue_id, vli.rank, vli.added_at,
+              v.name AS venue_name, v.city, v.state, v.country, v.rating,
+              vc.name AS category_name, vc.icon AS category_icon,
+              (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC, c.id DESC)
+                 FILTER (WHERE c.id IS NOT NULL))[1] AS last_checkin_at,
+              (ARRAY_AGG(c.checkin_timezone ORDER BY c.checked_in_at DESC, c.id DESC)
+                 FILTER (WHERE c.id IS NOT NULL))[1] AS last_checkin_timezone,
+              COUNT(c.id)::int AS checkin_count
+       FROM venue_list_items vli
+       JOIN venues v ON v.id = vli.venue_id
+       LEFT JOIN venue_categories vc ON vc.id = v.category_id
+       LEFT JOIN checkins c ON c.venue_id = v.id AND c.user_id = $2
+       WHERE vli.list_id = $1
+       GROUP BY vli.list_id, vli.venue_id, vli.rank, vli.added_at, v.id, vc.id
+       ORDER BY vli.rank ASC NULLS LAST, vli.added_at`,
+      [req.params.id, USER_ID]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error listing venue list items:', err);
+    res.status(500).json({ error: 'Failed to list venue list items' });
+  }
+});
+
+// PUT /lists/:id/ranks - bulk re-rank (drag-to-rank).
+// Body: { ranked_ids: string[] } — the venue ids in their new rank order
+// (1..n); every other member of the list becomes unranked (NULL).
+venuesRouter.put('/lists/:id/ranks', async (req: Request, res: Response) => {
+  try {
+    const { ranked_ids } = req.body ?? {};
+    if (!Array.isArray(ranked_ids) || !ranked_ids.every((v) => typeof v === 'string')) {
+      return res.status(400).json({ error: 'ranked_ids must be an array of venue ids' });
+    }
+    const ordered = Array.from(new Set(ranked_ids as string[]));
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const listResult = await client.query(
+        'SELECT id FROM venue_lists WHERE id = $1 AND user_id = $2',
+        [req.params.id, USER_ID]
+      );
+      if (listResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Venue list not found' });
+      }
+      await client.query('UPDATE venue_list_items SET rank = NULL WHERE list_id = $1', [req.params.id]);
+      for (let i = 0; i < ordered.length; i += 1) {
+        await client.query(
+          'UPDATE venue_list_items SET rank = $3 WHERE list_id = $1 AND venue_id = $2',
+          [req.params.id, ordered[i], i + 1]
+        );
+      }
+      await client.query('COMMIT');
+      res.json({ ranked_ids: ordered });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error re-ranking venue list:', err);
+    res.status(500).json({ error: 'Failed to re-rank list' });
   }
 });
 
@@ -2097,11 +2175,15 @@ venuesRouter.post('/:id/merge-into', async (req: Request, res: Response) => {
       // Move all check-ins from the source venue to the target
       await client.query('UPDATE checkins SET venue_id = $1 WHERE venue_id = $2', [target_id, id]);
 
-      // Carry list memberships over (cascade-delete would silently drop them)
+      // Carry list memberships over (cascade-delete would silently drop them).
+      // Rows are moved, not copied, so rank/position survive without tripping
+      // the per-list unique rank index; lists that already hold the target
+      // keep its row and the source's row cascades away with the venue.
       await client.query(
-        `INSERT INTO venue_list_items (list_id, venue_id, position, added_at)
-         SELECT list_id, $1, position, added_at FROM venue_list_items WHERE venue_id = $2
-         ON CONFLICT (list_id, venue_id) DO NOTHING`,
+        `UPDATE venue_list_items
+         SET venue_id = $1
+         WHERE venue_id = $2
+           AND list_id NOT IN (SELECT list_id FROM venue_list_items WHERE venue_id = $1)`,
         [target_id, id]
       );
 
@@ -2962,7 +3044,7 @@ export const server: CheckinTypeServerPlugin = {
         [user_id],
       ),
       query(
-        `SELECT vli.list_id, vli.venue_id, vli.position, vli.added_at
+        `SELECT vli.list_id, vli.venue_id, vli.position, vli.rank, vli.added_at
          FROM venue_list_items vli
          JOIN venue_lists vl ON vl.id = vli.list_id
          WHERE vl.user_id = $1
@@ -3165,10 +3247,10 @@ export const server: CheckinTypeServerPlugin = {
       for (const li of venueListItems) {
         if (!li?.list_id || !li?.venue_id) continue;
         await client.query(
-          `INSERT INTO venue_list_items (list_id, venue_id, position, added_at)
-           VALUES ($1, $2, COALESCE($3::int, 0), COALESCE($4::timestamptz, NOW()))
-           ON CONFLICT (list_id, venue_id) DO NOTHING`,
-          [li.list_id, li.venue_id, li.position ?? 0, li.added_at || null]
+          `INSERT INTO venue_list_items (list_id, venue_id, position, rank, added_at)
+           VALUES ($1, $2, COALESCE($3::int, 0), $4::int, COALESCE($5::timestamptz, NOW()))
+           ON CONFLICT DO NOTHING`,
+          [li.list_id, li.venue_id, li.position ?? 0, li.rank ?? null, li.added_at || null]
        );
      }
 

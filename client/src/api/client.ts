@@ -161,6 +161,14 @@ export const venueLists = {
     request<{ message: string }>(`/venues/lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ venue_id: venueId }) }),
   removeVenue: (listId: string, venueId: string) =>
     request<{ message: string }>(`/venues/lists/${listId}/items/${venueId}`, { method: 'DELETE' }),
+  items: (listId: string) => request<any[]>(`/venues/lists/${listId}/items`),
+  // Drag-to-rank: the venue ids in their new rank order (1..n); everyone
+  // else in the list becomes unranked.
+  reRank: (listId: string, rankedIds: string[]) =>
+    request<{ ranked_ids: string[] }>(`/venues/lists/${listId}/ranks`, {
+      method: 'PUT',
+      body: JSON.stringify({ ranked_ids: rankedIds }),
+    }),
 };
 
 // Stats

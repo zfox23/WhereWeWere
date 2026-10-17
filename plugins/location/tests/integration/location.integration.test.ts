@@ -172,6 +172,18 @@ describe('Location plugin API (integration)', () => {
       expect((await query('SELECT venue_id FROM venue_list_items')).rows.map((r) => r.venue_id)).toEqual([target]);
     });
 
+    it('keeps list rank when merging a ranked venue into another', async () => {
+      const source = await insertVenue('Source', 10, 10);
+      const target = await insertVenue('Target', 10.0001, 10.0001);
+      const list = await request(app).post('/api/v1/venues/lists').send({ name: 'Ranked' });
+      await query('INSERT INTO venue_list_items (list_id, venue_id, rank) VALUES ($1, $2, 1)', [list.body.id, source]);
+
+      const res = await request(app).post(`/api/v1/venues/${source}/merge-into`).send({ target_id: target });
+      expect(res.status).toBe(200);
+      const rows = (await query('SELECT venue_id, rank FROM venue_list_items')).rows;
+      expect(rows).toEqual([{ venue_id: target, rank: 1 }]);
+    });
+
     it('merging a parent into its own child does not make the child its own parent', async () => {
       const parent = await insertVenue('Airport', 10, 10);
       const childVenue = await insertVenue('Terminal', 10.0001, 10.0001, { parent });

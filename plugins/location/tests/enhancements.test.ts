@@ -210,6 +210,44 @@ describe('venue lists (endpoints)', () => {
   });
 });
 
+describe('venue list ranking (endpoints)', () => {
+  it('GET /lists/:id/items 404s for an unknown list and returns rows otherwise', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    expect((await request(app()).get('/venues/lists/nope/items')).status).toBe(404);
+
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'l1' }] })
+      .mockResolvedValueOnce({ rows: [{ venue_id: 'v1', venue_name: 'Coaster', rank: 1 }] });
+    const res = await request(app()).get('/venues/lists/l1/items');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ venue_id: 'v1', venue_name: 'Coaster', rank: 1 }]);
+  });
+
+  it('PUT /lists/:id/ranks clears all ranks then assigns 1..n in order', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('SELECT id FROM venue_lists')) return { rows: [{ id: 'l1' }] };
+        return { rows: [], rowCount: 1 };
+      }),
+      release: vi.fn(),
+    };
+    poolConnectMock.mockResolvedValueOnce(client);
+    const res = await request(app()).put('/venues/lists/l1/ranks').send({ ranked_ids: ['b', 'a', 'b'] });
+    expect(res.status).toBe(200);
+    expect(res.body.ranked_ids).toEqual(['b', 'a']);
+    const sets = client.query.mock.calls.filter((c) => (c[0] as string).includes('SET rank = $3'));
+    expect(sets.map((c) => c[1])).toEqual([['l1', 'b', 1], ['l1', 'a', 2]]);
+    expect(client.query.mock.calls.some((c) => (c[0] as string).includes('SET rank = NULL'))).toBe(true);
+  });
+
+  it('PUT /lists/:id/ranks validates the body and 404s on an unknown list', async () => {
+    expect((await request(app()).put('/venues/lists/l1/ranks').send({ ranked_ids: 'x' })).status).toBe(400);
+    const client = { query: vi.fn(async () => ({ rows: [] })), release: vi.fn() };
+    poolConnectMock.mockResolvedValueOnce(client);
+    expect((await request(app()).put('/venues/lists/l1/ranks').send({ ranked_ids: [] })).status).toBe(404);
+  });
+});
+
 describe('checkin lists (endpoints)', () => {
   it('GET /lists returns each list with its item count', async () => {
     queryMock
@@ -545,7 +583,7 @@ describe('backup round-trip', () => {
     expect(companionCall[1]).toEqual(['c1', 'Ada']);
     // List item references the list id and venue id.
     const listItemCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO venue_list_items'))!;
-    expect(listItemCall[1]).toEqual(['l1', 'v1', 1, null]);
+    expect(listItemCall[1]).toEqual(['l1', 'v1', 1, null, null]);
     // Checkin list + item were inserted; the dangling item was skipped.
     expect(sqls.some((s) => s.includes('INSERT INTO checkin_lists'))).toBe(true);
     const checkinListItemCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO checkin_list_items'))!;
