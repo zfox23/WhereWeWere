@@ -94,10 +94,16 @@ export async function runPluginJob(jobId: string, definition: PluginJobDefinitio
   };
 
   try {
-    await query(
-      `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1`,
+    // Only a still-pending job may start: one cancelled while pending must
+    // stay cancelled (an unconditional update used to resurrect it).
+    const started = await query(
+      `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1 AND status = 'pending'`,
       [jobId]
     );
+    if ((started.rowCount ?? 0) === 0) {
+      console.log(`[jobs] ${definition.jobType} ${jobId} is no longer pending (cancelled?); not starting`);
+      return;
+    }
     localRunningJobs.add(jobId);
     console.log(`[jobs] ${definition.jobType} ${jobId} started (local runner live)`);
 

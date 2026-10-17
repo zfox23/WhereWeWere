@@ -68,6 +68,18 @@ const SEARCH_QUERY = `
   }
 `;
 
+// Paged variant, used only by the by-id sync lookup (the interactive search
+// keeps its fixed first page).
+const SEARCH_PAGE_QUERY = `
+  query SearchBooksPage($q: String!, $perPage: Int!, $page: Int!) {
+    search(query: $q, query_type: "Book", per_page: $perPage, page: $page) {
+      results
+    }
+  }
+`;
+const LOOKUP_PER_PAGE = 25;
+const LOOKUP_MAX_PAGES = 3;
+
 const cache = new ApiCache(60 * 60 * 1000);
 
 function toNumber(value: number | string | null | undefined): number | null {
@@ -216,9 +228,34 @@ export const hardcover = {
     if (!apiKey) return null;
     return withDegradation(
       async () => {
-        const found = await this.searchBooks(apiKey, title);
-        if (!found) return null;
-        return found.find((r) => r.externalId === externalId) || null;
+        // A title search ranks by relevance, so a common title can push the
+        // wanted book past the first page: walk a few pages before giving up.
+        for (let page = 1; page <= LOOKUP_MAX_PAGES; page++) {
+          const json = await cache.get<GraphQlSearchResponse>(
+            `hardcover:lookup:${title.toLowerCase()}:${page}`,
+            async () => {
+              const res = await externalFetchPostJson<GraphQlSearchResponse>(
+                GRAPHQL_URL,
+                { query: SEARCH_PAGE_QUERY, variables: { q: title, perPage: LOOKUP_PER_PAGE, page } },
+                { Authorization: `Bearer ${apiKey}` }
+              );
+              if (res.errors?.length) {
+                throw new MediaApiError(`Hardcover GraphQL error: ${res.errors.map((e) => e.message).join('; ')}`);
+              }
+              if (res.data?.search?.error) {
+                throw new MediaApiError(`Hardcover search error: ${res.data.search.error}`);
+              }
+              return res;
+            }
+          );
+          const hits = parseResults(json.data?.search?.results)
+            .map(hitToResult)
+            .filter((r): r is HardcoverBookResult => r !== null);
+          const match = hits.find((r) => r.externalId === externalId);
+          if (match) return match;
+          if (hits.length < LOOKUP_PER_PAGE) break; // last page
+        }
+        return null;
       },
       null,
       `Hardcover book details ${externalId}`

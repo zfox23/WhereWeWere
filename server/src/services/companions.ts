@@ -18,6 +18,7 @@
  */
 
 import { query, pool } from '../db';
+import { escapeLike } from './queryParams';
 /** Anything able to run parameterized queries (pool or a tx client). */
 export type QueryExecutor = {
   query: (sql: string, values?: unknown[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
@@ -170,7 +171,7 @@ export async function searchCompanionNames(
   const params: unknown[] = [];
   let sql = 'SELECT name FROM companions';
   if (q && q.trim() !== '') {
-    params.push(`%${q.trim()}%`);
+    params.push(`%${escapeLike(q.trim())}%`);
     sql += ' WHERE name ILIKE $1';
   }
   sql += `

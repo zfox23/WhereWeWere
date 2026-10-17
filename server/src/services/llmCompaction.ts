@@ -7,6 +7,9 @@
 // re-digested (recursive reduce) until everything fits.
 
 import type { PluginLlmHook, PluginLlmRow } from 'wwp-shared';
+import { mapWithConcurrency } from './batching';
+
+const DIGEST_CONCURRENCY = 3;
 
 /** A single check-in rendered into one or more prompt lines. */
 export interface LifeEntry {
@@ -168,7 +171,9 @@ export async function condenseUntilFits(
       charBudget,
       config
     );
-    const digests = await Promise.all(levelChunks.map((c) => digest(c, level)));
+    // A few at a time: all chunks at once can be dozens of concurrent requests
+    // against a single local model server.
+    const digests = await mapWithConcurrency(levelChunks, DIGEST_CONCURRENCY, (c) => digest(c, level));
     current = levelChunks.map((c, i) => ({
       from: c.from,
       to: c.to,

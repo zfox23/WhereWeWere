@@ -36,6 +36,7 @@ import type {
 } from 'wwp-shared';
 import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
+import { pagination, parseYear, parseMonth } from '../../server/src/services/queryParams';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import {
@@ -987,7 +988,7 @@ statsRouter.get('/top-venues', async (req: Request, res: Response) => {
        GROUP BY v.id, vc.name, vc.icon
        ORDER BY checkin_count DESC
        LIMIT $${limitParamIndex}`,
-      [user_id, ...rangeParams, parseInt(limit as string, 10)]
+      [user_id, ...rangeParams, pagination(limit, 0, { limit: 10, maxLimit: 200 }).limit]
     );
 
     res.json(result.rows);
@@ -1038,7 +1039,8 @@ statsRouter.get('/heatmap', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id and year are required' });
     }
 
-    const yearNum = parseInt(year as string, 10);
+    const yearNum = parseYear(year);
+    if (yearNum === null) return res.status(400).json({ error: 'year must be a valid year' });
 
     const result = await query(
       `SELECT TO_CHAR(DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')), 'YYYY-MM-DD') AS date,
@@ -1068,10 +1070,10 @@ statsRouter.get('/monthly', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id, year, and month are required' });
     }
 
-    const yearNum = parseInt(year as string, 10);
-    const monthNum = parseInt(month as string, 10);
-
-    if (monthNum < 1 || monthNum > 12) {
+    const yearNum = parseYear(year);
+    const monthNum = parseMonth(month);
+    if (yearNum === null) return res.status(400).json({ error: 'year must be a valid year' });
+    if (monthNum === null) {
       return res.status(400).json({ error: 'month must be between 1 and 12' });
     }
 
@@ -2396,8 +2398,7 @@ searchRouter.get('/', async (req: Request, res: Response) => {
     }
 
     const searchQuery = q as string;
-    const limitNum = parseInt(limit as string, 10);
-    const offsetNum = parseInt(offset as string, 10);
+    const { limit: limitNum, offset: offsetNum } = pagination(limit, offset, { limit: 20, maxLimit: 100 });
 
     const searchType = type as string;
 

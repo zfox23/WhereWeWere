@@ -5,6 +5,11 @@
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** True for a canonical UUID string (Immich asset ids, check-in ids, ...). */
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_RE.test(value);
+}
+
 /** Largest id batch the fan-out endpoints will process in one request. */
 export const MAX_CHECKIN_ID_BATCH = 100;
 

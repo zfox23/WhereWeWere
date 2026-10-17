@@ -120,19 +120,56 @@ function safeArchiveDest(root: string, name: string): string | null {
   return dest;
 }
 
+/** Hard limits on what a restore will unpack, so a hostile or corrupt archive can't fill the disk. */
+export const BACKUP_EXTRACT_LIMITS = {
+  maxEntries: 50_000,
+  maxEntryBytes: 2 * 1024 * 1024 * 1024,
+  maxTotalBytes: 8 * 1024 * 1024 * 1024,
+  /** Only enforced for entries above minBytesForRatioCheck (tiny text compresses very well legitimately). */
+  maxCompressionRatio: 2_000,
+  minBytesForRatioCheck: 50 * 1024 * 1024,
+};
+
 /**
- * Extract a backup ZIP buffer into a fresh temp directory. Rejects entries
- * with absolute paths or `..` segments (path traversal). Returns the
- * extracted root directory; the caller must remove it when done.
+ * Extract a backup ZIP into a fresh temp directory. `source` is either a
+ * Buffer or the path of an already-uploaded file (the upload route streams to
+ * disk so a 500 MB archive isn't held in memory). Rejects entries with
+ * absolute paths or `..` segments (path traversal), and archives that exceed
+ * BACKUP_EXTRACT_LIMITS (entry count, per-entry and total size, compression
+ * ratio), counting the bytes actually written so a lying header can't bypass
+ * the cap. Returns the extracted root directory; the caller must remove it
+ * when done.
  */
-export async function extractBackupZip(zipBuffer: Buffer): Promise<string> {
+export async function extractBackupZip(source: Buffer | string): Promise<string> {
+  const limits = BACKUP_EXTRACT_LIMITS;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wherewewere-backup-restore-'));
-  const zipPath = path.join(root, '__backup.zip');
+  const bufferZipPath = path.join(root, '__backup.zip');
+  const zipPath = typeof source === 'string' ? source : bufferZipPath;
 
   try {
-    fs.writeFileSync(zipPath, zipBuffer);
+    if (typeof source !== 'string') fs.writeFileSync(bufferZipPath, source);
     const cd = await unzipper.Open.file(zipPath);
 
+    if (cd.files.length > limits.maxEntries) {
+      throw new Error(`Backup archive has too many entries (${cd.files.length})`);
+    }
+    let declaredTotal = 0;
+    for (const file of cd.files) {
+      const size = Number(file.uncompressedSize) || 0;
+      const packed = Number(file.compressedSize) || 0;
+      if (size > limits.maxEntryBytes) {
+        throw new Error(`Backup archive entry is too large: ${file.path}`);
+      }
+      if (size > limits.minBytesForRatioCheck && packed > 0 && size / packed > limits.maxCompressionRatio) {
+        throw new Error(`Backup archive entry has a suspicious compression ratio: ${file.path}`);
+      }
+      declaredTotal += size;
+      if (declaredTotal > limits.maxTotalBytes) {
+        throw new Error('Backup archive is too large when extracted');
+      }
+    }
+
+    let writtenTotal = 0;
     for (const file of cd.files) {
       const name = file.path;
       if (file.type === 'Directory') {
@@ -150,17 +187,33 @@ export async function extractBackupZip(zipBuffer: Buffer): Promise<string> {
       }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
 
+      const declared = Number(file.uncompressedSize) || 0;
       const entry = file.stream();
       await new Promise<void>((resolve, reject) => {
         const out = fs.createWriteStream(dest);
+        let entryBytes = 0;
+        const abort = (err: Error) => {
+          entry.destroy();
+          out.destroy();
+          reject(err);
+        };
         out.on('finish', () => resolve());
         out.on('error', reject);
         entry.on('error', reject);
+        entry.on('data', (chunk: Buffer) => {
+          entryBytes += chunk.length;
+          writtenTotal += chunk.length;
+          if (entryBytes > Math.max(declared, 0) + 1024 || entryBytes > limits.maxEntryBytes) {
+            abort(new Error(`Backup archive entry exceeds its declared size: ${name}`));
+          } else if (writtenTotal > limits.maxTotalBytes) {
+            abort(new Error('Backup archive is too large when extracted'));
+          }
+        });
         entry.pipe(out);
       });
     }
 
-    fs.unlinkSync(zipPath);
+    if (typeof source !== 'string') fs.unlinkSync(bufferZipPath);
   } catch (err) {
     fs.rmSync(root, { recursive: true, force: true });
     throw err;

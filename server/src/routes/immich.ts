@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { query } from '../db';
 import { pluginTimestampUnion } from '../plugins/registry';
 import { config } from '../config';
-import { mapWithConcurrency, parseCheckinIdList } from '../services/batching';
+import { isUuid, mapWithConcurrency, parseCheckinIdList } from '../services/batching';
 
 // Without a timeout a hung Immich holds the request open forever.
 const IMMICH_TIMEOUT_MS = 15_000;
@@ -209,6 +209,9 @@ router.get('/photos', async (req: Request, res: Response) => {
 router.get('/thumbnail/:assetId', async (req: Request, res: Response) => {
   try {
     const { assetId } = req.params;
+    // The id is interpolated into the upstream URL (with the user's API key
+    // attached): anything but a UUID could address a different Immich endpoint.
+    if (!isUuid(assetId)) return res.status(400).send('Invalid asset id');
 
     const immich = await getImmichSettings();
     if (!immich) return res.status(404).send('Immich not configured');
@@ -360,7 +363,7 @@ router.get('/person-photo', async (req: Request, res: Response) => {
 
     // 2. Fetch the person's featured thumbnail.
     const personId = person.id;
-    const thumb = await fetch(`${immich.url}/api/people/${personId}/thumbnail`, {
+    const thumb = await fetch(`${immich.url}/api/people/${encodeURIComponent(personId)}/thumbnail`, {
       headers: { 'x-api-key': immich.apiKey },
       signal: AbortSignal.timeout(IMMICH_IMAGE_TIMEOUT_MS),
     });

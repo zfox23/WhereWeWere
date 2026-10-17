@@ -5,9 +5,11 @@ export const pool = new Pool({
   connectionString: config.databaseUrl,
 });
 
+// An error on an idle pooled client (e.g. Postgres restarted or the network
+// blipped) only invalidates that connection: pg removes it from the pool and
+// the next query opens a fresh one. Log it; don't take the whole server down.
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
-  process.exit(-1);
 });
 
 export async function query(text: string, params?: any[]) {

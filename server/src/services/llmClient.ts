@@ -67,7 +67,9 @@ export async function callLlm(
   // Reasoning models can spend their entire output budget on hidden thinking
   // and return empty visible content. If that happens with finish_reason
   // 'length', retry once with a larger budget before giving up.
-  const attempts = [maxTokens, Math.min(maxTokens * 4, 16384)];
+  // (De-duplicated: when the budget is already at the cap the "retry" would be
+  // an identical request.)
+  const attempts = [...new Set([maxTokens, Math.min(maxTokens * 4, 16384)])];
   for (let i = 0; i < attempts.length; i++) {
     const content = await attemptLlmCall(llm, systemPrompt, userContent, attempts[i]);
     if (content) return content;

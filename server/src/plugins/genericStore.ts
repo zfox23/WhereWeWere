@@ -17,6 +17,7 @@ function validZoneOrNull(value: unknown): string | null {
 import { query, pool } from '../db';
 import { timelineColumnList } from './timeline';
 import { timelineWhereConditions } from './sql';
+import { escapeLike } from '../services/queryParams';
 
 export interface GenericCheckinRow {
   id: string;
@@ -64,7 +65,7 @@ export function genericTimelineWhere(
     timestampColumn: 'checked_in_at',
     timezoneColumn: 'checkin_timezone',
     // Search free text across the whole JSONB data payload.
-    search: (c, q) => c.push(`(pc.data::text ILIKE ?)`, `%${q}%`),
+    search: (c, q) => c.push(`(pc.data::text ILIKE ?)`, `%${escapeLike(q)}%`),
   });
 
   // Scope to this plugin's own rows. The generic branch SELECTs from the
@@ -81,6 +82,9 @@ export function genericTimelineWhere(
     const field = plugin.fields.find((f) => f.name === name);
     if (!field) continue;
     if (field.kind === 'number' || field.kind === 'integer' || field.kind === 'rating') {
+      // A non-numeric filter value would make the ::numeric cast throw and 500
+      // the whole unified timeline; ignore it instead.
+      if (value.trim() === '' || !Number.isFinite(Number(value))) continue;
       conds.push(`(pc.data->>'${field.name}')::numeric = ?::numeric`, value);
     } else {
       conds.push(`pc.data->>'${field.name}' = ?`, value);

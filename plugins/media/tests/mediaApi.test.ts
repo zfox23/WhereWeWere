@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiCache, withDegradation, MediaApiError, externalFetchJson } from '../services/mediaApi';
 
 describe('ApiCache', () => {
@@ -120,5 +120,58 @@ describe('externalFetchJson', () => {
 
     await expect(externalFetchJson('https://example.com/x')).rejects.toThrow('fetch failed');
     vi.unstubAllGlobals();
+  });
+});
+
+describe('ApiCache size cap', () => {
+  it('evicts the oldest entries beyond maxEntries', async () => {
+    const small = new ApiCache(60_000, 3);
+    for (const k of ['a', 'b', 'c', 'd', 'e']) {
+      await small.get(k, async () => k);
+    }
+    expect(small.size).toBe(3);
+    let reloaded = false;
+    await small.get('a', async () => {
+      reloaded = true;
+      return 'a';
+    });
+    expect(reloaded).toBe(true); // 'a' was evicted
+    let hit = true;
+    await small.get('e', async () => {
+      hit = false;
+      return 'e';
+    });
+    expect(hit).toBe(true); // the newest entries survive
+  });
+});
+
+describe('external fetch rate limiting', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('retries once after a 429 and returns the second response', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('slow down', { status: 429, headers: { 'retry-after': '0' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const result = await externalFetchJson<{ ok: boolean }>('https://example.test/x');
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after the single retry and surfaces the status', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response('no', { status: 429, headers: { 'retry-after': '0' } }));
+    await expect(externalFetchJson('https://example.test/x')).rejects.toThrow('429');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry other errors', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
+    await expect(externalFetchJson('https://example.test/x')).rejects.toThrow('500');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

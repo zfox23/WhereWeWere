@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { settings } from '../api/client';
+import { safeGetItem, safeSetItem } from '../utils/storage';
 import {
   DEFAULT_THEME_BY_MODE,
   SYSTEM_THEME_ID,
@@ -57,21 +58,21 @@ function getSystemTheme(): ThemeMode {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemePreference>(() => {
-    const stored = normalizeThemePreference(localStorage.getItem('theme'));
+    const stored = normalizeThemePreference(safeGetItem('theme'));
     return stored || SYSTEM_THEME_ID;
   });
   const [systemThemeSelection, setSystemThemeSelectionState] = useState<Record<ThemeMode, AppThemeId>>(() => ({
-    light: resolveAppThemeId(localStorage.getItem('system-light-theme'), DEFAULT_THEME_BY_MODE.light),
-    dark: resolveAppThemeId(localStorage.getItem('system-dark-theme'), DEFAULT_THEME_BY_MODE.dark),
+    light: resolveAppThemeId(safeGetItem('system-light-theme'), DEFAULT_THEME_BY_MODE.light),
+    dark: resolveAppThemeId(safeGetItem('system-dark-theme'), DEFAULT_THEME_BY_MODE.dark),
   }));
   const [systemTheme, setSystemTheme] = useState<ThemeMode>(getSystemTheme);
 
   const [bgPattern, setBgPatternState] = useState<BgPatternId>(() => {
-    const stored = localStorage.getItem('bg-pattern') as BgPatternId | null;
+    const stored = safeGetItem('bg-pattern') as BgPatternId | null;
     return BG_PATTERN_OPTIONS.some(p => p.id === stored) ? stored! : DEFAULT_BG_PATTERN;
   });
   const [bgGradient, setBgGradientState] = useState<BgGradientId>(() => {
-    const stored = localStorage.getItem('bg-gradient') as BgGradientId | null;
+    const stored = safeGetItem('bg-gradient') as BgGradientId | null;
     return BG_GRADIENT_OPTIONS.some(g => g.id === stored) ? stored! : DEFAULT_BG_GRADIENT;
   });
 
@@ -89,7 +90,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const normalizedTheme = normalizeThemePreference(s.theme);
       if (normalizedTheme) {
         setThemeState(normalizedTheme);
-        localStorage.setItem('theme', normalizedTheme);
+        safeSetItem('theme', normalizedTheme);
       }
 
       const nextSystemThemeSelection = {
@@ -98,8 +99,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       };
 
       setSystemThemeSelectionState(nextSystemThemeSelection);
-      localStorage.setItem('system-light-theme', nextSystemThemeSelection.light);
-      localStorage.setItem('system-dark-theme', nextSystemThemeSelection.dark);
+      safeSetItem('system-light-theme', nextSystemThemeSelection.light);
+      safeSetItem('system-dark-theme', nextSystemThemeSelection.dark);
     }).catch(() => {});
   }, []);
 
@@ -122,6 +123,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyBgToRoot(document.documentElement, bgPattern, bgGradient);
   }, [bgPattern, bgGradient]);
 
+  // Remember what was applied so the inline script in index.html can restore
+  // it before first paint on the next load (no light flash for dark themes).
+  // Declared after the two effects above so it snapshots their result.
+  useEffect(() => {
+    const root = document.documentElement;
+    safeSetItem(
+      'theme-snapshot',
+      JSON.stringify({
+        dark: root.classList.contains('dark'),
+        style: root.getAttribute('style') || '',
+        theme: root.dataset.theme || '',
+        bgPattern: root.dataset.bgPattern || '',
+        bgGradient: root.dataset.bgGradient || '',
+      })
+    );
+  }, [resolvedTheme, resolvedThemeId, bgPattern, bgGradient]);
+
   const setTheme = (newTheme: ThemePreference) => {
     const nextSystemThemeSelection = newTheme === SYSTEM_THEME_ID
       ? systemThemeSelection
@@ -131,10 +149,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         };
 
     setThemeState(newTheme);
-    localStorage.setItem('theme', newTheme);
+    safeSetItem('theme', newTheme);
     setSystemThemeSelectionState(nextSystemThemeSelection);
-    localStorage.setItem('system-light-theme', nextSystemThemeSelection.light);
-    localStorage.setItem('system-dark-theme', nextSystemThemeSelection.dark);
+    safeSetItem('system-light-theme', nextSystemThemeSelection.light);
+    safeSetItem('system-dark-theme', nextSystemThemeSelection.dark);
 
     // Persist both the active theme and the remembered system pairings.
     settings.update({
@@ -146,17 +164,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setBgPattern = (pattern: BgPatternId) => {
     setBgPatternState(pattern);
-    localStorage.setItem('bg-pattern', pattern);
+    safeSetItem('bg-pattern', pattern);
   };
 
   const setBgGradient = (gradient: BgGradientId) => {
     setBgGradientState(gradient);
-    localStorage.setItem('bg-gradient', gradient);
+    safeSetItem('bg-gradient', gradient);
   };
 
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme, systemThemeSelection, resolvedTheme, resolvedThemeId, bgPattern, setBgPattern, bgGradient, setBgGradient }}>
-      {children}
-    </ThemeContext.Provider>
+  // Stable identity between renders so context consumers only re-render when
+  // a theme value actually changes.
+  const value = useMemo(
+    () => ({ theme, setTheme, systemThemeSelection, resolvedTheme, resolvedThemeId, bgPattern, setBgPattern, bgGradient, setBgGradient }),
+    // setTheme/setBgPattern/setBgGradient close over state already listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [theme, systemThemeSelection, resolvedTheme, resolvedThemeId, bgPattern, bgGradient]
   );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

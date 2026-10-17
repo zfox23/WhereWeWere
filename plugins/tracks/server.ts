@@ -26,6 +26,7 @@ import type {
 } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
 import { config } from '../../server/src/config';
+import { escapeLike, pagination } from '../../server/src/services/queryParams';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { getVenueTimezone } from '../location/services/geoTimezone';
@@ -183,11 +184,12 @@ tracksRouter.get('/', async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    params.push(parseInt(limit as string, 10));
+    const page = pagination(limit, offset);
+    params.push(page.limit);
     const limitParam = `$${paramIndex}`;
     paramIndex++;
 
-    params.push(parseInt(offset as string, 10));
+    params.push(page.offset);
     const offsetParam = `$${paramIndex}`;
 
     const result = await query(
@@ -934,7 +936,7 @@ export const server: CheckinTypeServerPlugin = {
       alias: 't',
       timestampColumn: 'started_at',
       timezoneColumn: 'timezone',
-      search: (c, q) => c.push(`t.name ILIKE '%' || ? || '%'`, q),
+      search: (c, q) => c.push(`t.name ILIKE '%' || ? || '%'`, escapeLike(q)),
     });
     if (ctx.filterParams.track_activity) {
       if (ctx.filterParams.track_activity === NO_ACTIVITY_TYPE) {
@@ -942,7 +944,7 @@ export const server: CheckinTypeServerPlugin = {
         // explicit null/blank condition.
         conds.push(`(t.activity_type IS NULL OR TRIM(t.activity_type) = '')`);
       } else {
-        conds.push(`t.activity_type ILIKE ?`, ctx.filterParams.track_activity);
+        conds.push(`t.activity_type ILIKE ?`, escapeLike(ctx.filterParams.track_activity));
       }
     }
     return conds.build();

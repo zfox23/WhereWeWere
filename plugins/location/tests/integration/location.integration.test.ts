@@ -257,4 +257,38 @@ describe('Location plugin API (integration)', () => {
       expect(huge.status).toBe(200);
     });
   });
+
+  describe('input validation', () => {
+
+  it('rejects a malformed user_id with 400 instead of a Postgres 500', async () => {
+    const res = await request(app).get('/api/v1/location-checkins/stats/summary').query({ user_id: 'not-a-uuid' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/user_id/);
+  });
+
+  it('ignores an empty venue_id filter', async () => {
+    const res = await request(app).get('/api/v1/location-checkins').query({ venue_id: '' });
+    expect(res.status).toBe(200);
+  });
+
+  it('answers a bad year with 400', async () => {
+    const res = await request(app)
+      .get('/api/v1/location-checkins/stats/heatmap')
+      .query({ user_id: DEFAULT_USER_ID, year: 'abc' });
+    expect(res.status).toBe(400);
+  });
+
+  it('treats % and _ in search text literally', async () => {
+    await request(app).post('/api/v1/companions/names').send({ name: 'Ada' });
+    await request(app).post('/api/v1/companions/names').send({ name: '100%_Real' });
+    const all = await request(app).get('/api/v1/companions/names').query({ q: '%' });
+    expect(all.status).toBe(200);
+    expect(all.body).toEqual(['100%_Real']);
+  });
+
+  it('ignores a non-numeric filter on a generic numeric field instead of failing the timeline', async () => {
+    const res = await request(app).get('/api/v1/timeline').query({ user_id: DEFAULT_USER_ID, rating: 'abc' });
+    expect(res.status).toBe(200);
+  });
+});
 });

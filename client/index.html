@@ -4,6 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WhereWeWere</title>
+    <script>
+      // Restore the last applied theme before first paint (the React
+      // ThemeProvider only runs after the bundle loads, which flashed a light
+      // page for dark-theme users). Best effort: any failure is ignored.
+      (function () {
+        try {
+          var root = document.documentElement;
+          var raw = window.localStorage.getItem('theme-snapshot');
+          var snap = raw ? JSON.parse(raw) : null;
+          if (snap) {
+            if (snap.dark) root.classList.add('dark');
+            if (snap.style) root.setAttribute('style', snap.style);
+            if (snap.theme) root.dataset.theme = snap.theme;
+            if (snap.bgPattern) root.dataset.bgPattern = snap.bgPattern;
+            if (snap.bgGradient) root.dataset.bgGradient = snap.bgGradient;
+          } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            root.classList.add('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
     <meta name="description" content="A self-hosted check-in tracker for the places that matter to you." />
     <meta name="theme-color" content="#4f46e5" />
     <link rel="icon" href="/icon-192.svg" type="image/svg+xml" />

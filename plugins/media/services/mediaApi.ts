@@ -18,11 +18,40 @@ interface InFlight {
   promise: Promise<unknown>;
 }
 
+/** Upper bound on cached responses per ApiCache (keys are arbitrary search strings). */
+export const DEFAULT_CACHE_MAX_ENTRIES = 500;
+
 export class ApiCache {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inflight = new Map<string, InFlight>();
 
-  constructor(private readonly ttlMs: number = DEFAULT_CACHE_TTL_MS) {}
+  constructor(
+    private readonly ttlMs: number = DEFAULT_CACHE_TTL_MS,
+    private readonly maxEntries: number = DEFAULT_CACHE_MAX_ENTRIES
+  ) {}
+
+  /** Number of cached (not in-flight) entries; exposed for tests. */
+  get size(): number {
+    return this.cache.size;
+  }
+
+  private store(key: string, value: unknown): void {
+    // Re-inserting moves the key to the end, so Map order is least-recently-stored first.
+    this.cache.delete(key);
+    this.cache.set(key, { value, expiresAt: Date.now() + this.ttlMs });
+    if (this.cache.size <= this.maxEntries) return;
+
+    // Over the cap: drop expired entries first, then the oldest ones.
+    const now = Date.now();
+    for (const [k, entry] of this.cache) {
+      if (entry.expiresAt <= now) this.cache.delete(k);
+    }
+    while (this.cache.size > this.maxEntries) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
+  }
 
   /**
    * Return the cached value for `key`, or fetch it via `loader`.
@@ -41,7 +70,7 @@ export class ApiCache {
 
     const promise = loader().then(
       (value) => {
-        this.cache.set(key, { value, expiresAt: Date.now() + this.ttlMs });
+        this.store(key, value);
         this.inflight.delete(key);
         return value;
       },
@@ -81,22 +110,56 @@ export async function withDegradation<T>(
   }
 }
 
+/** Longest we will wait on a Retry-After before giving up on a rate-limited call. */
+const MAX_RETRY_WAIT_MS = 5_000;
+const EXTERNAL_TIMEOUT_MS = 15_000;
+
+function retryDelayMs(res: Response): number {
+  const header = res.headers.get('retry-after');
+  const seconds = header ? Number(header) : NaN;
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : 1_000;
+  return Math.min(Math.max(ms, 250), MAX_RETRY_WAIT_MS);
+}
+
+/**
+ * fetch() with a per-attempt timeout and one retry when the provider answers
+ * 429 (rate limited) or 503, honoring Retry-After up to a short cap. Anything
+ * else (including a second 429) is returned for the caller to treat as an
+ * error, so searches still degrade gracefully instead of hanging.
+ */
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), EXTERNAL_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if ((res.status === 429 || res.status === 503) && attempt === 0) {
+      const wait = retryDelayMs(res);
+      await res.body?.cancel().catch(() => {});
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
+    }
+    return res;
+  }
+}
+
+async function parseJsonOrThrow<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    throw new MediaApiError(`External API returned ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
+
 /**
  * Perform an authenticated external API GET and parse the JSON body.
  * Throws on network failure or non-2xx status (caller decides on fallback).
  */
 export async function externalFetchJson<T = unknown>(url: string, headers: Record<string, string> = {}): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  try {
-    const res = await fetch(url, { headers, signal: controller.signal });
-    if (!res.ok) {
-      throw new MediaApiError(`External API returned ${res.status}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return parseJsonOrThrow<T>(await fetchWithRetry(url, { headers }));
 }
 
 /**
@@ -110,22 +173,13 @@ export async function externalFetchPostText<T = unknown>(
   textBody: string,
   headers: Record<string, string> = {}
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  try {
-    const res = await fetch(url, {
+  return parseJsonOrThrow<T>(
+    await fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain', ...headers },
       body: textBody,
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new MediaApiError(`External API returned ${res.status}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timeout);
-  }
+    })
+  );
 }
 
 /**
@@ -137,20 +191,11 @@ export async function externalFetchPostJson<T = unknown>(
   body: unknown,
   headers: Record<string, string> = {}
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  try {
-    const res = await fetch(url, {
+  return parseJsonOrThrow<T>(
+    await fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new MediaApiError(`External API returned ${res.status}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timeout);
-  }
+    })
+  );
 }

@@ -24,6 +24,10 @@ export const config = {
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
   apiAccessToken: process.env.API_ACCESS_TOKEN || '',
   trustProxy: parseBoolean(process.env.TRUST_PROXY, false),
+  // Photon geocoder used for reverse geocoding / place search. Venue
+  // coordinates are sent to this host, so self-hosters should point it at their
+  // own instance (or a public one such as https://photon.komoot.io).
+  photonUrl: (process.env.PHOTON_URL || 'https://photon.home.zachfox.io').replace(/\/+$/, ''),
   dataDir: process.env.DATA_DIR
     ? path.resolve(process.env.DATA_DIR)
     : path.join(process.cwd(), 'data'),

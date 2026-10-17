@@ -19,9 +19,17 @@ function resolveMigrationsDir() {
   throw new Error('Could not locate migrations directory');
 }
 
+/** Arbitrary constant identifying the migration advisory lock. */
+const MIGRATION_LOCK_KEY = 872_341_906;
+
 export async function runMigrations(targetPool: Pool = pool) {
   const client = await targetPool.connect();
+  let locked = false;
   try {
+    // Serialize concurrent starters (two replicas, or a restart overlapping a
+    // slow migration): the applied-set below must be read under the lock.
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
+    locked = true;
     await client.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
@@ -53,6 +61,9 @@ export async function runMigrations(targetPool: Pool = pool) {
       }
     }
   } finally {
+    if (locked) {
+      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]).catch(() => {});
+    }
     client.release();
   }
 }

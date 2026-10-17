@@ -2,18 +2,29 @@ const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Track last request time to enforce 1 req/sec rate limit
-let lastRequestTime = 0;
+// Nominatim allows 1 req/sec. Each caller reserves the next free slot
+// synchronously (before any await), so concurrent callers queue one slot apart
+// instead of all computing the same wait and firing together.
+const MIN_INTERVAL_MS = 1100;
+let nextSlotAt = 0;
+
+/** Wait for this caller's turn. Exported for tests. */
+export async function waitForNominatimSlot(now: number = Date.now()): Promise<void> {
+  const start = Math.max(now, nextSlotAt);
+  nextSlotAt = start + MIN_INTERVAL_MS;
+  const wait = start - now;
+  if (wait > 0) await delay(wait);
+}
+
+/** Test helper: forget previously reserved slots. */
+export function resetNominatimRateLimiter(): void {
+  nextSlotAt = 0;
+}
 
 const FETCH_TIMEOUT_MS = 15000;
 
 async function rateLimitedFetch(url: string): Promise<Response> {
-  const now = Date.now();
-  const elapsed = now - lastRequestTime;
-  if (elapsed < 1100) {
-    await delay(1100 - elapsed);
-  }
-  lastRequestTime = Date.now();
+  await waitForNominatimSlot();
   const fetchStart = Date.now();
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);

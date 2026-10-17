@@ -12,6 +12,7 @@ import {
   type LlmContentPart,
 } from '../services/llmClient';
 import { buildChronologicalEntries } from '../services/llmCompaction';
+import { isUuid } from '../services/batching';
 import {
   addDays,
   currentMonthRange,
@@ -141,6 +142,8 @@ async function fetchImageParts(
 
   const imageResults = await Promise.all(
     imageIds.map(async (assetId) => {
+      // Client-supplied ids end up in the upstream URL: UUIDs only.
+      if (!isUuid(assetId)) return null;
       try {
         // Use the 1024px preview rather than the full-resolution original:
         // vision models don't need more, and it keeps the payload small.
@@ -567,7 +570,15 @@ async function addressedTo(): Promise<string> {
 
 // POST /postcard - generate (and persist) a postcard about an interesting
 // period in the user's past.
+// A postcard generation takes minutes and persists a row: a double click (or a
+// second tab) must not start a parallel one.
+let postcardGenerating = false;
+
 router.post('/postcard', async (_req: Request, res: Response) => {
+  if (postcardGenerating) {
+    return res.status(409).json({ error: 'A postcard is already being generated. Try again when it finishes.' });
+  }
+  postcardGenerating = true;
   try {
     const llm = await getLlmSettings(USER_ID);
     if (!llm) {
@@ -655,6 +666,8 @@ router.post('/postcard', async (_req: Request, res: Response) => {
   } catch (err) {
     console.error('Error generating postcard:', err);
     res.status(500).json({ error: 'Failed to generate postcard' });
+  } finally {
+    postcardGenerating = false;
   }
 });
 

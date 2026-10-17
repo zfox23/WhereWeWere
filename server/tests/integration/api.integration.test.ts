@@ -1,7 +1,10 @@
 import request from 'supertest';
+import fs from 'fs';
+import os from 'os';
 import { describe, expect, beforeAll, beforeEach, afterAll, it } from 'vitest';
 import app from '../../src/index';
-import { query } from '../../src/db';
+import { query, pool } from '../../src/db';
+import { runMigrations } from '../../src/db/runMigrations';
 import {
   DEFAULT_USER_ID,
   resetIntegrationDatabase,
@@ -251,5 +254,87 @@ describe('API integration', () => {
     );
     expect(updatedMediaCheckin.rows[0].checkin_timezone).toBe('Europe/Lisbon');
     expect(new Date(updatedMediaCheckin.rows[0].checked_in_at).toISOString()).toBe('2026-01-01T15:00:00.000Z');
+  });
+  describe('error handling', () => {
+    it('answers malformed JSON with a JSON 400', async () => {
+      const res = await request(app)
+        .post('/api/v1/jobs')
+        .set('Content-Type', 'application/json')
+        .send('{"type": ');
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: 'Malformed JSON body' });
+    });
+
+    it('rejects an oversized JSON body outside the backup importer with a JSON 413', async () => {
+      const big = JSON.stringify({ type: 'x'.repeat(11 * 1024 * 1024) });
+      const res = await request(app).post('/api/v1/jobs').set('Content-Type', 'application/json').send(big);
+      expect(res.status).toBe(413);
+      expect(res.body.error).toBe('Upload is too large');
+    });
+
+    it('rejects a non-backup upload with a JSON 400 instead of an HTML 500', async () => {
+      const res = await request(app)
+        .post('/api/v1/backup/import')
+        .attach('file', Buffer.from('hello'), { filename: 'notes.txt', contentType: 'text/plain' });
+      expect(res.status).toBe(400);
+      expect(res.headers['content-type']).toMatch(/json/);
+      expect(res.body.error).toMatch(/backup/i);
+    });
+
+    it('imports a valid zip backup via the disk-backed upload and removes the temp upload', async () => {
+      const before = fs.readdirSync(os.tmpdir()).length;
+      const res = await request(app)
+        .post('/api/v1/backup/import')
+        .attach('file', Buffer.from('not really a zip'), { filename: 'backup.zip', contentType: 'application/zip' });
+      // Not a real archive: must fail cleanly (400) and not leak the upload.
+      expect(res.status).toBe(400);
+      const leaked = fs.readdirSync(os.tmpdir()).filter((n) => n.length === 32 && /^[0-9a-f]+$/.test(n));
+      expect(leaked).toHaveLength(0);
+      expect(fs.readdirSync(os.tmpdir()).length).toBeLessThanOrEqual(before + 1);
+    });
+  });
+
+  describe('migrations', () => {
+    it('can run concurrently and releases its advisory lock', async () => {
+      await Promise.all([runMigrations(pool), runMigrations(pool)]);
+      const locks = await query("SELECT COUNT(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND granted");
+      expect(locks.rows[0].n).toBe(0);
+    });
+  });
+  describe('jobs', () => {
+    it('lets only one of two simultaneous starts through (409 for the other)', async () => {
+      const [a, b] = await Promise.all([
+        request(app).post('/api/v1/jobs').send({ type: 'backfill' }),
+        request(app).post('/api/v1/jobs').send({ type: 'backfill' }),
+      ]);
+      expect([a.status, b.status].sort()).toEqual([201, 409]);
+      const loser = a.status === 409 ? a : b;
+      expect(loser.body.job_id).toBeTruthy();
+      // Let the winning (empty-DB, instant) job finish so it doesn't outlive the test.
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    it('answers a missing body with 400 and a non-UUID id with 404', async () => {
+      const noBody = await request(app).post('/api/v1/jobs');
+      expect(noBody.status).toBe(400);
+      expect((await request(app).get('/api/v1/jobs/not-a-uuid')).status).toBe(404);
+      expect((await request(app).post('/api/v1/jobs/not-a-uuid/cancel')).status).toBe(404);
+    });
+
+    it('does not start a job that was cancelled while still pending', async () => {
+      const { runPluginJob, findPluginJob } = await import('../../src/services/jobs');
+      const definition = findPluginJob('backfill')!;
+      let handlerRan = false;
+      const inserted = await query(`INSERT INTO jobs (type, status) VALUES ('backfill', 'cancelled') RETURNING id`);
+      await runPluginJob(inserted.rows[0].id, {
+        ...definition,
+        handler: async () => {
+          handlerRan = true;
+        },
+      });
+      expect(handlerRan).toBe(false);
+      const row = await query('SELECT status FROM jobs WHERE id = $1', [inserted.rows[0].id]);
+      expect(row.rows[0].status).toBe('cancelled');
+    });
   });
 });

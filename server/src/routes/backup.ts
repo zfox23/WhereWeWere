@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
+import os from 'os';
 import multer from 'multer';
 import { pool, query } from '../db';
 import {
@@ -27,8 +29,9 @@ import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const FIRST_START_OVER_CONFIRMATION = 'DELETE MY DATA';
 const SECOND_START_OVER_CONFIRMATION = 'START OVER';
 
+// Stream uploads to disk instead of buffering up to 500 MB in memory.
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({ destination: os.tmpdir() }),
   fileFilter: (_req, file, cb) => {
     const name = file.originalname.toLowerCase();
     const isJson =
@@ -474,8 +477,10 @@ router.get('/export', async (_req: Request, res: Response) => {
 });
 
 router.post('/import', upload.single('file'), async (req: Request, res: Response) => {
-  const client = await pool.connect();
   let tempRoot: string | undefined;
+  // Checked out only once the archive is extracted and parsed: that part is
+  // slow and must not pin a pooled connection.
+  let client: import('pg').PoolClient | undefined;
   try {
     let backup: ParsedBackup;
 
@@ -487,17 +492,18 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         name.endsWith('.zip');
 
       if (isZip) {
-        tempRoot = await extractBackupZip(req.file.buffer);
+        tempRoot = await extractBackupZip(req.file.path);
         backup = parseV2Backup(tempRoot);
         backup.tempRoot = tempRoot;
       } else {
-        backup = parseV1Backup(JSON.parse(req.file.buffer.toString('utf-8')));
+        backup = parseV1Backup(JSON.parse(fs.readFileSync(req.file.path, 'utf-8')));
       }
     } else {
       backup = parseV1Backup(req.body);
     }
 
     const errors: string[] = [];
+    client = await pool.connect();
     // withTransaction commits on success and rolls back + rethrows on error.
     const counts = await withTransaction(client, (tx) =>
       runRestore(tx, { ...backup, tempRoot: tempRoot }, errors)
@@ -512,12 +518,13 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
   } catch (err) {
     // withTransaction already rolls back when the restore fails; a pre-
     // transaction failure (parse/extract) has nothing to roll back.
-    await client.query('ROLLBACK').catch(() => {});
+    await client?.query('ROLLBACK').catch(() => {});
     console.error('Error importing backup:', err);
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to import backup' });
   } finally {
     if (tempRoot) removeBackupTempDir(tempRoot);
-    client.release();
+    if (req.file?.path) fs.rmSync(req.file.path, { force: true });
+    client?.release();
   }
 });
 

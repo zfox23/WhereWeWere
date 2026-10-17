@@ -22,6 +22,7 @@ import type {
 } from 'wwp-shared';
 import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
+import { escapeLike, pagination, parseYear } from '../../server/src/services/queryParams';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
@@ -88,11 +89,12 @@ router.get('/', async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    params.push(parseInt(limit as string, 10));
+    const page = pagination(limit, offset);
+    params.push(page.limit);
     const limitParam = `$${paramIndex}`;
     paramIndex++;
 
-    params.push(parseInt(offset as string, 10));
+    params.push(page.offset);
     const offsetParam = `$${paramIndex}`;
 
     const sql = `
@@ -569,7 +571,8 @@ router.get('/stats/monthly', async (req: Request, res: Response) => {
     const { user_id, year } = req.query;
     if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
 
-    const yearNum = parseInt(year as string, 10);
+    const yearNum = parseYear(year);
+    if (yearNum === null) return res.status(400).json({ error: 'year must be a valid year' });
 
     const result = await query(
       `SELECT
@@ -753,7 +756,8 @@ router.get('/stats/heatmap', async (req: Request, res: Response) => {
     const { user_id, year } = req.query;
     if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
 
-    const yearNum = parseInt(year as string, 10);
+    const yearNum = parseYear(year);
+    if (yearNum === null) return res.status(400).json({ error: 'year must be a valid year' });
 
     const result = await query(
       `SELECT
@@ -1326,7 +1330,7 @@ export const server: CheckinTypeServerPlugin = {
       alias: 'mc',
       timestampColumn: 'checked_in_at',
       timezoneColumn: 'mood_timezone',
-      search: (c, q) => c.push(`mc.note ILIKE '%' || ? || '%'`, q),
+      search: (c, q) => c.push(`mc.note ILIKE '%' || ? || '%'`, escapeLike(q)),
     });
 
     const moodValue = ctx.filterParams.mood ? parseInt(ctx.filterParams.mood, 10) : NaN;
@@ -1341,7 +1345,7 @@ export const server: CheckinTypeServerPlugin = {
           WHERE mca2.mood_checkin_id = mc.id
             AND ma2.name ILIKE ?
         )`,
-        ctx.filterParams.activity,
+        escapeLike(ctx.filterParams.activity),
       );
     }
 

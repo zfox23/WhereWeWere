@@ -25,6 +25,7 @@ import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
 import { allPlugins } from '../../server/src/plugins/registry';
+import { pagination } from '../../server/src/services/queryParams';
 
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
@@ -86,11 +87,12 @@ sleepEntriesRouter.get('/', async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    params.push(parseInt(limit as string, 10));
+    const page = pagination(limit, offset);
+    params.push(page.limit);
     const limitParam = `$${paramIndex}`;
     paramIndex++;
 
-    params.push(parseInt(offset as string, 10));
+    params.push(page.offset);
     const offsetParam = `$${paramIndex}`;
 
     const result = await query(
@@ -477,33 +479,49 @@ webhookRouter.post('/', async (req: Request, res: Response) => {
       // any earlier pending sessions, which would otherwise stay open forever
       // and render as "Slept for 0m" in the timeline. A new start supersedes
       // any still-pending session, so delete the abandoned ones.
-      const abandoned = await query(
-        `DELETE FROM sleep_entries
-         WHERE user_id = $1 AND is_pending = TRUE`,
-        [USER_ID]
-      );
-      if (abandoned.rowCount) {
-        console.warn(
-          `Sleep webhook: new tracking start at ${startTime.toISOString()} ` +
-          `abandoned ${abandoned.rowCount} still-pending session(s); ` +
-          `deleting them as superseded.`
-        );
-      }
-
+      //
+      // Resolve the timezone first (it may query/throw), then delete the
+      // abandoned sessions and insert the new one in ONE transaction, with an
+      // advisory lock so two overlapping starts can't interleave and lose or
+      // duplicate the pending session.
       const timezone = await inferSleepTimezone(startTime);
 
-      await query(
-        `INSERT INTO sleep_entries
-           (user_id, sleep_as_android_id, sleep_timezone, started_at, ended_at, is_pending)
-         VALUES ($1, $2, $3, $4, $4, TRUE)
-         ON CONFLICT (user_id, sleep_as_android_id) DO UPDATE
-           SET started_at  = EXCLUDED.started_at,
-               ended_at    = EXCLUDED.ended_at,
-               sleep_timezone = EXCLUDED.sleep_timezone,
-               is_pending  = TRUE,
-               updated_at  = NOW()`,
-        [USER_ID, androidId, timezone, startTime.toISOString()]
-      );
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['sleep-webhook-start']);
+        const abandoned = await client.query(
+          `DELETE FROM sleep_entries
+           WHERE user_id = $1 AND is_pending = TRUE`,
+          [USER_ID]
+        );
+        if (abandoned.rowCount) {
+          console.warn(
+            `Sleep webhook: new tracking start at ${startTime.toISOString()} ` +
+            `abandoned ${abandoned.rowCount} still-pending session(s); ` +
+            `deleting them as superseded.`
+          );
+        }
+
+        await client.query(
+          `INSERT INTO sleep_entries
+             (user_id, sleep_as_android_id, sleep_timezone, started_at, ended_at, is_pending)
+           VALUES ($1, $2, $3, $4, $4, TRUE)
+           ON CONFLICT (user_id, sleep_as_android_id) DO UPDATE
+             SET started_at  = EXCLUDED.started_at,
+                 ended_at    = EXCLUDED.ended_at,
+                 sleep_timezone = EXCLUDED.sleep_timezone,
+                 is_pending  = TRUE,
+                 updated_at  = NOW()`,
+          [USER_ID, androidId, timezone, startTime.toISOString()]
+        );
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        client.release();
+      }
     } else if (event === 'sleep_tracking_stopped') {
       const startTime = parseWebhookTimestamp(value1);
       const endTime = parseWebhookTimestamp(value2) ?? new Date();

@@ -239,6 +239,43 @@ describe('Sleep plugin API', () => {
       expect(row.rows[0].sleep_timezone).toBe('America/Los_Angeles');
     });
 
+    it('keeps exactly one pending session when starts arrive simultaneously', async () => {
+      const startMs = Date.UTC(2026, 2, 10, 23, 30);
+      const results = await Promise.all(
+        [0, 1, 2, 3].map((i) =>
+          request(app)
+            .post('/api/v1/webhook/sleep-as-android')
+            .send({ event: 'sleep_tracking_started', value1: String(startMs + i * 60_000) }),
+        ),
+      );
+      for (const r of results) expect(r.status).toBe(200);
+      const rows = await query('SELECT COUNT(*)::int AS c, COUNT(*) FILTER (WHERE is_pending)::int AS p FROM sleep_entries');
+      expect(rows.rows[0]).toEqual({ c: 1, p: 1 });
+    });
+
+    it('excludes pending sessions from stats, and a PUT with an end time completes one', async () => {
+      const startMs = Date.UTC(2026, 2, 10, 23, 30);
+      await request(app)
+        .post('/api/v1/webhook/sleep-as-android')
+        .send({ event: 'sleep_tracking_started', value1: String(startMs) });
+      const summaryPending = await request(app).get('/api/v1/sleep-entries/stats/summary').query({ user_id: DEFAULT_USER_ID });
+      expect(summaryPending.body.total_sleeps).toBe(0);
+
+      const row = await query('SELECT id FROM sleep_entries');
+      const end = new Date(startMs + 7 * 3600 * 1000).toISOString();
+      const put = await request(app).put(`/api/v1/sleep-entries/${row.rows[0].id}`).send({ ended_at: end });
+      expect(put.status).toBe(200);
+      expect(put.body.is_pending).toBe(false);
+
+      const summaryDone = await request(app).get('/api/v1/sleep-entries/stats/summary').query({ user_id: DEFAULT_USER_ID });
+      expect(summaryDone.body.total_sleeps).toBe(1);
+
+      const bad = await request(app)
+        .put(`/api/v1/sleep-entries/${row.rows[0].id}`)
+        .send({ ended_at: new Date(startMs - 3600_000).toISOString() });
+      expect(bad.status).toBe(400);
+    });
+
     it('supersedes an abandoned pending session on a new start, and falls back to the newest pending on a mismatched stop', async () => {
       const startMs = Date.UTC(2026, 2, 10, 23, 30);
       await request(app)

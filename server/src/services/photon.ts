@@ -1,4 +1,7 @@
-const PHOTON_BASE = 'https://photon.home.zachfox.io';
+import { config } from '../config';
+
+// Geocoder base URL (PHOTON_URL). Venue coordinates are sent to this host.
+const PHOTON_BASE = config.photonUrl;
 const PHOTON_TIMEOUT_MS = 8_000;
 
 export interface ReverseGeocodeResult {
@@ -37,7 +40,8 @@ export async function reverseGeocode(
       state: props.state,
       city: props.city || props.town,
     };
-  } catch {
+  } catch (err) {
+    console.warn('[photon] reverse geocode failed:', err instanceof Error ? err.message : err);
     return {};
   }
 }
@@ -84,7 +88,8 @@ export async function searchPlacesByName(
         };
       })
       .filter((item: PlaceSearchResult) => item != null);
-  } catch {
+  } catch (err) {
+    console.warn('[photon] place search failed:', err instanceof Error ? err.message : err);
     return [];
   }
 }

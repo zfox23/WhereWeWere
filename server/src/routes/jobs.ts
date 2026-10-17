@@ -7,6 +7,7 @@ import {
   supportedJobTypes,
   isJobRunningLocally,
 } from '../services/jobs';
+import { isUuid } from '../services/batching';
 
 const router = Router();
 
@@ -29,6 +30,7 @@ router.get('/', async (_req: Request, res: Response) => {
 // GET /:id - get job status
 router.get('/:id', async (req: Request, res: Response) => {
   try {
+    if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Job not found' });
     const result = await query(
       `SELECT id, type, status, progress, error, started_at, completed_at, created_at
        FROM jobs WHERE id = $1`,
@@ -47,9 +49,10 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST / - start a new job (all job types are plugin-contributed)
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { type } = req.body;
+    // Express 5 leaves req.body undefined when no body was sent.
+    const type = req.body?.type;
 
-    const definition = findPluginJob(type);
+    const definition = typeof type === 'string' ? findPluginJob(type) : undefined;
     if (!definition) {
       return res.status(400).json({ error: `Unknown job type. Supported: ${supportedJobTypes().join(', ')}` });
     }
@@ -66,11 +69,28 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await query(
-      `INSERT INTO jobs (type, status) VALUES ($1, 'pending') RETURNING *`,
-      [type]
-    );
-    const job = result.rows[0];
+    // The partial unique index (one pending/running job per type) makes this
+    // insert the real guard; the check above is just the friendly fast path.
+    let job;
+    try {
+      const result = await query(
+        `INSERT INTO jobs (type, status) VALUES ($1, 'pending') RETURNING *`,
+        [type]
+      );
+      job = result.rows[0];
+    } catch (insertErr: any) {
+      if (insertErr?.code === '23505') {
+        const active = await query(
+          `SELECT id FROM jobs WHERE type = $1 AND status IN ('pending', 'running') LIMIT 1`,
+          [type]
+        );
+        return res.status(409).json({
+          error: 'A job of this type is already running',
+          job_id: active.rows[0]?.id ?? null,
+        });
+      }
+      throw insertErr;
+    }
 
     // Fire and forget — run in the background
     runPluginJob(job.id, definition).catch((err: unknown) => {
@@ -87,6 +107,7 @@ router.post('/', async (req: Request, res: Response) => {
 // POST /:id/cancel - cancel a running/pending job
 router.post('/:id/cancel', async (req: Request, res: Response) => {
   try {
+    if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Job not found' });
     const result = await query(
       `SELECT id, status FROM jobs WHERE id = $1`,
       [req.params.id]
@@ -110,8 +131,9 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       );
     }
 
-    // Signal the in-memory runner to stop
-    requestJobCancellation(job.id);
+    // Signal the in-memory runner to stop. Only for a live local runner: a
+    // flag for any other id would never be cleared and would leak.
+    if (isJobRunningLocally(job.id)) requestJobCancellation(job.id);
 
     // If the job is 'running' but has no live runner in this process (e.g. the
     // server restarted while it was running), the in-memory flag alone will

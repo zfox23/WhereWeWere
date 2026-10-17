@@ -14,6 +14,7 @@ import { llmRouter } from './routes/llm';
 import { importYamtrackRouter } from './routes/import-yamtrack';
 import { companionsRouter } from './routes/companions';
 import { runMigrations } from './db/runMigrations';
+import { isUuid } from './services/batching';
 import { pluginsRouter } from './plugins/routes';
 import { allPlugins } from './plugins/registry';
 
@@ -75,6 +76,19 @@ export function createApp() {
     });
   }
 
+  // `user_id` / `venue_id` query params feed uuid columns: a malformed value
+  // would surface as a Postgres error (500). Reject it up front with a 400.
+  app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
+    for (const key of ['user_id', 'venue_id']) {
+      const value = req.query[key];
+      if (value !== undefined && value !== '' && !(typeof value === 'string' && isUuid(value))) {
+        res.status(400).json({ error: `${key} must be a valid UUID` });
+        return;
+      }
+    }
+    next();
+  });
+
   // API routes
   app.use('/api/v1/stats', statsRouter);
   app.use('/api/v1/settings', settingsRouter);
@@ -100,8 +114,45 @@ export function createApp() {
     }
   }
 
+  // JSON error responses (Express's default handler renders HTML 500s).
+  // Covers upload/body-parser/CORS failures that previously surfaced as a
+  // generic 500 page.
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    const e = err as { status?: number; statusCode?: number; code?: string; type?: string; message?: string };
+    let status = e.status ?? e.statusCode ?? 500;
+    let message = 'Internal server error';
+    if (e.code === 'LIMIT_FILE_SIZE' || e.type === 'entity.too.large') {
+      status = 413;
+      message = 'Upload is too large';
+    } else if (typeof e.code === 'string' && e.code.startsWith('LIMIT_')) {
+      status = 400;
+      message = e.message || 'Invalid upload';
+    } else if (e.type === 'entity.parse.failed') {
+      status = 400;
+      message = 'Malformed JSON body';
+    } else if (e.message === 'Origin not allowed by CORS') {
+      status = 403;
+      message = e.message;
+    } else if (e.message === 'Only backup .json or .zip files are allowed') {
+      status = 400;
+      message = e.message;
+    } else if (status >= 400 && status < 500 && e.message) {
+      message = e.message;
+    }
+    if (status >= 500) console.error('Unhandled request error:', err);
+    res.status(status).json({ error: message });
+  });
+
   return app;
 }
+
+// One app instance, shared by the server entry point and by tests that import
+// the default export (previously startServer built a second one).
+const app = createApp();
 
 export async function startServer() {
   await runMigrations();
@@ -109,7 +160,6 @@ export async function startServer() {
   const { cleanupStaleJobs } = await import('./services/jobs');
   await cleanupStaleJobs();
 
-  const app = createApp();
   app.listen(config.port, () => {
     console.log(`WhereWeWere server listening on port ${config.port}`);
   });
@@ -122,5 +172,4 @@ if (require.main === module) {
   });
 }
 
-const app = createApp();
 export default app;
