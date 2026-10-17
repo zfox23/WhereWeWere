@@ -230,3 +230,28 @@ describe('computeTrackSegmentTotals', () => {
     expect(totals.elevationGainM).toBeCloseTo(60, 0);
   });
 });
+
+describe('parseGpx multiple tracks', () => {
+  it('merges the segments of every <trk> instead of rejecting the file', () => {
+    const trk = (lat: number) => `<trk><name>T${lat}</name><trkseg>
+      <trkpt lat="${lat}" lon="0"><time>2024-01-01T00:00:00Z</time></trkpt>
+      <trkpt lat="${lat + 0.001}" lon="0"><time>2024-01-01T00:01:00Z</time></trkpt>
+    </trkseg></trk>`;
+    const stats = parseGpx(`<gpx>${trk(10)}${trk(20)}</gpx>`, 'fallback');
+    expect(stats.pointCount).toBe(4);
+    expect(stats.name).toBe('T10');
+  });
+});
+
+describe('computeTrackStats max heart rate', () => {
+  it('does not overflow the call stack on very long tracks', () => {
+    const points: GpxPoint[] = Array.from({ length: 200_000 }, (_, i) => ({
+      lat: 10 + i * 1e-6,
+      lon: 0,
+      ele: null,
+      time: new Date(Date.UTC(2024, 0, 1) + i * 1000),
+      hr: 100 + (i % 80),
+    }));
+    expect(computeTrackStats(points, 'long', null).maxHr).toBe(179);
+  });
+});

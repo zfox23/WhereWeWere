@@ -9,6 +9,7 @@ import { MarkdownNote } from '../../../client/src/components/checkin-card/Markdo
 import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
 import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
 import { useResolvedPhotos } from '../../../client/src/components/checkin-card/useResolvedPhotos';
+import { localDateKey } from '../../../client/src/utils/checkin';
 
 interface CheckInCardProps {
   checkin: CheckIn;
@@ -141,7 +142,7 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
         <div className="flex items-center gap-1 shrink-0">
           { showOnThisDay &&
             <Link
-              to={`/?from=${checkin.checked_in_at.substring(0, 10)}&to=${checkin.checked_in_at.substring(0, 10)}`}
+              to={`/?from=${localDateKey(checkin.checked_in_at, checkin.venue_timezone)}&to=${localDateKey(checkin.checked_in_at, checkin.venue_timezone)}`}
               className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
               title="View day"
             >

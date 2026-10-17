@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckSquare, Loader2, MapPin, Plus, Square, Trash2 } from 'lucide-react';
 import { checkins, checkinLists, venues } from '../../../client/src/api/client';
@@ -64,6 +64,9 @@ export default function CheckInForm({
     if (initialCheckedInAt) return toLocalDatetimeString(new Date(initialCheckedInAt));
     return toLocalDatetimeString(new Date());
   });
+  // The input only has minute precision, so re-sending an untouched value would
+  // truncate the stored seconds and can reorder same-minute check-ins.
+  const initialCheckedInAtValue = useRef(checkedInAt).current;
   const [alsoCheckinParent, setAlsoCheckinParent] = useState(true);
   const [rating, setRating] = useState<number>(initialRating ?? 0);
   const [companions, setCompanions] = useState<string[]>(initialCompanions ?? []);
@@ -218,7 +221,9 @@ export default function CheckInForm({
       if (isEditMode) {
         await checkins.update(editCheckinId!, {
           notes: notes.trim() || null,
-          checked_in_at: new Date(checkedInAt).toISOString(),
+          ...(checkedInAt !== initialCheckedInAtValue
+            ? { checked_in_at: new Date(checkedInAt).toISOString() }
+            : {}),
           rating: ratingPayload,
           companions,
           list_ids: selectedListIds,

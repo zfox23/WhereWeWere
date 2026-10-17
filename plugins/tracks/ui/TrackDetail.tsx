@@ -444,7 +444,19 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
     setSaveError(null);
     try {
       if (trimChanged) {
-        await tracks.trim(id, trimStart, trimEnd);
+        // The trim is destructive and committed on its own. Adopt its result
+        // and reset the trim range right away: if the update below fails, a
+        // retry must not trim again with indices that now point at the wrong
+        // points of the shortened track.
+        const trimmed = await tracks.trim(id, trimStart, trimEnd);
+        setTrack(trimmed);
+        setTrimStart(0);
+        setTrimEnd((trimmed.geometry?.length ?? 1) - 1);
+        const trimmedWin = trackWindowMs(trimmed);
+        if (trimmedWin) {
+          setTrimStartText(formatMsAsDatetimeLocal(trimmedWin.startMs, trimmed.timezone));
+          setTrimEndText(formatMsAsDatetimeLocal(trimmedWin.endMs, trimmed.timezone));
+        }
       }
       const updated = await tracks.update(id, {
         name,

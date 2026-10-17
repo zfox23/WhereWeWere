@@ -145,15 +145,17 @@ function parseTcxPoint(tp: any): GpxPoint | null {
   const time = timeRaw ? new Date(String(timeRaw)) : null;
 
   let hr: number | null = null;
+  // TCX puts <HeartRateBpm><Value> directly on the Trackpoint; the extension
+  // lookup is kept as a fallback for non-standard exporters.
   const ext = tp?.extensions;
-  if (ext) {
-    const extObj = ext['tpx:Extension'] || ext['Extension'] || ext;
-    const hrRaw =
-      extObj?.HeartRateBpm?.Value ?? extObj?.['tpx:HeartRateBpm']?.['tpx:Value'];
-    if (hrRaw != null && hrRaw !== '') {
-      const parsed = Number(hrRaw);
-      if (Number.isFinite(parsed) && parsed > 0) hr = parsed;
-    }
+  const extObj = ext ? ext['tpx:Extension'] || ext['Extension'] || ext : null;
+  const hrRaw =
+    tp?.HeartRateBpm?.Value ??
+    extObj?.HeartRateBpm?.Value ??
+    extObj?.['tpx:HeartRateBpm']?.['tpx:Value'];
+  if (hrRaw != null && hrRaw !== '') {
+    const parsed = Number(hrRaw);
+    if (Number.isFinite(parsed) && parsed > 0) hr = parsed;
   }
 
   return {
@@ -411,7 +413,8 @@ export function computeTrackStats(
     .map((p) => p.hr)
     .filter((v): v is number => v != null);
   const avgHr = hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null;
-  const maxHr = hrs.length > 0 ? Math.max(...hrs) : null;
+  // reduce, not Math.max(...hrs): spreading 100k+ values overflows the call stack
+  const maxHr = hrs.length > 0 ? hrs.reduce((a, b) => (b > a ? b : a), hrs[0]) : null;
 
   // --- Geometry ---
   const coordinates: [number, number][] = points.map((p) => [p.lon, p.lat]);
@@ -459,10 +462,12 @@ export function parseGpx(
     throw new Error('Invalid GPX file: could not parse XML');
   }
 
-  const trk = doc?.gpx?.trk ?? doc?.trk;
-  if (!trk) {
+  // A GPX may hold several <trk> elements (the parser returns an array then).
+  const trks = toNumberArray(doc?.gpx?.trk ?? doc?.trk);
+  if (trks.length === 0) {
     throw new Error('Invalid GPX file: no <trk> element found');
   }
+  const trk: any = trks[0];
 
   const trkNameRaw = trk.name;
   const name =
@@ -472,7 +477,7 @@ export function parseGpx(
   const activityType =
     typeof trkTypeRaw === 'string' && trkTypeRaw.trim() ? trkTypeRaw.trim() : null;
 
-  const segments = toNumberArray(trk.trkseg);
+  const segments = trks.flatMap((t: any) => toNumberArray(t?.trkseg));
   const points: GpxPoint[] = [];
   for (const seg of segments) {
     for (const trkpt of toNumberArray((seg as any)?.trkpt)) {
@@ -573,9 +578,9 @@ export function parseTrackPoints(xml: string, ext: string): GpxPoint[] {
       }
     }
   } else {
-    const trk = doc?.gpx?.trk ?? doc?.trk;
-    if (!trk) throw new Error('Invalid GPX file: no <trk> element found');
-    for (const seg of toNumberArray(trk.trkseg)) {
+    const trks = toNumberArray(doc?.gpx?.trk ?? doc?.trk);
+    if (trks.length === 0) throw new Error('Invalid GPX file: no <trk> element found');
+    for (const seg of trks.flatMap((t: any) => toNumberArray(t?.trkseg))) {
       for (const trkpt of toNumberArray((seg as any)?.trkpt)) {
         const p = parsePoint(trkpt);
         if (p) points.push(p);

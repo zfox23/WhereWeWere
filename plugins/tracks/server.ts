@@ -51,6 +51,7 @@ import {
   deleteStoredTrack,
   deriveActivityTypeFromFilename,
   gpxDownloadFilename,
+  attachmentContentDisposition,
   storeUploadedTrack,
   storedTrackPath,
   type GpxExportTrack,
@@ -799,7 +800,7 @@ tracksRouter.get('/:id/download', async (req: Request, res: Response) => {
 
     const filename = gpxDownloadFilename(exportTrack);
     res.setHeader('Content-Type', 'application/gpx+xml; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', attachmentContentDisposition(filename));
     res.send(buildGpx(exportTrack));
   } catch (err) {
     console.error('Error downloading track:', err);

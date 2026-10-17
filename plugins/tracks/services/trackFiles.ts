@@ -213,6 +213,17 @@ export function gpxDownloadFilename(track: GpxExportTrack): string {
   return `${base || `track-${track.id}`}.gpx`;
 }
 
+/**
+ * `Content-Disposition` value for a download. Node rejects header values with
+ * characters above U+00FF, so the plain `filename` is an ASCII fallback and the
+ * real (possibly emoji/CJK) name travels in the RFC 5987 `filename*` form.
+ */
+export function attachmentContentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 // ---------------------------------------------------------------------------
 // Backup v2 bundle file naming
 // ---------------------------------------------------------------------------

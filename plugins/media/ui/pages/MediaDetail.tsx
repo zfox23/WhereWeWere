@@ -298,6 +298,13 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
         setSaving(false);
         return;
       }
+      // Only resend the instant when the user changed it: the input is
+      // minute-precision, so an untouched value would drop stored seconds.
+      const original = checkins.find((c) => c.id === checkinId);
+      const timeUnchanged =
+        original != null &&
+        draft.datetime === isoToDatetimeValue(original.checked_in_at, original.checkin_timezone) &&
+        tz === (original.checkin_timezone || 'UTC');
       const h = parseInt(draft.time_hours, 10);
       const m = parseInt(draft.time_minutes, 10);
       const totalMin = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
@@ -310,7 +317,7 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
         checkin_type: draft.checkin_type,
         rating: draft.rating > 0 ? draft.rating : null,
         notes: draft.notes.trim() || null,
-        checked_in_at: checkedInAt,
+        ...(timeUnchanged ? {} : { checked_in_at: checkedInAt }),
         timezone: tz,
         time_played_minutes: timePlayed,
         companions: draft.companions,

@@ -15,6 +15,7 @@ import { PostcardSection } from './PostcardSection';
 import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
+import { zonedDayBounds } from '../utils/dayRange';
 import type { HeatmapDay, ImmichAsset } from '../types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -123,18 +124,33 @@ function formatReflectionTime(dateStr: string, timeZone?: string | null) {
   }).format(new Date(dateStr));
 }
 
-function buildImmichDayUrl(immichUrl: string, date: string) {
-  const dayStart = new Date(`${date}T00:00:00.000Z`);
-  const dayEnd = new Date(`${date}T23:59:59.999Z`);
-  const query = JSON.stringify({
-    takenAfter: dayStart.toISOString(),
-    takenBefore: dayEnd.toISOString(),
-  });
+/** The zone an item happened in (null = fall back to the device zone). */
+function reflectionItemTimezone(item: ReflectionItem | undefined): string | null {
+  if (!item) return null;
+  const data = item.data ?? {};
+  const candidates = [item.venue_timezone, item.mood_timezone, data.checkin_timezone, data.timezone];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c) return c;
+  }
+  return null;
+}
+
+/** The "on this day" local date for a past year: today's month-day in that year. */
+function reflectionDateForYear(year: number, today: string) {
+  return `${year}-${today.slice(5)}`;
+}
+
+function buildImmichDayUrl(immichUrl: string, date: string, timeZone?: string | null) {
+  const { startIso, endIso } = zonedDayBounds(date, timeZone);
+  const query = JSON.stringify({ takenAfter: startIso, takenBefore: endIso });
   return `${immichUrl}/search?query=${encodeURIComponent(query)}`;
 }
 
-function buildDawarichDayUrl(dawarichUrl: string, date: string) {
-  return `${dawarichUrl}/map/v2?end_at=${date}T23%3A59%3A59-04%3A00&start_at=${date}T00%3A00%3A00-04%3A00`;
+function buildDawarichDayUrl(dawarichUrl: string, date: string, timeZone?: string | null) {
+  const { startOffset, endOffset } = zonedDayBounds(date, timeZone);
+  const start = encodeURIComponent(`${date}T00:00:00${startOffset}`);
+  const end = encodeURIComponent(`${date}T23:59:59${endOffset}`);
+  return `${dawarichUrl}/map/v2?end_at=${end}&start_at=${start}`;
 }
 
 function OnThisDaySection({
@@ -185,7 +201,10 @@ function OnThisDaySection({
             (a, b) =>
               new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
           );
-          const yearDate = sortedItems[0]?.checked_in_at.slice(0, 10) || null;
+          const yearDate = sortedItems.length > 0
+            ? reflectionDateForYear(year.year, getLocalDateIso())
+            : null;
+          const yearTimeZone = reflectionItemTimezone(sortedItems[0]);
           const yearAssets = photosByYear[year.year] || [];
 
           return (
@@ -200,11 +219,8 @@ function OnThisDaySection({
               </button>
               <span className="text-xs text-gray-400">{year.year}</span>
               {dawarichUrl && (() => {
-                const now = new Date();
-                const month = String(now.getMonth() + 1).padStart(2, '0');
-                const day = String(now.getDate()).padStart(2, '0');
-                const date = `${year.year}-${month}-${day}`;
-                const dawarichLink = buildDawarichDayUrl(dawarichUrl, date);
+                const date = reflectionDateForYear(year.year, getLocalDateIso());
+                const dawarichLink = buildDawarichDayUrl(dawarichUrl, date, yearTimeZone);
                 return (
                   <a
                     href={dawarichLink}
@@ -239,7 +255,7 @@ function OnThisDaySection({
               {immichUrl && yearDate && yearAssets.length > 0 && (
                 <PhotoStrip
                   assets={yearAssets}
-                  moreUrl={buildImmichDayUrl(immichUrl, yearDate)}
+                  moreUrl={buildImmichDayUrl(immichUrl, yearDate, yearTimeZone)}
                   immichUrl={immichUrl}
                 />
               )}
@@ -353,11 +369,11 @@ export function ReflectTab() {
 
     // Collect all unique dates from reflections
     const uniqueDates = new Set<string>();
+    // Keyed by each year's local "on this day" date (not the UTC date of the
+    // stored instant, which is the next day for evening check-ins in the Americas).
+    const today = getLocalDateIso();
     for (const year of reflections) {
-      for (const item of year.items) {
-        const date = item.checked_in_at.slice(0, 10);
-        uniqueDates.add(date);
-      }
+      if (year.items.length > 0) uniqueDates.add(reflectionDateForYear(year.year, today));
     }
 
     if (uniqueDates.size === 0) {

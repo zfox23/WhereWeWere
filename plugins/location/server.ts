@@ -1077,7 +1077,9 @@ statsRouter.get('/monthly', async (req: Request, res: Response) => {
     const startDate = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
 
     const result = await query(
-      `SELECT DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) AS date,
+      // DATE(...)::text keeps pg from turning the date into a JS Date (which
+      // serializes as a server-timezone-shifted ISO timestamp).
+      `SELECT DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::text AS date,
               COUNT(*)::int AS count
        FROM checkins
        WHERE user_id = $1
@@ -1147,7 +1149,9 @@ statsRouter.get('/map-data', async (req: Request, res: Response) => {
               COUNT(c.id)::int AS checkin_count,
               (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC))[1] AS last_checkin_at,
               (ARRAY_AGG(c.checkin_timezone ORDER BY c.checked_in_at DESC))[1] AS last_checkin_timezone,
-              ARRAY_AGG(DISTINCT DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')) ORDER BY DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')) DESC) AS dates
+              -- Only the latest local day is consumed (the "last visit" link), so
+              -- don't ship every visit day; text avoids JS Date serialization.
+              ARRAY[MAX(DATE(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC')))::text] AS dates
        FROM checkins c
        JOIN venues v ON c.venue_id = v.id
        WHERE c.user_id = $1
@@ -1303,27 +1307,25 @@ statsRouter.get('/additional-stats', async (req: Request, res: Response) => {
       [user_id]
     );
 
-    // Longest gap between check-ins
+    // Longest gap between check-ins (in local calendar days), computed in SQL
+    // over distinct days; ties resolve to the earliest gap.
     const gapResult = await query(
-      `SELECT DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) AS d
-       FROM checkins WHERE user_id = $1
-       ORDER BY checked_in_at`,
+      `SELECT prev::text AS gap_start, d::text AS gap_end, (d - prev)::int AS days
+       FROM (
+         SELECT d, LAG(d) OVER (ORDER BY d) AS prev
+         FROM (
+           SELECT DISTINCT DATE(checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC')) AS d
+           FROM checkins WHERE user_id = $1
+         ) days
+       ) gaps
+       WHERE prev IS NOT NULL
+       ORDER BY days DESC, d ASC
+       LIMIT 1`,
       [user_id]
     );
-    let longestGap = 0;
-    let gapStart = '';
-    let gapEnd = '';
-    const dates = gapResult.rows.map((r: any) => String(r.d).slice(0, 10));
-    for (let i = 1; i < dates.length; i++) {
-      const diff = Math.floor(
-        (new Date(dates[i]).getTime() - new Date(dates[i - 1]).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      if (diff > longestGap) {
-        longestGap = diff;
-        gapStart = dates[i - 1];
-        gapEnd = dates[i];
-      }
-    }
+    const longestGap = gapResult.rows[0]?.days ?? 0;
+    const gapStart = gapResult.rows[0]?.gap_start ?? '';
+    const gapEnd = gapResult.rows[0]?.gap_end ?? '';
 
     // Venues visited only once
     const oneTimers = await query(
@@ -1435,7 +1437,12 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
 
     const latNum = parseFloat(lat as string);
     const lonNum = parseFloat(lon as string);
-    const radiusMeters = parseInt(radius as string, 10);
+    const parsedRadius = parseInt(radius as string, 10);
+    // Non-numeric or non-positive radii fall back to the default; cap the top end
+    // so a huge value can't scan everything or be forwarded to Overpass as-is.
+    const radiusMeters = Number.isFinite(parsedRadius) && parsedRadius > 0
+      ? Math.min(parsedRadius, 50000)
+      : 5000;
     const limitNum = Math.min(Math.max(parseInt(limit as string, 10) || 20, 1), 100);
     const offsetNum = Math.max(parseInt(offset as string, 10) || 0, 0);
     const rawSource = typeof req.query.source === 'string' ? req.query.source : undefined;
@@ -1447,11 +1454,22 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
     }
 
     // Search local DB using Haversine distance
-    const haversineExpr = `(6371000 * acos(
+    // The acos argument can land a hair above 1 for identical points (float
+    // error), which Postgres rejects as out of range: clamp it.
+    const haversineExpr = `(6371000 * acos(LEAST(1.0, GREATEST(-1.0,
                cos(radians($1)) * cos(radians(v.latitude)) *
                cos(radians(v.longitude) - radians($2)) +
                sin(radians($1)) * sin(radians(v.latitude))
-             ))`;
+             ))))`;
+    // Bounding-box prefilter so the trig runs only on nearby rows and the
+    // lat/lng index is usable. Longitude is skipped near the poles/antimeridian.
+    const latDelta = radiusMeters / 111320;
+    const cosLat = Math.cos((latNum * Math.PI) / 180);
+    const lonDelta = cosLat > 0.01 ? radiusMeters / (111320 * cosLat) : 180;
+    let bboxCondition = `AND v.latitude BETWEEN ${latNum - latDelta} AND ${latNum + latDelta}`;
+    if (lonNum - lonDelta >= -180 && lonNum + lonDelta <= 180) {
+      bboxCondition += ` AND v.longitude BETWEEN ${lonNum - lonDelta} AND ${lonNum + lonDelta}`;
+    }
     const dbParams: unknown[] = [latNum, lonNum, radiusMeters];
     let searchCondition = '';
     if (search) {
@@ -1469,6 +1487,7 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
         SELECT DISTINCT v.osm_id
         FROM venues v
         WHERE v.osm_id IS NOT NULL
+          ${bboxCondition}
           AND ${haversineExpr} <= $3
           ${searchCondition}
       `;
@@ -1484,6 +1503,7 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
         FROM venues v
         LEFT JOIN venue_categories vc ON v.category_id = vc.id
         WHERE ${haversineExpr} <= $3
+        ${bboxCondition}
         ${searchCondition}
         ORDER BY distance ASC
       `;
@@ -1510,10 +1530,7 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
       );
 
       // Filter out OSM results that already exist in local DB by osm_id
-      const localOsmIds = new Set(
-        localVenues.filter((v: { osm_id: string | null }) => v.osm_id).map((v: { osm_id: string }) => v.osm_id)
-      );
-
+      // (uses the outer localOsmIds, which is also populated for source=osm).
       osmVenues = osmResults
         .filter((r) => !localOsmIds.has(r.osm_id))
         .map((r) => ({

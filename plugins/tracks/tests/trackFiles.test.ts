@@ -3,6 +3,7 @@ import {
   backupTrackFilename,
   buildGpx,
   gpxDownloadFilename,
+  attachmentContentDisposition,
   deriveActivityTypeFromFilename,
 } from '../services/trackFiles';
 import { parseGpx } from '../services/gpx';
@@ -194,5 +195,13 @@ describe('gpxDownloadFilename', () => {
     expect(
       gpxDownloadFilename({ id: 'abc', name: '///', activityType: null, coordinates: [], points: null })
     ).toBe('track-abc.gpx');
+  });
+});
+
+describe('attachmentContentDisposition', () => {
+  it('keeps the header ASCII-safe and carries the real name in filename*', () => {
+    const header = attachmentContentDisposition('Run 🏃 東京.gpx');
+    expect(header).toMatch(/^[\x20-\x7e]+$/);
+    expect(header).toContain(`filename*=UTF-8''${encodeURIComponent('Run 🏃 東京.gpx')}`);
   });
 });

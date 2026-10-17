@@ -97,3 +97,19 @@ describe('parseTrackFile', () => {
     expect(() => parseTrackFile(TCX, '.gpx', 'x')).toThrow(/Invalid GPX/);
   });
 });
+
+describe('parseTcx standard heart rate', () => {
+  it('reads <HeartRateBpm><Value> directly on the Trackpoint', () => {
+    const tp = (lat: number, t: string, hr: number) => `<Trackpoint>
+      <Time>${t}</Time>
+      <Position><LatitudeDegrees>${lat}</LatitudeDegrees><LongitudeDegrees>0</LongitudeDegrees></Position>
+      <HeartRateBpm><Value>${hr}</Value></HeartRateBpm>
+    </Trackpoint>`;
+    const xml = `<TrainingCenterDatabase><Activities><Activity Sport="Running"><Lap><Track>
+      ${tp(0, '2024-01-01T10:00:00Z', 120)}${tp(0.001, '2024-01-01T10:01:00Z', 160)}
+    </Track></Lap></Activity></Activities></TrainingCenterDatabase>`;
+    const stats = parseTcx(xml, 'run');
+    expect(stats.avgHr).toBe(140);
+    expect(stats.maxHr).toBe(160);
+  });
+});

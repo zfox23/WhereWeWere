@@ -57,14 +57,18 @@ export const tracks = {
     }
     let filename = `track-${id}.gpx`;
     const disposition = res.headers.get('Content-Disposition') || '';
-    const match =
-      disposition.match(/filename="([^"]+)"/) || disposition.match(/filename=([^;]+)/);
-    if (match) {
+    // Prefer the RFC 5987 `filename*` (exact name); the plain `filename` is an
+    // ASCII fallback and must not be percent-decoded.
+    const extended = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    const plain = disposition.match(/filename="([^"]+)"/) || disposition.match(/filename=([^;]+)/);
+    if (extended) {
       try {
-        filename = decodeURIComponent(match[1].trim());
+        filename = decodeURIComponent(extended[1].trim());
       } catch {
         // keep fallback
       }
+    } else if (plain) {
+      filename = plain[1].trim();
     }
     return { blob: await res.blob(), filename };
   },

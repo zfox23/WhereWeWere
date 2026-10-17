@@ -151,6 +151,9 @@ sleepEntriesRouter.post('/', async (req: Request, res: Response) => {
     if (!started_at || !ended_at) {
       return res.status(400).json({ error: 'started_at and ended_at are required' });
     }
+    if (new Date(ended_at).getTime() < new Date(started_at).getTime()) {
+      return res.status(400).json({ error: 'ended_at must not be before started_at' });
+    }
 
     const result = await query(
       `INSERT INTO sleep_entries (
@@ -191,15 +194,24 @@ sleepEntriesRouter.put('/:id', async (req: Request, res: Response) => {
       comment,
     } = req.body;
 
+    if (started_at && ended_at && new Date(ended_at).getTime() < new Date(started_at).getTime()) {
+      return res.status(400).json({ error: 'ended_at must not be before started_at' });
+    }
+
+    // Setting an end time completes a pending webhook session. The WHERE guard
+    // also rejects an end before the (possibly stored) start when only one of
+    // the two is supplied.
     const result = await query(
       `UPDATE sleep_entries
        SET sleep_timezone = COALESCE($2, sleep_timezone),
            started_at = COALESCE($3::timestamptz, started_at),
            ended_at = COALESCE($4::timestamptz, ended_at),
+           is_pending = CASE WHEN $8::timestamptz IS NOT NULL THEN FALSE ELSE is_pending END,
            rating = COALESCE($5, rating),
            comment = CASE WHEN $7::boolean THEN $6 ELSE comment END,
            updated_at = NOW()
        WHERE id = $1
+         AND COALESCE($4::timestamptz, ended_at) >= COALESCE($3::timestamptz, started_at)
        RETURNING *`,
       [
         id,
@@ -209,10 +221,16 @@ sleepEntriesRouter.put('/:id', async (req: Request, res: Response) => {
         rating != null ? normalizeRating(rating) : null,
         normalizeComment(comment),
         'comment' in req.body,
+        ended_at || null,
       ]
     );
 
     if (result.rows.length === 0) {
+      // Either the row doesn't exist or the supplied times are inconsistent.
+      const exists = await query('SELECT 1 FROM sleep_entries WHERE id = $1', [id]);
+      if (exists.rows.length > 0) {
+        return res.status(400).json({ error: 'ended_at must not be before started_at' });
+      }
       return res.status(404).json({ error: 'Sleep entry not found' });
     }
 
@@ -250,10 +268,12 @@ sleepEntriesRouter.delete('/:id', async (req: Request, res: Response) => {
 // behavior unchanged)
 // ---------------------------------------------------------------------------
 
+// Pending rows (a webhook "start" with no end yet) have ended_at = started_at,
+// i.e. a bogus 0-minute sleep: every stats query excludes them.
 const SLEEP_DATE_RANGE_WHERE = (hasRange: boolean) =>
   hasRange
-    ? "AND (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
-    : '';
+    ? "AND is_pending = FALSE AND (ended_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC'))::date BETWEEN $2::date AND $3::date"
+    : 'AND is_pending = FALSE';
 const SLEEP_DATE_RANGE_PARAMS = (user_id: unknown, from: unknown, to: unknown) =>
   typeof from === 'string' && typeof to === 'string' && from && to
     ? [user_id, from, to]

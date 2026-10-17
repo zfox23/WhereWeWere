@@ -38,6 +38,16 @@ export function normalizeTimezoneForDisplay(tz: string | null | undefined): stri
   return ETC_GMT_DISPLAY_MAP[tz] || tz;
 }
 
+/** YYYY-MM-DD of an instant as seen in `timeZone` (device zone when unset/invalid). */
+export function localDateKey(dateStr: string, timeZone?: string | null): string {
+  const zone = normalizeTimezoneForDisplay(timeZone);
+  try {
+    return new Date(dateStr).toLocaleDateString('en-CA', zone ? { timeZone: zone } : {});
+  } catch {
+    return new Date(dateStr).toLocaleDateString('en-CA');
+  }
+}
+
 export function formatDate(dateStr: string, timeZone?: string | null): string {
   const date = new Date(dateStr);
   const displayTimeZone = normalizeTimezoneForDisplay(timeZone);
