@@ -214,8 +214,26 @@ export function LifeSummarySection({ llmConfig }: { llmConfig: LlmConfig }) {
     setError(null);
     setResult(null);
     try {
-      const data = await llmApi.summarize(from, to, imageSelectionActive ? selected : []);
-      setResult(data);
+      const { task_id } = await llmApi.summarize(from, to, imageSelectionActive ? selected : []);
+      // Poll instead of holding one long request open (mobile browsers and
+      // proxies drop those). Transient network errors just retry.
+      let failures = 0;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 3000));
+        let status;
+        try {
+          status = await llmApi.summarizeStatus(task_id);
+          failures = 0;
+        } catch (err) {
+          if (err instanceof TypeError && ++failures < 20) continue;
+          throw err;
+        }
+        if (status.status === 'done') {
+          setResult(status.result);
+          break;
+        }
+        if (status.status === 'error') throw new Error(status.error);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate summary.');
     } finally {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Router, Request, Response } from 'express';
 import type { CheckinTypeServer, PluginLlmHook } from 'wwp-shared';
 import { allPlugins, pluginTimestampBranches } from '../plugins/registry';
@@ -251,22 +252,23 @@ router.get('/candidate-images', async (req: Request, res: Response) => {
 // chunk is condensed (digested) by the LLM in parallel (map phase), and the
 // digests are merged (reduce phase). If the digests themselves still exceed
 // the budget, they are re-chunked and re-digested (recursive reduce).
-router.post('/summarize', async (req: Request, res: Response) => {
+async function generateSummary(reqBody: unknown): Promise<SummaryOutcome> {
+  const fail = (status: number, error: string): SummaryOutcome => ({ status, json: { error } });
   try {
-    const { from, to, image_asset_ids } = req.body as {
+    const { from, to, image_asset_ids } = (reqBody ?? {}) as {
       from?: string;
       to?: string;
       image_asset_ids?: string[];
     };
 
     const range = validateDateRange(from, to);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return fail(400, range.error);
     const fromStr = from as string;
     const toStr = to as string;
 
     const llm = await getLlmSettings(USER_ID);
     if (!llm) {
-      return res.status(400).json({ error: 'LLM integration is not configured. Set an API URL and model name in Settings → Integrations.' });
+      return fail(400, 'LLM integration is not configured. Set an API URL and model name in Settings → Integrations.');
     }
 
     const imageIds = Array.isArray(image_asset_ids)
@@ -275,7 +277,7 @@ router.post('/summarize', async (req: Request, res: Response) => {
 
     const data = await gatherLifeData(fromStr, toStr);
     if (!data.hasAnyData && imageIds.length === 0) {
-      return res.status(400).json({ error: 'No data found for the selected period.' });
+      return fail(400, 'No data found for the selected period.');
     }
 
     // --- Text budget: data is always prioritized over images ---
@@ -321,10 +323,10 @@ router.post('/summarize', async (req: Request, res: Response) => {
       summary = await callLlm(llm, SYSTEM_PROMPT, contentParts, Math.min(Math.floor(llm.context_window * 0.2), 16384));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to generate summary';
-      return res.status(502).json({ error: message });
+      return fail(502, message);
     }
 
-    res.json({
+    return { status: 200, json: {
       summary,
       images_included: imageResult.included,
       images_skipped: imageResult.skipped,
@@ -334,11 +336,58 @@ router.post('/summarize', async (req: Request, res: Response) => {
       // Kept for backward compatibility with older clients; always empty now
       // since no data is ever sampled away.
       skipped: [] as { type: string; total: number; included: number }[],
-    });
+    } };
   } catch (err) {
     console.error('Error summarizing life period:', err);
-    res.status(500).json({ error: 'Failed to generate summary' });
+    return fail(500, 'Failed to generate summary');
   }
+}
+
+// Summaries can take minutes on a local model — far longer than a reverse
+// proxy or a mobile browser will keep one HTTP request open (the client saw
+// "NetworkError when attempting to fetch resource"). So POST starts the work
+// and returns a task id; the client polls GET /summarize/:id.
+interface SummaryOutcome {
+  status: number;
+  json: Record<string, unknown>;
+}
+interface SummaryTask {
+  state: 'running' | 'done';
+  outcome?: SummaryOutcome;
+  finishedAt?: number;
+}
+const SUMMARY_TASK_TTL_MS = 60 * 60 * 1000;
+const summaryTasks = new Map<string, SummaryTask>();
+
+function pruneSummaryTasks() {
+  const cutoff = Date.now() - SUMMARY_TASK_TTL_MS;
+  for (const [id, task] of summaryTasks) {
+    if (task.finishedAt && task.finishedAt < cutoff) summaryTasks.delete(id);
+  }
+}
+
+router.post('/summarize', (req: Request, res: Response) => {
+  pruneSummaryTasks();
+  const id = randomUUID();
+  const task: SummaryTask = { state: 'running' };
+  summaryTasks.set(id, task);
+  void generateSummary(req.body).then((outcome) => {
+    task.state = 'done';
+    task.outcome = outcome;
+    task.finishedAt = Date.now();
+  });
+  res.status(202).json({ task_id: id });
+});
+
+// GET /summarize/:id - poll a summary started by POST /summarize
+router.get('/summarize/:id', (req: Request, res: Response) => {
+  const task = summaryTasks.get(String(req.params.id));
+  if (!task) return res.status(404).json({ error: 'Summary task not found (the server may have restarted). Please try again.' });
+  if (task.state === 'running' || !task.outcome) return res.json({ status: 'running' });
+  if (task.outcome.status !== 200) {
+    return res.json({ status: 'error', error: task.outcome.json.error ?? 'Failed to generate summary' });
+  }
+  res.json({ status: 'done', result: task.outcome.json });
 });
 
 // --- Postcard From Your Past ----------------------------------------------
