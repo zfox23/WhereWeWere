@@ -7,13 +7,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
+import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
 import { Clock, Gauge, Heart, Map as MapIcon, Mountain, Route, TrendingUp } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import type { PluginProfileTabProps } from 'wwp-shared';
 import { settings, stats } from '../../../client/src/api/client';
 import { tracks } from './api';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import { getThemeDefinition } from '../../../client/src/themes';
 import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../location/ui/geo';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
@@ -34,6 +36,7 @@ import {
 } from '../../location/ui/geo';
 import { NO_ACTIVITY_TYPE } from '../constants';
 import type { TrackEntry, TrackMapEntry } from './types';
+import { clusterTracks } from './trackClustering';
 
 const PAGE_SIZE = 500;
 
@@ -194,6 +197,103 @@ function FitToAllTracks({ tracks, fitKey }: { tracks: TrackMapEntry[]; fitKey: s
   return null;
 }
 
+function clusterIcon(count: number, rgb: string): L.DivIcon {
+  const badge = count > 99 ? '99+' : String(count);
+  const size = count >= 20 ? 44 : count >= 10 ? 38 : 32;
+  return L.divIcon({
+    className: 'track-cluster-icon',
+    html: `<div style="width: ${size}px; height: ${size}px; border-radius: 9999px; background: rgb(${rgb}); border: 2px solid rgba(255,255,255,0.95); box-shadow: 0 4px 10px rgba(15, 23, 42, 0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: ${badge.length > 2 ? 10 : 12}px; line-height: 1;">${badge}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+/**
+ * Draws tracks as lines when they're big enough to see, a dot for a lone track
+ * too small to see as a line, and a numbered circle for several nearby small
+ * tracks. Recomputed on zoom; clicking a circle zooms in on its tracks.
+ */
+function ClusteredTrackLayer({
+  tracks: drawTracks,
+  distanceUnit,
+}: {
+  tracks: TrackMapEntry[];
+  distanceUnit: DistanceUnit;
+}) {
+  const map = useMap();
+  const { resolvedThemeId } = useTheme();
+  const accent = getThemeDefinition(resolvedThemeId).palette['500'];
+  const [zoom, setZoom] = useState(() => map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+
+  const items = useMemo(
+    () => clusterTracks(
+      drawTracks,
+      (lat, lng) => map.project([lat, lng], zoom),
+      (x, y) => map.unproject([x, y], zoom),
+    ),
+    [drawTracks, map, zoom],
+  );
+
+  return (
+    <>
+      {items.map((item) => {
+        if (item.kind === 'cluster') {
+          return (
+            <Marker
+              key={`cluster-${item.id}`}
+              position={[item.lat, item.lng]}
+              icon={clusterIcon(item.tracks.length, accent)}
+              eventHandlers={{
+                click: () => {
+                  const bounds = L.latLngBounds([]);
+                  for (const t of item.tracks) {
+                    bounds.extend([t.bounds!.minLat, t.bounds!.minLng]);
+                    bounds.extend([t.bounds!.maxLat, t.bounds!.maxLng]);
+                  }
+                  // Always zoom in at least one level, even if the tracks coincide.
+                  const target = Math.min(
+                    Math.max(map.getBoundsZoom(bounds.pad(0.2)), map.getZoom() + 1),
+                    map.getMaxZoom(),
+                  );
+                  map.setView(bounds.getCenter(), target);
+                },
+              }}
+            />
+          );
+        }
+        const color = TRACK_COLORS[item.index % TRACK_COLORS.length];
+        const popup = (
+          <Popup>
+            <TrackInfoPopup track={item.track} color={color} distanceUnit={distanceUnit} />
+          </Popup>
+        );
+        if (item.kind === 'dot') {
+          return (
+            <CircleMarker
+              key={item.track.id}
+              center={[item.lat, item.lng]}
+              radius={6}
+              pathOptions={{ color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }}
+            >
+              {popup}
+            </CircleMarker>
+          );
+        }
+        return (
+          <Polyline
+            key={item.track.id}
+            positions={item.track.coordinates.map(([lng, lat]) => [lat, lng] as [number, number])}
+            pathOptions={{ color, weight: 4, opacity: 0.85 }}
+          >
+            {popup}
+          </Polyline>
+        );
+      })}
+    </>
+  );
+}
+
 function TracksMap({
   tracks,
   distanceUnit,
@@ -245,20 +345,7 @@ function TracksMap({
           crossOrigin="anonymous"
           url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
         />
-        {drawTracks.map((track, i) => {
-          const color = TRACK_COLORS[i % TRACK_COLORS.length];
-          return (
-            <Polyline
-              key={track.id}
-              positions={track.coordinates.map(([lng, lat]) => [lat, lng] as [number, number])}
-              pathOptions={{ color, weight: 4, opacity: 0.85 }}
-            >
-              <Popup>
-                <TrackInfoPopup track={track} color={color} distanceUnit={distanceUnit} />
-              </Popup>
-            </Polyline>
-          );
-        })}
+        <ClusteredTrackLayer tracks={drawTracks} distanceUnit={distanceUnit} />
         <FitToAllTracks tracks={drawTracks} fitKey={fitKey} />
         {onBoundsChange && <BoundsReporter onBounds={onBoundsChange} />}
       </MapContainer>
