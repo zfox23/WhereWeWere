@@ -283,18 +283,16 @@ describe('location plugin — backup & cleanup hooks', () => {
     expect(clientQuery).not.toHaveBeenCalled();
   });
 
-  it('detaches scrobbles and deletes the user check-ins on start-over', async () => {
+  it('deletes the user check-ins on start-over', async () => {
     queryMock
-      .mockResolvedValueOnce({ rowCount: 1 }) // scrobble detach
       .mockResolvedValueOnce({ rowCount: 1 }) // companion delete
       .mockResolvedValueOnce({ rowCount: 3 }) // checkin delete
       .mockResolvedValueOnce({ rowCount: 1 }) // venue-list delete
       .mockResolvedValueOnce({ rowCount: 1 }); // checkin-list delete
     expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(3);
-    expect(queryMock.mock.calls[0][0]).toContain('DELETE FROM checkin_scrobbles');
-    expect(queryMock.mock.calls[2][0]).toContain('DELETE FROM checkins WHERE user_id = $1');
-    expect(queryMock.mock.calls[3][0]).toContain('DELETE FROM venue_lists WHERE user_id = $1');
-    expect(queryMock.mock.calls[4][0]).toContain('DELETE FROM checkin_lists WHERE user_id = $1');
+    expect(queryMock.mock.calls[1][0]).toContain('DELETE FROM checkins WHERE user_id = $1');
+    expect(queryMock.mock.calls[2][0]).toContain('DELETE FROM venue_lists WHERE user_id = $1');
+    expect(queryMock.mock.calls[3][0]).toContain('DELETE FROM checkin_lists WHERE user_id = $1');
   });
 
   it('deletes the whole venues catalog on start-over (all-data)', async () => {

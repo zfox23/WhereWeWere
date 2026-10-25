@@ -1,8 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons';
 import { resolveActivityIcon } from '../../../client/src/utils/icons';
-import type { TimelineItem, ImmichAsset, Scrobble } from '../../../client/src/types';
-import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
+import type { TimelineItem, ImmichAsset } from '../../../client/src/types';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
 import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
@@ -14,8 +13,6 @@ interface MoodCheckInCardProps {
   iconPack?: string;
   immichUrl?: string | null;
   photos?: ImmichAsset[] | null;
-  scrobbles?: Scrobble[];
-  malojaUrl?: string | null;
   compact?: boolean;
 }
 
@@ -26,7 +23,7 @@ function renderIcon(iconName?: string): React.ReactNode {
   return <IconComponent size={14} className="shrink-0 text-current" />;
 }
 
-export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, scrobbles, malojaUrl, compact = false }: MoodCheckInCardProps) {
+export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, photos, compact = false }: MoodCheckInCardProps) {
   const { pathname } = useLocation();
   const mood = typeof item.mood === 'number' && item.mood >= 1 && item.mood <= 5 ? item.mood : 3;
   const activities = Array.isArray(item.activities) ? item.activities : [];
@@ -96,9 +93,6 @@ export default function MoodCheckInCard({ item, iconPack = 'emoji', immichUrl, p
             assets={resolvedAssets}
             checkedInAt={item.checked_in_at}
           />
-
-          {/* Scrobbles */}
-          {scrobbles && <ScrobbleList scrobbles={scrobbles} checkedInAt={item.checked_in_at} malojaUrl={malojaUrl} />}
 
           {/* Timestamp */}
           <TimestampLink

@@ -1,9 +1,8 @@
 import { Camera, Calendar, Map, MapPin, Users } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import type { CheckIn, Scrobble, ImmichAsset } from '../../../client/src/types';
+import type { CheckIn, ImmichAsset } from '../../../client/src/types';
 import Stars from '../../../client/src/components/Stars';
 import { CompanionName } from '../../../client/src/components/CompanionName';
-import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
 import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
@@ -15,8 +14,6 @@ interface CheckInCardProps {
   checkin: CheckIn;
   immichUrl?: string | null;
   photos?: ImmichAsset[] | null;
-  scrobbles?: Scrobble[];
-  malojaUrl?: string | null;
   dawarichUrl?: string | null;
   compact?: boolean;
 }
@@ -31,7 +28,7 @@ function buildDawarichCheckinUrl(dawarichUrl: string, checkedInAt: string): stri
   return `${dawarichUrl}/map/v2?start_at=${start}&end_at=${end}`;
 }
 
-export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, malojaUrl, dawarichUrl, compact = false }: CheckInCardProps) {
+export default function CheckInCard({ checkin, immichUrl, photos, dawarichUrl, compact = false }: CheckInCardProps) {
   const { pathname } = useLocation();
 
   const isHomePage = pathname === '/';
@@ -125,9 +122,6 @@ export default function CheckInCard({ checkin, immichUrl, photos, scrobbles, mal
             checkedInAt={checkin.checked_in_at}
             fallbackLinkContent={<Camera size={12} />}
           />
-
-          {/* Scrobbles */}
-          {scrobbles && <ScrobbleList scrobbles={scrobbles} checkedInAt={checkin.checked_in_at} malojaUrl={malojaUrl} />}
 
           {/* Date/time */}
           <TimestampLink

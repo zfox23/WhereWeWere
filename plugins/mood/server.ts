@@ -1583,7 +1583,7 @@ export const server: CheckinTypeServerPlugin = {
   // Cross-cutting service hooks
   // ------------------------------------------------------------------
 
-  // Photo/scrobble anchor timestamps for Immich and Maloja enrichment.
+  // Photo/scrobble anchor timestamps for Immich and music enrichment.
   resolveTimestamps: () => ({
     sql: 'SELECT id, checked_in_at FROM mood_checkins WHERE id = ANY($1::uuid[])',
   }),

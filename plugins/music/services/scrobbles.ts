@@ -1,0 +1,567 @@
+/**
+ * Music plugin — scrobble storage, listening-session maintenance, and the
+ * read queries behind the Profile tab.
+ */
+
+import crypto from 'crypto';
+import type { PoolClient } from 'pg';
+import { isValidTimeZone } from 'wwp-shared';
+import { query, pool } from '../../../server/src/db';
+import { allPlugins } from '../../../server/src/plugins/registry';
+import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
+import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './constants';
+
+
+export interface ScrobbleInput {
+  playedAt: Date;
+  title: string;
+  artists: string[];
+  album?: string | null;
+  albumArtists?: string[];
+  trackLength?: number | null;
+  listenedFor?: number | null;
+  source?: string | null;
+  /** IANA zone the play happened in; assigned from check-ins when absent. */
+  timezone?: string | null;
+}
+
+export interface MusicSettings {
+  scrobbler_key: string;
+  session_gap_minutes: number;
+  min_session_tracks: number;
+  timezone: string;
+}
+
+type Queryable = Pick<PoolClient, 'query'> | { query: typeof query };
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+function positiveInt(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback;
+}
+
+function settingsFromRows(stored: Map<string, unknown>): MusicSettings {
+  const tz = stored.get('timezone');
+  return {
+    scrobbler_key: typeof stored.get('scrobbler_key') === 'string' ? (stored.get('scrobbler_key') as string) : '',
+    session_gap_minutes: positiveInt(stored.get('session_gap_minutes'), DEFAULT_SESSION_GAP_MINUTES),
+    min_session_tracks: positiveInt(stored.get('min_session_tracks'), DEFAULT_MIN_SESSION_TRACKS),
+    timezone: typeof tz === 'string' && isValidTimeZone(tz) ? tz : 'UTC',
+  };
+}
+
+/**
+ * Stored settings with defaults applied, read through `db` (so a caller
+ * inside a transaction sees its own uncommitted writes). Never writes: the
+ * scrobbler key is empty until `getMusicSettings` has generated one.
+ */
+async function readMusicSettings(userId: string, db: Queryable = { query }): Promise<MusicSettings & { timezoneStored: boolean }> {
+  const result = await db.query(
+    `SELECT key, value FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2`,
+    [userId, PLUGIN_ID],
+  );
+  const stored = new Map<string, unknown>(result.rows.map((r: { key: string; value: unknown }) => [r.key, r.value]));
+  return { ...settingsFromRows(stored), timezoneStored: typeof stored.get('timezone') === 'string' };
+}
+
+/**
+ * The timezone of the user's most recent check-in, asked of every plugin that
+ * can answer (the same hook the Plex and Sleep integrations use). Null when
+ * no check-in carries one.
+ */
+async function inferTimezone(userId: string): Promise<string | null> {
+  for (const plugin of allPlugins()) {
+    const hook = plugin.server.latestTimezoneAsOf;
+    if (!hook) continue;
+    const result = await query(hook().sql, [new Date().toISOString(), userId]);
+    const tz = result.rows[0]?.timezone;
+    if (typeof tz === 'string' && tz !== 'UTC' && isValidTimeZone(tz)) return tz;
+  }
+  return null;
+}
+
+/**
+ * Effective music settings. First use generates the scrobbler key and, when
+ * no timezone has been chosen, adopts the timezone of the user's latest
+ * check-in (sessions and periods are bucketed by it, and UTC would put
+ * evening listening on the wrong day). Nothing is stored until a check-in
+ * timezone exists, so it is retried until then.
+ */
+export async function getMusicSettings(userId: string): Promise<MusicSettings> {
+  let current = await readMusicSettings(userId);
+  if (!current.scrobbler_key) {
+    await query(
+      `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+       VALUES ($1, $2, 'scrobbler_key', $3::jsonb)
+       ON CONFLICT (user_id, plugin_id, key) DO NOTHING`,
+      [userId, PLUGIN_ID, JSON.stringify(crypto.randomBytes(24).toString('hex'))],
+    );
+    current = await readMusicSettings(userId);
+  }
+  if (!current.timezoneStored) {
+    const inferred = await inferTimezone(userId);
+    if (inferred) {
+      await query(
+        `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+         VALUES ($1, $2, 'timezone', $3::jsonb)
+         ON CONFLICT (user_id, plugin_id, key) DO NOTHING`,
+        [userId, PLUGIN_ID, JSON.stringify(inferred)],
+      );
+      current = await readMusicSettings(userId);
+      // Plays already stored took the UTC default as their fallback zone.
+      const existing = await query('SELECT 1 FROM music_scrobbles WHERE user_id = $1 LIMIT 1', [userId]);
+      if ((existing.rowCount ?? 0) > 0) await recomputeTimezones(userId);
+    }
+  }
+  const { timezoneStored: _stored, ...settings } = current;
+  return settings;
+}
+
+export async function regenerateScrobblerKey(userId: string): Promise<string> {
+  const key = crypto.randomBytes(24).toString('hex');
+  await query(
+    `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+     VALUES ($1, $2, 'scrobbler_key', $3::jsonb)
+     ON CONFLICT (user_id, plugin_id, key) DO UPDATE SET value = EXCLUDED.value`,
+    [userId, PLUGIN_ID, JSON.stringify(key)],
+  );
+  return key;
+}
+
+/**
+ * Persist settings changes. A new gap regroups sessions; a new fallback
+ * timezone re-assigns zones (and so regroups too).
+ */
+export async function updateMusicSettings(
+  userId: string,
+  updates: Partial<Pick<MusicSettings, 'session_gap_minutes' | 'min_session_tracks' | 'timezone'>>,
+): Promise<MusicSettings> {
+  const before = await getMusicSettings(userId);
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined) continue;
+    await query(
+      `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (user_id, plugin_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      [userId, PLUGIN_ID, key, JSON.stringify(value)],
+    );
+  }
+  const after = await getMusicSettings(userId);
+  if (after.timezone !== before.timezone) {
+    await recomputeTimezones(userId);
+  } else if (after.session_gap_minutes !== before.session_gap_minutes) {
+    await rebuildAllSessions(userId);
+  }
+  return after;
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+/**
+ * Regroup the user's scrobbles into sessions. With no range every session is
+ * rebuilt; with a range the caller must already have widened it to whole
+ * session boundaries (see `insertScrobble`).
+ */
+async function rebuildSessions(
+  db: Queryable,
+  userId: string,
+  gapMinutes: number,
+  range: { from: Date; to: Date } | null,
+): Promise<void> {
+  if (range) {
+    await db.query(
+      `DELETE FROM music_sessions WHERE user_id = $1 AND started_at >= $2 AND ended_at <= $3`,
+      [userId, range.from, range.to],
+    );
+  } else {
+    await db.query(`DELETE FROM music_sessions WHERE user_id = $1`, [userId]);
+  }
+  // Stage the grouping in a temp table so the planner has real row counts
+  // for the joins below: as CTEs it picked nested loops that never finished
+  // on a six-figure history. A session takes the id of its first scrobble.
+  await db.query(`DROP TABLE IF EXISTS music_grp`);
+  await db.query(
+    `CREATE TEMP TABLE music_grp ON COMMIT DROP AS
+     WITH ordered AS (
+       SELECT id, played_at, title, artists, listened_for, timezone,
+              CASE WHEN played_at - LAG(played_at) OVER (ORDER BY played_at, id)
+                        > make_interval(mins => $2::int) THEN 1 ELSE 0 END AS brk
+       FROM music_scrobbles
+       WHERE user_id = $1
+         AND ($3::timestamptz IS NULL OR played_at >= $3::timestamptz)
+         AND ($4::timestamptz IS NULL OR played_at <= $4::timestamptz)
+     ),
+     grp AS (
+       SELECT *, SUM(brk) OVER (ORDER BY played_at, id) AS g FROM ordered
+     )
+     SELECT id, played_at, title, artists, listened_for, g,
+            FIRST_VALUE(id) OVER (PARTITION BY g ORDER BY played_at, id) AS sid,
+            FIRST_VALUE(timezone) OVER (PARTITION BY g ORDER BY played_at, id) AS stz
+     FROM grp`,
+    [userId, gapMinutes, range?.from ?? null, range?.to ?? null],
+  );
+  await db.query(`ANALYZE music_grp`);
+  await db.query(
+    `WITH top AS (
+       SELECT sid, a.artist,
+              ROW_NUMBER() OVER (PARTITION BY sid ORDER BY COUNT(*) DESC, a.artist) AS rn
+       FROM music_grp, LATERAL unnest(music_grp.artists) AS a(artist)
+       GROUP BY sid, a.artist
+     ),
+     top_agg AS (
+       SELECT sid, jsonb_agg(artist ORDER BY rn) AS top_artists
+       FROM top WHERE rn <= 5
+       GROUP BY sid
+     ),
+     base AS (
+       SELECT sid,
+              MIN(stz) AS stz,
+              MIN(played_at) AS started_at,
+              MAX(played_at) AS ended_at,
+              COUNT(*)::int AS track_count,
+              COALESCE(SUM(listened_for), 0)::int AS listened_seconds,
+              string_agg(DISTINCT title || ' ' || array_to_string(artists, ' '), ' ') AS search_text
+       FROM music_grp
+       GROUP BY sid
+     )
+     INSERT INTO music_sessions
+       (id, user_id, started_at, ended_at, timezone, track_count, listened_seconds, top_artists, search_text)
+     SELECT b.sid, $1, b.started_at, b.ended_at, b.stz, b.track_count, b.listened_seconds,
+            COALESCE(t.top_artists, '[]'::jsonb), b.search_text
+     FROM base b LEFT JOIN top_agg t ON t.sid = b.sid`,
+    [userId],
+  );
+  await db.query(
+    `UPDATE music_scrobbles m SET session_id = g.sid FROM music_grp g WHERE m.id = g.id`,
+  );
+  await db.query(`DROP TABLE music_grp`);
+}
+
+export async function rebuildAllSessions(userId: string): Promise<void> {
+  const settings = await getMusicSettings(userId);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
+    await rebuildSessions(client, userId, settings.session_gap_minutes, null);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Writes
+// ---------------------------------------------------------------------------
+
+function validZone(zone: string | null | undefined): string | null {
+  return typeof zone === 'string' && zone && isValidTimeZone(zone) ? zone : null;
+}
+
+const ZONE_UPDATE_BATCH = 5000;
+
+/**
+ * Re-assign every scrobble's timezone from the user's current check-ins (and
+ * the fallback setting), then regroup sessions. Use after adding or fixing
+ * check-ins, or changing the fallback zone. Returns how many plays changed.
+ */
+export async function recomputeTimezones(userId: string): Promise<number> {
+  const settings = await getMusicSettings(userId);
+  const anchors = await loadTimezoneAnchors(userId);
+  const client = await pool.connect();
+  let changed = 0;
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
+    const plays = await client.query(
+      `SELECT id, played_at FROM music_scrobbles WHERE user_id = $1`,
+      [userId],
+    );
+    const rows = plays.rows as { id: string; played_at: Date }[];
+    for (let i = 0; i < rows.length; i += ZONE_UPDATE_BATCH) {
+      const slice = rows.slice(i, i + ZONE_UPDATE_BATCH);
+      const result = await client.query(
+        `UPDATE music_scrobbles m SET timezone = v.tz
+         FROM unnest($1::uuid[], $2::text[]) AS v(id, tz)
+         WHERE m.id = v.id AND m.timezone IS DISTINCT FROM v.tz`,
+        [
+          slice.map((r) => r.id),
+          slice.map((r) => timezoneAt(anchors, new Date(r.played_at).getTime(), settings.timezone)),
+        ],
+      );
+      changed += result.rowCount ?? 0;
+    }
+    await rebuildSessions(client, userId, settings.session_gap_minutes, null);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+  return changed;
+}
+
+/** Insert one scrobble. Returns false when it was already stored. */
+export async function insertScrobble(userId: string, s: ScrobbleInput): Promise<boolean> {
+  const settings = await getMusicSettings(userId);
+  const timezone = validZone(s.timezone) ?? (await resolveTimezones(userId, [s.playedAt], settings.timezone))[0];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
+    const inserted = await client.query(
+      `INSERT INTO music_scrobbles
+         (user_id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [
+        userId, s.playedAt, s.title, s.artists, s.album ?? null, s.albumArtists ?? [],
+        s.trackLength ?? null, s.listenedFor ?? null, s.source ?? null, timezone,
+      ],
+    );
+    if ((inserted.rowCount ?? 0) > 0) {
+      // Sessions within one gap of the new play may merge with it; widen the
+      // rebuilt range to cover them whole.
+      const near = await client.query(
+        `SELECT MIN(started_at) AS from_at, MAX(ended_at) AS to_at
+         FROM music_sessions
+         WHERE user_id = $1
+           AND ended_at >= $2::timestamptz - make_interval(mins => $3::int)
+           AND started_at <= $2::timestamptz + make_interval(mins => $3::int)`,
+        [userId, s.playedAt, settings.session_gap_minutes],
+      );
+      const row = near.rows[0] ?? {};
+      const from = row.from_at && new Date(row.from_at) < s.playedAt ? new Date(row.from_at) : s.playedAt;
+      const to = row.to_at && new Date(row.to_at) > s.playedAt ? new Date(row.to_at) : s.playedAt;
+      await rebuildSessions(client, userId, settings.session_gap_minutes, { from, to });
+    }
+    await client.query('COMMIT');
+    return (inserted.rowCount ?? 0) > 0;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+const BULK_BATCH = 1000;
+
+/**
+ * Insert many scrobbles (import / restore), skipping duplicates, then rebuild
+ * all sessions once. Returns the number of newly inserted rows.
+ */
+export async function insertScrobblesBulk(
+  userId: string,
+  rows: ScrobbleInput[],
+  opts: {
+    /** Transaction to run in (restore); a connection is opened when omitted. */
+    db?: Queryable;
+    /** Session gap to build with, when the stored one isn't in place yet (restore). */
+    sessionGapMinutes?: number;
+    /** Fallback zone for plays with neither a zone nor an earlier check-in (restore). */
+    fallbackTimezone?: string;
+  } = {},
+): Promise<number> {
+  let inserted = 0;
+  const ownsClient = opts.db == null;
+  const client = (opts.db ?? (await pool.connect())) as PoolClient;
+  try {
+    if (ownsClient) await client.query('BEGIN');
+    // Inside a caller's transaction read settings through it (a pool read
+    // could block on its uncommitted rows); never generate a key there.
+    const settings = ownsClient ? await getMusicSettings(userId) : await readMusicSettings(userId, client);
+    // Plays that arrive without a zone take it from the user's check-ins.
+    const anchors = rows.some((r) => !validZone(r.timezone)) ? await loadTimezoneAnchors(userId) : [];
+    const fallback = opts.fallbackTimezone ?? settings.timezone;
+    for (let i = 0; i < rows.length; i += BULK_BATCH) {
+      const batch = rows.slice(i, i + BULK_BATCH).map((r) => ({
+        timezone: validZone(r.timezone) ?? timezoneAt(anchors, r.playedAt.getTime(), fallback),
+        played_at: r.playedAt.toISOString(),
+        title: r.title,
+        artists: r.artists,
+        album: r.album ?? null,
+        album_artists: r.albumArtists ?? [],
+        track_length: r.trackLength ?? null,
+        listened_for: r.listenedFor ?? null,
+        source: r.source ?? null,
+      }));
+      const result = await client.query(
+        `INSERT INTO music_scrobbles
+           (user_id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone)
+         SELECT $1, r.played_at, r.title,
+                ARRAY(SELECT jsonb_array_elements_text(r.artists)),
+                r.album,
+                ARRAY(SELECT jsonb_array_elements_text(r.album_artists)),
+                r.track_length, r.listened_for, r.source, r.timezone
+         FROM jsonb_to_recordset($2::jsonb) AS r(
+           played_at timestamptz, title text, artists jsonb, album text, album_artists jsonb,
+           track_length int, listened_for int, source text, timezone text)
+         ON CONFLICT DO NOTHING`,
+        [userId, JSON.stringify(batch)],
+      );
+      inserted += result.rowCount ?? 0;
+    }
+    if (inserted > 0) {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
+      await rebuildSessions(client, userId, opts.sessionGapMinutes ?? settings.session_gap_minutes, null);
+    }
+    if (ownsClient) await client.query('COMMIT');
+  } catch (err) {
+    if (ownsClient) await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    if (ownsClient) client.release();
+  }
+  return inserted;
+}
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
+export interface StoredScrobble {
+  played_at: Date;
+  title: string;
+  artists: string[];
+  album: string | null;
+  album_artists: string[];
+  track_length: number | null;
+  listened_for: number | null;
+}
+
+export interface ScrobblePage {
+  rows: StoredScrobble[];
+  hasMore: boolean;
+}
+
+/** Newest-first page of scrobbles, optionally bounded by UTC instants. */
+export async function listScrobbles(
+  userId: string,
+  opts: { from?: Date | null; until?: Date | null; page: number; perPage: number },
+): Promise<ScrobblePage> {
+  const result = await query(
+    `SELECT played_at, title, artists, album, album_artists, track_length, listened_for
+     FROM music_scrobbles
+     WHERE user_id = $1
+       AND ($2::timestamptz IS NULL OR played_at >= $2::timestamptz)
+       AND ($3::timestamptz IS NULL OR played_at < $3::timestamptz)
+     ORDER BY played_at DESC, id DESC
+     LIMIT $4 OFFSET $5`,
+    [userId, opts.from ?? null, opts.until ?? null, opts.perPage + 1, opts.page * opts.perPage],
+  );
+  return {
+    rows: result.rows.slice(0, opts.perPage),
+    hasMore: result.rows.length > opts.perPage,
+  };
+}
+
+export interface MusicTotals {
+  scrobbles: number;
+  listened_seconds: number;
+  unique_artists: number;
+  unique_tracks: number;
+}
+
+/**
+ * SQL fragment bounding plays to local dates, each play read in its own
+ * timezone; params start at $2.
+ */
+const IN_RANGE = `
+  AND ($2::date IS NULL OR (played_at AT TIME ZONE timezone)::date >= $2::date)
+  AND ($3::date IS NULL OR (played_at AT TIME ZONE timezone)::date <= $3::date)`;
+const PLAY_SECONDS = `COALESCE(listened_for, track_length, 0)`;
+const ALBUM_ARTISTS = `CASE WHEN cardinality(album_artists) > 0 THEN album_artists ELSE artists[1:1] END`;
+
+function rangeParams(userId: string, from: string | null, to: string | null) {
+  return [userId, from || null, to || null];
+}
+
+export async function getTotals(userId: string, from: string | null, to: string | null): Promise<MusicTotals> {
+  const result = await query(
+    `SELECT COUNT(*)::int AS scrobbles,
+            COALESCE(SUM(${PLAY_SECONDS}), 0)::int AS listened_seconds,
+            (SELECT COUNT(DISTINCT a) FROM music_scrobbles m2, unnest(m2.artists) a
+              WHERE m2.user_id = $1
+                AND ($2::date IS NULL OR (m2.played_at AT TIME ZONE m2.timezone)::date >= $2::date)
+                AND ($3::date IS NULL OR (m2.played_at AT TIME ZONE m2.timezone)::date <= $3::date))::int AS unique_artists,
+            COUNT(DISTINCT (lower(title), artists))::int AS unique_tracks
+     FROM music_scrobbles
+     WHERE user_id = $1 ${IN_RANGE}`,
+    rangeParams(userId, from, to),
+  );
+  return result.rows[0];
+}
+
+export type LibraryView = 'songs' | 'artists' | 'albums';
+
+/** Aggregated plays per song / artist / album in the period, most played first. */
+export async function getLibrary(
+  userId: string,
+  view: LibraryView,
+  from: string | null,
+  to: string | null,
+  limit: number,
+) {
+  const params = [...rangeParams(userId, from, to), limit];
+  const agg = `COUNT(*)::int AS plays,
+               COALESCE(SUM(${PLAY_SECONDS}), 0)::int AS listened_seconds,
+               MIN(played_at) AS first_played_at,
+               MAX(played_at) AS last_played_at`;
+  let sql: string;
+  if (view === 'artists') {
+    sql = `SELECT a.artist AS name,
+                  COUNT(DISTINCT lower(m.title))::int AS unique_tracks,
+                  ${agg}
+           FROM music_scrobbles m, unnest(m.artists) AS a(artist)
+           WHERE m.user_id = $1
+             AND ($2::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date >= $2::date)
+             AND ($3::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date <= $3::date)
+           GROUP BY a.artist
+           ORDER BY plays DESC, name ASC LIMIT $4`;
+  } else if (view === 'albums') {
+    sql = `SELECT MIN(album) AS name, ${ALBUM_ARTISTS} AS artists,
+                  COUNT(DISTINCT lower(title))::int AS unique_tracks, ${agg}
+           FROM music_scrobbles
+           WHERE user_id = $1 AND album IS NOT NULL AND album <> '' ${IN_RANGE}
+           GROUP BY lower(album), ${ALBUM_ARTISTS}
+           ORDER BY plays DESC, name ASC LIMIT $4`;
+  } else {
+    sql = `SELECT MIN(title) AS name, artists, MIN(album) AS album, ${agg}
+           FROM music_scrobbles
+           WHERE user_id = $1 ${IN_RANGE}
+           GROUP BY lower(title), artists
+           ORDER BY plays DESC, name ASC LIMIT $4`;
+  }
+  const result = await query(sql, params);
+  return result.rows;
+}
+
+export async function getSessionTracks(userId: string, sessionId: string) {
+  const result = await query(
+    `SELECT played_at, title, artists, album, track_length, listened_for, timezone
+     FROM music_scrobbles WHERE user_id = $1 AND session_id = $2
+     ORDER BY played_at ASC, id ASC`,
+    [userId, sessionId],
+  );
+  return result.rows;
+}
+
+export async function getCounts(userId: string): Promise<{ scrobbles: number; last_scrobbled_at: string | null }> {
+  const result = await query(
+    `SELECT COUNT(*)::int AS scrobbles, MAX(played_at) AS last_scrobbled_at
+     FROM music_scrobbles WHERE user_id = $1`,
+    [userId],
+  );
+  return result.rows[0];
+}

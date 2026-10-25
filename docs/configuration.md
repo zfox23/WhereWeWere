@@ -37,4 +37,4 @@ cp .env.example .env
 ## Notes
 
 - This project is currently a single-user deployment model.
-- Integrations (Immich, Maloja, Dawarich, LLM) are configured per-user in the app's **Settings → Integrations** page, not via environment variables.
+- Integrations (Immich, Dawarich, LLM) are configured per-user in the app's **Settings → Integrations** page, not via environment variables.

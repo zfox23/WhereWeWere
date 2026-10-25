@@ -29,7 +29,7 @@ import { LocationSettings } from './ui/LocationSettings';
 import { LocationProvider } from './ui/LocationContext';
 import { LocationReflectionCard } from './ui/LocationReflectionCard';
 import { stats } from '../../client/src/api/client';
-import type { CheckIn, ImmichAsset, Scrobble } from '../../client/src/types';
+import type { CheckIn, ImmichAsset } from '../../client/src/types';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -79,8 +79,6 @@ function LocationCardAdapter(props: CheckinCardProps) {
       checkin={toLegacyCheckin(props)}
       immichUrl={props.integrations.immich_url ?? null}
       photos={(props.photos as ImmichAsset[] | null) ?? null}
-      scrobbles={(props.scrobbles as Scrobble[]) ?? []}
-      malojaUrl={props.integrations.maloja_url ?? null}
       dawarichUrl={props.integrations.dawarich_url ?? null}
       compact={props.compact}
     />

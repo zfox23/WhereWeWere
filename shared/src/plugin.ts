@@ -308,6 +308,14 @@ export interface CheckinTypeServerPlugin {
   api?: PluginApiMount | PluginApiMount[];
 
   /**
+   * Routes mounted at the server root (`mount` is the full path, e.g.
+   * '/apis/mlj_1'), BEFORE the `API_ACCESS_TOKEN` guard. For protocols that
+   * third-party clients speak with their own credentials; the router must
+   * authenticate requests itself.
+   */
+  rootApi?: PluginApiMount | PluginApiMount[];
+
+  /**
    * Timeline SELECT branch for this type. The returned SQL must be a single
    * SELECT producing at least these columns:
    *
@@ -448,7 +456,7 @@ export interface CheckinTypeServerPlugin {
   // -----------------------------------------------------------------
 
   /**
-   * Timeline/anchor lookup used by photo (Immich) and scrobble (Maloja)
+   * Timeline/anchor lookup used by photo (Immich)
    * enrichment: given a set of check-in ids, return their timestamps. The
    * SQL is a single SELECT producing `(id, checked_in_at)` rows and must
    * filter on `$1` (a `uuid[]` parameter). The framework UNIONs this with
@@ -466,6 +474,16 @@ export interface CheckinTypeServerPlugin {
    * the registered plugins and uses the first non-null result.
    */
   latestTimezoneAsOf?: () => { sql: string };
+
+  /**
+   * Every timezone-bearing check-in this type has, for assigning a local
+   * timezone to data that arrives without one (e.g. music scrobbles). The SQL
+   * is a single SELECT filtering on `$1` (user_id) that produces
+   * `(at timestamptz, timezone text)` rows; rows without a timezone should be
+   * left out. Consumers sort the union across plugins and give a moment the
+   * timezone of the latest anchor at or before it.
+   */
+  timezoneAnchors?: () => { sql: string };
 
   /**
    * Anniversary branch for the "this day in previous years" reflection
@@ -522,7 +540,7 @@ export interface CheckinTypeServerPlugin {
 export interface CheckinCardProps {
   item: PluginTimelineEntry;
   compact?: boolean;
-  /** Integration URLs the app has loaded from settings (immich_url, maloja_url, ...). */
+  /** Integration URLs the app has loaded from settings (immich_url, dawarich_url, ...). */
   integrations: Record<string, string | null>;
   /**
    * The plugin's manifest fields. Provided by the framework so the default
@@ -534,9 +552,6 @@ export interface CheckinCardProps {
   // Typed loosely to avoid coupling the contract to the client's asset shapes.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   photos?: any[] | null;
-  /** Music scrobbles associated with this check-in. */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  scrobbles?: any[];
   /**
    * The user's effective settings for this plugin (from `plugin_settings`
    * with declared defaults applied). Cards read type-specific preferences
@@ -614,6 +629,12 @@ export interface CheckinTypeClientPlugin {
   fabOrder?: number;
   /** Route of the new check-in page, e.g. '/mood-check-in'. */
   checkInPath: string;
+  /**
+   * True for types whose data arrives from elsewhere (imports, webhooks,
+   * scrobblers) and is never created by hand: no FAB entry, hotkey, check-in
+   * route, or "add" link on empty days.
+   */
+  noCheckIn?: boolean;
   /**
    * Route pattern for the detail page, e.g. '/mood-checkins/:id'. When
    * omitted the app routes details to `/checkins/:pluginId/:id` and renders

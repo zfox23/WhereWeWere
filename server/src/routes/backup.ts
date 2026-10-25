@@ -63,7 +63,6 @@ interface BackupSettings {
   dawarich_api_key: string | null;
   immich_url: string | null;
   immich_api_key: string | null;
-  maloja_url: string | null;
   theme: string | null;
   system_light_theme: string | null;
   system_dark_theme: string | null;
@@ -259,17 +258,16 @@ async function runRestore(
     await client.query(
       `INSERT INTO user_settings (
          user_id, dawarich_url, dawarich_api_key,
-         immich_url, immich_api_key, maloja_url,
+         immich_url, immich_api_key,
          theme, system_light_theme, system_dark_theme,
          distance_unit
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (user_id) DO UPDATE SET
           dawarich_url = COALESCE(EXCLUDED.dawarich_url, user_settings.dawarich_url),
           dawarich_api_key = COALESCE(EXCLUDED.dawarich_api_key, user_settings.dawarich_api_key),
           immich_url = COALESCE(EXCLUDED.immich_url, user_settings.immich_url),
           immich_api_key = COALESCE(EXCLUDED.immich_api_key, user_settings.immich_api_key),
-          maloja_url = COALESCE(EXCLUDED.maloja_url, user_settings.maloja_url),
           theme = COALESCE(EXCLUDED.theme, user_settings.theme),
           system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
           system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
@@ -281,7 +279,6 @@ async function runRestore(
         toStringOrNull(s.dawarich_api_key),
         toStringOrNull(s.immich_url),
         toStringOrNull(s.immich_api_key),
-        toStringOrNull(s.maloja_url),
         toStringOrNull(s.theme),
         toStringOrNull(s.system_light_theme),
         toStringOrNull(s.system_dark_theme),
@@ -413,7 +410,6 @@ router.get('/export', async (_req: Request, res: Response) => {
         query(
           `SELECT dawarich_url, dawarich_api_key,
                   immich_url, immich_api_key,
-                  maloja_url,
                   theme,
                   system_light_theme,
                   system_dark_theme,
@@ -658,14 +654,13 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     if (resetIntegrationsSettings) {
       const integrationSettingsResult = await client.query(
-        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key, maloja_url)
-         VALUES ($1, NULL, NULL, NULL, NULL, NULL)
+        `INSERT INTO user_settings (user_id, dawarich_url, dawarich_api_key, immich_url, immich_api_key)
+         VALUES ($1, NULL, NULL, NULL, NULL)
          ON CONFLICT (user_id) DO UPDATE SET
            dawarich_url = NULL,
            dawarich_api_key = NULL,
            immich_url = NULL,
            immich_api_key = NULL,
-           maloja_url = NULL,
            updated_at = NOW()`,
         [USER_ID]
       );

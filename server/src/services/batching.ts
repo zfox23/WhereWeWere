@@ -1,6 +1,6 @@
 /**
  * Helpers for endpoints that fan a batch of check-in ids out to upstream
- * services (Immich, Maloja).
+ * services (Immich).
  */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

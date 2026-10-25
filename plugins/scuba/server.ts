@@ -506,7 +506,7 @@ export const server: CheckinTypeServerPlugin = {
   // Cross-cutting service hooks
   // ------------------------------------------------------------------
 
-  // Photo/scrobble anchor timestamps for Immich and Maloja enrichment.
+  // Photo/scrobble anchor timestamps for Immich and music enrichment.
   resolveTimestamps: () => ({
     sql: `SELECT id, checked_in_at FROM plugin_checkins
           WHERE plugin_id = '${PLUGIN_ID}' AND id = ANY($1::uuid[])`,

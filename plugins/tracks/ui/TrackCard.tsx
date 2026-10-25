@@ -13,7 +13,6 @@ import type { CheckinCardProps } from 'wwp-shared';
 import type { TrackTimelineFields } from './types';
 import { formatDistance, type DistanceUnit } from '../../location/ui/geo';
 import { settings } from '../../../client/src/api/client';
-import { ScrobbleList } from '../../../client/src/components/ScrobbleList';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { PhotoSection } from '../../../client/src/components/checkin-card/PhotoSection';
 import { TimestampLink } from '../../../client/src/components/checkin-card/TimestampLink';
@@ -30,13 +29,12 @@ function formatDuration(totalSeconds: number): string {
   return `${hours}h ${minutes}m`;
 }
 
-export function TrackCard({ item, integrations, photos, scrobbles, compact = false }: CheckinCardProps) {
+export function TrackCard({ item, integrations, photos, compact = false }: CheckinCardProps) {
   const { pathname } = useLocation();
   const track = item as unknown as TrackTimelineFields & {
     companions?: string[] | null;
   };
   const immichUrl = integrations.immich_url ?? null;
-  const malojaUrl = integrations.maloja_url ?? null;
   const resolvedAssets = useResolvedPhotos(item.id, immichUrl, photos as any[] | null);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
 
@@ -118,8 +116,6 @@ export function TrackCard({ item, integrations, photos, scrobbles, compact = fal
             assets={resolvedAssets}
             checkedInAt={startedAt}
           />
-
-          {scrobbles && <ScrobbleList scrobbles={scrobbles as any[]} checkedInAt={startedAt} malojaUrl={malojaUrl} />}
 
           <TimestampLink
             to={`/tracks/${item.id}`}

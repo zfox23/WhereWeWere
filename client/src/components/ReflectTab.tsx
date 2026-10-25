@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarDays, History, Loader2, Compass } from 'lucide-react';
-import { immich as immichApi, settings, stats, scrobbles } from '../api/client';
+import { immich as immichApi, settings, stats } from '../api/client';
 import { MoodYearInPixels } from '../../../plugins/mood/ui/MoodStats';
 import { moodStats } from '../../../plugins/mood/ui/api';
 import { SleepYearInPixels } from '../../../plugins/sleep/ui/SleepStats';
@@ -12,7 +12,6 @@ import { getClientPlugin, pluginDetailPath } from '../plugins/registry';
 import { PhotoStrip } from './PhotoStrip';
 import { LifeSummarySection } from './LifeSummarySection';
 import { PostcardSection } from './PostcardSection';
-import { MalojaScrobbleStrip } from './MalojaScrobbleStrip';
 import { Heatmap } from './Stats';
 import { normalizeTimezoneForDisplay } from '../utils/checkin';
 import { zonedDayBounds } from '../utils/dayRange';
@@ -91,12 +90,6 @@ function PluginReflectionFallback({ item }: { item: ReflectionItem }) {
   );
 }
 
-type Scrobble = {
-  artists: string[];
-  title: string;
-  time: number;
-};
-
 function getLocalDateIso(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -158,16 +151,12 @@ function OnThisDaySection({
   moodIconPack,
   immichUrl,
   photosByYear,
-  malojaUrl,
-  scrobblesByDate,
   dawarichUrl,
 }: {
   data: ReflectionYear[];
   moodIconPack: 'emoji' | 'lucide' | 'nature';
   immichUrl: string | null;
   photosByYear: Record<number, ImmichAsset[]>;
-  malojaUrl: string | null;
-  scrobblesByDate: Record<string, Scrobble[]>;
   dawarichUrl: string | null;
 }) {
   if (data.length === 0) {
@@ -259,14 +248,6 @@ function OnThisDaySection({
                   immichUrl={immichUrl}
                 />
               )}
-
-              {malojaUrl && yearDate && scrobblesByDate[yearDate] && scrobblesByDate[yearDate].length > 0 && (
-                <MalojaScrobbleStrip
-                  scrobbles={scrobblesByDate[yearDate]}
-                  date={yearDate}
-                  malojaUrl={malojaUrl}
-                />
-              )}
             </div>
           </div>
           );
@@ -283,10 +264,8 @@ export function ReflectTab() {
   const [sleepHeatmap, setSleepHeatmap] = useState<SleepDailyPoint[]>([]);
   const [reflections, setReflections] = useState<ReflectionYear[]>([]);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
-  const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [photosByYear, setPhotosByYear] = useState<Record<number, ImmichAsset[]>>({});
-  const [scrobblesByDate, setScrobblesByDate] = useState<Record<string, Scrobble[]>>({});
   const [moodIconPack, setMoodIconPack] = useState<'emoji' | 'lucide' | 'nature'>('emoji');
   const [llmConfigured, setLlmConfigured] = useState(false);
   const [llmImageSupport, setLlmImageSupport] = useState(true);
@@ -327,11 +306,6 @@ export function ReflectTab() {
         } else {
           setImmichUrl(null);
         }
-        if (userSettings?.maloja_url) {
-          setMalojaUrl(userSettings.maloja_url.replace(/\/+$/, ''));
-        } else {
-          setMalojaUrl(null);
-        }
         if (userSettings?.dawarich_url) {
           setDawarichUrl(userSettings.dawarich_url.replace(/\/+$/, ''));
         } else {
@@ -356,71 +330,6 @@ export function ReflectTab() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!malojaUrl || reflections.length === 0) {
-      setScrobblesByDate({});
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    // Collect all unique dates from reflections
-    const uniqueDates = new Set<string>();
-    // Keyed by each year's local "on this day" date (not the UTC date of the
-    // stored instant, which is the next day for evening check-ins in the Americas).
-    const today = getLocalDateIso();
-    for (const year of reflections) {
-      if (year.items.length > 0) uniqueDates.add(reflectionDateForYear(year.year, today));
-    }
-
-    if (uniqueDates.size === 0) {
-      setScrobblesByDate({});
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    // Convert date format from YYYY-MM-DD to YYYY/MM/DD for Maloja
-    const malojaDateFormat = (dateStr: string) => {
-      return dateStr.replace(/-/g, '/');
-    };
-
-    // Fetch scrobbles for each unique date
-    Promise.all(
-      Array.from(uniqueDates).map((date) =>
-        scrobbles
-          .forDate(malojaDateFormat(date))
-          .then((scrobbleList) => ({ date, scrobbles: scrobbleList }))
-          .catch((err) => {
-            console.error(`Failed to fetch scrobbles for ${date}:`, err);
-            return { date, scrobbles: [] };
-          })
-      )
-    )
-      .then((results) => {
-        if (cancelled) return;
-
-        const byDate: Record<string, Scrobble[]> = {};
-        for (const { date, scrobbles: scrobbleList } of results) {
-          byDate[date] = scrobbleList;
-        }
-
-        setScrobblesByDate(byDate);
-      })
-      .catch((err) => {
-        console.error('Failed to load reflection scrobbles:', err);
-        if (!cancelled) {
-          setScrobblesByDate({});
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [malojaUrl, reflections]);
 
   useEffect(() => {
     let cancelled = false;
@@ -589,8 +498,6 @@ export function ReflectTab() {
           moodIconPack={moodIconPack}
           immichUrl={immichUrl}
           photosByYear={photosByYear}
-          malojaUrl={malojaUrl}
-          scrobblesByDate={scrobblesByDate}
           dawarichUrl={dawarichUrl}
         />
       )}

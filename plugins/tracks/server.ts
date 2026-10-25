@@ -1204,7 +1204,7 @@ export const server: CheckinTypeServerPlugin = {
   // Cross-cutting service hooks
   // ------------------------------------------------------------------
 
-  // Photo (Immich) / scrobble (Maloja) anchor timestamps: replace the
+  // Photo (Immich) / scrobble anchor timestamps: replace the
   // hard-coded tracks UNION branches in those core routes.
   resolveTimestamps: () => ({
     sql: 'SELECT id, started_at AS checked_in_at FROM tracks WHERE id = ANY($1::uuid[])',

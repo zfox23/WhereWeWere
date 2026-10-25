@@ -5,8 +5,8 @@ import {
   Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink,
   Navigation2, List, Plus, Trash2, LocateFixed
 } from 'lucide-react';
-import { venues, checkins, settings, scrobbles as scrobblesApi, immich as immichApi, venueLists } from '../../../client/src/api/client';
-import { Venue, CheckIn, VenueCategory, Scrobble, ImmichAsset, VenueList } from '../../../client/src/types';
+import { venues, checkins, settings, immich as immichApi, venueLists } from '../../../client/src/api/client';
+import { Venue, CheckIn, VenueCategory, ImmichAsset, VenueList } from '../../../client/src/types';
 import ScorePicker from '../../../client/src/components/ScorePicker';
 import Stars from '../../../client/src/components/Stars';
 import VenueEditMap from './VenueEditMap';
@@ -96,8 +96,6 @@ export default function VenueDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
-  const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
-  const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric');
 
@@ -139,7 +137,6 @@ export default function VenueDetail() {
   useEffect(() => {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
-      if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
       if (s.distance_unit === 'metric' || s.distance_unit === 'imperial') {
         setDistanceUnit(s.distance_unit);
       }
@@ -208,15 +205,6 @@ export default function VenueDetail() {
   useEffect(() => {
     fetchData();
   }, [id]);
-
-  // Fetch scrobbles for loaded check-ins
-  useEffect(() => {
-    if (!malojaUrl || venueCheckins.length === 0) return;
-    const ids = venueCheckins.map((c) => c.id);
-    scrobblesApi.forCheckins(ids).then((data) => {
-      setScrobblesMap(data);
-    }).catch(() => { });
-  }, [venueCheckins, malojaUrl]);
 
   // Fetch photos for loaded check-ins (batch with deduplication)
   useEffect(() => {
@@ -821,8 +809,6 @@ export default function VenueDetail() {
                 checkin={checkin}
                 immichUrl={immichUrl}
                 photos={photosMap[checkin.id] ?? null}
-                scrobbles={scrobblesMap[checkin.id]}
-                malojaUrl={malojaUrl}
               />
             ))}
           </div>

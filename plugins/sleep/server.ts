@@ -986,7 +986,7 @@ export const server: CheckinTypeServerPlugin = {
   // Cross-cutting service hooks
   // ------------------------------------------------------------------
 
-  // Photo/scrobble anchor timestamps for Immich and Maloja enrichment
+  // Photo/scrobble anchor timestamps for Immich and music enrichment
   // (parity with the other check-in types; sleep entries are currently not
   // photo-attached but may be in future).
   resolveTimestamps: () => ({

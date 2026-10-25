@@ -18,6 +18,7 @@ import { client as tracksClient, manifest as tracksManifest } from '../../../plu
 import { client as locationClient, manifest as locationManifest } from '../../../plugins/location/client';
 import { client as mediaClient, manifest as mediaManifest } from '../../../plugins/media/client';
 import { client as scubaClient, manifest as scubaManifest } from '../../../plugins/scuba/client';
+import { client as musicClient, manifest as musicManifest } from '../../../plugins/music/client';
 
 const registrations: CheckinTypeClient[] = [
   { ...moodManifest, client: moodClient },
@@ -26,6 +27,7 @@ const registrations: CheckinTypeClient[] = [
   { ...locationManifest, client: locationClient },
   { ...mediaManifest, client: mediaClient },
   { ...scubaManifest, client: scubaClient },
+  { ...musicManifest, client: musicClient },
 ];
 
 const byId = new Map<string, CheckinTypeClient>();

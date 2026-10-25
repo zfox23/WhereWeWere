@@ -2603,7 +2603,7 @@ export const server: CheckinTypeServerPlugin = {
   // Cross-cutting service hooks
   // ------------------------------------------------------------------
 
-  // Photo/scrobble anchor timestamps for Immich and Maloja enrichment.
+  // Photo/scrobble anchor timestamps for Immich and music enrichment.
   resolveTimestamps: () => ({
     sql: 'SELECT id, checked_in_at FROM media_checkins WHERE id = ANY($1::uuid[])',
   }),
@@ -2726,6 +2726,14 @@ export const server: CheckinTypeServerPlugin = {
             AND checked_in_at <= $1
           ORDER BY checked_in_at DESC
           LIMIT 1`,
+  }),
+
+  // Every media check-in's timezone, for timezone assignment to
+  // timezone-less data (music scrobbles).
+  timezoneAnchors: () => ({
+    sql: `SELECT checked_in_at AS at, checkin_timezone AS timezone
+          FROM media_checkins
+          WHERE user_id = $1 AND checkin_timezone IS NOT NULL`,
   }),
 
   // Timestamp reconciliation participation. Media-style scan (scanAll:

@@ -23,7 +23,7 @@ It helps you record where you were, how you felt, and how you slept, then browse
 - A Profile page with reflection-worthy stats, plus LLM-assisted reflection summaries
 - Unified timeline across all check-in types
 - Data import flows (Swarm, Daylio, Sleep as Android, Yamtrack) and a Plex scrobble webhook
-- Optional integrations with Immich, Maloja, Dawarich, and any LLM-compatible API
+- Optional integrations with Immich, Dawarich, and any LLM-compatible API; music scrobbles arrive from [multi-scrobbler](docs/music.md)
 - Installable PWA for mobile and desktop
 - Full backup & restore (JSON and ZIP bundles, including uploaded files)
 

@@ -133,7 +133,6 @@ export default function Settings() {
           initialDawarichApiKey={data.dawarich_api_key || ''}
           initialImmichUrl={data.immich_url || ''}
           initialImmichApiKey={data.immich_api_key || ''}
-          initialMalojaUrl={data.maloja_url || ''}
           initialLlmApiUrl={data.llm_api_url || ''}
           initialLlmModel={data.llm_model || ''}
           initialLlmReasoningLevel={data.llm_reasoning_level || 'medium'}

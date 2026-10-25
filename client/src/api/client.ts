@@ -372,14 +372,6 @@ export const immich = {
     `${API_BASE}/immich/thumbnail/${assetId}?size=${size}`,
 };
 
-// Scrobbles
-export const scrobbles = {
-  forCheckins: (checkinIds: string[]) =>
-    request<Record<string, any[]>>(`/scrobbles?checkin_ids=${checkinIds.join(',')}`),
-  forDate: (date: string) =>
-    request<any[]>(`/scrobbles/by-date?date=${encodeURIComponent(date)}`),
-};
-
 // Timeline
 export const timeline = {
   list: (params?: Record<string, string>) =>

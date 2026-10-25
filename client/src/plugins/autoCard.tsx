@@ -20,7 +20,6 @@ export function PluginTimelineCard({
   integrations,
   compact = false,
   photos,
-  scrobbles,
   settings,
 }: {
   item: CheckinCardProps['item'];
@@ -28,7 +27,6 @@ export function PluginTimelineCard({
   integrations: Record<string, string | null>;
   compact?: boolean;
   photos?: CheckinCardProps['photos'];
-  scrobbles?: CheckinCardProps['scrobbles'];
   settings?: CheckinCardProps['settings'];
 }) {
   const CardComponent = plugin.client.timelineCard ?? AutoCheckInCard;
@@ -39,7 +37,6 @@ export function PluginTimelineCard({
       compact={compact}
       fields={plugin.fields}
       photos={photos}
-      scrobbles={scrobbles}
       settings={settings}
     />
   );

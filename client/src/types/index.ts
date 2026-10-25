@@ -329,7 +329,6 @@ export interface UserSettings {
   dawarich_api_key: string | null;
   immich_url: string | null;
   immich_api_key: string | null;
-  maloja_url: string | null;
   // Media provider API keys + plex_usernames live in the media plugin's
   // plugin_settings (see plugins/media), not in user_settings.
   llm_api_url: string | null;
@@ -348,12 +347,6 @@ export interface ImmichAsset {
   id: string;
   thumbhash: string | null;
   originalFileName: string;
-}
-
-export interface Scrobble {
-  artists: string[];
-  title: string;
-  time: number;
 }
 
 export interface Job {

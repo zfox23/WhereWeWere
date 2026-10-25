@@ -885,8 +885,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // The shared companion table has no FK into checkins; clean up explicitly.
     await deleteCompanionsForCheckins('location', [String(id)]);
-    // Likewise the Maloja scrobble cache (its FK was dropped in migration 017).
-    await query('DELETE FROM checkin_scrobbles WHERE checkin_id = $1', [id]);
 
     res.json({ message: 'Check-in deleted', id });
   } catch (err) {
@@ -3325,21 +3323,13 @@ export const server: CheckinTypeServerPlugin = {
   },
 
   /**
-   * Start-over: delete the user's location check-ins. Scrobbles attached to
-   * those check-ins go first (they reference checkins); venues and
+   * Start-over: delete the user's location check-ins. Venues and
    * venue_categories are shared reference data and are kept.
    */
   deleteUserData: async ({ user_id, client: txClient }) => {
     const client = txClient ?? null;
     const run = (sql: string, values: unknown[]) =>
       client ? client.query(sql, values) : query(sql, values);
-
-    // Detach scrobbles (core-owned table) that point at this user's check-ins.
-    await run(
-      `DELETE FROM checkin_scrobbles
-       WHERE checkin_id IN (SELECT id FROM checkins WHERE user_id = $1)`,
-      [user_id]
-    );
 
     // Companions (shared core table) are removed explicitly for clarity.
     await run(
@@ -3403,7 +3393,7 @@ export const server: CheckinTypeServerPlugin = {
   // Cross-cutting service hooks
   // ------------------------------------------------------------------
 
-  // Photo/scrobble anchor timestamps for Immich and Maloja enrichment.
+  // Photo/scrobble anchor timestamps for Immich and music enrichment.
   resolveTimestamps: () => ({
     sql: 'SELECT id, checked_in_at FROM checkins WHERE id = ANY($1::uuid[])',
   }),
@@ -3418,6 +3408,14 @@ export const server: CheckinTypeServerPlugin = {
            AND checked_in_at <= $1
          ORDER BY checked_in_at DESC
          LIMIT 1`,
+  }),
+
+  // Every located check-in's timezone, for timezone assignment to
+  // timezone-less data (music scrobbles).
+  timezoneAnchors: () => ({
+    sql: `SELECT checked_in_at AS at, checkin_timezone AS timezone
+          FROM checkins
+          WHERE user_id = $1 AND checkin_timezone IS NOT NULL`,
   }),
 
   // "This day in previous years" reflection branch.

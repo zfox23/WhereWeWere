@@ -63,9 +63,11 @@ function PluginDetailPage({ pluginId }: { pluginId: string }) {
 /** Routes contributed by check-in plugins. */
 const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
   const elements: React.ReactElement[] = [];
-  elements.push(
-    <Route key={`form-${plugin.id}`} path={plugin.client.checkInPath} element={<PluginCheckInPage pluginId={plugin.id} />} />,
-  );
+  if (!plugin.client.noCheckIn) {
+    elements.push(
+      <Route key={`form-${plugin.id}`} path={plugin.client.checkInPath} element={<PluginCheckInPage pluginId={plugin.id} />} />,
+    );
+  }
   const detailPath = plugin.client.detailPath;
   if (detailPath) {
     elements.push(

@@ -252,18 +252,6 @@ describe('Location plugin API (integration)', () => {
     });
   });
 
-  describe('check-in delete', () => {
-    it('removes the cached scrobbles for the deleted check-in', async () => {
-      const venueId = await insertVenue('Scrobbly', 10, 10);
-      const id = await insertCheckin(venueId, '2024-01-01T12:00:00Z', 'UTC');
-      await query(`INSERT INTO checkin_scrobbles (checkin_id, scrobbles) VALUES ($1, '[]'::jsonb)`, [id]);
-      const res = await request(app).delete(`/api/v1/location-checkins/${id}`);
-      expect(res.status).toBe(200);
-      const left = await query('SELECT COUNT(*)::int AS n FROM checkin_scrobbles WHERE checkin_id = $1', [id]);
-      expect(left.rows[0].n).toBe(0);
-    });
-  });
-
   describe('unified timeline paging', () => {
     it('pages across plugin branches in order without duplicates or gaps', async () => {
       const venueId = await insertVenue('Timeline', 10, 10);

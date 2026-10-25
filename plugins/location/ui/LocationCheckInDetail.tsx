@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, Music, ChevronRight, CalendarDays, Users, List } from 'lucide-react';
+import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, ChevronRight, CalendarDays, Users, List } from 'lucide-react';
 import { BackButton } from '../../../client/src/components/BackButton';
 import Stars from '../../../client/src/components/Stars';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
-import { checkins, settings, scrobbles as scrobblesApi, immich as immichApi, checkinLists } from '../../../client/src/api/client';
-import type { Scrobble, ImmichAsset, CheckinList } from '../../../client/src/types';
+import { checkins, settings, immich as immichApi, checkinLists } from '../../../client/src/api/client';
+import type { ImmichAsset, CheckinList } from '../../../client/src/types';
 import MapView from './MapView';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
@@ -20,20 +20,6 @@ function formatDate(dateStr: string, timeZone?: string | null): string {
     ...(timeZone ? { timeZone, timeZoneName: 'short' } : {}),
   };
   return new Intl.DateTimeFormat('en-US', options).format(new Date(dateStr));
-}
-
-function formatMalojaDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
-}
-
-function buildMalojaTrackUrl(malojaUrl: string, artists: string[], title?: string): string {
-  const params = new URLSearchParams();
-  for (const artist of artists) {
-    params.append('trackartist', artist);
-  }
-  if (title) params.append('title', title);
-  return `${malojaUrl}/track?${params.toString()}`;
 }
 
 function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {
@@ -62,8 +48,6 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
-  const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
-  const [scrobbles, setScrobbles] = useState<Scrobble[]>([]);
   const [photos, setPhotos] = useState<ImmichAsset[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [lists, setLists] = useState<CheckinList[]>([]);
@@ -73,7 +57,6 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
   useEffect(() => {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
-      if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
     }).catch(() => {});
   }, []);
 
@@ -86,13 +69,6 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
       setError(err instanceof Error ? err.message : 'Failed to load check-in');
     }).finally(() => setLoading(false));
   }, [id]);
-
-  useEffect(() => {
-    if (!id || !malojaUrl) return;
-    scrobblesApi.forCheckins([id]).then((data) => {
-      setScrobbles(data[id] || []);
-    }).catch(() => {});
-  }, [id, malojaUrl]);
 
   useEffect(() => {
     if (!id || !immichUrl) return;
@@ -282,54 +258,6 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
               >
                 View in time
               </a>
-            </div>
-          </div>
-        )}
-
-        {/* Scrobbles */}
-        {scrobbles.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
-              <Music size={14} />
-              <span className="font-medium">Listening</span>
-            </div>
-            <div className="space-y-1">
-              {scrobbles.map((s, i) => (
-                <div key={i} className="text-sm text-gray-500 dark:text-gray-400">
-                  {malojaUrl ? (
-                    <>
-                      {s.artists.map((artist: string, j: number) => (
-                        <span key={j}>
-                          {j > 0 && ', '}
-                          <a
-                            href={buildMalojaTrackUrl(malojaUrl, [artist])}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                          >
-                            {artist}
-                          </a>
-                        </span>
-                      ))}
-                    </>
-                  ) : (
-                    <span className="font-medium text-gray-600 dark:text-gray-300">{s.artists.join(', ')}</span>
-                  )}
-                  {' — '}
-                  {malojaUrl ? (
-                    <a
-                      href={buildMalojaTrackUrl(malojaUrl, s.artists, s.title)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                    >
-                      {s.title}
-                    </a>
-                  ) : (
-                    s.title
-                  )}
-                </div>
-              ))}
             </div>
           </div>
         )}

@@ -73,8 +73,6 @@ function MoodCard(props: CheckinCardProps) {
       iconPack={packFromProps || fetchedPack || 'emoji'}
       immichUrl={props.integrations.immich_url ?? null}
       photos={(props.photos as unknown as import('../../client/src/types').ImmichAsset[]) ?? null}
-      scrobbles={(props.scrobbles as unknown as import('../../client/src/types').Scrobble[]) ?? []}
-      malojaUrl={props.integrations.maloja_url ?? null}
       compact={props.compact}
     />
   );

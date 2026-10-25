@@ -1,12 +1,10 @@
 import express from 'express';
 import cors from 'cors';
-import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { config } from './config';
 import { statsRouter } from './routes/stats';
 import { settingsRouter } from './routes/settings';
 import { jobsRouter } from './routes/jobs';
-import { scrobblesRouter } from './routes/scrobbles';
 import { immichRouter } from './routes/immich';
 import { timelineRouter } from './routes/timeline';
 import { backupRouter } from './routes/backup';
@@ -15,14 +13,10 @@ import { importYamtrackRouter } from './routes/import-yamtrack';
 import { companionsRouter } from './routes/companions';
 import { runMigrations } from './db/runMigrations';
 import { isUuid } from './services/batching';
+import { tokensMatch } from './services/tokens';
 import { pluginsRouter } from './plugins/routes';
 import { allPlugins } from './plugins/registry';
 
-function tokensMatch(provided: string, expected: string): boolean {
-  const a = crypto.createHash('sha256').update(provided).digest();
-  const b = crypto.createHash('sha256').update(expected).digest();
-  return crypto.timingSafeEqual(a, b);
-}
 
 export function createApp() {
   const app = express();
@@ -65,6 +59,27 @@ export function createApp() {
     res.status(200).json({ ok: true });
   });
 
+  // Plugin routes that third-party clients call with their own credentials
+  // (e.g. multi-scrobbler), so they sit outside the API_ACCESS_TOKEN guard.
+  const rootMounts = allPlugins().flatMap((plugin) => {
+    const api = plugin.server.rootApi;
+    return api ? (Array.isArray(api) ? api : [api]) : [];
+  });
+  if (rootMounts.length > 0) {
+    // Clients that join a base URL ending in "/" to an absolute path (e.g.
+    // multi-scrobbler: "http://host:3001/" + "/apis/...") send a doubled
+    // slash, which Express would otherwise 404.
+    app.use((req: Request, _res: Response, next: NextFunction) => {
+      if (req.url.startsWith('//') && rootMounts.some((m) => req.url.replace(/^\/+/, '/').startsWith(m.mount))) {
+        req.url = req.url.replace(/^\/+/, '/');
+      }
+      next();
+    });
+    for (const mount of rootMounts) {
+      app.use(mount.mount, mount.router);
+    }
+  }
+
   if (config.apiAccessToken) {
     app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
       const token = req.header('x-wherewewere-token') ?? '';
@@ -93,7 +108,6 @@ export function createApp() {
   app.use('/api/v1/stats', statsRouter);
   app.use('/api/v1/settings', settingsRouter);
   app.use('/api/v1/jobs', jobsRouter);
-  app.use('/api/v1/scrobbles', scrobblesRouter);
   app.use('/api/v1/immich', immichRouter);
   app.use('/api/v1/timeline', timelineRouter);
   app.use('/api/v1/backup', backupRouter);

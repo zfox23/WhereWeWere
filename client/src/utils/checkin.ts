@@ -76,11 +76,6 @@ export function formatTime(dateStr: string, timeZone?: string | null): string {
   return new Intl.DateTimeFormat('en-US', options).format(date);
 }
 
-export function formatMalojaDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  return `${d.getUTCFullYear()}/${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
-}
-
 export function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): string {
   const t = new Date(checkedInAt);
   const takenAfter = new Date(t.getTime() - 20 * 60 * 1000).toISOString();
@@ -91,13 +86,4 @@ export function buildImmichTimeUrl(immichUrl: string, checkedInAt: string): stri
 
 export function buildImmichMapUrl(immichUrl: string, lat: number, lng: number): string {
   return `${immichUrl}/map#15/${lat}/${lng}`;
-}
-
-export function buildMalojaTrackUrl(malojaUrl: string, artists: string[], title?: string): string {
-  const params = new URLSearchParams();
-  for (const artist of artists) {
-    params.append('trackartist', artist);
-  }
-  if (title) params.append('title', title);
-  return `${malojaUrl}/track?${params.toString()}`;
 }

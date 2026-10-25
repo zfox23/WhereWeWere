@@ -8,7 +8,6 @@ interface IntegrationsTabProps {
   initialDawarichApiKey: string;
   initialImmichUrl: string;
   initialImmichApiKey: string;
-  initialMalojaUrl: string;
   initialLlmApiUrl: string;
   initialLlmModel: string;
   initialLlmReasoningLevel: string;
@@ -22,7 +21,6 @@ export function IntegrationsTab({
   initialDawarichApiKey,
   initialImmichUrl,
   initialImmichApiKey,
-  initialMalojaUrl,
   initialLlmApiUrl,
   initialLlmModel,
   initialLlmReasoningLevel,
@@ -34,7 +32,6 @@ export function IntegrationsTab({
   const [dawarichApiKey, setDawarichApiKey] = useState(initialDawarichApiKey);
   const [immichUrl, setImmichUrl] = useState(initialImmichUrl);
   const [immichApiKey, setImmichApiKey] = useState(initialImmichApiKey);
-  const [malojaUrl, setMalojaUrl] = useState(initialMalojaUrl);
   const [llmApiUrl, setLlmApiUrl] = useState(initialLlmApiUrl);
   const [llmModel, setLlmModel] = useState(initialLlmModel);
   const [llmReasoningLevel, setLlmReasoningLevel] = useState(initialLlmReasoningLevel);
@@ -53,7 +50,6 @@ export function IntegrationsTab({
         dawarich_api_key: dawarichApiKey || null,
         immich_url: immichUrl || null,
         immich_api_key: immichApiKey || null,
-        maloja_url: malojaUrl || null,
         llm_api_url: llmApiUrl || null,
         llm_model: llmModel || null,
         llm_reasoning_level: llmReasoningLevel || null,
@@ -127,23 +123,6 @@ export function IntegrationsTab({
                 placeholder="Enter API key"
               />
             </div>
-          </div>
-        </div>
-
-        <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Maloja</h3>
-          <p className="text-xs text-gray-500 mb-2">
-            Connect to your Maloja scrobble server to show what music you were listening to around each check-in.
-          </p>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">URL</label>
-            <input
-              type="url"
-              value={malojaUrl}
-              onChange={(e) => setMalojaUrl(e.target.value)}
-              className="input"
-              placeholder="https://maloja.example.com"
-            />
           </div>
         </div>
 

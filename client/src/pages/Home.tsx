@@ -1,8 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type ChangeEvent, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, AlignJustify, Rows3 } from 'lucide-react';
-import { timeline as timelineApi, settings, scrobbles as scrobblesApi, immich as immichApi } from '../api/client';
-import { Scrobble, ImmichAsset, TimelineItem } from '../types';
+import { timeline as timelineApi, settings, immich as immichApi } from '../api/client';
+import { ImmichAsset, TimelineItem } from '../types';
 import type { PluginTimelineEntry } from 'wwp-shared';
 import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/registry';
 import { PluginTimelineCard } from '../plugins/autoCard';
@@ -33,11 +33,11 @@ const FEED_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 const FEED_SNAPSHOT_MAX_ITEMS = 500;
 
 /** Check-in plugins that should appear in the expandable FAB, by fabOrder. */
-const FAB_PLUGINS = allClientPlugins().slice().sort((a, b) => (a.client.fabOrder ?? 100) - (b.client.fabOrder ?? 100));
+const FAB_PLUGINS = allClientPlugins().filter((p) => !p.client.noCheckIn).slice().sort((a, b) => (a.client.fabOrder ?? 100) - (b.client.fabOrder ?? 100));
 /** Hotkey -> plugin check-in route (plugins with a declared hotkey). */
 const PLUGIN_HOTKEYS: Record<string, string> = Object.fromEntries(
   allClientPlugins()
-    .filter((p) => p.client.hotkey)
+    .filter((p) => p.client.hotkey && !p.client.noCheckIn)
     .map((p) => [p.client.hotkey as string, p.client.checkInPath]),
 );
 
@@ -198,19 +198,16 @@ export default function Home() {
   // auto-paging (otherwise the sentinel re-triggers the failing request forever).
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
-  const [malojaUrl, setMalojaUrl] = useState<string | null>(null);
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
   const [openTimelineDotDate, setOpenTimelineDotDate] = useState<string | null>(null);
   const [pluginSettings, setPluginSettings] = useState<Record<string, Record<string, unknown>>>({});
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('comfortable');
-  const [scrobblesMap, setScrobblesMap] = useState<Record<string, Scrobble[]>>({});
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
 
   // Fetch integration URLs from settings
   useEffect(() => {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
-      if (s.maloja_url) setMalojaUrl(s.maloja_url.replace(/\/+$/, ''));
       if (s.dawarich_url) setDawarichUrl(s.dawarich_url.replace(/\/+$/, ''));
       if (s.timeline_density === 'compact' || s.timeline_density === 'comfortable') setTimelineDensity(s.timeline_density);
     }).catch(() => {});
@@ -550,52 +547,8 @@ export default function Home() {
     };
   }, [fetchTimeline]);
 
-  // All visible timeline items for cross-type photo/scrobble deduplication
+  // All visible timeline items for cross-type photo deduplication
   const timelineItems = useMemo(() => items, [items]);
-
-  // Fetch scrobbles for loaded timeline check-ins
-  useEffect(() => {
-    if (!malojaUrl || timelineItems.length === 0) return;
-    const newIds = timelineItems.map((c) => c.id).filter((id) => !(id in scrobblesMap));
-    if (newIds.length === 0) return;
-    scrobblesApi.forCheckins(newIds).then((data) => {
-      setScrobblesMap((prev) => ({ ...prev, ...data }));
-    }).catch(() => {});
-  }, [timelineItems, malojaUrl, scrobblesMap]);
-
-  // Deduplicate scrobbles across checkins: assign each scrobble to the closest checkin
-  const dedupedScrobblesMap = useMemo(() => {
-    if (timelineItems.length <= 1) return scrobblesMap;
-    const assignments: Map<number, { checkinId: string; checkinTimeMs: number; scrobble: Scrobble }[]> = new Map();
-    for (const item of timelineItems) {
-      const scrobbleList = scrobblesMap[item.id];
-      if (!scrobbleList) continue;
-      const checkinTimeMs = new Date(item.checked_in_at).getTime();
-      for (const s of scrobbleList) {
-        const key = s.time;
-        if (!assignments.has(key)) assignments.set(key, []);
-        assignments.get(key)!.push({ checkinId: item.id, checkinTimeMs, scrobble: s });
-      }
-    }
-    const result: Record<string, Scrobble[]> = {};
-    for (const id of Object.keys(scrobblesMap)) {
-      result[id] = [];
-    }
-    for (const [, entries] of assignments) {
-      let best = entries[0];
-      for (const entry of entries) {
-        if (Math.abs(entry.scrobble.time * 1000 - entry.checkinTimeMs) < Math.abs(best.scrobble.time * 1000 - best.checkinTimeMs)) {
-          best = entry;
-        }
-      }
-      if (!result[best.checkinId]) result[best.checkinId] = [];
-      result[best.checkinId].push(best.scrobble);
-    }
-    for (const id of Object.keys(result)) {
-      result[id].sort((a, b) => a.time - b.time);
-    }
-    return result;
-  }, [scrobblesMap, timelineItems]);
 
   // Fetch photos for loaded timeline check-ins (batch with deduplication)
   useEffect(() => {
@@ -957,10 +910,9 @@ export default function Home() {
                           <PluginTimelineCard
                             item={item as unknown as PluginTimelineEntry}
                             plugin={getClientPlugin(item.type)!}
-                            integrations={{ immich_url: immichUrl, maloja_url: malojaUrl, dawarich_url: dawarichUrl }}
+                            integrations={{ immich_url: immichUrl, dawarich_url: dawarichUrl }}
                             compact={timelineDensity === 'compact'}
                             photos={photosMap[item.id] ?? null}
-                            scrobbles={dedupedScrobblesMap[item.id]}
                             settings={pluginSettings[item.type]}
                           />
                         ) : null}
