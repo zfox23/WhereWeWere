@@ -12,7 +12,7 @@ function assertSafeTestDatabase() {
 
   if (!dbName.toLowerCase().includes('test')) {
     throw new Error(
-      `Refusing to run integration tests against non-test database "${dbName}". Set DATABASE_URL to a dedicated test database.`
+      `Refusing to run integration tests against non-test database "${dbName}". Set TEST_DATABASE_URL (e.g. postgres://user:pass@localhost:5432/wherewewere_test) in .env or your shell; the test DB is created automatically.`
     );
   }
 }

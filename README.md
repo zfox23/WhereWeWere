@@ -68,7 +68,7 @@ Testing:
 
 ```bash
 npm run test            # client + server unit tests
-npm run test:integration  # backend integration tests (requires a test database)
+npm run test:integration  # backend integration tests (needs TEST_DATABASE_URL in .env; wipes that DB)
 ```
 
 See [Testing Strategy](docs/testing-strategy.md) for details.

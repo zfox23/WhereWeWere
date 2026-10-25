@@ -18,8 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "DATABASE_URL=${DATABASE_URL:-postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test} vitest run -c vitest.integration.config.ts",
-    "test:integration:watch": "DATABASE_URL=${DATABASE_URL:-postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test} vitest -c vitest.integration.config.ts"
+    "test:integration": "vitest run -c vitest.integration.config.ts",
+    "test:integration:watch": "vitest -c vitest.integration.config.ts"
   },
   "dependencies": {
     "archiver": "^8.0.0",

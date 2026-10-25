@@ -55,7 +55,9 @@ Local integration test command:
 
 - `npm run test:integration`
 
-Requires a local PostGIS database (by default `postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test`); override with `DATABASE_URL`.
+Requires a PostGIS server and `TEST_DATABASE_URL` (set in the root `.env` or your shell; see `.env.example`), e.g. `postgres://wherewewere:wherewewere@localhost:5432/wherewewere_test`. Use the same credentials and port as `DATABASE_URL` but a database name containing `test`; it is created automatically if missing.
+
+**Warning:** the integration suite `TRUNCATE`s tables. It never reads `DATABASE_URL`, and `testDb.ts` refuses any database whose name does not contain `test`. Do not work around this by pointing tests at the real database.
 
 Coverage thresholds are planned next.
 
