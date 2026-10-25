@@ -13,7 +13,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import type { Response } from 'express';
 import * as unzipper from 'unzipper';
 import type { PluginBackupPayload, PluginBackupFile } from '../plugins/backup';
@@ -35,7 +35,7 @@ export interface BackupManifest {
  */
 export function zipDirectory(dir: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     const chunks: Buffer[] = [];
     archive.on('data', (chunk) => chunks.push(chunk));
     archive.on('error', (err) => reject(err));
@@ -61,7 +61,7 @@ export function streamBackupZip(
   postcards?: unknown,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     let settled = false;
     const done = (err?: Error) => {
       if (settled) return;

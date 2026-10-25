@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,7 +11,7 @@ import {
 
 function makeZip(files: Record<string, string | Buffer>): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = new ZipArchive({ zlib: { level: 9 } });
     const chunks: Buffer[] = [];
     archive.on('data', (c: Buffer) => chunks.push(c));
     archive.on('end', () => resolve(Buffer.concat(chunks)));
