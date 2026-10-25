@@ -1,7 +1,8 @@
 import request from 'supertest';
-import { describe, expect, beforeAll, beforeEach, afterAll, it } from 'vitest';
+import { describe, expect, beforeAll, beforeEach, afterAll, afterEach, it, vi } from 'vitest';
 import app from '../../../../server/src/index';
 import { query } from '../../../../server/src/db';
+import { tmdb } from '../../services/tmdb';
 import {
   DEFAULT_USER_ID,
   resetIntegrationDatabase,
@@ -307,6 +308,121 @@ describe('Plex webhook API', () => {
         .put('/api/v1/plugins/media/settings')
         .send({ not_a_setting: 'x' });
       expect(res.status).toBe(400);
+    });
+  });
+  // Real payloads from current Plex agents: plex:// guids, with the external
+  // ids in Guid[] (an episode's Guid[] identifies the episode, not the show).
+  describe('TMDB identity resolution', () => {
+    const realMovie = () => movieScrobblePayload({
+      Metadata: {
+        type: 'movie',
+        title: 'The Land Before Time XIV: Journey of the Brave',
+        guid: 'plex://movie/5d776ba0594b2b001e6df2d4',
+        Guid: [{ id: 'imdb://tt4431254' }, { id: 'tmdb://339526' }, { id: 'tvdb://23620' }],
+      },
+    });
+    const realEpisode = (grandparentTitle: string, Guid: { id: string }[]) => episodeScrobblePayload({
+      Metadata: {
+        type: 'episode',
+        title: 'The Adventure',
+        guid: 'plex://episode/5e1618ac67f14f001e692e13',
+        grandparentGuid: 'plex://show/5d9c08172192ba001f3071b9',
+        grandparentTitle,
+        parentIndex: 1,
+        index: 2,
+        Guid,
+      },
+    });
+    const showDetails = { title: 'Bluey', releaseYear: 2018, imageUrl: 'https://image.tmdb.org/t/p/w500/bluey.jpg' };
+
+    beforeEach(async () => {
+      await request(app).put('/api/v1/plugins/media/settings').send({ tmdb_api_key: 'test-key' });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('resolves a movie from Guid[] and stores poster, year and url', async () => {
+      vi.spyOn(tmdb, 'getMovieDetails').mockResolvedValue({
+        title: 'The Land Before Time XIV: Journey of the Brave', releaseYear: 2016, imageUrl: 'https://image.tmdb.org/t/p/w500/lbt.jpg',
+      });
+      await request(app).post('/api/v1/webhook/plex').send(realMovie());
+
+      const item = await query(`SELECT * FROM media_items WHERE media_type = 'movie'`, []);
+      expect(item.rows).toHaveLength(1);
+      expect(item.rows[0].external_source).toBe('tmdb');
+      expect(item.rows[0].external_id).toBe('339526');
+      expect(item.rows[0].image_url).toBe('https://image.tmdb.org/t/p/w500/lbt.jpg');
+      expect(item.rows[0].release_year).toBe(2016);
+    });
+
+    it('resolves a show via the episode tvdb id and reuses the existing TMDB item', async () => {
+      await query(
+        `INSERT INTO media_items (user_id, media_type, external_source, external_id, title)
+         VALUES ($1, 'tv_show', 'tmdb', '82728', 'Bluey')`,
+        [DEFAULT_USER_ID]
+      );
+      const find = vi.spyOn(tmdb, 'findShowId').mockResolvedValue('82728');
+      vi.spyOn(tmdb, 'getTvShowDetails').mockResolvedValue(showDetails);
+
+      await request(app).post('/api/v1/webhook/plex')
+        .send(realEpisode('Bluey (2018)', [{ id: 'imdb://tt12612672' }, { id: 'tmdb://1836008' }, { id: 'tvdb://7116588' }]));
+
+      expect(find).toHaveBeenCalledWith('test-key', 'tvdb_id', '7116588');
+      const items = await query(`SELECT * FROM media_items WHERE media_type = 'tv_show'`, []);
+      expect(items.rows).toHaveLength(1);
+      expect(items.rows[0].external_id).toBe('82728');
+      // The pre-existing item had no poster; the webhook fills the gap.
+      expect(items.rows[0].image_url).toBe(showDetails.imageUrl);
+      const checkins = await query('SELECT season_number, episode_number FROM media_checkins WHERE media_item_id = $1', [items.rows[0].id]);
+      expect(checkins.rows).toEqual([{ season_number: 1, episode_number: 2 }]);
+    });
+
+    it('falls back to an exact-title TMDB search when no tvdb/imdb id is available', async () => {
+      vi.spyOn(tmdb, 'searchTv').mockResolvedValue([
+        { externalId: '1', title: 'Bluey Remake', releaseYear: 2018, imageUrl: null, externalUrl: '' },
+        { externalId: '82728', title: 'Bluey', releaseYear: 2018, imageUrl: showDetails.imageUrl, externalUrl: 'https://www.themoviedb.org/tv/82728' },
+      ]);
+
+      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Bluey (2018)', [{ id: 'tmdb://1836008' }]));
+
+      const items = await query(`SELECT * FROM media_items WHERE media_type = 'tv_show'`, []);
+      expect(items.rows).toHaveLength(1);
+      expect(items.rows[0].external_id).toBe('82728');
+      expect(items.rows[0].title).toBe('Bluey');
+      expect(items.rows[0].image_url).toBe(showDetails.imageUrl);
+    });
+
+    it('adopts a local-only item with the same title instead of duplicating it', async () => {
+      await query(
+        `INSERT INTO media_items (user_id, media_type, title) VALUES ($1, 'tv_show', 'Bluey (2018)')`,
+        [DEFAULT_USER_ID]
+      );
+      vi.spyOn(tmdb, 'findShowId').mockResolvedValue('82728');
+      vi.spyOn(tmdb, 'getTvShowDetails').mockResolvedValue(showDetails);
+
+      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Bluey (2018)', [{ id: 'tvdb://7116588' }]));
+
+      const items = await query(`SELECT * FROM media_items WHERE media_type = 'tv_show'`, []);
+      expect(items.rows).toHaveLength(1);
+      expect(items.rows[0].external_source).toBe('tmdb');
+      expect(items.rows[0].external_id).toBe('82728');
+      expect(items.rows[0].title).toBe('Bluey');
+    });
+
+    it('falls back to a title-only item when TMDB resolves nothing', async () => {
+      vi.spyOn(tmdb, 'findShowId').mockResolvedValue(null);
+      vi.spyOn(tmdb, 'searchTv').mockResolvedValue([]);
+
+      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Obscure Show', [{ id: 'tvdb://1' }]));
+      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Obscure Show', [{ id: 'tvdb://2' }]));
+
+      const items = await query(`SELECT * FROM media_items WHERE media_type = 'tv_show'`, []);
+      expect(items.rows).toHaveLength(1);
+      expect(items.rows[0].external_source).toBeNull();
+      expect(items.rows[0].title).toBe('Obscure Show');
+      const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins', []);
+      expect(checkins.rows[0].n).toBe(2);
     });
   });
 });

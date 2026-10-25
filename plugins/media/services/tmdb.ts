@@ -192,6 +192,28 @@ export const tmdb = {
     );
   },
 
+  /**
+   * Resolve a TV show's TMDB id from an external id (tvdb/imdb) of one of its
+   * episodes or of the show itself, via GET /find. Plex webhooks only carry
+   * the episode's ids, never the show's.
+   */
+  async findShowId(apiKey: string | null, externalSource: 'tvdb_id' | 'imdb_id', externalId: string): Promise<string | null> {
+    if (!apiKey) return null;
+    const url = `${TMDB_BASE}/find/${encodeURIComponent(externalId)}?api_key=${encodeURIComponent(apiKey)}&external_source=${externalSource}&language=en-US`;
+    return withDegradation(
+      async () => {
+        const data = await cache.get<{ tv_results?: { id: number }[]; tv_episode_results?: { show_id: number }[] }>(
+          `tmdb:find:${externalSource}:${externalId}`,
+          async () => externalFetchJson(url)
+        );
+        const showId = data.tv_episode_results?.[0]?.show_id ?? data.tv_results?.[0]?.id;
+        return showId != null ? String(showId) : null;
+      },
+      null,
+      `TMDB find ${externalSource} ${externalId}`
+    );
+  },
+
   async getMovieDetails(apiKey: string | null, tmdbId: string): Promise<TmdbMovieDetails | null> {
     if (!apiKey) return null;
     const url = `${TMDB_BASE}/movie/${encodeURIComponent(tmdbId)}?api_key=${encodeURIComponent(apiKey)}&language=en-US`;

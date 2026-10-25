@@ -11,6 +11,7 @@
     "backfill:track-max-speeds": "tsx ../plugins/tracks/scripts/backfill-track-max-speeds.ts",
     "backfill:track-avg-speeds": "tsx ../plugins/tracks/scripts/backfill-track-avg-speeds.ts",
     "backfill:games-to-igdb": "tsx ../plugins/media/scripts/backfill-games-to-igdb.ts",
+    "backfill:plex-items-to-tmdb": "tsx ../plugins/media/scripts/backfill-plex-items-to-tmdb.ts",
     "import:games": "tsx ../plugins/media/scripts/import-games-csv.ts",
     "import:ride-ratings": "tsx ../plugins/location/scripts/import-ride-ratings.ts",
     "import:ride-log": "tsx ../plugins/location/scripts/import-ride-log.ts",

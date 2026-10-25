@@ -34,6 +34,7 @@ import { isValidTimeZone } from 'wwp-shared';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 
 import { tmdb } from './services/tmdb';
+import { parsePlexGuids, splitTitleYear, resolvePlexMovie, resolvePlexShow, type PlexExternalIds, type ResolvedTmdbItem } from './services/plexResolve';
 import { igdb, pickIgdbCandidate, type IgdbGameResult } from './services/igdb';
 import { normalizeTitle, titleRelation } from './services/titleMatch';
 import { hardcover } from './services/hardcover';
@@ -1904,6 +1905,11 @@ interface PlexScrobble {
   title: string;
   externalSource: string | null;
   externalId: string | null;
+  /**
+   * Ids from Metadata.Guid[]. For a movie these identify the movie; for an
+   * episode they identify the EPISODE (the show's ids are not in the payload).
+   */
+  guidIds: PlexExternalIds;
   seasonNumber: number | null;
   episodeNumber: number | null;
   episodeTitle: string | null;
@@ -1914,9 +1920,10 @@ interface PlexScrobble {
  *
  * Movies map straight to a movie; episodes map to a tv_show (WhereWeWere
  * stores episodes as fields on the check-in row, not as entities). A
- * "tmdb://<id>" guid gives us an external identity to dedupe against; any
- * other guid scheme (plex://, hulu://, etc.) falls back to a title-only
- * local item.
+ * "tmdb://<id>" guid (legacy agents) or a Guid[] entry (current agents, movies
+ * only) gives us an external identity to dedupe against. Shows are resolved
+ * through TMDB by resolvePlexItem; anything unresolved falls back to a
+ * title-only local item.
  */
 function extractScrobble(metadata: Record<string, unknown> | null | undefined): PlexScrobble | null {
   if (!metadata) return null;
@@ -1935,12 +1942,14 @@ function extractScrobble(metadata: Record<string, unknown> | null | undefined): 
       : typeof metadata.guid === 'string' ? metadata.guid : null;
   let externalSource: string | null = null;
   let externalId: string | null = null;
-  if (guid && guid.startsWith('tmdb://')) {
-    const id = guid.slice('tmdb://'.length);
-    if (/^\d+$/.test(id)) {
-      externalSource = 'tmdb';
-      externalId = id;
-    }
+  const guidIds = parsePlexGuids(metadata.Guid);
+  const legacy = parsePlexGuids(null, guid);
+  // Legacy agents put the tmdb id straight in the (show) guid; current
+  // agents list a movie's id in Guid[] (an episode's Guid[] is the episode's).
+  const tmdbId = legacy.tmdb ?? (type === 'movie' ? guidIds.tmdb : null);
+  if (tmdbId) {
+    externalSource = 'tmdb';
+    externalId = tmdbId;
   }
 
   if (type === 'movie') {
@@ -1949,6 +1958,7 @@ function extractScrobble(metadata: Record<string, unknown> | null | undefined): 
       title,
       externalSource,
       externalId,
+      guidIds,
       seasonNumber: null,
       episodeNumber: null,
       episodeTitle: null,
@@ -1977,6 +1987,7 @@ function extractScrobble(metadata: Record<string, unknown> | null | undefined): 
       title: showTitle,
       externalSource,
       externalId,
+      guidIds,
       seasonNumber,
       episodeNumber,
       episodeTitle,
@@ -1984,6 +1995,106 @@ function extractScrobble(metadata: Record<string, unknown> | null | undefined): 
   }
 
   return null;
+}
+
+/**
+ * Find or create the media item a Plex scrobble belongs to.
+ *
+ * 1. Resolve a TMDB identity (movie: Guid[]; show: /find from an episode's
+ *    tvdb/imdb id, else exact-title search). Unresolvable => no identity.
+ * 2. With an identity: reuse the item holding that TMDB id, else adopt a
+ *    local-only item with the same title (re-keying it to the TMDB id and
+ *    filling poster/year), else create it with full metadata.
+ * 3. Without one: reuse any item of the type with the same normalized title
+ *    (TMDB-sourced preferred), else create a title-only item.
+ */
+async function resolvePlexItem(scrobble: PlexScrobble): Promise<string> {
+  const { title: cleanTitle } = splitTitleYear(scrobble.title);
+  const keys = await getApiKeys();
+
+  let resolved: ResolvedTmdbItem | null = null;
+  try {
+    if (scrobble.mediaType === 'movie' && scrobble.externalId) {
+      resolved = await resolvePlexMovie(keys.tmdb_api_key, scrobble.externalId);
+    } else if (scrobble.mediaType === 'tv_show' && scrobble.externalId) {
+      resolved = await tmdb.getTvShowDetails(keys.tmdb_api_key, scrobble.externalId).then((d) => d && {
+        externalId: scrobble.externalId as string,
+        title: d.title,
+        releaseYear: d.releaseYear,
+        imageUrl: d.imageUrl,
+        externalUrl: `https://www.themoviedb.org/tv/${scrobble.externalId}`,
+      });
+    } else if (scrobble.mediaType === 'tv_show') {
+      resolved = await resolvePlexShow(keys.tmdb_api_key, scrobble.guidIds, scrobble.title);
+    }
+  } catch (err) {
+    console.error('Plex webhook TMDB resolution failed:', err);
+  }
+  // A Plex-provided tmdb id is trustworthy even if the detail lookup failed.
+  const tmdbId = resolved?.externalId ?? scrobble.externalId;
+
+  if (tmdbId) {
+    const byId = await query(
+      `SELECT id FROM media_items
+       WHERE user_id = $1 AND media_type = $2 AND external_source = 'tmdb' AND external_id = $3`,
+      [USER_ID, scrobble.mediaType, tmdbId]
+    );
+    if (byId.rows.length > 0) {
+      const id = byId.rows[0].id as string;
+      if (resolved) await fillItemMetadata(id, resolved);
+      return id;
+    }
+  }
+
+  const key = normalizeTitle(cleanTitle);
+  const siblings = await query(
+    `SELECT id, title, external_source FROM media_items
+     WHERE user_id = $1 AND media_type = $2${tmdbId ? ' AND external_source IS NULL' : ''}
+     ORDER BY (external_source IS NULL), created_at`,
+    [USER_ID, scrobble.mediaType]
+  );
+  const match = siblings.rows.find((r) => normalizeTitle(splitTitleYear(r.title as string).title) === key);
+  if (match) {
+    const id = match.id as string;
+    if (tmdbId) {
+      // Adopt the local-only item: key it to TMDB and fill its metadata.
+      await query(
+        `UPDATE media_items
+         SET external_source = 'tmdb', external_id = $2,
+             title = COALESCE($3, title),
+             release_year = COALESCE(release_year, $4),
+             image_url = COALESCE(image_url, $5),
+             external_url = COALESCE($6, external_url),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [id, tmdbId, resolved?.title ?? null, resolved?.releaseYear ?? null, resolved?.imageUrl ?? null,
+         resolved?.externalUrl ?? `https://www.themoviedb.org/${scrobble.mediaType === 'movie' ? 'movie' : 'tv'}/${tmdbId}`]
+      );
+    }
+    return id;
+  }
+
+  return upsertMediaItem({
+    media_type: scrobble.mediaType,
+    external_source: tmdbId ? 'tmdb' : null,
+    external_id: tmdbId,
+    title: resolved?.title ?? cleanTitle,
+    release_year: resolved?.releaseYear ?? null,
+    image_url: resolved?.imageUrl ?? null,
+    external_url: resolved?.externalUrl ?? null,
+  });
+}
+
+/** Fill gaps (poster/year/url) on an existing TMDB item without clobbering edits. */
+async function fillItemMetadata(id: string, resolved: ResolvedTmdbItem): Promise<void> {
+  await query(
+    `UPDATE media_items
+     SET release_year = COALESCE(release_year, $2),
+         image_url = COALESCE(image_url, $3),
+         external_url = COALESCE(external_url, $4)
+     WHERE id = $1 AND (release_year IS NULL OR image_url IS NULL OR external_url IS NULL)`,
+    [id, resolved.releaseYear, resolved.imageUrl, resolved.externalUrl]
+  );
 }
 
 // POST / - receive a Plex webhook event
@@ -2039,29 +2150,7 @@ plexWebhookRouter.post('/', plexUpload.any(), async (req: Request, res: Response
         return res.json({ ok: true, skipped: 'unsupported_metadata' });
       }
 
-      // Items without a tmdb identity (plex://, hulu://, ...) have no unique
-      // key to dedupe on, so reuse the local-only item with the same title
-      // instead of creating one per scrobble.
-      let itemId: string;
-      const localMatch = scrobble.externalId
-        ? null
-        : await query(
-            `SELECT id FROM media_items
-             WHERE user_id = $1 AND media_type = $2 AND external_source IS NULL
-               AND lower(title) = lower($3)
-             ORDER BY created_at LIMIT 1`,
-            [USER_ID, scrobble.mediaType, scrobble.title]
-          );
-      if (localMatch && localMatch.rows.length > 0) {
-        itemId = localMatch.rows[0].id as string;
-      } else {
-        itemId = await upsertMediaItem({
-          media_type: scrobble.mediaType,
-          external_source: scrobble.externalSource,
-          external_id: scrobble.externalId,
-          title: scrobble.title,
-        });
-      }
+      const itemId = await resolvePlexItem(scrobble);
 
       const now = new Date();
       const timezone = await inferPlexTimezone(now);
