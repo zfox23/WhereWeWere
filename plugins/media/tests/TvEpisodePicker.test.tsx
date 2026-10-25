@@ -7,12 +7,16 @@ import TvEpisodePicker from '../ui/pages/TvEpisodePicker';
 const apiMocks = vi.hoisted(() => ({
   getItem: vi.fn(),
   tvSeasons: vi.fn(),
+  lists: vi.fn(),
+  addItemToList: vi.fn(),
 }));
 
 vi.mock('../ui/api', () => ({
   media: {
     getItem: apiMocks.getItem,
     tvSeasons: apiMocks.tvSeasons,
+    lists: apiMocks.lists,
+    addItemToList: apiMocks.addItemToList,
   },
 }));
 
@@ -63,6 +67,10 @@ describe('TvEpisodePicker', () => {
     apiMocks.tvSeasons.mockReset();
     apiMocks.getItem.mockResolvedValue(item);
     apiMocks.tvSeasons.mockResolvedValue({ seasons, cached: true });
+    apiMocks.lists.mockReset();
+    apiMocks.lists.mockResolvedValue([{ id: 'list-1', name: 'Watchlist', created_at: '', items: [] }]);
+    apiMocks.addItemToList.mockReset();
+    apiMocks.addItemToList.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -106,6 +114,21 @@ describe('TvEpisodePicker', () => {
 
     await waitFor(() => {
       expect(screen.getByText('episode form target')).toBeTruthy();
+    });
+  });
+
+  it('adds the whole show to a list', async () => {
+    renderPicker();
+    await waitFor(() => {
+      expect(screen.getByText('Infected')).toBeTruthy();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /add to list/i }));
+    await user.click(await screen.findByRole('button', { name: 'Watchlist' }));
+
+    await waitFor(() => {
+      expect(apiMocks.addItemToList).toHaveBeenCalledWith('list-1', 'item-1');
     });
   });
 

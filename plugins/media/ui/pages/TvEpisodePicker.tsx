@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Loader2, ArrowLeft, ChevronRight } from 'lucide-react';
+import { Loader2, ArrowLeft, ChevronRight, ListPlus } from 'lucide-react';
 import { media } from '../api';
+import AddToListModal from '../AddToListModal';
 import type { MediaItem, MediaTvSeason } from '../types';
 import { slugify } from '../../../../client/src/utils/slugify';
 import { usePageTitle } from '../../../../client/src/utils/pageTitle';
@@ -15,6 +16,7 @@ export default function TvEpisodePicker() {
   const [error, setError] = useState<string | null>(null);
   const [seasons, setSeasons] = useState<MediaTvSeason[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [showListModal, setShowListModal] = useState(false);
 
   usePageTitle(`TV Episode Picker${item ? `: ${item.title}` : ''}`);
 
@@ -93,6 +95,14 @@ export default function TvEpisodePicker() {
           <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h1>
           {item.release_year && <p className="text-sm text-gray-500 dark:text-gray-400">{item.release_year}</p>}
           <p className="text-sm text-primary-600 dark:text-primary-400 mt-2">Select an episode to check in</p>
+          <button
+            type="button"
+            onClick={() => setShowListModal(true)}
+            className="btn-secondary inline-flex items-center gap-2 text-sm mt-3"
+          >
+            <ListPlus size={15} />
+            Add to List
+          </button>
         </div>
       </div>
 
@@ -141,6 +151,8 @@ export default function TvEpisodePicker() {
           </div>
         </div>
       )}
+
+      {showListModal && <AddToListModal itemId={item.id} onClose={() => setShowListModal(false)} />}
     </div>
   );
 }

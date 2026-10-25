@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Loader2, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { Loader2, ArrowLeft, CheckCircle2, ListPlus } from 'lucide-react';
 import { media } from '../api';
+import AddToListModal from '../AddToListModal';
 import type { MediaItem } from '../types';
 import type { MediaSubtype } from '../../../../client/src/types';
 import ScorePicker from '../../../../client/src/components/ScorePicker';
@@ -35,6 +36,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
   const [notes, setNotes] = useState('');
   const [companions, setCompanions] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [showListModal, setShowListModal] = useState(false);
 
   usePageTitle(`${config.label} Check-In${item ? `: ${item.title}` : ''}`);
 
@@ -213,6 +215,16 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
         {error && item && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
 
         <div className="flex items-center justify-end gap-3">
+          {!episodeMode && (
+            <button
+              type="button"
+              onClick={() => setShowListModal(true)}
+              className="btn-secondary inline-flex items-center gap-2"
+            >
+              <ListPlus size={16} />
+              Add to List
+            </button>
+          )}
           <button
             type="submit"
             disabled={submitting}
@@ -223,6 +235,8 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
           </button>
         </div>
       </form>
+
+      {showListModal && id && <AddToListModal itemId={id} onClose={() => setShowListModal(false)} />}
     </div>
   );
 }
