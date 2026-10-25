@@ -21,7 +21,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* Top nav — glass header */}
       <header className="sticky top-0 z-60 bg-white/70 dark:bg-gray-900/70 border-b backdrop-blur-sm border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link to="/" className="text-xl font-bold text-[#ea580c]">
+          <Link to="/" className="font-display text-2xl tracking-wide text-[#ea580c]">
             WhereWeWere
           </Link>
           <nav className="hidden md:flex items-center gap-1">

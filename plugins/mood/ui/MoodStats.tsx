@@ -325,7 +325,7 @@ function MoodLineSpanChart({
               textAnchor="end"
               fontSize={10}
               fill={TC}
-              fontFamily="system-ui, sans-serif"
+              fontFamily="Lato, system-ui, sans-serif"
             >
               {m}
             </text>
@@ -345,7 +345,7 @@ function MoodLineSpanChart({
               textAnchor="middle"
               fontSize={9}
               fill={TC}
-              fontFamily="system-ui, sans-serif"
+              fontFamily="Lato, system-ui, sans-serif"
             >
               {t.label}
             </text>
@@ -386,7 +386,7 @@ function MoodLineSpanChart({
                     textAnchor="end"
                     fontSize={10}
                     fill="rgba(13, 148, 136, 0.85)"
-                    fontFamily="system-ui, sans-serif"
+                    fontFamily="Lato, system-ui, sans-serif"
                   >
                     {formatSleepMinutesShort(val)}
                   </text>

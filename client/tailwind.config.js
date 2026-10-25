@@ -12,6 +12,11 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Lato', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        display: ['"Bebas Neue"', 'Impact', 'ui-sans-serif', 'sans-serif'],
+      },
       colors: {
         primary: {
           50: colorVar('--color-primary-50'),

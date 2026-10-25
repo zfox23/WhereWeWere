@@ -3,6 +3,11 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
+import '@fontsource/bebas-neue/400.css';
+import '@fontsource/lato/400.css';
+import '@fontsource/lato/400-italic.css';
+import '@fontsource/lato/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
 import './index.css';
 import { isUserEditing, reloadWhenIdle } from './utils/swUpdate';
 

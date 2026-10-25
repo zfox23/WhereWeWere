@@ -115,6 +115,14 @@ html[data-bg-gradient="flat"] {
 }
 
 @layer base {
+  h1,
+  h2,
+  h3 {
+    font-family: theme('fontFamily.display');
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+
   .prose pre code {
     background-color: transparent;
     color: inherit;
