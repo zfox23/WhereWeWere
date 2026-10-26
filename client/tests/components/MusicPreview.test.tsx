@@ -63,16 +63,37 @@ describe('MusicPreview', () => {
     expect(container.querySelector('a')).toBeNull();
   });
 
-  it('is one link to the session day, carrying the session to reveal', async () => {
+  const JUMP = '/?from=2024-05-01&to=2024-05-01|{"focusSession":"sess-1"}';
+
+  it('jumps to the session day from the icon link or any preview line', async () => {
     const user = userEvent.setup();
     renderPreview(listening());
     const link = screen.getByRole('link', { name: 'Show this listening session on the timeline' });
     expect(link.getAttribute('href')).toBe('/?from=2024-05-01&to=2024-05-01');
-    // The icon and every preview line are inside it, so any of them jumps.
     expect(link.querySelector('svg')).not.toBeNull();
-    expect(link.querySelectorAll('li')).toHaveLength(3);
     await user.click(screen.getByText('Middle', { exact: false }));
-    expect(screen.getByTestId('probe').textContent).toBe('/?from=2024-05-01&to=2024-05-01|{"focusSession":"sess-1"}');
+    expect(screen.getByTestId('probe').textContent).toBe(JUMP);
+    cleanup();
+    renderPreview(listening());
+    await user.click(screen.getByRole('link', { name: 'Show this listening session on the timeline' }));
+    expect(screen.getByTestId('probe').textContent).toBe(JUMP);
+  });
+
+  it('shows a cover per play; clicking one opens the album instead of jumping', async () => {
+    const user = userEvent.setup();
+    renderPreview(listening({
+      tracks: [
+        { artists: ['A'], title: 'With cover', time: 2, art_id: 'art-1' },
+        { artists: ['B'], title: 'Without', time: 1, art_id: null },
+      ],
+      has_more: false,
+    }));
+    const covers = screen.getAllByRole('button', { name: 'Show album details' });
+    expect(covers).toHaveLength(1);
+    expect(covers[0].querySelector('img')?.getAttribute('src')).toBe('/api/v1/music/albums/art-1/art');
+    await user.click(covers[0]);
+    expect(screen.queryByTestId('probe')).toBeNull(); // still on the originating route
+    expect(screen.getByRole('dialog')).toBeTruthy();
   });
 });
 

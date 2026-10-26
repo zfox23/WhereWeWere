@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Search, X } from 'lucide-react';
 import { music } from './api';
+import { AlbumArt } from './AlbumArt';
 import { formatDay, formatDuration, joinArtists } from './format';
 import type { MusicAggregate, MusicLibraryView } from './types';
 
@@ -19,6 +20,8 @@ interface Column {
   /** Value used for sorting. */
   sort: (row: MusicAggregate) => string | number;
   render: (row: MusicAggregate) => string | number;
+  /** Draw the album cover to the left of the value. */
+  art?: boolean;
 }
 
 const text = (v: string | null | undefined) => (v ?? '').toLowerCase();
@@ -43,7 +46,7 @@ const COLUMNS: Record<MusicLibraryView, Column[]> = {
   songs: [
     { key: 'name', label: 'Title', sort: (r) => text(r.name), render: (r) => r.name },
     { key: 'artists', label: 'Artist', sort: (r) => text(joinArtists(r.artists)), render: (r) => joinArtists(r.artists) },
-    { key: 'album', label: 'Album', sort: (r) => text(r.album), render: (r) => r.album ?? '' },
+    { key: 'album', label: 'Album', sort: (r) => text(r.album), render: (r) => r.album ?? '', art: true },
     PLAYS, TIME, LAST,
   ],
   artists: [
@@ -51,7 +54,7 @@ const COLUMNS: Record<MusicLibraryView, Column[]> = {
     TRACKS, PLAYS, TIME, LAST,
   ],
   albums: [
-    { key: 'name', label: 'Album', sort: (r) => text(r.name), render: (r) => r.name },
+    { key: 'name', label: 'Album', sort: (r) => text(r.name), render: (r) => r.name, art: true },
     { key: 'artists', label: 'Artist', sort: (r) => text(joinArtists(r.artists)), render: (r) => joinArtists(r.artists) },
     TRACKS, PLAYS, TIME, LAST,
   ],
@@ -282,7 +285,14 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
                       ci === 0 ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-300'
                     }`}
                   >
-                    {c.render(row)}
+                    {c.art ? (
+                      <span className="flex items-center gap-2">
+                        <AlbumArt artId={row.art_id} size={28} />
+                        <span className="min-w-0">{c.render(row)}</span>
+                      </span>
+                    ) : (
+                      c.render(row)
+                    )}
                   </td>
                 ))}
               </tr>

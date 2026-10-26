@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp, Loader2, Music } from 'lucide-react';
 import type { CheckinCardProps } from 'wwp-shared';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { music } from './api';
+import { AlbumArt } from './AlbumArt';
 import { formatClock, formatDuration, joinArtists } from './format';
 import type { MusicSessionData, SessionTrack } from './types';
 
@@ -110,7 +111,8 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
             {tracks && (
               <ol className="space-y-0.5">
                 {tracks.map((t, i) => (
-                  <li key={i} className="text-xs text-gray-500 dark:text-gray-400 flex gap-2">
+                  <li key={i} className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                    <AlbumArt artId={t.art_id} size={24} />
                     <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
                     <span>
                       <span className="font-medium text-gray-600 dark:text-gray-300">{joinArtists(t.artists)}</span>

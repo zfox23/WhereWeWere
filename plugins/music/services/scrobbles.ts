@@ -532,21 +532,30 @@ export async function getLibrary(
            GROUP BY a.artist
            ORDER BY plays DESC, name ASC LIMIT $4`;
   } else if (view === 'albums') {
-    sql = `SELECT MIN(album) AS name, ${ALBUM_ARTISTS} AS artists,
+    sql = `SELECT MIN(album) AS name, ${ALBUM_ARTISTS} AS artists, MIN(album_key) AS album_key,
                   COUNT(DISTINCT lower(title))::int AS unique_tracks, ${agg}
            FROM music_scrobbles
            WHERE user_id = $1 AND album IS NOT NULL AND album <> '' ${IN_RANGE}
            GROUP BY lower(album), ${ALBUM_ARTISTS}
            ORDER BY plays DESC, name ASC LIMIT $4`;
   } else {
-    sql = `SELECT MIN(title) AS name, artists, MIN(album) AS album, ${agg}
+    sql = `SELECT MIN(title) AS name, artists, MIN(album) AS album,
+                  MODE() WITHIN GROUP (ORDER BY album_key) AS album_key, ${agg}
            FROM music_scrobbles
            WHERE user_id = $1 ${IN_RANGE}
            GROUP BY lower(title), artists
            ORDER BY plays DESC, name ASC LIMIT $4`;
   }
+  if (view !== 'artists') {
+    // Songs and albums carry the cover of their (most played) album, when one was found.
+    sql = `SELECT g.*, a.id AS art_id
+           FROM (${sql}) g
+           LEFT JOIN music_albums a
+             ON a.user_id = $1 AND a.album_key = g.album_key AND a.thumb_file IS NOT NULL
+           ORDER BY g.plays DESC, g.name ASC`;
+  }
   const result = await query(sql, params);
-  return result.rows;
+  return result.rows.map(({ album_key: _key, ...row }) => row);
 }
 
 export interface ListeningBefore {
@@ -555,7 +564,7 @@ export interface ListeningBefore {
   /** Local date (YYYY-MM-DD) of the session's end, as the timeline groups it. */
   session_date: string;
   /** Up to three plays, newest first. */
-  tracks: { artists: string[]; title: string; time: number }[];
+  tracks: { artists: string[]; title: string; time: number; art_id: string | null }[];
   /** True when the session has plays earlier than the oldest one returned. */
   has_more: boolean;
 }
@@ -578,7 +587,7 @@ export async function getListeningBefore(
   if (anchors.length === 0) return out;
   const result = await query(
     `SELECT a.id AS anchor_id, n.session_id, n.session_date,
-            p.played_at, p.title, p.artists,
+            p.played_at, p.title, p.artists, p.art_id,
             EXISTS (SELECT 1 FROM music_scrobbles e
                     WHERE e.session_id = n.session_id AND e.played_at < p.played_at) AS older_exists
      FROM unnest($1::uuid[], $2::timestamptz[]) AS a(id, t)
@@ -593,9 +602,12 @@ export async function getListeningBefore(
        LIMIT 1
      ) n ON n.track_count >= $5
      JOIN LATERAL (
-       SELECT played_at, title, artists FROM music_scrobbles
-       WHERE session_id = n.session_id AND played_at <= a.t
-       ORDER BY played_at DESC, id DESC
+       SELECT s2.played_at, s2.title, s2.artists,
+              (SELECT al.id FROM music_albums al
+               WHERE al.user_id = s2.user_id AND al.album_key = s2.album_key AND al.thumb_file IS NOT NULL) AS art_id
+       FROM music_scrobbles s2
+       WHERE s2.session_id = n.session_id AND s2.played_at <= a.t
+       ORDER BY s2.played_at DESC, s2.id DESC
        LIMIT $6
      ) p ON true
      ORDER BY a.id, p.played_at DESC`,
@@ -611,6 +623,7 @@ export async function getListeningBefore(
       artists: row.artists,
       title: row.title,
       time: Math.floor(new Date(row.played_at).getTime() / 1000),
+      art_id: row.art_id ?? null,
     });
     // Rows arrive newest first, so the last one seen is the oldest shown.
     entry.has_more = row.older_exists;
@@ -620,9 +633,12 @@ export async function getListeningBefore(
 
 export async function getSessionTracks(userId: string, sessionId: string) {
   const result = await query(
-    `SELECT played_at, title, artists, album, track_length, listened_for, timezone
-     FROM music_scrobbles WHERE user_id = $1 AND session_id = $2
-     ORDER BY played_at ASC, id ASC`,
+    `SELECT m.played_at, m.title, m.artists, m.album, m.track_length, m.listened_for, m.timezone, a.id AS art_id
+     FROM music_scrobbles m
+     LEFT JOIN music_albums a
+       ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
+     WHERE m.user_id = $1 AND m.session_id = $2
+     ORDER BY m.played_at ASC, m.id ASC`,
     [userId, sessionId],
   );
   return result.rows;

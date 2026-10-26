@@ -20,6 +20,7 @@ import {
 } from '../../../client/src/utils/periodRange';
 import { music } from './api';
 import { formatDuration, joinArtists } from './format';
+import { AlbumArt } from './AlbumArt';
 import { MusicLibrarySection } from './MusicLibrarySection';
 import type { MusicAggregate, MusicStats } from './types';
 
@@ -44,11 +45,14 @@ function TopList({
   icon: Icon,
   rows,
   detail,
+  withArt = false,
 }: {
   title: string;
   icon: React.ElementType;
   rows: MusicAggregate[];
   detail: (row: MusicAggregate) => string;
+  /** Show each row's album cover (songs and albums, not artists). */
+  withArt?: boolean;
 }) {
   const [showAll, setShowAll] = useState(false);
   const shown = showAll ? rows : rows.slice(0, TOP_COLLAPSED);
@@ -67,10 +71,13 @@ function TopList({
           {shown.map((row, i) => (
             <li key={`${row.name}|${detail(row)}|${i}`} className="text-sm">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="min-w-0 truncate text-gray-900 dark:text-gray-100">
-                  <span className="text-gray-400 tabular-nums mr-1.5">{i + 1}.</span>
-                  {row.name}
-                  {detail(row) && <span className="text-xs text-gray-500 dark:text-gray-400"> · {detail(row)}</span>}
+                <span className="min-w-0 flex items-center gap-1.5 text-gray-900 dark:text-gray-100">
+                  <span className="text-gray-400 tabular-nums">{i + 1}.</span>
+                  {withArt && <AlbumArt artId={row.art_id} size={28} />}
+                  <span className="min-w-0 truncate">
+                    {row.name}
+                    {detail(row) && <span className="text-xs text-gray-500 dark:text-gray-400"> · {detail(row)}</span>}
+                  </span>
                 </span>
                 <span className="shrink-0 text-xs tabular-nums text-gray-500">{row.plays}</span>
               </div>
@@ -223,9 +230,9 @@ export function MusicTab(_props: PluginProfileTabProps) {
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-          <TopList title="Top songs" icon={Music} rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} />
+          <TopList title="Top songs" icon={Music} rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt />
           <TopList title="Top artists" icon={Mic2} rows={data?.top_artists ?? []} detail={() => ''} />
-          <TopList title="Top albums" icon={Disc3} rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} />
+          <TopList title="Top albums" icon={Disc3} rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt />
         </div>
       </div>
 

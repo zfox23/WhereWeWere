@@ -202,6 +202,28 @@ describe('album artwork', () => {
     expect((await status()).albums.matched).toBe(1);
   });
 
+  it('carries each play\'s cover id through sessions, stats, library and the check-in preview', async () => {
+    for (const [i, t] of ['Filaments', 'Sun & Moon', 'Oceanic'].entries()) await push(t, 'Group Therapy', ['Above & Beyond'], i * 300);
+    await push('Loose Single', undefined, ['Someone'], 1200);
+    useDeps(async () => match());
+    await backfill();
+    const artId = (await query(`SELECT id FROM music_albums LIMIT 1`)).rows[0].id;
+
+    const sessionId = (await query(`SELECT id FROM music_sessions`)).rows[0].id;
+    const tracks = (await request(app).get(`/api/v1/music/sessions/${sessionId}/tracks`)).body;
+    expect(tracks.map((t: any) => t.art_id)).toEqual([artId, artId, artId, null]);
+
+    const stats = (await request(app).get('/api/v1/music/stats')).body;
+    expect(stats.top_songs.find((r: any) => r.name === 'Sun & Moon').art_id).toBe(artId);
+    expect(stats.top_albums[0]).toMatchObject({ name: 'Group Therapy', art_id: artId });
+    expect(stats.top_artists.every((r: any) => !('art_id' in r))).toBe(true);
+    expect(stats.top_albums[0]).not.toHaveProperty('album_key');
+
+    const library = (await request(app).get('/api/v1/music/library').query({ view: 'songs' })).body;
+    expect(library.find((r: any) => r.name === 'Loose Single').art_id).toBeNull();
+    expect(library.find((r: any) => r.name === 'Oceanic').art_id).toBe(artId);
+  });
+
   it('removes albums on start-over and collects their files on the next lookup', async () => {
     await push('Sun & Moon', 'Group Therapy');
     useDeps(async () => match());

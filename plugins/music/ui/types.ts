@@ -7,6 +7,8 @@ export interface MusicTotals {
 
 export interface MusicAggregate {
   name: string;
+  /** Cover of the album (most played, for songs), when one was found. */
+  art_id?: string | null;
   /** Present for songs (artist list) and albums (album artists). */
   artists?: string[];
   album?: string | null;
@@ -51,6 +53,7 @@ export interface SessionTrack {
   listened_for: number | null;
   /** IANA zone this play happened in. */
   timezone: string;
+  art_id?: string | null;
 }
 
 export interface MusicSessionData {
