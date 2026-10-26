@@ -82,3 +82,13 @@ Keep favorites, or any other lists, of songs and albums in the **Lists** subtab 
 - **Backups:** lists and their ranks travel in backups (restores merge by list name and skip items already there; a list that already exists keeps its own ranking). **Start Over → All music data** deletes them too.
 - **Its own page:** middle-click or ctrl-click a cover or album name to open the same details as a page in a new tab (`/music/album`), which can be bookmarked and shared.
 - **Show in library:** the details also have a button that filters the Library to that album, which replaces clicking an album name in Top albums to filter.
+
+### Rank by comparing
+
+On a list's page, **Rank by comparing** (or **Resume ranking**) helps you rank a whole list by choosing between two items at a time, instead of dragging.
+
+- **Start:** if some items are already ranked you choose **Continue from my ranking** (your ranks are a starting guess, which saves questions when they are mostly right; it costs more than starting fresh if they are badly off) or **Start from scratch**. A paused session offers **Resume**. Songs and albums are compared together.
+- **Questions:** pick the one you like more by clicking it, or with the ← and → keys. **Can't decide** (↓ or T) calls it a tie, **Undo** (Backspace or Z) takes back the last answer, and **Finish now** jumps to the result with whatever has been settled.
+- **Which questions:** a rating for every item is fitted to all your answers, and the next question is the pair whose order is least certain. A pair your earlier answers already imply (A over B, B over C) is never asked. The tool is done when every neighbouring pair in the order is settled by your answers, so a list takes about 0.8 × n·log₂(n) questions from scratch (around 160 for 40 items) and as few as n−1 when your existing ranking is right and trusted. The progress text ("12 answered · about 20 left") is a rough estimate.
+- **Preview:** nothing changes until you press **Apply this ranking** on the result screen, which shows each item's new rank beside how far it moved. **Discard** throws the session away. Applying ranks every item, replacing the list's ranks.
+- **Pausing:** progress is saved on the server after every answer, so you can leave (Pause and go back) or close the page and resume later. A saved session is a list of the answers given, so items added or removed from the list in the meantime are accounted for. Sessions are not included in backups.

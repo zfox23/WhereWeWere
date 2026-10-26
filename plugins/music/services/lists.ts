@@ -322,3 +322,64 @@ export async function importLists(db: Db, userId: string, payload: unknown): Pro
   return added;
 }
 
+
+// ---- Paused ranking sessions -------------------------------------------
+
+export interface RankSessionStateDto {
+  mode: 'continue' | 'scratch';
+  initialRanks: Record<string, number | null>;
+  itemIds: string[];
+  answers: { a: string; b: string; r: 'a' | 'b' | 'tie' }[];
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_SESSION_ITEMS = 1000;
+const MAX_SESSION_ANSWERS = 10_000;
+
+/** Check a client-supplied session; null when it isn't one. Nothing is trusted beyond its shape. */
+export function validateRankSession(raw: unknown): RankSessionStateDto | null {
+  const s = (raw && typeof raw === 'object' ? raw : null) as Record<string, any> | null;
+  if (!s || (s.mode !== 'continue' && s.mode !== 'scratch')) return null;
+  if (!Array.isArray(s.itemIds) || s.itemIds.length > MAX_SESSION_ITEMS || !s.itemIds.every((i: unknown) => typeof i === 'string' && UUID.test(i))) return null;
+  if (!Array.isArray(s.answers) || s.answers.length > MAX_SESSION_ANSWERS) return null;
+  const ids = new Set<string>(s.itemIds);
+  const answers: RankSessionStateDto['answers'] = [];
+  for (const a of s.answers) {
+    if (!a || !ids.has(a.a) || !ids.has(a.b) || a.a === a.b || !['a', 'b', 'tie'].includes(a.r)) return null;
+    answers.push({ a: a.a, b: a.b, r: a.r });
+  }
+  const initialRanks: Record<string, number | null> = {};
+  for (const id of ids) {
+    const r = s.initialRanks?.[id];
+    initialRanks[id] = Number.isInteger(r) && r > 0 && r <= MAX_SESSION_ITEMS ? r : null;
+  }
+  return { mode: s.mode, initialRanks, itemIds: [...s.itemIds], answers };
+}
+
+export async function getRankSession(userId: string, listId: string): Promise<{ state: RankSessionStateDto; updated_at: string } | null> {
+  const r = await query(
+    `SELECT s.state, s.updated_at FROM music_rank_sessions s JOIN music_lists l ON l.id = s.list_id WHERE s.list_id = $2 AND l.user_id = $1`,
+    [userId, listId],
+  );
+  return r.rows[0] ?? null;
+}
+
+/** Save (replace) a list's paused session. False when there is no such list. */
+export async function saveRankSession(userId: string, listId: string, state: RankSessionStateDto): Promise<boolean> {
+  const r = await query(
+    `INSERT INTO music_rank_sessions (list_id, state, updated_at)
+     SELECT l.id, $3::jsonb, NOW() FROM music_lists l WHERE l.id = $2 AND l.user_id = $1
+     ON CONFLICT (list_id) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()
+     RETURNING list_id`,
+    [userId, listId, JSON.stringify(state)],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+export async function deleteRankSession(userId: string, listId: string): Promise<boolean> {
+  const r = await query(
+    `DELETE FROM music_rank_sessions s USING music_lists l WHERE s.list_id = l.id AND l.id = $2 AND l.user_id = $1 RETURNING s.list_id`,
+    [userId, listId],
+  );
+  return (r.rowCount ?? 0) > 0;
+}

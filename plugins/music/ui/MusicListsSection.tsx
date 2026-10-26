@@ -6,13 +6,14 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, List, Loader2 } from 'lucide-react';
+import { ArrowLeft, List, Loader2, Swords } from 'lucide-react';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
 import { RankedListView } from '../../../client/src/components/lists/RankedListView';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
 import { music, albumArtUrl } from './api';
 import { AlbumArt } from './AlbumArt';
 import { AlbumLink } from './AlbumLink';
+import { RankByComparing } from './RankByComparing';
 import { formatDay, formatDuration, joinArtists } from './format';
 import { refreshMusicLists, useMusicLists } from './useMusicLists';
 import type { ListItemWithStats, MusicList } from './types';
@@ -111,6 +112,15 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
   const [items, setItems] = useState<ListItemWithStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [ranking, setRanking] = useState(false);
+  const [paused, setPaused] = useState(false);
+
+  // Is there a paused "rank by comparing" session to resume?
+  const checkPaused = () => music.rankSession(list.id).then((s) => setPaused(s.state.answers.length > 0)).catch(() => setPaused(false));
+  useEffect(() => {
+    void checkPaused();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.id]);
 
   const load = () =>
     music.listItems(list.id).then(setItems).catch(() => setItems([]));
@@ -153,6 +163,20 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
     }
   };
 
+  if (ranking) {
+    return (
+      <RankByComparing
+        list={list}
+        items={items}
+        onDone={(applied) => {
+          setRanking(false);
+          void checkPaused();
+          if (applied) void Promise.all([load(), refreshMusicLists()]);
+        }}
+      />
+    );
+  }
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -173,7 +197,17 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
             </span>
           )}
         </h3>
-        {saving && <Loader2 size={14} className="ml-auto animate-spin text-primary-500" />}
+        {saving && <Loader2 size={14} className="animate-spin text-primary-500" />}
+        <button
+          type="button"
+          onClick={() => setRanking(true)}
+          disabled={loading || items.length < 2}
+          title={items.length < 2 ? 'Add at least two items to rank them' : 'Pick between two at a time to rank the whole list'}
+          className="btn-secondary ml-auto inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs disabled:opacity-40"
+        >
+          <Swords size={13} />
+          {paused ? 'Resume ranking' : 'Rank by comparing'}
+        </button>
       </div>
 
       {loading ? (

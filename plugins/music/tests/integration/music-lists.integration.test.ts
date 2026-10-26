@@ -202,6 +202,56 @@ describe('music lists', () => {
     expect((await request(app).get(api())).body[0].items[0].art_id).toBe(artId);
   });
 
+  describe('paused ranking sessions', () => {
+    const U = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+    const session = (over: object = {}) => ({
+      mode: 'continue',
+      itemIds: [U(1), U(2), U(3)],
+      initialRanks: { [U(1)]: 1, [U(2)]: 2, [U(3)]: null },
+      answers: [{ a: U(1), b: U(2), r: 'a' }, { a: U(2), b: U(3), r: 'tie' }],
+      ...over,
+    });
+    const url = (id: string) => api(`/${id}/rank-session`);
+
+    it('saves, replaces, loads and discards one session per list', async () => {
+      const id = await newList();
+      expect((await request(app).get(url(id))).status).toBe(404);
+      expect((await request(app).put(url(id)).send({ state: session() })).status).toBe(200);
+      const loaded = (await request(app).get(url(id))).body;
+      expect(loaded.state).toEqual(session());
+      expect(loaded.updated_at).toBeTruthy();
+      // Saving again replaces rather than adds.
+      await request(app).put(url(id)).send({ state: session({ answers: [] }) });
+      expect((await request(app).get(url(id))).body.state.answers).toEqual([]);
+      expect((await query('SELECT 1 FROM music_rank_sessions')).rowCount).toBe(1);
+      expect((await request(app).delete(url(id))).status).toBe(200);
+      expect((await request(app).get(url(id))).status).toBe(404);
+    });
+
+    it('refuses anything that is not a session, and keeps only the known fields', async () => {
+      const id = await newList();
+      const bad = [
+        undefined, 'x', { mode: 'other' }, session({ itemIds: ['nope'] }), session({ answers: [{ a: U(1), b: U(9), r: 'a' }] }),
+        session({ answers: [{ a: U(1), b: U(1), r: 'a' }] }), session({ answers: [{ a: U(1), b: U(2), r: 'maybe' }] }),
+        session({ answers: 'x' }),
+      ];
+      for (const state of bad) expect((await request(app).put(url(id)).send({ state })).status).toBe(400);
+      await request(app).put(url(id)).send({ state: { ...session(), junk: 'x', initialRanks: { [U(1)]: 1, [U(2)]: -4, [U(3)]: 2.5, [U(9)]: 3 } } });
+      const saved = (await request(app).get(url(id))).body.state;
+      expect(saved).not.toHaveProperty('junk');
+      expect(saved.initialRanks).toEqual({ [U(1)]: 1, [U(2)]: null, [U(3)]: null });
+    });
+
+    it('404s for a list that is not there, and goes with its list and Start Over', async () => {
+      expect((await request(app).put(url('00000000-0000-4000-8000-000000000000')).send({ state: session() })).status).toBe(404);
+      expect((await request(app).get(url('nope'))).status).toBe(400);
+      const id = await newList();
+      await request(app).put(url(id)).send({ state: session() });
+      await request(app).delete(api(`/${id}`));
+      expect((await query('SELECT 1 FROM music_rank_sessions')).rowCount).toBe(0);
+    });
+  });
+
   it('is removed by Start Over along with its items', async () => {
     await push('Sun & Moon', 'Group Therapy');
     const id = await newList();

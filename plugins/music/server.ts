@@ -37,6 +37,10 @@ import {
   InvalidNameError,
   NameTakenError,
   addItem,
+  deleteRankSession,
+  getRankSession,
+  saveRankSession,
+  validateRankSession,
   createList,
   deleteList,
   exportLists,
@@ -452,6 +456,43 @@ musicRouter.put('/lists/:id/ranks', async (req: Request, res: Response) => {
     res.json({ ranked_ids: ids });
   } catch (err) {
     listError(res, err, 'ranking the list');
+  }
+});
+
+// A paused "rank by comparing" session, so it can be resumed later.
+musicRouter.get('/lists/:id/rank-session', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    const session = await getRankSession(USER_ID, listId);
+    if (!session) return res.status(404).json({ error: 'No paused session' });
+    res.json(session);
+  } catch (err) {
+    listError(res, err, 'loading the ranking session');
+  }
+});
+
+musicRouter.put('/lists/:id/rank-session', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    const state = validateRankSession(req.body?.state);
+    if (!state) return res.status(400).json({ error: 'Not a ranking session' });
+    if (!(await saveRankSession(USER_ID, listId, state))) return res.status(404).json({ error: 'List not found' });
+    res.json({ saved: true });
+  } catch (err) {
+    listError(res, err, 'saving the ranking session');
+  }
+});
+
+musicRouter.delete('/lists/:id/rank-session', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    await deleteRankSession(USER_ID, listId);
+    res.json({ deleted: true });
+  } catch (err) {
+    listError(res, err, 'discarding the ranking session');
   }
 });
 

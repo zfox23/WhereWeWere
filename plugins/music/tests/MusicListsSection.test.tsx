@@ -41,6 +41,9 @@ const api = {
     for (const i of l.items) i.rank = ids.includes(i.id) ? ids.indexOf(i.id) + 1 : null;
     return { ranked_ids: ids };
   }),
+  rankSession: vi.fn(async () => { throw new Error('none'); }),
+  saveRankSession: vi.fn(async () => ({ saved: true })),
+  discardRankSession: vi.fn(async () => ({ deleted: true })),
   library: vi.fn(),
   albumView: vi.fn(),
 };
@@ -138,6 +141,37 @@ describe('MusicListsSection', () => {
     await user.click(await screen.findByRole('menuitem', { name: /Remove/ }));
     await waitFor(() => expect(api.removeFromList).toHaveBeenCalledWith('l1', 'a1'));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Actions for Group Therapy' })).toBeNull());
+  });
+
+  it('offers "Rank by comparing" on a list with two or more items, and opens the tool', async () => {
+    const user = userEvent.setup();
+    render(<MusicListsSection />);
+    await user.click(await screen.findByTitle('Open Favorites'));
+    await user.click(await screen.findByRole('button', { name: 'Rank by comparing' }));
+    expect(await screen.findByText(/Rank “Favorites” by comparing/)).toBeTruthy();
+    expect(screen.queryByRole('table')).toBeNull();
+    // Leaving returns to the list's table.
+    await user.click(screen.getByRole('button', { name: /Back to list|Pause and go back/ }));
+    expect(await screen.findAllByRole('row')).not.toHaveLength(0);
+  });
+
+  it('disables it for a list with fewer than two items', async () => {
+    const user = userEvent.setup();
+    render(<MusicListsSection />);
+    await user.click(await screen.findByTitle('Open Road trip'));
+    const button = await screen.findByRole('button', { name: 'Rank by comparing' });
+    expect(button.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('says "Resume ranking" when a session was paused', async () => {
+    const user = userEvent.setup();
+    api.rankSession.mockResolvedValueOnce({
+      state: { mode: 'scratch', itemIds: ['s1', 'a1'], initialRanks: { s1: null, a1: 1 }, answers: [{ a: 's1', b: 'a1', r: 'a' }] },
+      updated_at: '',
+    });
+    render(<MusicListsSection />);
+    await user.click(await screen.findByTitle('Open Favorites'));
+    expect(await screen.findByRole('button', { name: 'Resume ranking' })).toBeTruthy();
   });
 
   it('says what to do with an empty list', async () => {

@@ -3,6 +3,7 @@
  */
 
 import { request, withAuthHeader } from '../../../client/src/api/client';
+import type { RankSessionState } from './ranking/engine';
 import type {
   AlbumBackfillStatus,
   AlbumView,
@@ -73,6 +74,10 @@ export const music = {
     request<{ added: boolean }>(`/music/lists/${listId}/items`, { method: 'POST', body: JSON.stringify(target) }),
   removeFromList: (listId: string, itemId: string) =>
     request<{ id: string }>(`/music/lists/${listId}/items/${itemId}`, { method: 'DELETE' }),
+  rankSession: (listId: string) => request<{ state: RankSessionState; updated_at: string }>(`/music/lists/${listId}/rank-session`),
+  saveRankSession: (listId: string, state: RankSessionState) =>
+    request<{ saved: boolean }>(`/music/lists/${listId}/rank-session`, { method: 'PUT', body: JSON.stringify({ state }) }),
+  discardRankSession: (listId: string) => request<{ deleted: boolean }>(`/music/lists/${listId}/rank-session`, { method: 'DELETE' }),
   listItems: (listId: string) => request<ListItemWithStats[]>(`/music/lists/${listId}/items`),
   // Drag-to-rank: these ids become ranks 1..n; everything else on the list is unranked.
   rankList: (listId: string, rankedIds: string[]) =>
