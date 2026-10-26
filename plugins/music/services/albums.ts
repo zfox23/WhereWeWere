@@ -382,6 +382,8 @@ export interface BackfillStatus {
   total: number;
   matched: number;
   not_found: number;
+  /** Albums left for next time because a catalog was unavailable for them. */
+  skipped: number;
   /** Plays that were given a track length from an album's tracklist. */
   durations_filled: number;
   /** Thumbnails downloaded again after a restore without images. */
@@ -390,7 +392,8 @@ export interface BackfillStatus {
 }
 
 const BATCH = 25;
-let status: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
+const MAX_FAILURES_IN_A_ROW = 5;
+let status: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, skipped: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
 let cancelRequested = false;
 let running: Promise<void> | null = null;
 
@@ -410,15 +413,19 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
   if (opts.retryMissing) await query(`DELETE FROM music_albums WHERE user_id = $1 AND status = 'not_found'`, [userId]);
   const total = (await query(`SELECT COUNT(*)::int AS n FROM (${UNLOOKED} GROUP BY m.album_key) u`, [userId])).rows[0].n;
   cancelRequested = false;
-  status = { state: 'running', processed: 0, total, matched: 0, not_found: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
+  status = { state: 'running', processed: 0, total, matched: 0, not_found: 0, skipped: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
   running = (async () => {
     try {
       await collectOrphanArt();
+      // Albums a catalog couldn't answer for are left for the next run; a few
+      // in a row means the catalog is down, so stop rather than skip them all.
+      const skipped: string[] = [];
+      let failuresInARow = 0;
       // Re-query each round: albums that arrived meanwhile are picked up too.
       for (;;) {
         const batch = (await query(
-          `${UNLOOKED} GROUP BY m.album_key ORDER BY plays DESC, m.album_key LIMIT ${BATCH}`,
-          [userId],
+          `${UNLOOKED} AND NOT (m.album_key = ANY($2::text[])) GROUP BY m.album_key ORDER BY plays DESC, m.album_key LIMIT ${BATCH}`,
+          [userId, skipped],
         )).rows as Target[];
         if (batch.length === 0) break;
         for (const target of batch) {
@@ -426,8 +433,16 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
             status.state = 'cancelled';
             return;
           }
-          const outcome = await lookupOne(userId, target);
-          status[outcome === 'matched' ? 'matched' : 'not_found']++;
+          try {
+            const outcome = await lookupOne(userId, target);
+            failuresInARow = 0;
+            status[outcome === 'matched' ? 'matched' : 'not_found']++;
+          } catch (err) {
+            if (!(err instanceof ProviderUnavailableError)) throw err;
+            skipped.push(target.album_key);
+            status.skipped++;
+            if (++failuresInARow >= MAX_FAILURES_IN_A_ROW) throw err;
+          }
           status.processed++;
           status.total = Math.max(status.total, status.processed);
         }

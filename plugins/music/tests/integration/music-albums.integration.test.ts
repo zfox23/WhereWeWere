@@ -43,6 +43,8 @@ const match = (over: Partial<AlbumMatch> = {}): AlbumMatch => ({
   ...over,
 });
 
+let currentDeps: AlbumDeps | null = null;
+const setAlbumDepsSnapshot = () => currentDeps;
 let finds: string[] = [];
 let imageHits: string[] = [];
 function useDeps(find: (album: string) => Promise<AlbumMatch | null>, imageStatus = 200) {
@@ -53,6 +55,7 @@ function useDeps(find: (album: string) => Promise<AlbumMatch | null>, imageStatu
       return { ok: imageStatus < 400, status: imageStatus, arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer };
     },
   };
+  currentDeps = deps;
   setAlbumDeps(deps);
 }
 
@@ -122,7 +125,10 @@ describe('music metadata', () => {
 
     // A second run only looks at what is new.
     finds = [];
+    const deps = setAlbumDepsSnapshot();
+    setAlbumDeps(null); // so the arrival of 'Fresh' doesn't look it up on its own
     await push('New', 'Fresh', ['Someone'], 900);
+    setAlbumDeps(deps);
     await backfill();
     expect(finds).toEqual(['Fresh']);
   });
@@ -139,13 +145,36 @@ describe('music metadata', () => {
     expect((await status()).albums).toMatchObject({ matched: 1, not_found: 0 });
   });
 
-  it('stops without recording anything when a catalog is unavailable', async () => {
-    await push('Sun & Moon', 'Group Therapy');
-    useDeps(async () => { throw new ProviderUnavailableError('Deezer is rate limiting requests'); });
+  it('skips albums a catalog is unavailable for, keeps going, and leaves them for the next run', async () => {
+    await push('A', 'Flaky Album', ['X']);
+    await push('B', 'Good Album', ['Y'], 600);
+    await push('C', 'Good Album', ['Y'], 1200);
+    useDeps(async (album) => {
+      if (album === 'Flaky Album') throw new ProviderUnavailableError('MusicBrainz returned HTTP 503');
+      return match({ externalId: '7', title: 'Good Album' });
+    });
     await backfill();
     const s = await status();
-    expect(s.job).toMatchObject({ state: 'error', error: 'Deezer is rate limiting requests' });
-    expect(s.albums).toMatchObject({ pending: 1, matched: 0, not_found: 0 });
+    expect(s.job).toMatchObject({ state: 'done', matched: 1, skipped: 1, error: null });
+    expect(s.albums).toMatchObject({ pending: 1, matched: 1, not_found: 0 });
+    // Tried once, not endlessly, within the run.
+    expect(finds.filter((a) => a === 'Flaky Album')).toHaveLength(1);
+
+    finds = [];
+    useDeps(async () => match({ externalId: '8', title: 'Flaky Album' }));
+    await backfill();
+    expect(finds).toEqual(['Flaky Album']);
+    expect((await status()).albums.pending).toBe(0);
+  });
+
+  it('stops the run when a catalog keeps failing, recording nothing for the failed albums', async () => {
+    for (let i = 0; i < 8; i++) await push(`T${i}`, `Album ${i}`, ['X'], i * 600);
+    useDeps(async () => { throw new ProviderUnavailableError('MusicBrainz returned HTTP 503'); });
+    await backfill();
+    const s = await status();
+    expect(s.job).toMatchObject({ state: 'error', error: 'MusicBrainz returned HTTP 503' });
+    expect(finds).toHaveLength(5);
+    expect(s.albums).toMatchObject({ pending: 8, matched: 0, not_found: 0 });
   });
 
   it('describes an album with the user\'s play counts, across keys sharing a release', async () => {

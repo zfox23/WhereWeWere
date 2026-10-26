@@ -40,7 +40,7 @@ describe('MusicSettings', () => {
     albumStatusMock.mockResolvedValue({
       enabled: true,
       albums: { total: 10, matched: 6, not_found: 1, pending: 3 },
-      job: { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, durations_filled: 0, thumbnails_restored: 0, error: null },
+      job: { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, skipped: 0, durations_filled: 0, thumbnails_restored: 0, error: null },
     });
   });
   afterEach(() => {
