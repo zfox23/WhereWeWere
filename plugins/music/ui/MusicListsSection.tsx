@@ -6,9 +6,9 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, List, Loader2, Swords } from 'lucide-react';
+import { List, Swords } from 'lucide-react';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
-import { RankedListView } from '../../../client/src/components/lists/RankedListView';
+import { ListSectionShell, RankedListDetail, compareByRank, dash, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
 import { music, albumArtUrl } from './api';
 import { AlbumArt } from './AlbumArt';
@@ -21,16 +21,13 @@ import type { ListItemWithStats, MusicList } from './types';
 const getId = (i: ListItemWithStats) => i.id;
 const getRank = (i: ListItemWithStats) => i.rank;
 const compareByName = (a: ListItemWithStats, b: ListItemWithStats) => a.title.localeCompare(b.title);
+const byRank = compareByRank(getRank, compareByName);
 const lastPlayed = (i: ListItemWithStats) => (i.last_played_at ? new Date(i.last_played_at).getTime() : -Infinity);
 
 function compareBy(key: string, a: ListItemWithStats, b: ListItemWithStats): number {
   switch (key) {
-    case 'rank': {
-      if (a.rank == null && b.rank == null) return compareByName(a, b);
-      if (a.rank == null) return 1; // unranked always sinks to the bottom
-      if (b.rank == null) return -1;
-      return a.rank - b.rank;
-    }
+    case 'rank':
+      return byRank(a, b);
     case 'name':
       return compareByName(a, b);
     case 'artist':
@@ -60,8 +57,6 @@ const SORT_OPTIONS: RankedSortOption[] = [
   { key: 'time', label: 'Listening time', defaultDir: 'desc' },
   { key: 'last', label: 'Last played', defaultDir: 'desc' },
 ];
-
-const dash = <span className="text-gray-300 dark:text-gray-600">—</span>;
 
 const TypeBadge = ({ kind }: { kind: 'song' | 'album' }) => (
   <span className="rounded-full bg-pink-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pink-600 dark:bg-pink-900/30 dark:text-pink-300">
@@ -109,9 +104,13 @@ const renderCard = (item: ListItemWithStats) => (
 );
 
 function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
-  const [items, setItems] = useState<ListItemWithStats[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const state = useRankedList<ListItemWithStats>({
+    listId: list.id,
+    api: { items: music.listItems, reRank: music.rankList },
+    getId,
+    withRank: (i, rank) => ({ ...i, rank }),
+    onChanged: () => void refreshMusicLists(),
+  });
   const [ranking, setRanking] = useState(false);
   const [paused, setPaused] = useState(false);
 
@@ -122,118 +121,50 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.id]);
 
-  const load = () =>
-    music.listItems(list.id).then(setItems).catch(() => setItems([]));
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    music
-      .listItems(list.id)
-      .then((data) => !cancelled && setItems(data))
-      .catch(() => !cancelled && setItems([]))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [list.id]);
-
-  const persistOrder = async (rankedIds: string[]) => {
-    setSaving(true);
-    try {
-      await music.rankList(list.id, rankedIds);
-      const rankById = new Map(rankedIds.map((id, idx) => [id, idx + 1]));
-      setItems((prev) => prev.map((i) => ({ ...i, rank: rankById.get(i.id) ?? null })));
-      void refreshMusicLists();
-    } catch (err) {
-      console.error('Failed to rank music list:', err);
-      await load(); // re-sync so local state can't drift
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemove = async (item: ListItemWithStats) => {
-    if (!window.confirm(`Remove "${item.title}" from "${list.name}"? The music itself is kept.`)) return;
-    try {
-      await music.removeFromList(list.id, item.id);
-      await Promise.all([load(), refreshMusicLists()]); // the server closes any rank gap
-    } catch (err) {
-      console.error('Failed to remove from music list:', err);
-    }
-  };
-
   if (ranking) {
     return (
       <RankByComparing
         list={list}
-        items={items}
+        items={state.items}
         onDone={(applied) => {
           setRanking(false);
           void checkPaused();
-          if (applied) void Promise.all([load(), refreshMusicLists()]);
+          if (applied) void Promise.all([state.reload(), refreshMusicLists()]);
         }}
       />
     );
   }
 
   return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400"
-        >
-          <ArrowLeft size={14} />
-          Back to lists
-        </button>
-        <span className="text-gray-300 dark:text-gray-600">·</span>
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          {list.name}
-          {!loading && (
-            <span className="ml-1.5 text-xs font-normal text-gray-400">
-              {items.length} item{items.length !== 1 ? 's' : ''}
-            </span>
-          )}
-        </h3>
-        {saving && <Loader2 size={14} className="animate-spin text-primary-500" />}
+    <RankedListDetail
+      list={list}
+      onBack={onBack}
+      state={state}
+      itemNoun="item"
+      emptyText="Nothing in this list yet. Open an album's details (click a cover or an album name) to add the album or its songs."
+      getId={getId}
+      getRank={getRank}
+      getLabel={(i) => i.title}
+      columns={COLUMNS}
+      renderCard={renderCard}
+      sortOptions={SORT_OPTIONS}
+      compareBy={compareBy}
+      compareUnranked={compareByName}
+      removeMessage={(i) => `Remove "${i.title}" from "${list.name}"? The music itself is kept.`}
+      onRemove={(i) => music.removeFromList(list.id, i.id)}
+      headerActions={
         <button
           type="button"
           onClick={() => setRanking(true)}
-          disabled={loading || items.length < 2}
-          title={items.length < 2 ? 'Add at least two items to rank them' : 'Pick between two at a time to rank the whole list'}
-          className="btn-secondary ml-auto inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs disabled:opacity-40"
+          disabled={state.loading || state.items.length < 2}
+          title={state.items.length < 2 ? 'Add at least two items to rank them' : 'Pick between two at a time to rank the whole list'}
+          className="btn-secondary inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs disabled:opacity-40"
         >
           <Swords size={13} />
           {paused ? 'Resume ranking' : 'Rank by comparing'}
         </button>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="animate-spin text-primary-600" size={24} />
-        </div>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-gray-400">
-          Nothing in this list yet. Open an album's details (click a cover or an album name) to add the album or its songs.
-        </p>
-      ) : (
-        <RankedListView
-          items={items}
-          getId={getId}
-          getRank={getRank}
-          getLabel={(i) => i.title}
-          columns={COLUMNS}
-          renderCard={renderCard}
-          sortOptions={SORT_OPTIONS}
-          compareBy={compareBy}
-          compareUnranked={compareByName}
-          onReorder={persistOrder}
-          onRemove={(item) => void handleRemove(item)}
-        />
-      )}
-    </div>
+      }
+    />
   );
 }
 
@@ -282,15 +213,8 @@ export function MusicListsSection() {
   }, [loaded, selectedListId, selectedList]);
 
   return (
-    <section
-      aria-label="Music lists"
-      className="rounded-2xl border border-white/40 bg-white/60 p-4 shadow-sm shadow-black/3 dark:border-gray-700/40 dark:bg-gray-900/60"
-    >
-      {!loaded ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="animate-spin text-primary-600" size={24} />
-        </div>
-      ) : selectedList ? (
+    <ListSectionShell label="Music lists" loading={!loaded}>
+      {selectedList ? (
         <ListDetail list={selectedList} onBack={() => setSelectedListId(null)} />
       ) : (
         <ListsIndex
@@ -305,6 +229,6 @@ export function MusicListsSection() {
           showCreated
         />
       )}
-    </section>
+    </ListSectionShell>
   );
 }

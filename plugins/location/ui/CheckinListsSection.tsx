@@ -12,10 +12,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
-import { RankedListView } from '../../../client/src/components/lists/RankedListView';
+import { ListSectionShell, RankedListDetail, compareByRank, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
+import { useLists } from '../../../client/src/components/lists/useLists';
 import { checkinLists } from '../../../client/src/api/client';
 import { formatDate } from '../../../client/src/utils/checkin';
 import Stars from '../../../client/src/components/Stars';
@@ -33,19 +33,13 @@ const getCheckinId = (i: CheckinListItem) => i.checkin_id;
 const getCheckinRank = (i: CheckinListItem) => i.rank;
 const compareNewestFirst = (a: CheckinListItem, b: CheckinListItem) =>
   new Date(b.checked_in_at).getTime() - new Date(a.checked_in_at).getTime();
+const byRank = compareByRank(getCheckinRank, compareNewestFirst);
+const withRank = (i: CheckinListItem, rank: number | null): CheckinListItem => ({ ...i, rank });
 
 function compareBy(key: string, a: CheckinListItem, b: CheckinListItem): number {
   switch (key) {
-    case 'rank': {
-      const ar = a.rank;
-      const br = b.rank;
-      if (ar == null && br == null) {
-        return new Date(b.checked_in_at).getTime() - new Date(a.checked_in_at).getTime();
-      }
-      if (ar == null) return 1; // unranked always sinks to the bottom
-      if (br == null) return -1;
-      return ar - br;
-    }
+    case 'rank':
+      return byRank(a, b);
     case 'venue':
       return (a.venue_name ?? '').localeCompare(b.venue_name ?? '');
     case 'date':
@@ -172,111 +166,26 @@ const renderCheckinCard = (item: CheckinListItem) => (
   </>
 );
 
-function CheckinListDetail({
-  list,
-  onBack,
-}: {
-  list: CheckinList;
-  onBack: () => void;
-}) {
-  const [items, setItems] = useState<CheckinListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    checkinLists
-      .items(list.id)
-      .then((data) => {
-        if (!cancelled) setItems(data as CheckinListItem[]);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [list.id]);
-
-  const persistOrder = async (rankedIds: string[]) => {
-    setSaving(true);
-    try {
-      await checkinLists.reRank(list.id, rankedIds);
-      const rankById = new Map(rankedIds.map((id, idx) => [id, idx + 1]));
-      setItems((prev) =>
-        prev.map((i) => ({ ...i, rank: rankById.get(i.checkin_id) ?? null }))
-      );
-    } catch (err) {
-      console.error('Failed to re-rank list:', err);
-      // Re-sync from the server so local state can't drift.
-      const fresh = await checkinLists.items(list.id).catch(() => null);
-      if (fresh) setItems(fresh as CheckinListItem[]);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveFromList = async (item: CheckinListItem) => {
-    if (!window.confirm(`Remove "${item.venue_name}" from "${list.name}"? The check-in itself is kept.`)) return;
-    try {
-      await checkinLists.removeCheckin(list.id, item.checkin_id);
-      setItems((prev) => prev.filter((i) => i.checkin_id !== item.checkin_id));
-    } catch (err) {
-      console.error('Failed to remove check-in from list:', err);
-    }
-  };
-
+function CheckinListDetail({ list, onBack }: { list: CheckinList; onBack: () => void }) {
+  const state = useRankedList<CheckinListItem>({ listId: list.id, api: checkinLists, getId: getCheckinId, withRank });
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-        >
-          <ArrowLeft size={14} />
-          Back to lists
-        </button>
-        <span className="text-gray-300 dark:text-gray-600">·</span>
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          {list.name}
-          {!loading && (
-            <span className="ml-1.5 text-xs font-normal text-gray-400">
-              {items.length} check-in{items.length !== 1 ? 's' : ''}
-            </span>
-          )}
-        </h3>
-        {saving && <Loader2 size={14} className="animate-spin text-primary-500 ml-auto" />}
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="animate-spin text-primary-600" size={24} />
-        </div>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-gray-400">
-          No check-ins in this list yet. Add check-ins to lists from the check-in form.
-        </p>
-      ) : (
-        <RankedListView
-          items={items}
-          getId={getCheckinId}
-          getRank={getCheckinRank}
-          getLabel={(i) => i.venue_name || 'Unknown Venue'}
-          columns={CHECKIN_COLUMNS}
-          renderCard={renderCheckinCard}
-          sortOptions={CHECKIN_SORT_OPTIONS}
-          compareBy={compareBy}
-          compareUnranked={compareNewestFirst}
-          onReorder={persistOrder}
-          onRemove={(item) => void handleRemoveFromList(item)}
-        />
-      )}
-    </div>
+    <RankedListDetail
+      list={list}
+      onBack={onBack}
+      state={state}
+      itemNoun="check-in"
+      emptyText="No check-ins in this list yet. Add check-ins to lists from the check-in form."
+      getId={getCheckinId}
+      getRank={getCheckinRank}
+      getLabel={(i) => i.venue_name || 'Unknown Venue'}
+      columns={CHECKIN_COLUMNS}
+      renderCard={renderCheckinCard}
+      sortOptions={CHECKIN_SORT_OPTIONS}
+      compareBy={compareBy}
+      compareUnranked={compareNewestFirst}
+      removeMessage={(i) => `Remove "${i.venue_name}" from "${list.name}"? The check-in itself is kept.`}
+      onRemove={(i) => checkinLists.removeCheckin(list.id, i.checkin_id)}
+    />
   );
 }
 
@@ -286,19 +195,8 @@ function CheckinListDetail({
 
 export function CheckinListsSection() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [lists, setLists] = useState<CheckinList[]>([]);
-  const [listsLoading, setListsLoading] = useState(true);
+  const { lists, loading: listsLoading, refresh } = useLists<CheckinList>(checkinLists.list as () => Promise<CheckinList[]>);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
-
-  const refresh = () => {
-    checkinLists
-      .list()
-      .then((data) => setLists(data as CheckinList[]))
-      .catch(() => setLists([]))
-      .finally(() => setListsLoading(false));
-  };
-
-  useEffect(refresh, []);
 
   // Deep link: ?checkinList=<id> opens that list's detail (e.g. from a
   // check-in detail page). Consumed once the list is loaded, and cleared
@@ -319,12 +217,8 @@ export function CheckinListsSection() {
   );
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
-      {listsLoading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="animate-spin text-primary-600" size={24} />
-        </div>
-      ) : selectedList ? (
+    <ListSectionShell loading={listsLoading}>
+      {selectedList ? (
         <CheckinListDetail list={selectedList} onBack={() => setSelectedListId(null)} />
       ) : (
         <ListsIndex
@@ -337,6 +231,6 @@ export function CheckinListsSection() {
           onRefresh={refresh}
         />
       )}
-    </div>
+    </ListSectionShell>
   );
 }

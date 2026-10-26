@@ -8,30 +8,28 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Loader2 } from 'lucide-react';
 import { venueLists } from '../../../client/src/api/client';
 import { formatDate } from '../../../client/src/utils/checkin';
 import Stars from '../../../client/src/components/Stars';
-import { RankedListView } from '../../../client/src/components/lists/RankedListView';
+import { ListSectionShell, RankedListDetail, compareByRank, dash, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
+import { useLists } from '../../../client/src/components/lists/useLists';
 import type { VenueList, VenueListItem } from '../../../client/src/types';
 
 const getVenueId = (i: VenueListItem) => i.venue_id;
 const getVenueRank = (i: VenueListItem) => i.rank;
 const compareByName = (a: VenueListItem, b: VenueListItem) => a.venue_name.localeCompare(b.venue_name);
+const byRank = compareByRank(getVenueRank, compareByName);
+const withRank = (i: VenueListItem, rank: number | null): VenueListItem => ({ ...i, rank });
 
 const locationLabel = (i: VenueListItem) => [i.city, i.state].filter(Boolean).join(', ');
 const lastCheckinTime = (i: VenueListItem) => (i.last_checkin_at ? new Date(i.last_checkin_at).getTime() : -Infinity);
 
 function compareBy(key: string, a: VenueListItem, b: VenueListItem): number {
   switch (key) {
-    case 'rank': {
-      if (a.rank == null && b.rank == null) return compareByName(a, b);
-      if (a.rank == null) return 1; // unranked always sinks to the bottom
-      if (b.rank == null) return -1;
-      return a.rank - b.rank;
-    }
+    case 'rank':
+      return byRank(a, b);
     case 'venue':
       return compareByName(a, b);
     case 'category':
@@ -61,8 +59,6 @@ const VENUE_SORT_OPTIONS: RankedSortOption[] = [
   { key: 'checkins', label: 'Check-ins', defaultDir: 'desc' },
   { key: 'last_checkin', label: 'Last check-in', defaultDir: 'desc' },
 ];
-
-const dash = <span className="text-gray-300 dark:text-gray-600">—</span>;
 
 const VENUE_COLUMNS: RankedColumn<VenueListItem>[] = [
   {
@@ -134,129 +130,31 @@ const renderVenueCard = (item: VenueListItem) => (
 );
 
 function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void }) {
-  const [items, setItems] = useState<VenueListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    venueLists
-      .items(list.id)
-      .then((data) => {
-        if (!cancelled) setItems(data as VenueListItem[]);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [list.id]);
-
-  const persistOrder = async (rankedIds: string[]) => {
-    setSaving(true);
-    try {
-      await venueLists.reRank(list.id, rankedIds);
-      const rankById = new Map(rankedIds.map((id, idx) => [id, idx + 1]));
-      setItems((prev) => prev.map((i) => ({ ...i, rank: rankById.get(i.venue_id) ?? null })));
-    } catch (err) {
-      console.error('Failed to re-rank venue list:', err);
-      // Re-sync from the server so local state can't drift.
-      const fresh = await venueLists.items(list.id).catch(() => null);
-      if (fresh) setItems(fresh as VenueListItem[]);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemoveFromList = async (item: VenueListItem) => {
-    if (!window.confirm(`Remove "${item.venue_name}" from "${list.name}"? The venue itself is kept.`)) return;
-    try {
-      await venueLists.removeVenue(list.id, item.venue_id);
-      // Ranks stay gap-free: closing the hole is a re-rank of the survivors.
-      const remaining = items.filter((i) => i.venue_id !== item.venue_id);
-      setItems(remaining);
-      if (item.rank != null) {
-        await persistOrder(
-          remaining
-            .filter((i) => i.rank != null)
-            .sort((a, b) => (a.rank as number) - (b.rank as number))
-            .map((i) => i.venue_id)
-        );
-      }
-    } catch (err) {
-      console.error('Failed to remove venue from list:', err);
-    }
-  };
-
+  const state = useRankedList<VenueListItem>({ listId: list.id, api: venueLists, getId: getVenueId, withRank });
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-        >
-          <ArrowLeft size={14} />
-          Back to lists
-        </button>
-        <span className="text-gray-300 dark:text-gray-600">·</span>
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          {list.name}
-          {!loading && (
-            <span className="ml-1.5 text-xs font-normal text-gray-400">
-              {items.length} venue{items.length !== 1 ? 's' : ''}
-            </span>
-          )}
-        </h3>
-        {saving && <Loader2 size={14} className="animate-spin text-primary-500 ml-auto" />}
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="animate-spin text-primary-600" size={24} />
-        </div>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-gray-400">
-          No venues in this list yet. Add venues to lists from a venue's page.
-        </p>
-      ) : (
-        <RankedListView
-          items={items}
-          getId={getVenueId}
-          getRank={getVenueRank}
-          getLabel={(i) => i.venue_name || 'Unknown Venue'}
-          columns={VENUE_COLUMNS}
-          renderCard={renderVenueCard}
-          sortOptions={VENUE_SORT_OPTIONS}
-          compareBy={compareBy}
-          compareUnranked={compareByName}
-          onReorder={persistOrder}
-          onRemove={(item) => void handleRemoveFromList(item)}
-        />
-      )}
-    </div>
+    <RankedListDetail
+      list={list}
+      onBack={onBack}
+      state={state}
+      itemNoun="venue"
+      emptyText="No venues in this list yet. Add venues to lists from a venue's page."
+      getId={getVenueId}
+      getRank={getVenueRank}
+      getLabel={(i) => i.venue_name || 'Unknown Venue'}
+      columns={VENUE_COLUMNS}
+      renderCard={renderVenueCard}
+      sortOptions={VENUE_SORT_OPTIONS}
+      compareBy={compareBy}
+      compareUnranked={compareByName}
+      removeMessage={(i) => `Remove "${i.venue_name}" from "${list.name}"? The venue itself is kept.`}
+      onRemove={(i) => venueLists.removeVenue(list.id, i.venue_id)}
+    />
   );
 }
 
 export function VenueListsSection() {
-  const [lists, setLists] = useState<VenueList[]>([]);
-  const [listsLoading, setListsLoading] = useState(true);
+  const { lists, loading: listsLoading, refresh } = useLists<VenueList>(venueLists.list as () => Promise<VenueList[]>);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
-
-  const refresh = () => {
-    venueLists
-      .list()
-      .then((data) => setLists(data as VenueList[]))
-      .catch(() => setLists([]))
-      .finally(() => setListsLoading(false));
-  };
-
-  useEffect(refresh, []);
 
   const summaries = useMemo(() => lists.map((l) => ({ ...l, item_count: l.items.length })), [lists]);
   const selectedList = useMemo(
@@ -265,12 +163,8 @@ export function VenueListsSection() {
   );
 
   return (
-    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
-      {listsLoading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="animate-spin text-primary-600" size={24} />
-        </div>
-      ) : selectedList ? (
+    <ListSectionShell loading={listsLoading}>
+      {selectedList ? (
         <VenueListDetail list={selectedList} onBack={() => setSelectedListId(null)} />
       ) : (
         <ListsIndex
@@ -283,6 +177,6 @@ export function VenueListsSection() {
           onRefresh={refresh}
         />
       )}
-    </div>
+    </ListSectionShell>
   );
 }

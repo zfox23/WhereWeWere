@@ -159,6 +159,12 @@ describe('CheckinListsSection', () => {
     await waitFor(() => expect(screen.getByText('Apollo')).toBeTruthy());
 
     await user.click(screen.getByRole('button', { name: 'Actions for Apollo' }));
+    // The list is reloaded after the removal, so the server's answer decides what is left.
+    const remaining = (await apiMocks.listsItems()).filter((i: { checkin_id: string }) => i.checkin_id !== 'c2');
+    apiMocks.listsRemoveCheckin.mockImplementationOnce(async () => {
+      apiMocks.listsItems.mockResolvedValue(remaining);
+      return { message: 'ok' };
+    });
     await user.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
 
     expect(confirmSpy).toHaveBeenCalledWith(

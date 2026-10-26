@@ -5,6 +5,7 @@ import type {
 } from '../types';
 
 import { notifySettingsChanged } from '../utils/settingsEvents';
+import { createListsApi } from './lists';
 
 const API_BASE = '/api/v1';
 const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
@@ -120,14 +121,7 @@ export const venues = {
 
 // Checkin lists (location plugin) — named lists of location check-ins.
 export const checkinLists = {
-  list: () => request<any[]>('/location-checkins/lists'),
-  create: (name: string) =>
-    request<any>('/location-checkins/lists', { method: 'POST', body: JSON.stringify({ name }) }),
-  rename: (id: string, name: string) =>
-    request<any>(`/location-checkins/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
-  delete: (id: string) =>
-    request<{ message: string; id: string }>(`/location-checkins/lists/${id}`, { method: 'DELETE' }),
-  items: (listId: string) => request<any[]>(`/location-checkins/lists/${listId}/items`),
+  ...createListsApi<any, any>('/location-checkins'),
   addCheckin: (listId: string, checkinId: string) =>
     request<{ message: string }>(`/location-checkins/lists/${listId}/items`, {
       method: 'POST',
@@ -140,36 +134,15 @@ export const checkinLists = {
       method: 'PUT',
       body: JSON.stringify({ rank }),
     }),
-  // Drag-to-rank: the check-in ids in their new rank order (1..n); everyone
-  // else in the list becomes unranked.
-  reRank: (listId: string, rankedIds: string[]) =>
-    request<{ ranked_ids: string[] }>(`/location-checkins/lists/${listId}/ranks`, {
-      method: 'PUT',
-      body: JSON.stringify({ ranked_ids: rankedIds }),
-    }),
 };
 
 // Venue lists (location plugin)
 export const venueLists = {
-  list: () => request<any[]>('/venues/lists'),
-  create: (name: string) =>
-    request<any>('/venues/lists', { method: 'POST', body: JSON.stringify({ name }) }),
-  rename: (id: string, name: string) =>
-    request<any>(`/venues/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
-  delete: (id: string) =>
-    request<{ message: string; id: string }>(`/venues/lists/${id}`, { method: 'DELETE' }),
+  ...createListsApi<any, any>('/venues'),
   addVenue: (listId: string, venueId: string) =>
     request<{ message: string }>(`/venues/lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ venue_id: venueId }) }),
   removeVenue: (listId: string, venueId: string) =>
     request<{ message: string }>(`/venues/lists/${listId}/items/${venueId}`, { method: 'DELETE' }),
-  items: (listId: string) => request<any[]>(`/venues/lists/${listId}/items`),
-  // Drag-to-rank: the venue ids in their new rank order (1..n); everyone
-  // else in the list becomes unranked.
-  reRank: (listId: string, rankedIds: string[]) =>
-    request<{ ranked_ids: string[] }>(`/venues/lists/${listId}/ranks`, {
-      method: 'PUT',
-      body: JSON.stringify({ ranked_ids: rankedIds }),
-    }),
 };
 
 // Stats

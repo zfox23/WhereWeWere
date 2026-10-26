@@ -90,18 +90,23 @@ describe('VenueListsSection', () => {
     await waitFor(() => expect(screen.queryByText('Millennium Force')).toBeNull());
   });
 
-  it('removing a ranked venue closes the rank gap via re-rank', async () => {
+  it('removing a ranked venue reloads the list, whose ranks the server has closed up', async () => {
     const user = userEvent.setup();
     apiMocks.items.mockResolvedValue([
       ITEM({ rank: 1 }),
       ITEM({ venue_id: 'v2', venue_name: 'Millennium Force', rank: 2 }),
     ]);
+    apiMocks.removeVenue.mockImplementation(async () => {
+      apiMocks.items.mockResolvedValue([ITEM({ venue_id: 'v2', venue_name: 'Millennium Force', rank: 1 })]);
+    });
     render(<VenueListsSection />);
     await user.click(await screen.findByRole('button', { name: /^Favorite coasters/ }));
     await user.click(await screen.findByRole('button', { name: 'Actions for Steel Vengeance' }));
     await user.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
 
     await waitFor(() => expect(apiMocks.removeVenue).toHaveBeenCalledWith('vl1', 'v1'));
-    await waitFor(() => expect(apiMocks.reRank).toHaveBeenCalledWith('vl1', ['v2']));
+    await waitFor(() => expect(screen.queryByText('Steel Vengeance')).toBeNull());
+    expect(screen.getByText('Millennium Force')).toBeTruthy();
+    expect(apiMocks.reRank).not.toHaveBeenCalled();
   });
 });
