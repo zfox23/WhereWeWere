@@ -23,7 +23,7 @@ import MusicCheckInForm from './ui/MusicCheckInForm';
 export const client: CheckinTypeClientPlugin = {
   icon: Music,
   iconColor: 'text-pink-500',
-  fabOrder: 90,
+  fabOrder: 25,
   checkInPath: '/music-check-in',
   checkInForm: MusicCheckInForm,
 
