@@ -272,18 +272,18 @@ musicRouter.get('/stats', async (req: Request, res: Response) => {
     const limit = clampInt(req.query.limit, { fallback: 10, min: 1, max: 25 });
     const [totals, top_songs, top_artists, top_albums] = await Promise.all([
       getTotals(USER_ID, from, to),
-      getLibrary(USER_ID, 'songs', from, to, limit),
-      getLibrary(USER_ID, 'artists', from, to, limit),
-      getLibrary(USER_ID, 'albums', from, to, limit),
+      getLibrary(USER_ID, 'songs', from, to, { limit }),
+      getLibrary(USER_ID, 'artists', from, to, { limit }),
+      getLibrary(USER_ID, 'albums', from, to, { limit }),
     ]);
-    res.json({ totals, top_songs, top_artists, top_albums });
+    res.json({ totals, top_songs: top_songs.rows, top_artists: top_artists.rows, top_albums: top_albums.rows });
   } catch (err) {
     console.error('Error loading music stats:', err);
     res.status(500).json({ error: 'Failed to load stats' });
   }
 });
 
-// GET /library?view=songs|artists|albums&from&to&limit
+// GET /library?view=songs|artists|albums&from&to&q&sort&dir&limit&offset -> { rows, total }
 musicRouter.get('/library', async (req: Request, res: Response) => {
   try {
     const view = (['songs', 'artists', 'albums'] as const).includes(req.query.view as LibraryView)
@@ -291,8 +291,12 @@ musicRouter.get('/library', async (req: Request, res: Response) => {
       : 'songs';
     const from = dateParam(req.query.from);
     const to = dateParam(req.query.to);
-    const limit = clampInt(req.query.limit, { fallback: 1000, min: 1, max: 1000 });
-    res.json(await getLibrary(USER_ID, view, from, to, limit));
+    const limit = clampInt(req.query.limit, { fallback: 100, min: 1, max: 500 });
+    const offset = clampInt(req.query.offset, { fallback: 0, min: 0, max: 1_000_000 });
+    const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : '';
+    const sort = typeof req.query.sort === 'string' ? req.query.sort : undefined;
+    const dir = req.query.dir === 'asc' ? 'asc' : 'desc';
+    res.json(await getLibrary(USER_ID, view, from, to, { limit, offset, q, sort, dir }));
   } catch (err) {
     console.error('Error loading music library:', err);
     res.status(500).json({ error: 'Failed to load library' });

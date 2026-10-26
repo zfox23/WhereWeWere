@@ -1,7 +1,8 @@
 /**
  * Music library: a sortable, searchable table of the songs, artists or albums
- * played in the selected period. Like the media library, the server returns
- * the whole period (capped) and the client sorts and filters.
+ * played. The server searches, sorts and pages (a library holds tens of
+ * thousands of songs, so no client-side copy could be complete); the table
+ * shows the first page and loads more on request.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -69,6 +70,8 @@ const VIEWS: { value: MusicLibraryView; label: string }[] = [
 ];
 
 const DEFAULT_VIEW: MusicLibraryView = 'songs';
+const PAGE_SIZE = 100;
+const SEARCH_DEBOUNCE_MS = 300;
 const DEFAULT_SORT = 'plays';
 const DEFAULT_DIR: SortDir = 'desc';
 
@@ -108,19 +111,33 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  // The search text is sent a moment after typing stops.
+  const [searchText, setSearchText] = useState(initial.query.trim());
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchText(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // A new view, search, sort or range starts again from the first page.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(false);
     music
-      .library(view, from || undefined, to || undefined)
+      .library(view, from || undefined, to || undefined, { q: searchText, sort: sortBy, dir: sortDir, limit: PAGE_SIZE })
       .then((data) => {
-        if (!cancelled) setRows(data);
+        if (cancelled) return;
+        setRows(data.rows);
+        setTotal(data.total);
       })
       .catch((err) => {
         console.error('Failed to load music library:', err);
         if (!cancelled) {
           setRows([]);
+          setTotal(0);
           setError(true);
         }
       })
@@ -130,7 +147,19 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
     return () => {
       cancelled = true;
     };
-  }, [view, from, to]);
+  }, [view, from, to, searchText, sortBy, sortDir]);
+
+  const loadMore = () => {
+    setLoadingMore(true);
+    music
+      .library(view, from || undefined, to || undefined, { q: searchText, sort: sortBy, dir: sortDir, limit: PAGE_SIZE, offset: rows.length })
+      .then((data) => {
+        setRows((prev) => [...prev, ...data.rows]);
+        setTotal(data.total);
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoadingMore(false));
+  };
 
   // Re-sync with the URL on back/forward.
   useEffect(() => {
@@ -172,22 +201,7 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   const columns = COLUMNS[view];
   const activeColumn = columns.find((c) => c.key === sortBy) ?? columns.find((c) => c.key === DEFAULT_SORT)!;
 
-  const visibleRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q
-      ? rows.filter((r) => `${r.name} ${joinArtists(r.artists)} ${r.album ?? ''}`.toLowerCase().includes(q))
-      : rows.slice();
-    const dir = sortDir === 'asc' ? 1 : -1;
-    return filtered.sort((a, b) => {
-      const av = activeColumn.sort(a);
-      const bv = activeColumn.sort(b);
-      if (av < bv) return -dir;
-      if (av > bv) return dir;
-      // Ties: most recently played, then name.
-      const byLast = new Date(b.last_played_at).getTime() - new Date(a.last_played_at).getTime();
-      return byLast !== 0 ? byLast : a.name.localeCompare(b.name);
-    });
-  }, [rows, query, sortDir, activeColumn]);
+  const visibleRows = rows;
 
   const changeView = (next: MusicLibraryView) => {
     setView(next);
@@ -309,13 +323,26 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
             {!loading && visibleRows.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-8 text-center text-sm text-gray-500">
-                  {error ? "Couldn't load the music library." : query ? 'Nothing matches your filter.' : 'No music played in this period.'}
+                  {error ? "Couldn't load the music library." : searchText ? 'Nothing matches your filter.' : 'No music played yet.'}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      {rows.length > 0 && (
+        <div className="flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+          <span>
+            Showing {rows.length.toLocaleString()} of {total.toLocaleString()}
+          </span>
+          {rows.length < total && (
+            <button type="button" onClick={loadMore} disabled={loadingMore} className="btn-secondary inline-flex items-center gap-1.5 !py-1 text-xs">
+              {loadingMore && <Loader2 size={12} className="animate-spin" />}
+              Show more
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

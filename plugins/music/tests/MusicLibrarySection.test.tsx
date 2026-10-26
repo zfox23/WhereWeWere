@@ -34,52 +34,74 @@ function renderSection(props: { from?: string; to?: string } = {}) {
   );
 }
 
+const page = (rows: MusicAggregate[], total = rows.length) => Promise.resolve({ rows, total });
+const lastCall = () => libraryMock.mock.calls[libraryMock.mock.calls.length - 1];
+
 describe('MusicLibrarySection', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/profile?tab=plugin:music');
     libraryMock.mockReset();
     libraryMock.mockImplementation((view: MusicLibraryView) =>
-      Promise.resolve(view === 'songs' ? SONGS : [song('Zed', [], 5, '2024-03-01T00:00:00Z')]),
+      view === 'songs' ? page(SONGS) : page([song('Zed', [], 5, '2024-03-01T00:00:00Z')]),
     );
   });
   afterEach(cleanup);
 
-  it('fetches songs for the period and ranks by plays, newest play breaking ties', async () => {
+  it('asks the server for the first page, most played first, and shows the rows as returned', async () => {
     renderSection({ from: '2024-01-01', to: '2024-03-31' });
-    await waitFor(() => expect(titles()).toEqual(['Charlie', 'Bravo', 'Alpha']));
-    expect(libraryMock).toHaveBeenCalledWith('songs', '2024-01-01', '2024-03-31');
+    await waitFor(() => expect(titles()).toEqual(['Alpha', 'Bravo', 'Charlie']));
+    expect(libraryMock).toHaveBeenCalledWith('songs', '2024-01-01', '2024-03-31', { q: '', sort: 'plays', dir: 'desc', limit: 100 });
+    expect(screen.getByText('Showing 3 of 3')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
   it('omits the range for all time', async () => {
     renderSection();
-    await waitFor(() => expect(libraryMock).toHaveBeenCalledWith('songs', undefined, undefined));
+    await waitFor(() => expect(libraryMock).toHaveBeenCalledWith('songs', undefined, undefined, expect.any(Object)));
   });
 
-  it('sorts by a clicked column and flips direction on a second click', async () => {
+  it('sorts on the server when a column is clicked, and flips direction on a second click', async () => {
     const user = userEvent.setup();
     renderSection();
     await waitFor(() => expect(titles()).toHaveLength(3));
     await user.click(screen.getByRole('button', { name: 'Title' }));
-    expect(titles()).toEqual(['Alpha', 'Bravo', 'Charlie']);
+    await waitFor(() => expect(lastCall()[3]).toMatchObject({ sort: 'name', dir: 'asc' }));
     await user.click(screen.getByRole('button', { name: 'Title' }));
-    expect(titles()).toEqual(['Charlie', 'Bravo', 'Alpha']);
+    await waitFor(() => expect(lastCall()[3]).toMatchObject({ sort: 'name', dir: 'desc' }));
     expect(new URLSearchParams(window.location.search).get('sort')).toBe('name');
     // Descending is the default direction, so it stays out of the URL.
     expect(new URLSearchParams(window.location.search).has('dir')).toBe(false);
   });
 
-  it('filters by title, artist or album', async () => {
+  it('searches on the server once typing pauses, not on every keystroke', async () => {
     const user = userEvent.setup();
     renderSection();
     await waitFor(() => expect(titles()).toHaveLength(3));
+    libraryMock.mockClear();
+    libraryMock.mockImplementation(() => page([SONGS[0]], 1));
     await user.type(screen.getByLabelText('Filter library'), 'first album');
-    expect(titles()).toEqual(['Alpha']);
-    await user.clear(screen.getByLabelText('Filter library'));
-    await user.type(screen.getByLabelText('Filter library'), 'amy');
-    expect(titles()).toEqual(['Bravo']);
+    await waitFor(() => expect(libraryMock).toHaveBeenCalled());
+    expect(libraryMock).toHaveBeenCalledTimes(1);
+    expect(lastCall()[3]).toMatchObject({ q: 'first album' });
+    await waitFor(() => expect(titles()).toEqual(['Alpha']));
+    libraryMock.mockImplementation(() => page([], 0));
     await user.clear(screen.getByLabelText('Filter library'));
     await user.type(screen.getByLabelText('Filter library'), 'zzz');
-    expect(screen.getByText('Nothing matches your filter.')).toBeTruthy();
+    expect(await screen.findByText('Nothing matches your filter.')).toBeTruthy();
+  });
+
+  it('loads the next page after the rows it already has, and says how many there are', async () => {
+    const user = userEvent.setup();
+    libraryMock.mockImplementationOnce(() => page(SONGS.slice(0, 2), 3));
+    renderSection();
+    await waitFor(() => expect(titles()).toEqual(['Alpha', 'Bravo']));
+    expect(screen.getByText('Showing 2 of 3')).toBeTruthy();
+    libraryMock.mockImplementationOnce(() => page(SONGS.slice(2), 3));
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => expect(titles()).toEqual(['Alpha', 'Bravo', 'Charlie']));
+    expect(lastCall()[3]).toMatchObject({ offset: 2, limit: 100 });
+    expect(screen.getByText('Showing 3 of 3')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
   it('switches view and refetches', async () => {
@@ -87,15 +109,15 @@ describe('MusicLibrarySection', () => {
     renderSection();
     await waitFor(() => expect(titles()).toHaveLength(3));
     await user.click(screen.getByRole('button', { name: 'Artists' }));
-    await waitFor(() => expect(libraryMock).toHaveBeenLastCalledWith('artists', undefined, undefined));
+    await waitFor(() => expect(lastCall()[0]).toBe('artists'));
     await waitFor(() => expect(titles()).toEqual(['Zed']));
     expect(new URLSearchParams(window.location.search).get('musicView')).toBe('artists');
   });
 
-  it('restores state from the URL', async () => {
+  it('restores state from the URL and sends it to the server', async () => {
     window.history.replaceState(null, '', '/profile?tab=plugin:music&musicView=songs&sort=name&dir=asc&q=a');
     renderSection();
-    await waitFor(() => expect(titles()).toEqual(['Alpha', 'Bravo', 'Charlie']));
+    await waitFor(() => expect(libraryMock).toHaveBeenCalledWith('songs', undefined, undefined, { q: 'a', sort: 'name', dir: 'asc', limit: 100 }));
     expect((screen.getByLabelText('Filter library') as HTMLInputElement).value).toBe('a');
   });
 
@@ -106,9 +128,9 @@ describe('MusicLibrarySection', () => {
   });
 
   it('shows an empty state and an error state', async () => {
-    libraryMock.mockResolvedValueOnce([]);
+    libraryMock.mockImplementationOnce(() => page([]));
     renderSection();
-    await waitFor(() => expect(screen.getByText('No music played in this period.')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('No music played yet.')).toBeTruthy());
     cleanup();
     libraryMock.mockRejectedValueOnce(new Error('boom'));
     vi.spyOn(console, 'error').mockImplementation(() => {});

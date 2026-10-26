@@ -48,7 +48,7 @@ describe('MusicTab', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/profile?tab=plugin:music');
     statsMock.mockResolvedValue(STATS);
-    libraryMock.mockResolvedValue([]);
+    libraryMock.mockResolvedValue({ rows: [], total: 0 });
   });
   afterEach(() => {
     cleanup();
@@ -88,7 +88,7 @@ describe('MusicTab', () => {
     expect(params.has('sort') && params.has('dir')).toBe(false);
     expect((await screen.findByLabelText('Filter library') as HTMLInputElement).value).toBe('Khruangbin');
     // The library is all-time, whatever period the overview was on.
-    expect(libraryMock).toHaveBeenLastCalledWith('artists', undefined, undefined);
+    expect(libraryMock).toHaveBeenLastCalledWith('artists', undefined, undefined, expect.objectContaining({ q: 'Khruangbin' }));
     expect(screen.queryByText('Top songs')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Overview' }));

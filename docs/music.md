@@ -118,3 +118,11 @@ Click the time beside any song in an expanded listening session on Home to open 
 - photos from that moment, when Immich is connected, like a place check-in.
 
 **Edit** reopens the check-in form filled in (title, artists, album, length, time in the play's own timezone, note, companions, saved location), and **Delete** removes the play. Both work on any play, including scrobbled ones, and regroup the listening sessions around the old and new time. A scrobbled play you delete is not re-added unless the scrobbler sends it again.
+
+## What counts as "the same song"
+
+A song is its **title and first artist**. A trailing "(feat. X)", "(with X)" or remaster tag is ignored, because scrobblers and imports disagree about them: Spotify sends "Known You Before" by Jason Ross, Seven Lions and Emilie Brandt; Last.fm has "Known You Before (with Emilie Brandt)" by Jason Ross. Those are one song, with one play count, in the Library, on a play's page, in Top songs, in lists and in the "already on file" check for hand-entered songs. A remix, live version or "- Single Version" stays a separate song, and so does the same title by a different first artist. An album is its name and first album artist.
+
+Each Library row shows the most recent spelling of the title and the fullest artist credit seen.
+
+The Library is searched, sorted and paged by the server: type to search the whole history (title, artist or album), click a column to sort all of it, and use **Show more** for the next 100. It is not limited to the most-played rows.

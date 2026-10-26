@@ -79,8 +79,21 @@ export const music = {
   deleteScrobble: (id: string) => request<{ id: string }>(`/music/scrobbles/${id}`, { method: 'DELETE' }),
   stats: (from?: string, to?: string, limit = 25) =>
     request<MusicStats>(`/music/stats${rangeQuery(from, to, { limit: String(limit) })}`),
-  library: (view: MusicLibraryView, from?: string, to?: string) =>
-    request<MusicAggregate[]>(`/music/library${rangeQuery(from, to, { view })}`),
+  /** One page of the library, filtered and sorted by the server (the whole history when no range is given). */
+  library: (
+    view: MusicLibraryView,
+    from?: string,
+    to?: string,
+    opts: { q?: string; sort?: string; dir?: 'asc' | 'desc'; limit?: number; offset?: number } = {},
+  ) => {
+    const extra: Record<string, string> = { view };
+    if (opts.q) extra.q = opts.q;
+    if (opts.sort) extra.sort = opts.sort;
+    if (opts.dir) extra.dir = opts.dir;
+    if (opts.limit) extra.limit = String(opts.limit);
+    if (opts.offset) extra.offset = String(opts.offset);
+    return request<{ rows: MusicAggregate[]; total: number }>(`/music/library${rangeQuery(from, to, extra)}`);
+  },
   sessionTracks: (sessionId: string) =>
     request<SessionTrack[]>(`/music/sessions/${sessionId}/tracks`),
   reflect: (date: string) => request<MusicReflectionYear[]>(`/music/reflect?date=${date}`),

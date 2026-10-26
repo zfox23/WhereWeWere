@@ -365,14 +365,17 @@ describe('music plugin', () => {
 
     it('serves each library view', async () => {
       const songs = await request(app).get('/api/v1/music/library').query({ view: 'songs' });
-      expect(songs.body.map((r: any) => [r.name, r.plays])).toEqual([['Hit', 2], ['Deep Cut', 1], ['Other', 1]]);
-      expect(songs.body[0]).toMatchObject({ album: 'Album One', listened_seconds: 200 });
+      expect(songs.body.total).toBe(3);
+      // Ties go to the most recently played.
+      expect(songs.body.rows.map((r: any) => [r.name, r.plays])).toEqual([['Hit', 2], ['Other', 1], ['Deep Cut', 1]]);
+      expect(songs.body.rows[0]).toMatchObject({ album: 'Album One', listened_seconds: 200 });
       const artists = await request(app).get('/api/v1/music/library').query({ view: 'artists' });
-      expect(artists.body[0]).toMatchObject({ name: 'A', plays: 3, unique_tracks: 2 });
+      expect(artists.body.rows[0]).toMatchObject({ name: 'A', plays: 3, unique_tracks: 2 });
       const albums = await request(app).get('/api/v1/music/library').query({ view: 'albums' });
-      expect(albums.body).toHaveLength(1);
+      expect(albums.body.rows).toHaveLength(1);
+      expect(albums.body.total).toBe(1);
       const fallback = await request(app).get('/api/v1/music/library').query({ view: 'bogus' });
-      expect(fallback.body[0].name).toBe('Hit');
+      expect(fallback.body.rows[0].name).toBe('Hit');
     });
 
     it('exposes the earliest scrobble date for the all-time selector', async () => {
@@ -465,7 +468,7 @@ describe('music plugin', () => {
       expect(stats.body.totals.scrobbles).toBe(1);
       expect(stats.body.top_songs[0].name).toBe('auckland play');
       const library = await request(app).get('/api/v1/music/library').query({ from: '2024-05-01', to: '2024-05-01' });
-      expect(library.body.map((r: any) => r.name)).toEqual(['chicago play']);
+      expect(library.body.rows.map((r: any) => r.name)).toEqual(['chicago play']);
     });
 
     it('takes a session\'s zone from its first play and reports each track\'s own', async () => {

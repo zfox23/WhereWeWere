@@ -9,6 +9,7 @@
 import { query } from '../../../server/src/db';
 import { escapeLike } from '../../../server/src/services/queryParams';
 import { normalizeTitle, sameArtist } from './albumMatch';
+import { fullestArtistsSql, latestTitleSql } from './identity';
 import { ProviderUnavailableError, type FetchLike } from './albumProviders';
 
 export interface Suggestion {
@@ -34,7 +35,7 @@ const MIN_QUERY_CHARS = 2;
 
 export async function searchLibrary(userId: string, q: SuggestQuery, limit: number): Promise<Suggestion[]> {
   const result = await query(
-    `SELECT MIN(title) AS title, MIN(artists) AS artists,
+    `SELECT ${latestTitleSql()} AS title, ${fullestArtistsSql()} AS artists,
             (ARRAY_AGG(album ORDER BY played_at DESC) FILTER (WHERE album IS NOT NULL))[1] AS album,
             (ARRAY_AGG(COALESCE(album_artists[1], artists[1]) ORDER BY played_at DESC) FILTER (WHERE album IS NOT NULL))[1] AS album_artist,
             MAX(track_length) AS length, COUNT(*)::int AS plays, MAX(played_at) AS last_played
@@ -42,7 +43,7 @@ export async function searchLibrary(userId: string, q: SuggestQuery, limit: numb
      WHERE user_id = $1
        AND ($2 = '' OR lower(title) LIKE '%' || lower($2) || '%' ESCAPE '\\')
        AND ($3 = '' OR lower(array_to_string(artists, ' ')) LIKE '%' || lower($3) || '%' ESCAPE '\\')
-     GROUP BY lower(btrim(title)), artists
+     GROUP BY song_key
      ORDER BY plays DESC, last_played DESC
      LIMIT $4`,
     [userId, escapeLike(q.title.trim()), escapeLike(q.artist.trim()), limit],

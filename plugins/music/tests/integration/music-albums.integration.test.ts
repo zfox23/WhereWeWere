@@ -301,7 +301,7 @@ describe('music metadata', () => {
     expect(stats.top_artists.every((r: any) => !('art_id' in r))).toBe(true);
     expect(stats.top_albums[0]).not.toHaveProperty('album_key');
 
-    const library = (await request(app).get('/api/v1/music/library').query({ view: 'songs' })).body;
+    const library = (await request(app).get('/api/v1/music/library').query({ view: 'songs' })).body.rows;
     expect(library.find((r: any) => r.name === 'Loose Single').art_id).toBeNull();
     expect(library.find((r: any) => r.name === 'Oceanic').art_id).toBe(artId);
   });
@@ -327,7 +327,7 @@ describe('music metadata', () => {
     expect(await secondsOf()).toBe(650);
     expect((await status()).job.durations_filled).toBe(2);
     // Library listening time now counts them.
-    const library = (await request(app).get('/api/v1/music/library').query({ view: 'songs' })).body;
+    const library = (await request(app).get('/api/v1/music/library').query({ view: 'songs' })).body.rows;
     expect(library.find((r: any) => r.name === 'Filaments').listened_seconds).toBe(300);
 
     // Already-matched albums are topped up by a later run, once nothing is left to look up.

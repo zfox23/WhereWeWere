@@ -101,12 +101,12 @@ export async function getListItems(userId: string, listId: string): Promise<List
                 MAX(m.played_at) AS last_played_at
          FROM music_scrobbles m WHERE m.user_id = l.user_id AND ${match}
        ) st ON true`;
-  // Two statements so each can use its index: albums by album_key, songs by title.
+  // Two statements so each can use its index: albums by album_key, songs by song_key.
   const [albums, songs] = await Promise.all([
     query(`SELECT ${base} ${join} ${stats('m.album_key = i.album_ref')} WHERE i.list_id = $1 AND i.kind = 'album'`, [listId]),
     query(
       `SELECT ${base} ${join}
-       ${stats(`lower(btrim(m.title)) = split_part(substr(i.item_key, 6), chr(31), 1) AND ${songKeySql('m.')} = substr(i.item_key, 6)`)}
+       ${stats(`${songKeySql('m.')} = substr(i.item_key, 6)`)}
        WHERE i.list_id = $1 AND i.kind = 'song'`,
       [listId],
     ),
@@ -349,8 +349,9 @@ export async function importLists(db: Db, userId: string, payload: unknown): Pro
       if ((i.kind !== 'song' && i.kind !== 'album') || !key || !title || !key.startsWith(`${i.kind}:`)) continue;
       const artists = (Array.isArray(i.artists) ? i.artists : []).flatMap((a) => (str(a) ? [str(a) as string] : []));
       const result = await db.query(
+        // A song's key is recomputed, so a backup written under an older identity still lines up.
         `INSERT INTO music_list_items (list_id, item_key, kind, title, artists, album, album_ref, position, rank)
-         VALUES ($1, $2, $3, $4, $5, $6, $7,
+         VALUES ($1, CASE WHEN $3::text = 'song' THEN 'song:' || music_song_key($4, $5::text[]) ELSE $2 END, $3, $4, $5, $6, $7,
                  COALESCE((SELECT MAX(position) + 1 FROM music_list_items WHERE list_id = $1), 0), $8)
          ON CONFLICT (list_id, item_key) DO NOTHING`,
         [listId, key, i.kind, title, artists, str(i.album), str(i.album_ref, 2000), created && Number(i.rank) > 0 ? nextRank : null],

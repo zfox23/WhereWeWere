@@ -19,7 +19,7 @@ import sharp from 'sharp';
 import { query } from '../../../server/src/db';
 import { config } from '../../../server/src/config';
 import { normalizeTitle, type AlbumMatch } from './albumMatch';
-import { albumRefSql, songKeySql, UNKNOWN_ALBUM } from './identity';
+import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql, UNKNOWN_ALBUM } from './identity';
 import {
   ProviderUnavailableError,
   chainProviders,
@@ -559,7 +559,7 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
     : [ref];
 
   const played = (await query(
-    `SELECT ${songKeySql()} AS song_key, MIN(title) AS title, MIN(artists) AS artists, COUNT(*)::int AS plays,
+    `SELECT ${songKeySql()} AS song_key, ${latestTitleSql()} AS title, ${fullestArtistsSql()} AS artists, COUNT(*)::int AS plays,
             COALESCE(SUM(COALESCE(listened_for, track_length, 0)), 0)::int AS seconds,
             MAX(track_length) AS length, MIN(album) AS album, MIN(COALESCE(album_artists[1], artists[1])) AS album_artist
      FROM music_scrobbles WHERE user_id = $1 AND ${albumRefSql()} = ANY($2::text[])

@@ -230,10 +230,10 @@ describe('list badges', () => {
   });
 
   it('hearts songs and albums that are on a list, wherever the library shows them', async () => {
-    api.library.mockResolvedValue([
+    api.library.mockResolvedValue({ total: 2, rows: [
       { name: 'Sun & Moon', artists: ['A'], album: 'Group Therapy', album_ref: 'group therapy|a', song_key: 'SK', plays: 2, listened_seconds: 1, first_played_at: '2024-01-01T00:00:00Z', last_played_at: '2024-01-02T00:00:00Z' },
       { name: 'Other', artists: ['A'], album: null, album_ref: '|a', song_key: 'OK', plays: 1, listened_seconds: 1, first_played_at: '2024-01-01T00:00:00Z', last_played_at: '2024-01-02T00:00:00Z' },
-    ]);
+    ] });
     render(<MusicLibrarySection from="2024-01-01" to="2024-01-31" />);
     await screen.findByText('Sun & Moon');
     // Song heart + album heart on the first row; none on the second.

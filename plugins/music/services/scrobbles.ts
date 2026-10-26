@@ -10,7 +10,8 @@ import { query, pool } from '../../../server/src/db';
 import { allPlugins } from '../../../server/src/plugins/registry';
 import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
 import { lookupAlbumSoon } from './albums';
-import { albumRefSql, songKeySql } from './identity';
+import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql } from './identity';
+import { escapeLike } from '../../../server/src/services/queryParams';
 import { companionNamesSql, deleteCompanionsForCheckins, setCompanions } from '../../../server/src/services/companions';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './constants';
 
@@ -363,8 +364,7 @@ async function findNearDuplicate(
     `SELECT id, played_at, title, artists, source FROM music_scrobbles
      WHERE user_id = $1
        AND played_at BETWEEN $2::timestamptz - make_interval(mins => $3::int) AND $2::timestamptz + make_interval(mins => $3::int)
-       AND lower(btrim(title)) = lower(btrim($4))
-       AND lower(array_to_string(artists, chr(31))) = lower(array_to_string($5::text[], chr(31)))
+       AND song_key = music_song_key($4, $5::text[])
        AND ($6::text IS NULL OR source = $6)
      ORDER BY abs(extract(epoch FROM played_at - $2::timestamptz)) LIMIT 1`,
     [userId, s.playedAt, NEAR_DUPLICATE_MINUTES, s.title, s.artists, onlySource],
@@ -613,7 +613,7 @@ export async function getScrobbleDetail(userId: string, id: string): Promise<Scr
     query(
       `SELECT COUNT(*)::int AS plays, MIN(played_at) AS first_played_at, MAX(played_at) AS last_played_at
        FROM music_scrobbles
-       WHERE user_id = $1 AND lower(btrim(title)) = split_part($2, chr(31), 1) AND ${songKeySql()} = $2`,
+       WHERE user_id = $1 AND ${songKeySql()} = $2`,
       [userId, play.song_key],
     ),
     sessionId
@@ -786,7 +786,7 @@ export async function getTotals(userId: string, from: string | null, to: string 
               WHERE m2.user_id = $1
                 AND ($2::date IS NULL OR (m2.played_at AT TIME ZONE m2.timezone)::date >= $2::date)
                 AND ($3::date IS NULL OR (m2.played_at AT TIME ZONE m2.timezone)::date <= $3::date))::int AS unique_artists,
-            COUNT(DISTINCT (lower(title), artists))::int AS unique_tracks
+            COUNT(DISTINCT song_key)::int AS unique_tracks
      FROM music_scrobbles
      WHERE user_id = $1 ${IN_RANGE}`,
     rangeParams(userId, from, to),
@@ -796,56 +796,101 @@ export async function getTotals(userId: string, from: string | null, to: string 
 
 export type LibraryView = 'songs' | 'artists' | 'albums';
 
-/** Aggregated plays per song / artist / album in the period, most played first. */
+export interface LibraryOptions {
+  limit: number;
+  offset?: number;
+  /** Matches the name, artists or album (any one play of a song counts). */
+  q?: string;
+  sort?: string;
+  dir?: 'asc' | 'desc';
+}
+
+/** Sortable columns, as the outer query names them. */
+const LIBRARY_SORTS: Record<string, string> = {
+  name: 'lower(g.name)',
+  artists: 'lower(g.artists::text)',
+  album: "lower(COALESCE(g.album, ''))",
+  plays: 'g.plays',
+  time: 'g.listened_seconds',
+  last: 'g.last_played_at',
+  first: 'g.first_played_at',
+  tracks: 'g.unique_tracks',
+};
+
+/**
+ * Aggregated plays per song / artist / album in the period (the whole history
+ * when there is none), filtered, sorted and paged here so a library of tens of
+ * thousands of songs is searchable, not just its most played thousand.
+ *
+ * A song is its `song_key` (title without a "(feat. X)" credit, and first
+ * artist); an album is its `album_key`. Each row shows the fullest artist
+ * credit and the most recent spelling seen.
+ */
 export async function getLibrary(
   userId: string,
   view: LibraryView,
   from: string | null,
   to: string | null,
-  limit: number,
-) {
-  const params = [...rangeParams(userId, from, to), limit];
+  opts: LibraryOptions,
+): Promise<{ rows: any[]; total: number }> {
+  const q = escapeLike((opts.q ?? '').trim().toLowerCase());
+  // $1 user, $2/$3 range (IN_RANGE), $4 search text, $5 limit, $6 offset.
+  const params = [...rangeParams(userId, from, to), q, opts.limit, opts.offset ?? 0];
   const agg = `COUNT(*)::int AS plays,
                COALESCE(SUM(${PLAY_SECONDS}), 0)::int AS listened_seconds,
                MIN(played_at) AS first_played_at,
                MAX(played_at) AS last_played_at`;
-  let sql: string;
+  const like = (text: string) => `BOOL_OR(lower(${text}) LIKE '%' || $4 || '%' ESCAPE '\\')`;
+  let grouped: string;
   if (view === 'artists') {
-    sql = `SELECT a.artist AS name,
-                  COUNT(DISTINCT lower(m.title))::int AS unique_tracks,
-                  ${agg}
-           FROM music_scrobbles m, unnest(m.artists) AS a(artist)
-           WHERE m.user_id = $1
-             AND ($2::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date >= $2::date)
-             AND ($3::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date <= $3::date)
-           GROUP BY a.artist
-           ORDER BY plays DESC, name ASC LIMIT $4`;
+    grouped = `SELECT a.artist AS name, NULL::jsonb AS artists, NULL::text AS album, NULL::text AS album_ref, NULL::text AS song_key,
+                      COUNT(DISTINCT m.song_key)::int AS unique_tracks,
+                      COUNT(*)::int AS plays,
+                      COALESCE(SUM(COALESCE(m.listened_for, m.track_length, 0)), 0)::int AS listened_seconds,
+                      MIN(m.played_at) AS first_played_at, MAX(m.played_at) AS last_played_at
+               FROM music_scrobbles m, unnest(m.artists) AS a(artist)
+               WHERE m.user_id = $1
+                 AND ($2::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date >= $2::date)
+                 AND ($3::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date <= $3::date)
+               GROUP BY a.artist
+               HAVING $4 = '' OR lower(a.artist) LIKE '%' || $4 || '%' ESCAPE '\\'`;
   } else if (view === 'albums') {
-    sql = `SELECT MIN(album) AS name, ${ALBUM_ARTISTS} AS artists, MIN(${albumRefSql()}) AS album_ref,
-                  COUNT(DISTINCT lower(title))::int AS unique_tracks, ${agg}
-           FROM music_scrobbles
-           WHERE user_id = $1 AND album IS NOT NULL AND album <> '' ${IN_RANGE}
-           GROUP BY lower(album), ${ALBUM_ARTISTS}
-           ORDER BY plays DESC, name ASC LIMIT $4`;
+    grouped = `SELECT ${latestTitleSql().replace(/title/g, 'album')} AS name,
+                      (ARRAY_AGG(to_jsonb(${ALBUM_ARTISTS}) ORDER BY played_at DESC))[1] AS artists,
+                      NULL::text AS album, album_key AS album_ref, NULL::text AS song_key,
+                      COUNT(DISTINCT song_key)::int AS unique_tracks, ${agg}
+               FROM music_scrobbles
+               WHERE user_id = $1 AND album_key IS NOT NULL ${IN_RANGE}
+               GROUP BY album_key
+               HAVING $4 = '' OR ${like("album || ' ' || array_to_string(artists, ' ')")}`;
   } else {
-    sql = `SELECT MIN(title) AS name, artists, MIN(album) AS album,
-                  MODE() WITHIN GROUP (ORDER BY ${albumRefSql()}) AS album_ref,
-                  MIN(${songKeySql()}) AS song_key, ${agg}
-           FROM music_scrobbles
-           WHERE user_id = $1 ${IN_RANGE}
-           GROUP BY lower(title), artists
-           ORDER BY plays DESC, name ASC LIMIT $4`;
+    grouped = `SELECT ${latestTitleSql()} AS name, ${fullestArtistsSql()} AS artists,
+                      MODE() WITHIN GROUP (ORDER BY album) AS album,
+                      MODE() WITHIN GROUP (ORDER BY ${albumRefSql()}) AS album_ref,
+                      ${songKeySql()} AS song_key, NULL::int AS unique_tracks, ${agg}
+               FROM music_scrobbles
+               WHERE user_id = $1 ${IN_RANGE}
+               GROUP BY ${songKeySql()}
+               HAVING $4 = '' OR ${like("title || ' ' || array_to_string(artists, ' ') || ' ' || COALESCE(album, '')")}`;
   }
-  if (view !== 'artists') {
-    // Songs and albums carry the cover of their (most played) album, when one was found.
-    sql = `SELECT g.*, a.id AS art_id
-           FROM (${sql}) g
-           LEFT JOIN music_albums a
-             ON a.user_id = $1 AND a.album_key = g.album_ref AND a.thumb_file IS NOT NULL
-           ORDER BY g.plays DESC, g.name ASC`;
-  }
+  const sortExpr = LIBRARY_SORTS[opts.sort ?? ''] ?? LIBRARY_SORTS.plays;
+  const dir = opts.dir === 'asc' ? 'ASC' : 'DESC';
+  const sql = `SELECT g.*, a.id AS art_id, COUNT(*) OVER()::int AS total
+               FROM (${grouped}) g
+               LEFT JOIN music_albums a
+                 ON a.user_id = $1 AND a.album_key = g.album_ref AND a.thumb_file IS NOT NULL
+               ORDER BY ${sortExpr} ${dir} NULLS LAST, g.last_played_at DESC, lower(g.name)
+               LIMIT $5 OFFSET $6`;
   const result = await query(sql, params);
-  return result.rows;
+  const rows = result.rows.map(({ total: _t, ...row }) => {
+    // An artist is just a name and its totals.
+    if (view === 'artists') {
+      const { artists: _a, album: _al, album_ref: _r, song_key: _s, art_id: _i, ...artist } = row;
+      return artist;
+    }
+    return row;
+  });
+  return { rows, total: result.rows[0]?.total ?? 0 };
 }
 
 export interface ListeningBefore {
@@ -966,19 +1011,19 @@ export async function getReflectionTracks(
   const result = await query(
     `WITH plays AS (
        SELECT EXTRACT(YEAR FROM played_at AT TIME ZONE timezone)::int AS year,
-              played_at, title, artists
+              played_at, title, artists, song_key
        FROM music_scrobbles
        WHERE user_id = $1
          AND TO_CHAR(played_at AT TIME ZONE timezone, 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
          AND EXTRACT(YEAR FROM played_at AT TIME ZONE timezone) < EXTRACT(YEAR FROM $2::date)
      ), ranked AS (
-       SELECT year, (ARRAY_AGG(title ORDER BY played_at DESC))[1] AS title, artists, COUNT(*)::int AS count,
+       SELECT year, ${latestTitleSql()} AS title, ${fullestArtistsSql()} AS artists, COUNT(*)::int AS count,
               ROW_NUMBER() OVER (
                 PARTITION BY year
-                ORDER BY COUNT(*) DESC, MAX(played_at) DESC, lower(title)
+                ORDER BY COUNT(*) DESC, MAX(played_at) DESC, ${latestTitleSql()}
               ) AS rank
        FROM plays
-       GROUP BY year, lower(title), artists
+       GROUP BY year, song_key
      )
      SELECT year, title, artists, count FROM ranked WHERE rank <= $3 ORDER BY year DESC, rank`,
     [userId, date, limit],
