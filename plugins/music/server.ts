@@ -40,11 +40,12 @@ import {
   createList,
   deleteList,
   exportLists,
+  getListItems,
   getLists,
   importLists,
   removeItem,
   renameList,
-  reorderItems,
+  setRanks,
 } from './services/lists';
 import {
   albumLookupEnabled,
@@ -439,17 +440,31 @@ musicRouter.delete('/lists/:id/items/:itemId', async (req: Request, res: Respons
   }
 });
 
-musicRouter.put('/lists/:id/order', async (req: Request, res: Response) => {
+// Drag-to-rank: the item ids in their new rank order; everyone else on the list becomes unranked.
+musicRouter.put('/lists/:id/ranks', async (req: Request, res: Response) => {
   try {
     const listId = String(req.params.id);
-    const ids: unknown = req.body?.item_ids;
+    const ids: unknown = req.body?.ranked_ids;
     if (!isUuid(listId) || !Array.isArray(ids) || !ids.every((i) => typeof i === 'string' && isUuid(i))) {
-      return res.status(400).json({ error: 'item_ids must be a list of item ids' });
+      return res.status(400).json({ error: 'ranked_ids must be a list of item ids' });
     }
-    if (!(await reorderItems(USER_ID, listId, ids as string[]))) return res.status(404).json({ error: 'List not found' });
-    res.json({ item_ids: ids });
+    if (!(await setRanks(USER_ID, listId, ids as string[]))) return res.status(404).json({ error: 'List not found' });
+    res.json({ ranked_ids: ids });
   } catch (err) {
-    listError(res, err, 'reordering the list');
+    listError(res, err, 'ranking the list');
+  }
+});
+
+// One list's items with all-time plays of each.
+musicRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    const items = await getListItems(USER_ID, listId);
+    if (!items) return res.status(404).json({ error: 'List not found' });
+    res.json(items);
+  } catch (err) {
+    listError(res, err, 'loading the list');
   }
 });
 

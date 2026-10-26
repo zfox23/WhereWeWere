@@ -22,12 +22,25 @@ export interface ListItem {
   album_ref: string | null;
   art_id: string | null;
   added_at: string;
+  /** 1..n among the ranked items; null when unranked. */
+  rank: number | null;
 }
 
 export interface MusicList {
   id: string;
   name: string;
+  updated_at: string;
+  item_count: number;
+  /** Up to four distinct covers, best-ranked items first, for the index card. */
+  covers: string[];
   items: ListItem[];
+}
+
+/** A list item with the user's all-time play data for it. */
+export interface ListItemWithStats extends ListItem {
+  plays: number;
+  listened_seconds: number;
+  last_played_at: string | null;
 }
 
 export class NameTakenError extends Error {}
@@ -42,17 +55,20 @@ export function cleanName(raw: unknown): string {
 /** The pool helper or a transaction client. */
 export type Db = { query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount: number | null }> };
 
+// position is the order of adding (restores add many items in one instant, so added_at alone ties).
+const ITEM_ORDER = `i.rank NULLS LAST, i.position, i.added_at, i.id`;
+
 export async function getLists(userId: string): Promise<MusicList[]> {
   const [lists, items] = await Promise.all([
-    query(`SELECT id, name FROM music_lists WHERE user_id = $1 ORDER BY created_at, id`, [userId]),
+    query(`SELECT id, name, updated_at FROM music_lists WHERE user_id = $1 ORDER BY created_at, id`, [userId]),
     query(
-      `SELECT i.id, i.list_id, i.item_key, i.kind, i.title, i.artists, i.album, i.album_ref, i.added_at, a.id AS art_id
+      `SELECT i.id, i.list_id, i.item_key, i.kind, i.title, i.artists, i.album, i.album_ref, i.added_at, i.rank, a.id AS art_id
        FROM music_list_items i
        JOIN music_lists l ON l.id = i.list_id
        LEFT JOIN music_albums a
          ON a.user_id = l.user_id AND a.album_key = i.album_ref AND a.thumb_file IS NOT NULL
        WHERE l.user_id = $1
-       ORDER BY i.position, i.added_at, i.id`,
+       ORDER BY ${ITEM_ORDER}`,
       [userId],
     ),
   ]);
@@ -62,8 +78,45 @@ export async function getLists(userId: string): Promise<MusicList[]> {
     bucket.push(item as ListItem);
     byList.set(list_id, bucket);
   }
-  return lists.rows.map((l: { id: string; name: string }) => ({ ...l, items: byList.get(l.id) ?? [] }));
+  return lists.rows.map((l: { id: string; name: string; updated_at: string }) => {
+    const listItems = byList.get(l.id) ?? [];
+    const covers = [...new Set(listItems.flatMap((i) => (i.art_id ? [i.art_id] : [])))].slice(0, 4);
+    return { ...l, item_count: listItems.length, covers, items: listItems };
+  });
 }
+
+/** One list's items with the user's all-time plays of each, or null when there is no such list. */
+export async function getListItems(userId: string, listId: string): Promise<ListItemWithStats[] | null> {
+  const list = await query(`SELECT 1 FROM music_lists WHERE id = $1 AND user_id = $2`, [listId, userId]);
+  if ((list.rowCount ?? 0) === 0) return null;
+  const base = `i.id, i.position, i.item_key, i.kind, i.title, i.artists, i.album, i.album_ref, i.added_at, i.rank, a.id AS art_id,
+                st.plays, st.seconds AS listened_seconds, st.last_played_at`;
+  const join = `FROM music_list_items i
+       JOIN music_lists l ON l.id = i.list_id
+       LEFT JOIN music_albums a ON a.user_id = l.user_id AND a.album_key = i.album_ref AND a.thumb_file IS NOT NULL`;
+  const stats = (match: string) => `LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS plays,
+                COALESCE(SUM(COALESCE(m.listened_for, m.track_length, 0)), 0)::int AS seconds,
+                MAX(m.played_at) AS last_played_at
+         FROM music_scrobbles m WHERE m.user_id = l.user_id AND ${match}
+       ) st ON true`;
+  // Two statements so each can use its index: albums by album_key, songs by title.
+  const [albums, songs] = await Promise.all([
+    query(`SELECT ${base} ${join} ${stats('m.album_key = i.album_ref')} WHERE i.list_id = $1 AND i.kind = 'album'`, [listId]),
+    query(
+      `SELECT ${base} ${join}
+       ${stats(`lower(btrim(m.title)) = split_part(substr(i.item_key, 6), chr(31), 1) AND ${songKeySql('m.')} = substr(i.item_key, 6)`)}
+       WHERE i.list_id = $1 AND i.kind = 'song'`,
+      [listId],
+    ),
+  ]);
+  const all = [...albums.rows, ...songs.rows] as (ListItemWithStats & { position: number })[];
+  return all
+    .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.position - b.position || a.id.localeCompare(b.id))
+    .map(({ position: _position, ...item }) => item);
+}
+
+const touch = (listId: string) => query(`UPDATE music_lists SET updated_at = NOW() WHERE id = $1`, [listId]);
 
 async function insertList(db: Db, userId: string, name: string): Promise<{ id: string; name: string } | null> {
   const result = await db.query(
@@ -83,7 +136,7 @@ export async function createList(userId: string, rawName: unknown) {
 export async function renameList(userId: string, id: string, rawName: unknown) {
   const name = cleanName(rawName);
   try {
-    const result = await query(`UPDATE music_lists SET name = $3 WHERE id = $2 AND user_id = $1 RETURNING id, name`, [userId, id, name]);
+    const result = await query(`UPDATE music_lists SET name = $3, updated_at = NOW() WHERE id = $2 AND user_id = $1 RETURNING id, name`, [userId, id, name]);
     return result.rows[0] ?? null;
   } catch (err: any) {
     if (err?.code === '23505') throw new NameTakenError('You already have a list with that name');
@@ -167,6 +220,7 @@ export async function addItem(userId: string, listId: string, req: AddItemReques
      ON CONFLICT (list_id, item_key) DO NOTHING`,
     [listId, item.key, item.kind, item.title, item.artists, item.album, item.albumRef],
   );
+  if ((result.rowCount ?? 0) > 0) await touch(listId);
   return { added: (result.rowCount ?? 0) > 0 };
 }
 
@@ -176,29 +230,36 @@ export async function removeItem(userId: string, listId: string, itemId: string)
      WHERE i.id = $3 AND i.list_id = $2 AND l.id = i.list_id AND l.user_id = $1 RETURNING i.id`,
     [userId, listId, itemId],
   );
-  return (result.rowCount ?? 0) > 0;
-}
-
-/** Put the list's items in the given order; ids not on the list are ignored, omitted items go last. */
-export async function reorderItems(userId: string, listId: string, itemIds: string[]): Promise<boolean> {
-  const list = await query(`SELECT 1 FROM music_lists WHERE id = $1 AND user_id = $2`, [listId, userId]);
-  if ((list.rowCount ?? 0) === 0) return false;
-  // Unlisted items move out of the way first so the listed ones lead.
-  await query(`UPDATE music_list_items SET position = position + 1000000 WHERE list_id = $1`, [listId]);
+  if ((result.rowCount ?? 0) === 0) return false;
+  // Ranks stay gap-free: close the hole.
   await query(
-    `UPDATE music_list_items i SET position = o.pos
-     FROM (SELECT id, ord - 1 AS pos FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord)) o
-     WHERE i.list_id = $1 AND i.id = o.id`,
-    [listId, itemIds],
-  );
-  // Anything not mentioned keeps its relative order after the listed items.
-  await query(
-    `UPDATE music_list_items i SET position = r.pos
-     FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY position, added_at, id) - 1 AS pos
-           FROM music_list_items WHERE list_id = $1) r
+    `UPDATE music_list_items i SET rank = r.rn
+     FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY rank) AS rn FROM music_list_items WHERE list_id = $1 AND rank IS NOT NULL) r
      WHERE i.id = r.id`,
     [listId],
   );
+  await touch(listId);
+  return true;
+}
+
+/**
+ * Drag-to-rank: the given item ids become ranks 1..n in that order and every
+ * other item on the list becomes unranked. Ids not on the list are ignored.
+ */
+export async function setRanks(userId: string, listId: string, rankedIds: string[]): Promise<boolean> {
+  const list = await query(`SELECT 1 FROM music_lists WHERE id = $1 AND user_id = $2`, [listId, userId]);
+  if ((list.rowCount ?? 0) === 0) return false;
+  const unique = [...new Set(rankedIds)];
+  await query(
+    `WITH listed AS (
+       SELECT i.id, ROW_NUMBER() OVER (ORDER BY r.ord) AS rank
+       FROM unnest($2::uuid[]) WITH ORDINALITY AS r(id, ord)
+       JOIN music_list_items i ON i.id = r.id AND i.list_id = $1
+     )
+     UPDATE music_list_items i SET rank = (SELECT l.rank FROM listed l WHERE l.id = i.id) WHERE i.list_id = $1`,
+    [listId, unique],
+  );
+  await touch(listId);
   return true;
 }
 
@@ -206,13 +267,16 @@ export async function reorderItems(userId: string, listId: string, itemIds: stri
 
 export interface ListBackup {
   name: string;
-  items: { kind: 'song' | 'album'; title: string; artists: string[]; album: string | null; item_key: string; album_ref: string | null }[];
+  items: {
+    kind: 'song' | 'album'; title: string; artists: string[]; album: string | null;
+    item_key: string; album_ref: string | null; rank: number | null;
+  }[];
 }
 
 export async function exportLists(userId: string): Promise<ListBackup[]> {
   return (await getLists(userId)).map((l) => ({
     name: l.name,
-    items: l.items.map(({ kind, title, artists, album, item_key, album_ref }) => ({ kind, title, artists, album, item_key, album_ref })),
+    items: l.items.map(({ kind, title, artists, album, item_key, album_ref, rank }) => ({ kind, title, artists, album, item_key, album_ref, rank })),
   }));
 }
 
@@ -233,19 +297,25 @@ export async function importLists(db: Db, userId: string, payload: unknown): Pro
     const existing = await db.query(`SELECT id FROM music_lists WHERE user_id = $1 AND lower(name) = lower($2)`, [userId, name]);
     const listId: string | undefined = existing.rows[0]?.id ?? (await insertList(db, userId, name))?.id;
     if (!listId) continue;
-    for (const rawItem of (Array.isArray(l.items) ? l.items : []).slice(0, 10_000)) {
+    // A list this restore creates gets its ranks back; a list that already
+    // exists keeps its own ranking and takes new items unranked.
+    const created = existing.rows.length === 0;
+    const ordered = (Array.isArray(l.items) ? l.items : []).slice(0, 10_000).sort((x: any, y: any) => (Number(x?.rank) || Infinity) - (Number(y?.rank) || Infinity));
+    let nextRank = 1;
+    for (const rawItem of ordered) {
       const i = (rawItem && typeof rawItem === 'object' ? rawItem : {}) as Record<string, unknown>;
       const key = str(i.item_key, 2000);
       const title = str(i.title);
       if ((i.kind !== 'song' && i.kind !== 'album') || !key || !title || !key.startsWith(`${i.kind}:`)) continue;
       const artists = (Array.isArray(i.artists) ? i.artists : []).flatMap((a) => (str(a) ? [str(a) as string] : []));
       const result = await db.query(
-        `INSERT INTO music_list_items (list_id, item_key, kind, title, artists, album, album_ref, position)
+        `INSERT INTO music_list_items (list_id, item_key, kind, title, artists, album, album_ref, position, rank)
          VALUES ($1, $2, $3, $4, $5, $6, $7,
-                 COALESCE((SELECT MAX(position) + 1 FROM music_list_items WHERE list_id = $1), 0))
+                 COALESCE((SELECT MAX(position) + 1 FROM music_list_items WHERE list_id = $1), 0), $8)
          ON CONFLICT (list_id, item_key) DO NOTHING`,
-        [listId, key, i.kind, title, artists, str(i.album), str(i.album_ref, 2000)],
+        [listId, key, i.kind, title, artists, str(i.album), str(i.album_ref, 2000), created && Number(i.rank) > 0 ? nextRank : null],
       );
+      if ((result.rowCount ?? 0) > 0 && created && Number(i.rank) > 0) nextRank++;
       added += result.rowCount ?? 0;
     }
   }

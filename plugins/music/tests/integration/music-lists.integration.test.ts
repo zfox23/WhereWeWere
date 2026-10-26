@@ -20,8 +20,8 @@ const push = (title: string, album: string | undefined, artists = ['Above & Beyo
 const api = (path = '') => `/api/v1/music/lists${path}`;
 
 /** The opaque identities the server hands out, read the way the API does. */
-async function identities(title: string) {
-  const r = await query(`SELECT ${songKeySql()} AS song_key, ${albumRefSql()} AS album_ref FROM music_scrobbles WHERE title = $1`, [title]);
+async function identities(title: string, artist = 'Above & Beyond') {
+  const r = await query(`SELECT ${songKeySql()} AS song_key, ${albumRefSql()} AS album_ref FROM music_scrobbles WHERE title = $1 AND artists[1] IN ($2, 'X', 'Some Artist')`, [title, artist]);
   return r.rows[0] as { song_key: string; album_ref: string };
 }
 const newList = async (name = 'Favorites') => (await request(app).post(api()).send({ name })).body.id as string;
@@ -115,24 +115,77 @@ describe('music lists', () => {
     expect(items[0].album).toBe('Live Album'); // invalid context ignored: latest play wins
   });
 
-  it('removes and reorders items, keeping unlisted ones in order at the end', async () => {
+  it('ranks items by drag order, leaving the rest unranked, and keeps ranks gap-free on removal', async () => {
     for (const [i, t] of ['A', 'B', 'C', 'D'].entries()) await push(t, `Album ${t}`, ['X'], i * 60);
     const id = await newList();
     for (const t of ['A', 'B', 'C', 'D']) {
       const { album_ref } = await identities(t);
       await request(app).post(api(`/${id}/items`)).send({ kind: 'album', album_ref });
     }
-    const titles = async () => (await request(app).get(api())).body[0].items.map((i: any) => i.title);
-    expect(await titles()).toEqual(['Album A', 'Album B', 'Album C', 'Album D']);
+    const view = async () => (await request(app).get(api())).body[0].items.map((i: any) => [i.title, i.rank]);
+    // New items arrive unranked, in the order added.
+    expect(await view()).toEqual([['Album A', null], ['Album B', null], ['Album C', null], ['Album D', null]]);
     const ids = (await request(app).get(api())).body[0].items.map((i: any) => i.id) as string[];
 
-    expect((await request(app).put(api(`/${id}/order`)).send({ item_ids: [ids[3], ids[1]] })).status).toBe(200);
-    expect(await titles()).toEqual(['Album D', 'Album B', 'Album A', 'Album C']);
-    expect((await request(app).put(api(`/${id}/order`)).send({ item_ids: ['nope'] })).status).toBe(400);
+    expect((await request(app).put(api(`/${id}/ranks`)).send({ ranked_ids: [ids[3], ids[1], ids[3]] })).status).toBe(200);
+    expect(await view()).toEqual([['Album D', 1], ['Album B', 2], ['Album A', null], ['Album C', null]]);
+    expect((await request(app).put(api(`/${id}/ranks`)).send({ ranked_ids: ['nope'] })).status).toBe(400);
+    expect((await request(app).put(api('/00000000-0000-4000-8000-000000000000/ranks')).send({ ranked_ids: [] })).status).toBe(404);
 
-    expect((await request(app).delete(api(`/${id}/items/${ids[1]}`))).status).toBe(200);
-    expect((await request(app).delete(api(`/${id}/items/${ids[1]}`))).status).toBe(404);
-    expect(await titles()).toEqual(['Album D', 'Album A', 'Album C']);
+    // An id from elsewhere is ignored and doesn't leave a hole.
+    const other = await newList('Other');
+    await request(app).post(api(`/${other}/items`)).send({ kind: 'album', album_ref: (await identities('A')).album_ref });
+    const foreign = (await request(app).get(api())).body[1].items[0].id;
+    await request(app).put(api(`/${id}/ranks`)).send({ ranked_ids: [foreign, ids[2], ids[0]] });
+    expect(await view()).toEqual([['Album C', 1], ['Album A', 2], ['Album B', null], ['Album D', null]]);
+
+    // Removing a ranked item closes the gap.
+    expect((await request(app).delete(api(`/${id}/items/${ids[2]}`))).status).toBe(200);
+    expect((await request(app).delete(api(`/${id}/items/${ids[2]}`))).status).toBe(404);
+    expect(await view()).toEqual([['Album A', 1], ['Album B', null], ['Album D', null]]);
+    // Clearing the ranking.
+    await request(app).put(api(`/${id}/ranks`)).send({ ranked_ids: [] });
+    expect((await view()).every(([, r]: any) => r === null)).toBe(true);
+  });
+
+  it('summarises lists for the index: count, updated time and up to four distinct covers', async () => {
+    for (let i = 0; i < 6; i++) await push(`T${i}`, `Album ${i}`, ['X'], i * 60);
+    const id = await newList();
+    const before = (await request(app).get(api())).body[0];
+    expect(before).toMatchObject({ item_count: 0, covers: [] });
+    for (let i = 0; i < 6; i++) {
+      const { album_ref } = await identities(`T${i}`);
+      await request(app).post(api(`/${id}/items`)).send({ kind: 'album', album_ref });
+      if (i < 5) {
+        await query(`INSERT INTO music_albums (user_id, album_key, status, provider, external_id, thumb_file) VALUES ($1, $2, 'matched', 'deezer', $3, $4)`, [DEFAULT_USER_ID, album_ref, String(i), `deezer-${i}-thumb.jpg`]);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 15));
+    const after = (await request(app).get(api())).body[0];
+    expect(after.item_count).toBe(6);
+    expect(after.covers).toHaveLength(4);
+    expect(new Set(after.covers).size).toBe(4);
+    expect(new Date(after.updated_at).getTime()).toBeGreaterThan(new Date(before.updated_at).getTime());
+  });
+
+  it('gives each list item its all-time plays, listening time and last play', async () => {
+    await push('Sun & Moon', 'Group Therapy');
+    await push('Sun & Moon', 'Group Therapy', ['Above & Beyond'], 600);
+    await push('Oceanic', 'Group Therapy', ['Above & Beyond'], 1200);
+    await push('Sun & Moon', 'Other Album', ['Someone Else'], 1800); // same title, different artist: not the same song
+    await request(app).post(`${BASE}/newscrobble`).send({ title: 'Oceanic', artists: ['Above & Beyond'], album: 'Group Therapy', time: T0 + 2400, length: 250, key });
+    const id = await newList();
+    const sun = await identities('Sun & Moon');
+    await request(app).post(api(`/${id}/items`)).send({ kind: 'song', ...sun });
+    await request(app).post(api(`/${id}/items`)).send({ kind: 'album', album_ref: sun.album_ref });
+    const res = await request(app).get(api(`/${id}/items`));
+    expect(res.status).toBe(200);
+    const byKind = Object.fromEntries(res.body.map((i: any) => [i.kind, i]));
+    expect(byKind.song).toMatchObject({ title: 'Sun & Moon', plays: 2, listened_seconds: 0 });
+    expect(new Date(byKind.song.last_played_at).getTime()).toBe((T0 + 600) * 1000);
+    expect(byKind.album).toMatchObject({ plays: 4, listened_seconds: 250 });
+    expect((await request(app).get(api('/00000000-0000-4000-8000-000000000000/items'))).status).toBe(404);
+    expect((await request(app).get(api('/nope/items'))).status).toBe(400);
   });
 
   it('shows a matched album\'s cover id on list items', async () => {
@@ -197,6 +250,26 @@ describe('music lists', () => {
     await server.backupImport!({ user_id: DEFAULT_USER_ID }, payload);
     expect(await summary()).toEqual(before);
     expect(before[0]).toEqual(['Favorites', ['song:Oceanic', 'album:Group Therapy', 'song:Sun & Moon']]);
+  });
+
+  it('restores ranks for lists it creates, but leaves an existing list\'s ranking alone', async () => {
+    const { server } = await import('../../server');
+    await seedLists();
+    const fav = (await request(app).get(api())).body[0];
+    // Rank: Sun & Moon (song) first, then the album; Oceanic stays unranked.
+    await request(app).put(api(`/${fav.id}/ranks`)).send({ ranked_ids: [fav.items[2].id, fav.items[1].id] });
+    const ranks = async () => (await request(app).get(api())).body[0].items.map((i: any) => [i.title, i.rank]);
+    const before = await ranks();
+    expect(before).toEqual([['Sun & Moon', 1], ['Group Therapy', 2], ['Oceanic', null]]);
+    const payload = await server.backupExport!({ user_id: DEFAULT_USER_ID });
+    await server.deleteUserData!({ user_id: DEFAULT_USER_ID });
+    await server.backupImport!({ user_id: DEFAULT_USER_ID }, payload);
+    expect(await ranks()).toEqual(before);
+
+    // Merging into a list that exists takes new items unranked and keeps its ranks.
+    await request(app).put(api(`/${(await request(app).get(api())).body[0].id}/ranks`)).send({ ranked_ids: [] });
+    await server.backupImport!({ user_id: DEFAULT_USER_ID }, payload);
+    expect((await ranks()).every(([, r]: any) => r === null)).toBe(true);
   });
 
   it('merges into existing lists on a repeated restore instead of duplicating', async () => {
