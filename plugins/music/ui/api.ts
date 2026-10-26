@@ -67,6 +67,12 @@ export const music = {
   },
   lists: () => request<MusicList[]>('/music/lists'),
   createList: (name: string) => request<MusicList>('/music/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  /** A new list holding these, ranked in the order given; a taken name gets " (2)" etc. */
+  createListFromItems: (name: string, items: ListTarget[]) =>
+    request<{ id: string; name: string; added: number }>('/music/lists/from-items', {
+      method: 'POST',
+      body: JSON.stringify({ name, items }),
+    }),
   renameList: (id: string, name: string) =>
     request<{ id: string; name: string }>(`/music/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   deleteList: (id: string) => request<{ id: string }>(`/music/lists/${id}`, { method: 'DELETE' }),

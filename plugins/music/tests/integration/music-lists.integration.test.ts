@@ -202,6 +202,59 @@ describe('music lists', () => {
     expect((await request(app).get(api())).body[0].items[0].art_id).toBe(artId);
   });
 
+  describe('lists made from many items at once', () => {
+    const make = (body: object) => request(app).post(api('/from-items')).send(body);
+
+    it('creates a list ranked 1..n in the order given, with created and modified times', async () => {
+      for (const [i, t] of ['A', 'B', 'C'].entries()) await push(t, `Album ${t}`, ['X'], i * 60);
+      const refs = await Promise.all(['A', 'B', 'C'].map(async (t) => (await identities(t)).album_ref));
+      const res = await make({ name: '2026-01 - 2026-03 Most Listened Albums', items: [refs[2], refs[0], refs[1]].map((album_ref) => ({ kind: 'album', album_ref })) });
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ name: '2026-01 - 2026-03 Most Listened Albums', added: 3 });
+      const [list] = (await request(app).get(api())).body;
+      expect(list.items.map((i: any) => [i.title, i.rank])).toEqual([['Album C', 1], ['Album A', 2], ['Album B', 3]]);
+      expect(new Date(list.created_at).getTime()).toBeGreaterThan(0);
+      expect(new Date(list.updated_at).getTime()).toBeGreaterThanOrEqual(new Date(list.created_at).getTime());
+    });
+
+    it('numbers a name that is already taken, trimming to stay within the length limit', async () => {
+      await push('A', 'Album A', ['X']);
+      const { album_ref } = await identities('A');
+      const items = [{ kind: 'album', album_ref }];
+      expect((await make({ name: 'Top', items })).body.name).toBe('Top');
+      expect((await make({ name: 'top', items })).body.name).toBe('top (2)');
+      expect((await make({ name: 'Top', items })).body.name).toBe('Top (3)');
+      const long = 'x'.repeat(100);
+      await make({ name: long, items });
+      expect((await make({ name: long, items })).body.name).toBe(`${'x'.repeat(96)} (2)`);
+    });
+
+    it('holds songs with their album context, skips music never played, and leaves no empty list', async () => {
+      await push('Sun & Moon', 'Group Therapy');
+      const { song_key, album_ref } = await identities('Sun & Moon');
+      const res = await make({
+        name: 'Songs',
+        items: [{ kind: 'song', song_key: 'never played\u001fnobody' }, { kind: 'song', song_key, album_ref }, { kind: 'album', album_ref: 'nope|nobody' }],
+      });
+      expect(res.body.added).toBe(1);
+      expect((await request(app).get(api())).body[0].items).toMatchObject([{ kind: 'song', title: 'Sun & Moon', album: 'Group Therapy', rank: 1 }]);
+
+      const none = await make({ name: 'Empty', items: [{ kind: 'album', album_ref: 'nope|nobody' }] });
+      expect(none.status).toBe(404);
+      expect((await request(app).get(api())).body.map((l: any) => l.name)).toEqual(['Songs']);
+    });
+
+    it('validates the request', async () => {
+      const item = { kind: 'album', album_ref: 'a|b' };
+      expect((await make({ name: 'x' })).status).toBe(400);
+      expect((await make({ name: 'x', items: [] })).status).toBe(400);
+      expect((await make({ name: 'x', items: Array(101).fill(item) })).status).toBe(400);
+      expect((await make({ name: 'x', items: [{ kind: 'playlist' }] })).status).toBe(400);
+      expect((await make({ name: '  ', items: [item] })).status).toBe(400);
+      expect((await request(app).get(api())).body).toEqual([]);
+    });
+  });
+
   describe('paused ranking sessions', () => {
     const U = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
     const session = (over: object = {}) => ({

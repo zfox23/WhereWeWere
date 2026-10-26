@@ -143,6 +143,7 @@ export interface ListItemWithStats extends ListItem {
 export interface MusicList {
   id: string;
   name: string;
+  created_at: string;
   updated_at: string;
   item_count: number;
   /** Up to four distinct covers, for the index card. */

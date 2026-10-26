@@ -11,6 +11,7 @@ import { formatDate } from '../../utils/checkin';
 export interface ListSummary {
   id: string;
   name: string;
+  created_at?: string;
   updated_at?: string;
   item_count?: number;
 }
@@ -36,6 +37,7 @@ export function ListsIndex({
   onOpenList,
   onRefresh,
   renderLeading,
+  showCreated = false,
 }: {
   lists: ListSummary[];
   api: ListsIndexApi;
@@ -47,6 +49,8 @@ export function ListsIndex({
   onRefresh: () => void;
   /** Replaces the default list icon on each card (e.g. a cover mosaic). */
   renderLeading?: (list: ListSummary) => ReactNode;
+  /** Also show when each list was created (next to when it last changed). */
+  showCreated?: boolean;
 }) {
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -137,9 +141,8 @@ export function ListsIndex({
                   </span>
                   <span className="block text-xs text-gray-400">
                     {list.item_count ?? 0} {itemNoun}{(list.item_count ?? 0) !== 1 ? 's' : ''}
-                    {list.updated_at
-                      ? ` · updated ${formatDate(list.updated_at)}`
-                      : ''}
+                    {showCreated && list.created_at ? ` · created ${formatDate(list.created_at)}` : ''}
+                    {list.updated_at ? ` · updated ${formatDate(list.updated_at)}` : ''}
                   </span>
                 </button>
               )}

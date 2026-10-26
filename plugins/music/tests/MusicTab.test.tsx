@@ -7,11 +7,16 @@ import { MusicTab } from '../ui/MusicTab';
 const statsMock = vi.fn();
 const libraryMock = vi.fn();
 const albumViewMock = vi.fn();
+const createFromMock = vi.fn();
+let listsData: any[] = [];
 vi.mock('../ui/api', () => ({
   music: {
     stats: (...args: unknown[]) => statsMock(...args),
     library: (...args: unknown[]) => libraryMock(...args),
-    lists: () => Promise.resolve([]),
+    lists: () => Promise.resolve(JSON.parse(JSON.stringify(listsData))),
+    createListFromItems: (...args: unknown[]) => createFromMock(...args),
+    listItems: () => Promise.resolve([]),
+    rankSession: () => Promise.reject(new Error('none')),
     albumView: (...args: unknown[]) => albumViewMock(...args),
   },
 }));
@@ -107,6 +112,86 @@ describe('MusicTab', () => {
     params = new URLSearchParams(window.location.search);
     expect([params.get('musicSection'), params.get('musicView'), params.get('q')]).toEqual(['library', 'albums', "Mowgli's Road"]);
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  describe('making a list from the top songs and albums', () => {
+    const rows = (n: number, albums = false) =>
+      Array.from({ length: n }, (_, i) =>
+        agg(`${albums ? 'Album' : 'Song'} ${i + 1}`, 50 - i, {
+          artists: ['Someone'], album_ref: `album ${i + 1}|someone`, ...(albums ? {} : { song_key: `song ${i + 1}\u001fsomeone` }),
+        }));
+    beforeEach(() => {
+      listsData = [];
+      createFromMock.mockImplementation(async () => {
+        listsData = [{ id: 'new1', name: 'Made', created_at: '2023-07-01T00:00:00Z', updated_at: '2023-07-01T00:00:00Z', item_count: 1, covers: [], items: [] }];
+        return { id: 'new1', name: 'Made', added: 10 };
+      });
+      statsMock.mockResolvedValue({ ...STATS, top_songs: rows(12), top_albums: rows(3, true) });
+    });
+    afterEach(() => {
+      createFromMock.mockReset();
+      listsData = [];
+    });
+
+    it('makes a list of the songs shown, named for the month, then opens it', async () => {
+      const user = userEvent.setup();
+      window.history.replaceState(null, '', '/profile?tab=plugin:music&musicMonth=2023-06&musicPeriod=single');
+      renderTab();
+      await waitFor(() => screen.getByText('Song 1'));
+      await user.click(screen.getByRole('button', { name: 'Make a list from these 10 songs' }));
+      await waitFor(() => expect(createFromMock).toHaveBeenCalledTimes(1));
+      const [name, items] = createFromMock.mock.calls[0];
+      expect(name).toBe('2023-06 Most Listened Songs');
+      expect(items).toHaveLength(10);
+      expect(items[0]).toEqual({ kind: 'song', song_key: 'song 1\u001fsomeone', album_ref: 'album 1|someone' });
+      expect(items[9].song_key).toBe('song 10\u001fsomeone');
+      // Straight to the new list.
+      const params = new URLSearchParams(window.location.search);
+      expect([params.get('musicSection'), params.get('musicList')]).toEqual(['lists', 'new1']);
+      expect(await screen.findByRole('region', { name: 'Music lists' })).toBeTruthy();
+    });
+
+    it('includes the rows revealed by "Show more"', async () => {
+      const user = userEvent.setup();
+      renderTab();
+      await waitFor(() => screen.getByText('Song 1'));
+      await user.click(screen.getByRole('button', { name: 'Show 2 more' }));
+      await user.click(screen.getByRole('button', { name: 'Make a list from these 12 songs' }));
+      await waitFor(() => expect(createFromMock).toHaveBeenCalled());
+      expect(createFromMock.mock.calls[0][1]).toHaveLength(12);
+    });
+
+    it('makes an album list with the all-time name, and artists get no button', async () => {
+      const user = userEvent.setup();
+      window.history.replaceState(null, '', '/profile?tab=plugin:music&musicPeriod=all');
+      renderTab();
+      await waitFor(() => screen.getByText('Album 1'));
+      expect(screen.queryByRole('button', { name: /Make a list from these \d+ artists/ })).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Make a list from these 3 albums' }));
+      await waitFor(() => expect(createFromMock).toHaveBeenCalled());
+      const [name, items] = createFromMock.mock.calls[0];
+      expect(name).toBe('All Time Most Listened Albums');
+      expect(items).toEqual([1, 2, 3].map((i) => ({ kind: 'album', album_ref: `album ${i}|someone` })));
+    });
+
+    it('shows why it failed and stays put', async () => {
+      const user = userEvent.setup();
+      createFromMock.mockRejectedValue(new Error('None of those songs or albums were found'));
+      renderTab();
+      await waitFor(() => screen.getByText('Song 1'));
+      await user.click(screen.getByRole('button', { name: 'Make a list from these 10 songs' }));
+      expect(await screen.findByText('None of those songs or albums were found')).toBeTruthy();
+      expect(new URLSearchParams(window.location.search).has('musicList')).toBe(false);
+    });
+
+    it('has nothing to make a list from when nothing was played', async () => {
+      statsMock.mockResolvedValue({ ...STATS, top_songs: [], top_albums: [] });
+      renderTab();
+      await waitFor(() => screen.getByText('Scrobbles'));
+      const buttons = screen.getAllByRole('button', { name: /Make a list from these 0/ });
+      expect(buttons).toHaveLength(2); // songs and albums
+      expect(buttons.every((b) => b.hasAttribute('disabled'))).toBe(true);
+    });
   });
 
   describe('subtabs', () => {

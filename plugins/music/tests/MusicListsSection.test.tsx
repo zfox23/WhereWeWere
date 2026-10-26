@@ -11,7 +11,7 @@ const mk = (id: string, kind: 'song' | 'album', title: string, album_ref: string
 });
 const withStats = (item: any, plays: number, seconds: number, last: string | null) => ({ ...item, plays, listened_seconds: seconds, last_played_at: last });
 const summary = (l: { id: string; name: string; items: any[]; covers?: string[] }) => ({
-  updated_at: '2024-05-01T12:00:00Z', item_count: l.items.length, covers: [], ...l,
+  created_at: '2024-04-01T09:30:00Z', updated_at: '2024-05-01T12:00:00Z', item_count: l.items.length, covers: [], ...l,
 });
 let lists: any[] = [];
 const api = {
@@ -54,6 +54,7 @@ vi.mock('../ui/api', () => ({
 
 describe('MusicListsSection', () => {
   beforeEach(() => {
+    window.history.replaceState(null, '', '/profile?tab=plugin:music&musicSection=lists');
     resetMusicLists();
     lists = [
       { id: 'l1', name: 'Favorites', covers: ['c1', 'c2'], items: [mk('s1', 'song', 'Sun & Moon', 'group therapy|above & beyond'), mk('a1', 'album', 'Group Therapy', 'group therapy|above & beyond', { rank: 1 })] },
@@ -72,6 +73,30 @@ describe('MusicListsSection', () => {
     expect(screen.getByText(/0 items/)).toBeTruthy();
     expect(document.querySelectorAll('img[src^="/art/"]')).toHaveLength(2);
     expect(screen.queryByRole('table')).toBeNull(); // nothing open until a list is chosen
+  });
+
+  it('shows when each list was created and last changed', async () => {
+    render(<MusicListsSection />);
+    await screen.findByText('Favorites');
+    const card = screen.getByTitle('Open Favorites');
+    expect(card.textContent).toMatch(/created .*2024.* · updated .*2024/);
+  });
+
+  it('opens the list named in the URL, and keeps the URL in step with the open list', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, '', '/profile?tab=plugin:music&musicSection=lists&musicList=l1');
+    render(<MusicListsSection />);
+    await screen.findAllByRole('row');
+    expect(screen.getByRole('heading', { name: /Favorites/ })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Back to lists/ }));
+    await screen.findByText('Road trip');
+    expect(new URLSearchParams(window.location.search).has('musicList')).toBe(false);
+    await user.click(screen.getByTitle('Open Road trip'));
+    expect(new URLSearchParams(window.location.search).get('musicList')).toBe('l2');
+    // Back/forward re-reads it.
+    window.history.pushState(null, '', '/profile?tab=plugin:music&musicSection=lists&musicList=l1');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(await screen.findByRole('heading', { name: /Favorites/ })).toBeTruthy();
   });
 
   it('guides an empty start', async () => {

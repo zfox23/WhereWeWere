@@ -249,6 +249,8 @@ function Mosaic({ covers }: { covers: string[] }) {
   );
 }
 
+const listFromLocation = (): string | null => new URLSearchParams(window.location.search).get('musicList');
+
 const indexApi = {
   create: (name: string) => music.createList(name),
   rename: (id: string, name: string) => music.renameList(id, name),
@@ -257,8 +259,22 @@ const indexApi = {
 
 export function MusicListsSection() {
   const { lists, loaded } = useMusicLists();
-  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  const [selectedListId, setSelectedListId] = useState<string | null>(listFromLocation);
   const selectedList = useMemo(() => lists.find((l) => l.id === selectedListId) ?? null, [lists, selectedListId]);
+
+  // The open list lives in the URL (`musicList`), so a link or the back button can open one.
+  useEffect(() => {
+    const sync = () => setSelectedListId(listFromLocation());
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, []);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if ((url.searchParams.get('musicList') ?? null) === selectedListId) return;
+    if (selectedListId) url.searchParams.set('musicList', selectedListId);
+    else url.searchParams.delete('musicList');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [selectedListId]);
 
   // A list that was deleted (here or elsewhere) can't stay open.
   useEffect(() => {
@@ -286,6 +302,7 @@ export function MusicListsSection() {
           onOpenList={setSelectedListId}
           onRefresh={() => void refreshMusicLists()}
           renderLeading={(l) => <Mosaic covers={(l as MusicList).covers ?? []} />}
+          showCreated
         />
       )}
     </section>

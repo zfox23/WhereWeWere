@@ -42,6 +42,8 @@ import {
   saveRankSession,
   validateRankSession,
   createList,
+  createListWithItems,
+  MAX_BULK_ITEMS,
   deleteList,
   exportLists,
   getListItems,
@@ -384,6 +386,32 @@ musicRouter.get('/lists', async (_req: Request, res: Response) => {
 musicRouter.post('/lists', async (req: Request, res: Response) => {
   try {
     res.status(201).json(await createList(USER_ID, req.body?.name));
+  } catch (err) {
+    listError(res, err, 'creating the list');
+  }
+});
+
+// Make a list from many songs/albums at once, ranked in the order given.
+// Body: { name, items: [{ kind: 'album', album_ref } | { kind: 'song', song_key, album_ref? }] }
+musicRouter.post('/lists/from-items', async (req: Request, res: Response) => {
+  try {
+    const raw: unknown = req.body?.items;
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_BULK_ITEMS) {
+      return res.status(400).json({ error: `Send 1 to ${MAX_BULK_ITEMS} items` });
+    }
+    const items = [];
+    for (const i of raw as Record<string, unknown>[]) {
+      if (i?.kind === 'album' && ident(i.album_ref) !== null) {
+        items.push({ kind: 'album' as const, album_ref: i.album_ref as string });
+      } else if (i?.kind === 'song' && ident(i.song_key)) {
+        items.push({ kind: 'song' as const, song_key: i.song_key as string, album_ref: ident(i.album_ref) });
+      } else {
+        return res.status(400).json({ error: 'Each item needs a kind and its album_ref or song_key' });
+      }
+    }
+    const created = await createListWithItems(USER_ID, req.body?.name, items);
+    if (!created) return res.status(404).json({ error: 'None of those songs or albums were found' });
+    res.status(201).json(created);
   } catch (err) {
     listError(res, err, 'creating the list');
   }

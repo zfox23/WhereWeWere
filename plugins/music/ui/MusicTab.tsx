@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Disc3, Library, List, Loader2, Mic2, Music, Timer, Users } from 'lucide-react';
+import { BarChart3, Disc3, Library, List, ListPlus, Loader2, Mic2, Music, Timer, Users } from 'lucide-react';
 import type { PluginProfileTabProps } from 'wwp-shared';
 import { stats as statsApi } from '../../../client/src/api/client';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
@@ -27,8 +27,10 @@ import { AlbumLink } from './AlbumLink';
 import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
 import { MusicLibrarySection } from './MusicLibrarySection';
 import { MusicListsSection } from './MusicListsSection';
+import { openMusicList, topListTitle } from './listTitle';
+import { refreshMusicLists } from './useMusicLists';
 import { ProfileLibraryLink } from './libraryLinks';
-import type { MusicAggregate, MusicLibraryView, MusicStats } from './types';
+import type { ListTarget, MusicAggregate, MusicLibraryView, MusicStats } from './types';
 
 function getMonthFromLocation(): string {
   const param = new URLSearchParams(window.location.search).get('musicMonth');
@@ -59,6 +61,8 @@ function getSectionFromLocation(): MusicSection {
 
 /** Params that belong to the Library subtab. */
 const LIBRARY_PARAMS = ['musicView', 'q', 'sort', 'dir'];
+/** Params that belong to the Lists subtab. */
+const LISTS_PARAMS = ['musicList'];
 
 const TOP_COLLAPSED = 10;
 
@@ -69,6 +73,7 @@ function TopList({
   detail,
   view,
   withArt = false,
+  onMakeList,
 }: {
   title: string;
   icon: React.ElementType;
@@ -78,17 +83,49 @@ function TopList({
   view: MusicLibraryView;
   /** Show each row's album cover (songs and albums, not artists). */
   withArt?: boolean;
+  /** Make a list of the rows shown (songs and albums only); may throw with a message to show. */
+  onMakeList?: (shown: MusicAggregate[]) => Promise<void>;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const [making, setMaking] = useState(false);
+  const [makeError, setMakeError] = useState<string | null>(null);
   const shown = showAll ? rows : rows.slice(0, TOP_COLLAPSED);
   const max = Math.max(...rows.map((r) => r.plays), 1);
 
+  const makeList = async () => {
+    if (!onMakeList || making) return;
+    setMaking(true);
+    setMakeError(null);
+    try {
+      await onMakeList(shown);
+    } catch (err) {
+      setMakeError(err instanceof Error ? err.message : 'Could not make the list.');
+    } finally {
+      setMaking(false);
+    }
+  };
+
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-        <Icon size={16} className="text-pink-500" />
-        {title}
-      </h3>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
+          <Icon size={16} className="text-pink-500" />
+          {title}
+        </h3>
+        {onMakeList && (
+          <button
+            type="button"
+            onClick={() => void makeList()}
+            disabled={making || shown.length === 0}
+            aria-label={`Make a list from these ${shown.length} ${view}`}
+            title={`Make a list from the ${shown.length} ${view} shown`}
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-pink-50 hover:text-pink-600 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-pink-900/20"
+          >
+            {making ? <Loader2 size={15} className="animate-spin" /> : <ListPlus size={15} />}
+          </button>
+        )}
+      </div>
+      {makeError && <p className="mb-2 text-xs text-red-500">{makeError}</p>}
       {rows.length === 0 ? (
         <p className="text-xs text-gray-500">Nothing played in this period.</p>
       ) : (
@@ -221,12 +258,11 @@ export function MusicTab(_props: PluginProfileTabProps) {
     setOrDelete('musicWeek', selectedWeek, selectedWeek === weekDefault);
     setOrDelete('musicSection', section, section === 'overview');
     // The library's filters aren't meaningful (or wanted in a shared link) on the other subtabs.
-    if (section !== 'library') {
-      for (const key of LIBRARY_PARAMS) {
-        if (url.searchParams.has(key)) {
-          url.searchParams.delete(key);
-          changed = true;
-        }
+    const unwanted = [...(section !== 'library' ? LIBRARY_PARAMS : []), ...(section !== 'lists' ? LISTS_PARAMS : [])];
+    for (const key of unwanted) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
       }
     }
     if (changed) {
@@ -235,6 +271,18 @@ export function MusicTab(_props: PluginProfileTabProps) {
   }, [periodMode, selectedMonth, selectedWeek, section]);
 
   const totals = data?.totals;
+
+  // A new list of the rows shown (rank 1 = most played), named for the period; then open it.
+  const makeList = (kind: 'songs' | 'albums') => async (shown: MusicAggregate[]) => {
+    const items = shown.flatMap((row): ListTarget[] => {
+      if (kind === 'albums') return row.album_ref != null ? [{ kind: 'album', album_ref: row.album_ref }] : [];
+      return row.song_key ? [{ kind: 'song', song_key: row.song_key, album_ref: row.album_ref }] : [];
+    });
+    if (items.length === 0) throw new Error('Nothing here can be added to a list.');
+    const created = await music.createListFromItems(topListTitle(visibleRange.from, visibleRange.to, kind), items);
+    await refreshMusicLists();
+    openMusicList(created.id);
+  };
 
   return (
     <div className="space-y-6">
@@ -295,9 +343,9 @@ export function MusicTab(_props: PluginProfileTabProps) {
             </div>
 
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-              <TopList title="Top songs" icon={Music} view="songs" rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt />
+              <TopList title="Top songs" icon={Music} view="songs" rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt onMakeList={makeList('songs')} />
               <TopList title="Top artists" icon={Mic2} view="artists" rows={data?.top_artists ?? []} detail={() => ''} />
-              <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt />
+              <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt onMakeList={makeList('albums')} />
             </div>
           </div>
 

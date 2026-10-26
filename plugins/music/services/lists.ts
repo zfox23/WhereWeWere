@@ -29,6 +29,7 @@ export interface ListItem {
 export interface MusicList {
   id: string;
   name: string;
+  created_at: string;
   updated_at: string;
   item_count: number;
   /** Up to four distinct covers, best-ranked items first, for the index card. */
@@ -60,7 +61,7 @@ const ITEM_ORDER = `i.rank NULLS LAST, i.position, i.added_at, i.id`;
 
 export async function getLists(userId: string): Promise<MusicList[]> {
   const [lists, items] = await Promise.all([
-    query(`SELECT id, name, updated_at FROM music_lists WHERE user_id = $1 ORDER BY created_at, id`, [userId]),
+    query(`SELECT id, name, created_at, updated_at FROM music_lists WHERE user_id = $1 ORDER BY created_at, id`, [userId]),
     query(
       `SELECT i.id, i.list_id, i.item_key, i.kind, i.title, i.artists, i.album, i.album_ref, i.added_at, i.rank, a.id AS art_id
        FROM music_list_items i
@@ -78,7 +79,7 @@ export async function getLists(userId: string): Promise<MusicList[]> {
     bucket.push(item as ListItem);
     byList.set(list_id, bucket);
   }
-  return lists.rows.map((l: { id: string; name: string; updated_at: string }) => {
+  return lists.rows.map((l: { id: string; name: string; created_at: string; updated_at: string }) => {
     const listItems = byList.get(l.id) ?? [];
     const covers = [...new Set(listItems.flatMap((i) => (i.art_id ? [i.art_id] : [])))].slice(0, 4);
     return { ...l, item_count: listItems.length, covers, items: listItems };
@@ -131,6 +132,45 @@ export async function createList(userId: string, rawName: unknown) {
   const created = await insertList({ query }, userId, cleanName(rawName));
   if (!created) throw new NameTakenError('You already have a list with that name');
   return { ...created, items: [] as ListItem[] };
+}
+
+export const MAX_BULK_ITEMS = 100;
+
+/**
+ * Make a new list holding these songs/albums, ranked 1..n in the order given
+ * (e.g. a period's most played). A name already in use gets " (2)", " (3)"...
+ * Music that was never played is skipped. Returns the list and how many items
+ * went in; null when none could be added (no list is left behind).
+ */
+export async function createListWithItems(
+  userId: string,
+  baseName: unknown,
+  targets: AddItemRequest[],
+): Promise<{ id: string; name: string; added: number } | null> {
+  const base = cleanName(baseName);
+  let list: { id: string; name: string } | null = null;
+  for (let n = 1; n <= 1000 && !list; n++) {
+    const suffix = n === 1 ? '' : ` (${n})`;
+    // Keep the suffix inside the length limit by trimming the base.
+    const name = `${base.slice(0, MAX_NAME - suffix.length)}${suffix}`;
+    list = await insertList({ query }, userId, name);
+  }
+  if (!list) throw new NameTakenError('Could not find a free name for the list');
+  const ids: string[] = [];
+  for (const target of targets.slice(0, MAX_BULK_ITEMS)) {
+    const added = await addItem(userId, list.id, target);
+    if (added?.added) {
+      const key = target.kind === 'album' ? `album:${target.album_ref}` : `song:${target.song_key}`;
+      const row = await query(`SELECT id FROM music_list_items WHERE list_id = $1 AND item_key = $2`, [list.id, key]);
+      if (row.rows[0]) ids.push(row.rows[0].id);
+    }
+  }
+  if (ids.length === 0) {
+    await deleteList(userId, list.id);
+    return null;
+  }
+  await setRanks(userId, list.id, ids);
+  return { ...list, added: ids.length };
 }
 
 export async function renameList(userId: string, id: string, rawName: unknown) {
