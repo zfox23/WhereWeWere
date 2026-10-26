@@ -1,17 +1,16 @@
 /**
  * Links into Profile > Music > Library, filtered to one artist, song or album.
  *
- * From the Home timeline they open the library in a new tab over all time (a
- * play can be from any period). From the Music profile they filter the library
- * on the same page, keeping the chosen period.
+ * From the Home timeline they open the Library subtab in a new tab. From the
+ * Music profile they switch to the Library subtab and filter it in place.
  */
 
 import type { MouseEvent, ReactNode } from 'react';
 import type { MusicLibraryView } from './types';
 
-/** URL of the Music profile's library filtered to `q`, over all time. */
+/** URL of the Music profile's Library subtab filtered to `q` (the library is all-time). */
 export function libraryHref(view: MusicLibraryView, q: string): string {
-  const params = new URLSearchParams({ tab: 'plugin:music', musicPeriod: 'all' });
+  const params = new URLSearchParams({ tab: 'plugin:music', musicSection: 'library' });
   if (view !== 'songs') params.set('musicView', view);
   params.set('q', q);
   return `/profile?${params}`;
@@ -20,6 +19,7 @@ export function libraryHref(view: MusicLibraryView, q: string): string {
 /** The current Music profile URL with the library set to `view` and `q`. */
 function inPageUrl(view: MusicLibraryView, q: string): URL {
   const url = new URL(window.location.href);
+  url.searchParams.set('musicSection', 'library');
   if (view === 'songs') url.searchParams.delete('musicView');
   else url.searchParams.set('musicView', view);
   // Sort columns differ per view; start from the defaults.

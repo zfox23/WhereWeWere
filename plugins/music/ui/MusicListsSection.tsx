@@ -1,203 +1,258 @@
 /**
- * Profile > Music > Lists: the user's lists of songs and albums. Songs and
- * albums open the album modal, where more can be added to a list.
+ * Profile > Music > Lists, modelled on Profile > Places > Lists: an index of
+ * the lists (rename, delete, create) that opens a ranked, sortable detail view
+ * with drag-to-rank. Songs and albums mix in one list; the name opens the
+ * album's details, where more can be added.
  */
 
-import { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, ListMusic, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { music } from './api';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, List, Loader2 } from 'lucide-react';
+import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
+import { RankedListView } from '../../../client/src/components/lists/RankedListView';
+import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
+import { music, albumArtUrl } from './api';
 import { AlbumArt } from './AlbumArt';
 import { AlbumLink } from './AlbumLink';
-import { joinArtists } from './format';
+import { formatDay, formatDuration, joinArtists } from './format';
 import { refreshMusicLists, useMusicLists } from './useMusicLists';
-import type { ListItem, MusicList } from './types';
+import type { ListItemWithStats, MusicList } from './types';
 
-const CARD =
-  'bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4';
+const getId = (i: ListItemWithStats) => i.id;
+const getRank = (i: ListItemWithStats) => i.rank;
+const compareByName = (a: ListItemWithStats, b: ListItemWithStats) => a.title.localeCompare(b.title);
+const lastPlayed = (i: ListItemWithStats) => (i.last_played_at ? new Date(i.last_played_at).getTime() : -Infinity);
 
-function ItemRow({
-  item,
-  first,
-  last,
-  onMove,
-  onRemove,
-}: {
-  item: ListItem;
-  first: boolean;
-  last: boolean;
-  onMove: (dir: -1 | 1) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <li className="flex items-center gap-2 py-1.5" data-kind={item.kind}>
-      <AlbumArt artId={item.art_id} albumRef={item.album_ref} size={32} />
-      <div className="min-w-0 flex-1 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">
-            <AlbumLink albumRef={item.album_ref}>{item.title}</AlbumLink>
-          </span>
-          <span className="shrink-0 rounded-full bg-pink-50 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-pink-600 dark:bg-pink-900/30 dark:text-pink-300">
-            {item.kind}
-          </span>
-        </div>
-        <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-          {joinArtists(item.artists)}
-          {item.kind === 'song' && item.album ? ` · ${item.album}` : ''}
-        </p>
-      </div>
-      <button type="button" aria-label={`Move ${item.title} up`} disabled={first} onClick={() => onMove(-1)} className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30">
-        <ArrowUp size={14} />
-      </button>
-      <button type="button" aria-label={`Move ${item.title} down`} disabled={last} onClick={() => onMove(1)} className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30">
-        <ArrowDown size={14} />
-      </button>
-      <button type="button" aria-label={`Remove ${item.title} from the list`} onClick={onRemove} className="p-1 text-gray-400 hover:text-red-500">
-        <X size={14} />
-      </button>
-    </li>
-  );
+function compareBy(key: string, a: ListItemWithStats, b: ListItemWithStats): number {
+  switch (key) {
+    case 'rank': {
+      if (a.rank == null && b.rank == null) return compareByName(a, b);
+      if (a.rank == null) return 1; // unranked always sinks to the bottom
+      if (b.rank == null) return -1;
+      return a.rank - b.rank;
+    }
+    case 'name':
+      return compareByName(a, b);
+    case 'artist':
+      return joinArtists(a.artists).localeCompare(joinArtists(b.artists));
+    case 'type':
+      return a.kind.localeCompare(b.kind);
+    case 'plays':
+      return a.plays - b.plays;
+    case 'time':
+      return a.listened_seconds - b.listened_seconds;
+    case 'last': {
+      const x = lastPlayed(a);
+      const y = lastPlayed(b);
+      return x === y ? 0 : x < y ? -1 : 1;
+    }
+    default:
+      return 0;
+  }
 }
 
-export function MusicListsSection() {
-  const { lists, loaded } = useMusicLists();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [newName, setNewName] = useState('');
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const SORT_OPTIONS: RankedSortOption[] = [
+  { key: 'rank', label: 'Rank', defaultDir: 'asc' },
+  { key: 'name', label: 'Name', defaultDir: 'asc' },
+  { key: 'artist', label: 'Artist', defaultDir: 'asc' },
+  { key: 'type', label: 'Type', defaultDir: 'asc' },
+  { key: 'plays', label: 'Plays', defaultDir: 'desc' },
+  { key: 'time', label: 'Listening time', defaultDir: 'desc' },
+  { key: 'last', label: 'Last played', defaultDir: 'desc' },
+];
 
-  const selected: MusicList | undefined = lists.find((l) => l.id === selectedId) ?? lists[0];
+const dash = <span className="text-gray-300 dark:text-gray-600">—</span>;
+
+const TypeBadge = ({ kind }: { kind: 'song' | 'album' }) => (
+  <span className="rounded-full bg-pink-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pink-600 dark:bg-pink-900/30 dark:text-pink-300">
+    {kind}
+  </span>
+);
+
+const COLUMNS: RankedColumn<ListItemWithStats>[] = [
+  {
+    key: 'name',
+    label: 'Name',
+    className: 'max-w-[18rem]',
+    render: (item) => (
+      <span className="flex items-center gap-2">
+        <AlbumArt artId={item.art_id} albumRef={item.album_ref} size={32} />
+        <span className="min-w-0 font-medium text-gray-800 dark:text-gray-200 line-clamp-2">
+          <AlbumLink albumRef={item.album_ref}>{item.title}</AlbumLink>
+        </span>
+      </span>
+    ),
+  },
+  { key: 'artist', label: 'Artist', className: 'max-w-[12rem] text-gray-600 dark:text-gray-300', render: (i) => <span className="line-clamp-2">{joinArtists(i.artists) || dash}</span> },
+  { key: 'album', label: 'Album', className: 'max-w-[12rem] text-gray-600 dark:text-gray-300', render: (i) => (i.kind === 'song' ? i.album ?? dash : dash) },
+  { key: 'type', label: 'Type', render: (i) => <TypeBadge kind={i.kind} /> },
+  { key: 'plays', label: 'Plays', className: 'tabular-nums text-gray-600 dark:text-gray-300', render: (i) => i.plays },
+  { key: 'time', label: 'Time', className: 'whitespace-nowrap tabular-nums text-gray-600 dark:text-gray-300', render: (i) => (i.listened_seconds ? formatDuration(i.listened_seconds) : dash) },
+  { key: 'last', label: 'Last played', className: 'whitespace-nowrap text-gray-600 dark:text-gray-300', render: (i) => (i.last_played_at ? formatDay(i.last_played_at) : dash) },
+];
+
+const renderCard = (item: ListItemWithStats) => (
+  <div className="flex items-center gap-2">
+    <AlbumArt artId={item.art_id} albumRef={item.album_ref} size={36} />
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5">
+        <span className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+          <AlbumLink albumRef={item.album_ref}>{item.title}</AlbumLink>
+        </span>
+        <TypeBadge kind={item.kind} />
+      </div>
+      <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+        {[joinArtists(item.artists), item.kind === 'song' ? item.album : null, `${item.plays} play${item.plays === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}
+      </p>
+    </div>
+  </div>
+);
+
+function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
+  const [items, setItems] = useState<ListItemWithStats[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = () =>
+    music.listItems(list.id).then(setItems).catch(() => setItems([]));
+
   useEffect(() => {
-    if (selected && selected.id !== selectedId) setSelectedId(selected.id);
-  }, [selected, selectedId]);
+    let cancelled = false;
+    setLoading(true);
+    music
+      .listItems(list.id)
+      .then((data) => !cancelled && setItems(data))
+      .catch(() => !cancelled && setItems([]))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [list.id]);
 
-  const attempt = async (work: () => Promise<unknown>) => {
-    setError(null);
+  const persistOrder = async (rankedIds: string[]) => {
+    setSaving(true);
     try {
-      await work();
-      await refreshMusicLists();
+      await music.rankList(list.id, rankedIds);
+      const rankById = new Map(rankedIds.map((id, idx) => [id, idx + 1]));
+      setItems((prev) => prev.map((i) => ({ ...i, rank: rankById.get(i.id) ?? null })));
+      void refreshMusicLists();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      console.error('Failed to rank music list:', err);
+      await load(); // re-sync so local state can't drift
+    } finally {
+      setSaving(false);
     }
   };
 
-  const create = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    void attempt(async () => {
-      const list = await music.createList(newName.trim());
-      setSelectedId(list.id);
-      setNewName('');
-    });
-  };
-
-  const move = (list: MusicList, index: number, dir: -1 | 1) => {
-    const ids = list.items.map((i) => i.id);
-    [ids[index], ids[index + dir]] = [ids[index + dir], ids[index]];
-    void attempt(() => music.reorderList(list.id, ids));
+  const handleRemove = async (item: ListItemWithStats) => {
+    if (!window.confirm(`Remove "${item.title}" from "${list.name}"? The music itself is kept.`)) return;
+    try {
+      await music.removeFromList(list.id, item.id);
+      await Promise.all([load(), refreshMusicLists()]); // the server closes any rank gap
+    } catch (err) {
+      console.error('Failed to remove from music list:', err);
+    }
   };
 
   return (
-    <section className={CARD} aria-label="Music lists">
-      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
-        <ListMusic size={16} className="text-pink-500" />
-        Lists
-      </h3>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        {lists.map((l) => (
-          <button
-            key={l.id}
-            type="button"
-            onClick={() => setSelectedId(l.id)}
-            aria-pressed={selected?.id === l.id}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-              selected?.id === l.id
-                ? 'bg-pink-500 text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
-            }`}
-          >
-            {l.name} <span className="opacity-70">{l.items.length}</span>
-          </button>
-        ))}
-        <form onSubmit={create} className="flex items-center gap-1">
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            maxLength={100}
-            placeholder="New list"
-            aria-label="New list name"
-            className="input !w-32 !py-1 text-xs"
-          />
-          <button type="submit" disabled={!newName.trim()} aria-label="Create list" className="btn-secondary !px-2 !py-1">
-            <Plus size={13} />
-          </button>
-        </form>
-      </div>
-      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
-
-      {loaded && lists.length === 0 && (
-        <p className="mt-3 text-xs text-gray-500">
-          Make a list above, then add songs and albums from an album's details (click a cover or an album name).
-        </p>
-      )}
-
-      {selected && (
-        <div className="mt-3">
-          <div className="flex items-center gap-2">
-            {renaming === selected.id ? (
-              <form
-                className="flex items-center gap-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const name = (e.currentTarget.elements.namedItem('rename') as HTMLInputElement).value;
-                  void attempt(async () => {
-                    await music.renameList(selected.id, name);
-                    setRenaming(null);
-                  });
-                }}
-              >
-                <input name="rename" defaultValue={selected.name} maxLength={100} aria-label="List name" autoFocus className="input !py-1 text-sm" />
-                <button type="submit" aria-label="Save name" className="p-1 text-green-600"><Check size={14} /></button>
-                <button type="button" aria-label="Cancel rename" onClick={() => setRenaming(null)} className="p-1 text-gray-400"><X size={14} /></button>
-              </form>
-            ) : (
-              <>
-                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{selected.name}</h4>
-                <button type="button" aria-label="Rename list" onClick={() => setRenaming(selected.id)} className="p-1 text-gray-400 hover:text-gray-700">
-                  <Pencil size={13} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Delete list"
-                  onClick={() => {
-                    if (window.confirm(`Delete “${selected.name}” and its ${selected.items.length} item${selected.items.length === 1 ? '' : 's'}? The music itself stays in your library.`)) {
-                      void attempt(() => music.deleteList(selected.id));
-                    }
-                  }}
-                  className="p-1 text-gray-400 hover:text-red-500"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </>
-            )}
-          </div>
-          {selected.items.length === 0 ? (
-            <p className="mt-2 text-xs text-gray-500">Nothing here yet.</p>
-          ) : (
-            <ol className="mt-1 divide-y divide-gray-100 dark:divide-gray-800">
-              {selected.items.map((item, i) => (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  first={i === 0}
-                  last={i === selected.items.length - 1}
-                  onMove={(dir) => move(selected, i, dir)}
-                  onRemove={() => void attempt(() => music.removeFromList(selected.id, item.id))}
-                />
-              ))}
-            </ol>
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400"
+        >
+          <ArrowLeft size={14} />
+          Back to lists
+        </button>
+        <span className="text-gray-300 dark:text-gray-600">·</span>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {list.name}
+          {!loading && (
+            <span className="ml-1.5 text-xs font-normal text-gray-400">
+              {items.length} item{items.length !== 1 ? 's' : ''}
+            </span>
           )}
+        </h3>
+        {saving && <Loader2 size={14} className="ml-auto animate-spin text-primary-500" />}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="animate-spin text-primary-600" size={24} />
         </div>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-gray-400">
+          Nothing in this list yet. Open an album's details (click a cover or an album name) to add the album or its songs.
+        </p>
+      ) : (
+        <RankedListView
+          items={items}
+          getId={getId}
+          getRank={getRank}
+          getLabel={(i) => i.title}
+          columns={COLUMNS}
+          renderCard={renderCard}
+          sortOptions={SORT_OPTIONS}
+          compareBy={compareBy}
+          compareUnranked={compareByName}
+          onReorder={persistOrder}
+          onRemove={(item) => void handleRemove(item)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Up to four covers in a 2x2 mosaic, or the plain list icon when there are none. */
+function Mosaic({ covers }: { covers: string[] }) {
+  if (covers.length === 0) return <List size={16} className="shrink-0 text-primary-500" />;
+  return (
+    <span className="grid h-9 w-9 shrink-0 grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-md bg-gray-200 dark:bg-gray-700" aria-hidden="true">
+      {covers.slice(0, 4).map((id) => (
+        <img key={id} src={albumArtUrl(id)} alt="" loading="lazy" className="h-full w-full object-cover" />
+      ))}
+    </span>
+  );
+}
+
+const indexApi = {
+  create: (name: string) => music.createList(name),
+  rename: (id: string, name: string) => music.renameList(id, name),
+  delete: (id: string) => music.deleteList(id),
+};
+
+export function MusicListsSection() {
+  const { lists, loaded } = useMusicLists();
+  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  const selectedList = useMemo(() => lists.find((l) => l.id === selectedListId) ?? null, [lists, selectedListId]);
+
+  // A list that was deleted (here or elsewhere) can't stay open.
+  useEffect(() => {
+    if (loaded && selectedListId && !selectedList) setSelectedListId(null);
+  }, [loaded, selectedListId, selectedList]);
+
+  return (
+    <section
+      aria-label="Music lists"
+      className="rounded-2xl border border-white/40 bg-white/60 p-4 shadow-sm shadow-black/3 dark:border-gray-700/40 dark:bg-gray-900/60"
+    >
+      {!loaded ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="animate-spin text-primary-600" size={24} />
+        </div>
+      ) : selectedList ? (
+        <ListDetail list={selectedList} onBack={() => setSelectedListId(null)} />
+      ) : (
+        <ListsIndex
+          lists={lists}
+          api={indexApi}
+          itemNoun="item"
+          emptyText="No lists yet. Create one here, or add songs and albums from an album's details (click a cover or an album name)."
+          createLabel="New list name"
+          onOpenList={setSelectedListId}
+          onRefresh={() => void refreshMusicLists()}
+          renderLeading={(l) => <Mosaic covers={(l as MusicList).covers ?? []} />}
+        />
       )}
     </section>
   );

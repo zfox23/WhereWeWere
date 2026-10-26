@@ -3,15 +3,21 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MusicListsSection } from '../ui/MusicListsSection';
 import { MusicLibrarySection } from '../ui/MusicLibrarySection';
-import { resetMusicLists } from '../ui/useMusicLists';
+import { refreshMusicLists, resetMusicLists } from '../ui/useMusicLists';
 
 const mk = (id: string, kind: 'song' | 'album', title: string, album_ref: string, extra: object = {}) => ({
   id, kind, title, artists: ['Above & Beyond'], album: kind === 'song' ? 'Group Therapy' : title,
-  album_ref, art_id: null, item_key: kind === 'album' ? `album:${album_ref}` : `song:${id}`, ...extra,
+  album_ref, art_id: null, rank: null, item_key: kind === 'album' ? `album:${album_ref}` : `song:${id}`, ...extra,
+});
+const withStats = (item: any, plays: number, seconds: number, last: string | null) => ({ ...item, plays, listened_seconds: seconds, last_played_at: last });
+const summary = (l: { id: string; name: string; items: any[]; covers?: string[] }) => ({
+  updated_at: '2024-05-01T12:00:00Z', item_count: l.items.length, covers: [], ...l,
 });
 let lists: any[] = [];
 const api = {
-  lists: vi.fn(async () => JSON.parse(JSON.stringify(lists))),
+  lists: vi.fn(async () => JSON.parse(JSON.stringify(lists.map(summary)))),
+  listItems: vi.fn(async (id: string) =>
+    lists.find((l) => l.id === id).items.map((i: any) => withStats(i, i.kind === 'song' ? 7 : 12, i.kind === 'song' ? 1500 : 4000, '2024-04-01T00:00:00Z'))),
   createList: vi.fn(async (name: string) => {
     const l = { id: 'new', name, items: [] };
     lists.push(l);
@@ -30,10 +36,10 @@ const api = {
     l.items = l.items.filter((i: any) => i.id !== itemId);
     return { id: itemId };
   }),
-  reorderList: vi.fn(async (listId: string, ids: string[]) => {
+  rankList: vi.fn(async (listId: string, ids: string[]) => {
     const l = lists.find((x) => x.id === listId);
-    l.items = ids.map((id) => l.items.find((i: any) => i.id === id));
-    return { item_ids: ids };
+    for (const i of l.items) i.rank = ids.includes(i.id) ? ids.indexOf(i.id) + 1 : null;
+    return { ranked_ids: ids };
   }),
   library: vi.fn(),
   albumView: vi.fn(),
@@ -47,7 +53,7 @@ describe('MusicListsSection', () => {
   beforeEach(() => {
     resetMusicLists();
     lists = [
-      { id: 'l1', name: 'Favorites', items: [mk('s1', 'song', 'Sun & Moon', 'group therapy|above & beyond'), mk('a1', 'album', 'Group Therapy', 'group therapy|above & beyond')] },
+      { id: 'l1', name: 'Favorites', covers: ['c1', 'c2'], items: [mk('s1', 'song', 'Sun & Moon', 'group therapy|above & beyond'), mk('a1', 'album', 'Group Therapy', 'group therapy|above & beyond', { rank: 1 })] },
       { id: 'l2', name: 'Road trip', items: [] },
     ];
   });
@@ -56,67 +62,100 @@ describe('MusicListsSection', () => {
     vi.clearAllMocks();
   });
 
-  it('shows the lists, the first one open, with song and album items', async () => {
+  it('shows an index of lists with counts and a cover mosaic', async () => {
     render(<MusicListsSection />);
-    await screen.findByRole('heading', { name: 'Favorites' });
-    expect(screen.getByRole('button', { name: /Road trip/ })).toBeTruthy();
-    const rows = screen.getAllByRole('listitem');
-    expect(rows.map((r) => r.getAttribute('data-kind'))).toEqual(['song', 'album']);
-    expect(rows[0].textContent).toContain('Above & Beyond · Group Therapy');
-    await userEvent.setup().click(screen.getByRole('button', { name: /Road trip/ }));
-    expect(screen.getByText('Nothing here yet.')).toBeTruthy();
+    await screen.findByText('Favorites');
+    expect(screen.getByText(/2 items/)).toBeTruthy();
+    expect(screen.getByText(/0 items/)).toBeTruthy();
+    expect(document.querySelectorAll('img[src^="/art/"]')).toHaveLength(2);
+    expect(screen.queryByRole('table')).toBeNull(); // nothing open until a list is chosen
   });
 
   it('guides an empty start', async () => {
     lists = [];
     render(<MusicListsSection />);
-    expect(await screen.findByText(/Make a list above/)).toBeTruthy();
+    expect(await screen.findByText(/No lists yet/)).toBeTruthy();
   });
 
-  it('creates, renames and deletes lists', async () => {
+  it('creates, renames and deletes lists from the index', async () => {
     const user = userEvent.setup();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<MusicListsSection />);
-    await screen.findByRole('heading', { name: 'Favorites' });
+    await screen.findByText('Favorites');
 
     await user.type(screen.getByLabelText('New list name'), 'Chill');
-    await user.click(screen.getByRole('button', { name: 'Create list' }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
     expect(api.createList).toHaveBeenCalledWith('Chill');
-    await screen.findByRole('heading', { name: 'Chill' });
+    await screen.findByText('Chill');
 
-    await user.click(screen.getByRole('button', { name: 'Rename list' }));
-    const input = screen.getByLabelText('List name');
+    await user.click(screen.getByRole('button', { name: 'Rename Chill' }));
+    const input = screen.getByLabelText('Rename list Chill');
     await user.clear(input);
     await user.type(input, 'Mellow{Enter}');
     expect(api.renameList).toHaveBeenCalledWith('new', 'Mellow');
-    await screen.findByRole('heading', { name: 'Mellow' });
+    await screen.findByText('Mellow');
 
-    await user.click(screen.getByRole('button', { name: 'Delete list' }));
+    await user.click(screen.getByRole('button', { name: 'Delete Mellow' }));
     expect(api.deleteList).toHaveBeenCalledWith('new');
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Mellow/ })).toBeNull());
+    await waitFor(() => expect(screen.queryByText('Mellow')).toBeNull());
   });
 
-  it('removes and reorders items', async () => {
+  it('opens a list as a ranked table: songs and albums with their all-time plays', async () => {
     const user = userEvent.setup();
     render(<MusicListsSection />);
-    await screen.findByRole('heading', { name: 'Favorites' });
-    expect(screen.getByRole('button', { name: 'Move Sun & Moon up' }).hasAttribute('disabled')).toBe(true);
-    await user.click(screen.getByRole('button', { name: 'Move Sun & Moon down' }));
-    expect(api.reorderList).toHaveBeenCalledWith('l1', ['a1', 's1']);
-    await waitFor(() => expect(screen.getAllByRole('listitem')[0].getAttribute('data-kind')).toBe('album'));
-    await user.click(screen.getByRole('button', { name: 'Remove Group Therapy from the list' }));
-    expect(api.removeFromList).toHaveBeenCalledWith('l1', 'a1');
-    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(1));
+    await user.click(await screen.findByTitle('Open Favorites'));
+    const rows = await screen.findAllByRole('row');
+    const text = rows.map((r) => r.textContent);
+    const song = text.find((t) => t?.includes('Sun & Moon'))!;
+    const album = text.find((t) => t?.includes('Group Therapy') && !t.includes('Sun & Moon'))!;
+    expect(song).toMatch(/song/i);
+    expect(song).toContain('Above & Beyond');
+    expect(song).toContain('7'); // plays
+    expect(song).toContain('25m'); // 1500 s
+    expect(album).toMatch(/album/i);
+    expect(album).toContain('12');
+    expect(api.listItems).toHaveBeenCalledWith('l1');
+
+    await user.click(screen.getByRole('button', { name: /Back to lists/ }));
+    expect(await screen.findByText('Road trip')).toBeTruthy();
   });
 
-  it('surfaces a rename that is refused', async () => {
+  it('ranks from the row menu, and removes with a confirmation', async () => {
     const user = userEvent.setup();
-    api.renameList.mockRejectedValueOnce(new Error('You already have a list with that name'));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<MusicListsSection />);
-    await screen.findByRole('heading', { name: 'Favorites' });
-    await user.click(screen.getByRole('button', { name: 'Rename list' }));
-    await user.type(screen.getByLabelText('List name'), 'x{Enter}');
-    expect(await screen.findByText('You already have a list with that name')).toBeTruthy();
+    await user.click(await screen.findByTitle('Open Favorites'));
+    await screen.findAllByRole('row');
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Sun & Moon' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Rank this' })); // joins the end of the ranked block
+    await waitFor(() => expect(api.rankList).toHaveBeenCalledWith('l1', ['a1', 's1']));
+    await user.click(screen.getByRole('button', { name: 'Actions for Sun & Moon' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Move to top' }));
+    await waitFor(() => expect(api.rankList).toHaveBeenLastCalledWith('l1', ['s1', 'a1']));
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Group Therapy' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Remove/ }));
+    await waitFor(() => expect(api.removeFromList).toHaveBeenCalledWith('l1', 'a1'));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Actions for Group Therapy' })).toBeNull());
+  });
+
+  it('says what to do with an empty list', async () => {
+    const user = userEvent.setup();
+    render(<MusicListsSection />);
+    await user.click(await screen.findByTitle('Open Road trip'));
+    expect(await screen.findByText(/Nothing in this list yet/)).toBeTruthy();
+  });
+
+  it('closes a list that is deleted elsewhere', async () => {
+    const user = userEvent.setup();
+    render(<MusicListsSection />);
+    await user.click(await screen.findByTitle('Open Favorites'));
+    await screen.findAllByRole('row');
+    lists = [lists[1]];
+    await refreshMusicLists();
+    await screen.findByText('Road trip');
+    expect(screen.queryByRole('table')).toBeNull();
   });
 });
 

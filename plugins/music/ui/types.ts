@@ -129,11 +129,24 @@ export interface ListItem {
   album: string | null;
   album_ref: string | null;
   art_id: string | null;
+  /** 1..n among the ranked items; null when unranked. */
+  rank: number | null;
+}
+
+/** A list item with the user's all-time plays of it. */
+export interface ListItemWithStats extends ListItem {
+  plays: number;
+  listened_seconds: number;
+  last_played_at: string | null;
 }
 
 export interface MusicList {
   id: string;
   name: string;
+  updated_at: string;
+  item_count: number;
+  /** Up to four distinct covers, for the index card. */
+  covers: string[];
   items: ListItem[];
 }
 

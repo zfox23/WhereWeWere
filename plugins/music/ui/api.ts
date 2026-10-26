@@ -6,6 +6,7 @@ import { request, withAuthHeader } from '../../../client/src/api/client';
 import type {
   AlbumBackfillStatus,
   AlbumView,
+  ListItemWithStats,
   ListTarget,
   MusicList,
   AlbumStatus,
@@ -72,8 +73,10 @@ export const music = {
     request<{ added: boolean }>(`/music/lists/${listId}/items`, { method: 'POST', body: JSON.stringify(target) }),
   removeFromList: (listId: string, itemId: string) =>
     request<{ id: string }>(`/music/lists/${listId}/items/${itemId}`, { method: 'DELETE' }),
-  reorderList: (listId: string, itemIds: string[]) =>
-    request<{ item_ids: string[] }>(`/music/lists/${listId}/order`, { method: 'PUT', body: JSON.stringify({ item_ids: itemIds }) }),
+  listItems: (listId: string) => request<ListItemWithStats[]>(`/music/lists/${listId}/items`),
+  // Drag-to-rank: these ids become ranks 1..n; everything else on the list is unranked.
+  rankList: (listId: string, rankedIds: string[]) =>
+    request<{ ranked_ids: string[] }>(`/music/lists/${listId}/ranks`, { method: 'PUT', body: JSON.stringify({ ranked_ids: rankedIds }) }),
   settings: () => request<MusicSettingsData>('/music/settings'),
   updateSettings: (patch: Partial<Pick<MusicSettingsData, 'session_gap_minutes' | 'min_session_tracks' | 'timezone'>>) =>
     request<MusicSettingsData>('/music/settings', { method: 'PUT', body: JSON.stringify(patch) }),

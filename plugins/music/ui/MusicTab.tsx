@@ -1,11 +1,13 @@
 /**
- * Profile > Music: listening totals, top songs/artists/albums and a library
- * table for the selected period. The period selector state lives in the URL
- * (`musicMonth` / `musicPeriod` / `musicWeek`), as in the media tab.
+ * Profile > Music, in three subtabs like Profile > Places (`musicSection` in
+ * the URL): Overview (listening totals and top songs/artists/albums for the
+ * selected period), Library (every song, artist and album, all time) and Lists.
+ * Only Overview has the period selector; its state lives in the URL
+ * (`musicMonth` / `musicPeriod` / `musicWeek`).
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Disc3, Loader2, Mic2, Music, Timer, Users } from 'lucide-react';
+import { BarChart3, Disc3, Library, List, Loader2, Mic2, Music, Timer, Users } from 'lucide-react';
 import type { PluginProfileTabProps } from 'wwp-shared';
 import { stats as statsApi } from '../../../client/src/api/client';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
@@ -41,6 +43,22 @@ function getWeekFromLocation(): string {
   const param = new URLSearchParams(window.location.search).get('musicWeek');
   return isValidDateParam(param) ? param : getCurrentMonthIso().slice(0, 4) + '-01-01';
 }
+
+export type MusicSection = 'overview' | 'library' | 'lists';
+
+const SECTIONS: { key: MusicSection; label: string; icon: React.ElementType }[] = [
+  { key: 'overview', label: 'Overview', icon: BarChart3 },
+  { key: 'library', label: 'Library', icon: Library },
+  { key: 'lists', label: 'Lists', icon: List },
+];
+
+function getSectionFromLocation(): MusicSection {
+  const section = new URLSearchParams(window.location.search).get('musicSection');
+  return section === 'library' || section === 'lists' ? section : 'overview';
+}
+
+/** Params that belong to the Library subtab. */
+const LIBRARY_PARAMS = ['musicView', 'q', 'sort', 'dir'];
 
 const TOP_COLLAPSED = 10;
 
@@ -122,6 +140,7 @@ export function MusicTab(_props: PluginProfileTabProps) {
   const [selectedMonth, setSelectedMonth] = useState<string>(getMonthFromLocation);
   const [selectedWeek, setSelectedWeek] = useState<string>(getWeekFromLocation);
   const [year, setYear] = useState(() => parseInt(getMonthFromLocation().slice(0, 4), 10));
+  const [section, setSection] = useState<MusicSection>(getSectionFromLocation);
   const [loading, setLoading] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [data, setData] = useState<MusicStats | null>(null);
@@ -167,6 +186,7 @@ export function MusicTab(_props: PluginProfileTabProps) {
       setSelectedMonth(getMonthFromLocation());
       setSelectedWeek(getWeekFromLocation());
       setPeriodMode(getPeriodFromLocation());
+      setSection(getSectionFromLocation());
     };
     window.addEventListener('popstate', sync);
     window.addEventListener('hashchange', sync);
@@ -199,62 +219,94 @@ export function MusicTab(_props: PluginProfileTabProps) {
     setOrDelete('musicMonth', selectedMonth, selectedMonth === monthDefault);
     setOrDelete('musicPeriod', periodMode, periodMode === 'single');
     setOrDelete('musicWeek', selectedWeek, selectedWeek === weekDefault);
+    setOrDelete('musicSection', section, section === 'overview');
+    // The library's filters aren't meaningful (or wanted in a shared link) on the other subtabs.
+    if (section !== 'library') {
+      for (const key of LIBRARY_PARAMS) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      }
+    }
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [periodMode, selectedMonth, selectedWeek]);
-
-  if (!initialLoaded) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="animate-spin text-primary-600" size={32} />
-      </div>
-    );
-  }
+  }, [periodMode, selectedMonth, selectedWeek, section]);
 
   const totals = data?.totals;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <PeriodRangeSelector
-          periodMode={periodMode}
-          onPeriodModeChange={setPeriodMode}
-          year={year}
-          onYearChange={setYear}
-          selectedMonth={selectedMonth}
-          onSelectedMonthChange={setSelectedMonth}
-          selectedWeek={selectedWeek}
-          onSelectedWeekChange={setSelectedWeek}
-          allTimeStartDate={earliestDate ?? undefined}
-          onOpenHome={() => {
-            if (visibleRange.from && visibleRange.to) {
-              window.open(`/?from=${visibleRange.from}&to=${visibleRange.to}`, '_blank', 'noopener,noreferrer');
-            } else {
-              window.open('/', '_blank', 'noopener,noreferrer');
-            }
-          }}
-        />
+      <div className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-xl bg-gray-100 p-1 dark:bg-gray-800/60">
+        {SECTIONS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setSection(key)}
+            aria-pressed={section === key}
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
+              section === key
+                ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className={`space-y-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
-        <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 md:gap-3">
-          <StatCard icon={Music} label="Scrobbles" value={totals?.scrobbles ?? 0} />
-          <StatCard icon={Timer} label="Listening time" value={formatDuration(totals?.listened_seconds ?? 0)} />
-          <StatCard icon={Users} label="Artists" value={totals?.unique_artists ?? 0} />
-          <StatCard icon={Disc3} label="Tracks" value={totals?.unique_tracks ?? 0} />
+      {section === 'overview' && !initialLoaded && (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="animate-spin text-primary-600" size={32} />
         </div>
+      )}
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-          <TopList title="Top songs" icon={Music} view="songs" rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt />
-          <TopList title="Top artists" icon={Mic2} view="artists" rows={data?.top_artists ?? []} detail={() => ''} />
-          <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt />
-        </div>
-      </div>
+      {section === 'overview' && initialLoaded && (
+        <>
+          <div className="flex items-center gap-2">
+            <PeriodRangeSelector
+              periodMode={periodMode}
+              onPeriodModeChange={setPeriodMode}
+              year={year}
+              onYearChange={setYear}
+              selectedMonth={selectedMonth}
+              onSelectedMonthChange={setSelectedMonth}
+              selectedWeek={selectedWeek}
+              onSelectedWeekChange={setSelectedWeek}
+              allTimeStartDate={earliestDate ?? undefined}
+              onOpenHome={() => {
+                if (visibleRange.from && visibleRange.to) {
+                  window.open(`/?from=${visibleRange.from}&to=${visibleRange.to}`, '_blank', 'noopener,noreferrer');
+                } else {
+                  window.open('/', '_blank', 'noopener,noreferrer');
+                }
+              }}
+            />
+          </div>
 
-      <MusicListsSection />
+          <div className={`space-y-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
+            <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 md:gap-3">
+              <StatCard icon={Music} label="Scrobbles" value={totals?.scrobbles ?? 0} />
+              <StatCard icon={Timer} label="Listening time" value={formatDuration(totals?.listened_seconds ?? 0)} />
+              <StatCard icon={Users} label="Artists" value={totals?.unique_artists ?? 0} />
+              <StatCard icon={Disc3} label="Tracks" value={totals?.unique_tracks ?? 0} />
+            </div>
 
-      <MusicLibrarySection from={visibleRange.from} to={visibleRange.to} />
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+              <TopList title="Top songs" icon={Music} view="songs" rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt />
+              <TopList title="Top artists" icon={Mic2} view="artists" rows={data?.top_artists ?? []} detail={() => ''} />
+              <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt />
+            </div>
+          </div>
+
+        </>
+      )}
+
+      {section === 'library' && <MusicLibrarySection from="" to="" />}
+
+      {section === 'lists' && <MusicListsSection />}
     </div>
   );
 }

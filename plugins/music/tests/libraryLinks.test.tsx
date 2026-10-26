@@ -5,12 +5,12 @@ import { ArtistLinks, HomeLibraryLink, libraryHref } from '../ui/libraryLinks';
 afterEach(cleanup);
 
 describe('libraryHref', () => {
-  it('targets the Music profile over all time', () => {
+  it('targets the Library subtab of the Music profile', () => {
     expect(libraryHref('artists', 'Above & Beyond')).toBe(
-      '/profile?tab=plugin%3Amusic&musicPeriod=all&musicView=artists&q=Above+%26+Beyond',
+      '/profile?tab=plugin%3Amusic&musicSection=library&musicView=artists&q=Above+%26+Beyond',
     );
     // Songs is the default view, so it is left out.
-    expect(libraryHref('songs', 'Soma')).toBe('/profile?tab=plugin%3Amusic&musicPeriod=all&q=Soma');
+    expect(libraryHref('songs', 'Soma')).toBe('/profile?tab=plugin%3Amusic&musicSection=library&q=Soma');
   });
 });
 

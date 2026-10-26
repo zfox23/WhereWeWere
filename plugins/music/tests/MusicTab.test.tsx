@@ -66,7 +66,7 @@ describe('MusicTab', () => {
     expect(screen.getByText('Nothing played in this period.')).toBeTruthy();
   });
 
-  it('jumps to the library filtered to a clicked artist, song or album, keeping the period', async () => {
+  it('jumps to the Library subtab filtered to a clicked artist, song or album', async () => {
     const user = userEvent.setup();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     window.history.replaceState(null, '', '/profile?tab=plugin:music&musicPeriod=twelve&sort=plays&dir=asc');
@@ -79,29 +79,78 @@ describe('MusicTab', () => {
 
     await user.click(screen.getByRole('link', { name: 'Khruangbin' }));
     let params = new URLSearchParams(window.location.search);
-    expect([params.get('musicView'), params.get('q'), params.get('musicPeriod')]).toEqual(['artists', 'Khruangbin', 'twelve']);
+    expect([params.get('musicSection'), params.get('musicView'), params.get('q')]).toEqual(['library', 'artists', 'Khruangbin']);
     expect(params.has('sort') && params.has('dir')).toBe(false);
-    expect((screen.getByLabelText('Filter library') as HTMLInputElement).value).toBe('Khruangbin');
-    expect(libraryMock).toHaveBeenLastCalledWith('artists', expect.any(String), expect.any(String));
+    expect((await screen.findByLabelText('Filter library') as HTMLInputElement).value).toBe('Khruangbin');
+    // The library is all-time, whatever period the overview was on.
+    expect(libraryMock).toHaveBeenLastCalledWith('artists', undefined, undefined);
+    expect(screen.queryByText('Top songs')).toBeNull();
 
-    await user.click(screen.getByRole('link', { name: 'Song 3' }));
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
+    await user.click(await screen.findByRole('link', { name: 'Song 3' }));
     params = new URLSearchParams(window.location.search);
-    expect([params.get('musicView'), params.get('q')]).toEqual([null, 'Song 3']); // songs is the default view
-    expect((screen.getByLabelText('Filter library') as HTMLInputElement).value).toBe('Song 3');
+    expect([params.get('musicSection'), params.get('musicView'), params.get('q')]).toEqual(['library', null, 'Song 3']); // songs is the default view
+    expect((await screen.findByLabelText('Filter library') as HTMLInputElement).value).toBe('Song 3');
+    expect(params.get('musicPeriod')).toBe('twelve'); // the overview's period is remembered
 
-    // An album opens its details instead of filtering, whether or not it has a catalog match.
+    // An album opens its details instead of filtering, matched or not.
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
     albumViewMock.mockResolvedValue({
       album_ref: 'mowglis road|khruangbin', art_id: null, matched: false, title: "Mowgli's Road", artist: 'Khruangbin',
       release_date: null, label: null, plays: 4, listened_seconds: 0, tracks: [],
     });
-    await user.click(screen.getByRole('link', { name: "Mowgli's Road" }));
+    await user.click(await screen.findByRole('link', { name: "Mowgli's Road" }));
     expect(await screen.findByRole('dialog', { name: "Mowgli's Road by Khruangbin" })).toBeTruthy();
     expect(albumViewMock).toHaveBeenCalledWith({ ref: 'mowglis road|khruangbin', artId: undefined });
-    // ...and its "Show in library" filters this page.
+    // ...and its "Show in library" filters the Library subtab.
     await user.click(screen.getByRole('button', { name: 'Show in library' }));
     params = new URLSearchParams(window.location.search);
-    expect([params.get('musicView'), params.get('q')]).toEqual(['albums', "Mowgli's Road"]);
+    expect([params.get('musicSection'), params.get('musicView'), params.get('q')]).toEqual(['library', 'albums', "Mowgli's Road"]);
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  describe('subtabs', () => {
+    it('opens on Overview with the period selector, and the other subtabs have none', async () => {
+      const user = userEvent.setup();
+      renderTab();
+      await waitFor(() => screen.getByText('321'));
+      expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-pressed')).toBe('true');
+      expect(screen.getByRole('button', { name: /^All$/ })).toBeTruthy();
+      expect(new URLSearchParams(window.location.search).has('musicSection')).toBe(false); // the default stays out of the URL
+
+      await user.click(screen.getByRole('button', { name: 'Library' }));
+      await screen.findByLabelText('Filter library');
+      expect(screen.queryByRole('button', { name: /^All$/ })).toBeNull();
+      expect(screen.queryByText('Scrobbles')).toBeNull();
+      expect(new URLSearchParams(window.location.search).get('musicSection')).toBe('library');
+
+      await user.click(screen.getByRole('button', { name: 'Lists' }));
+      await screen.findByRole('region', { name: 'Music lists' });
+      expect(screen.queryByLabelText('Filter library')).toBeNull();
+      expect(screen.queryByRole('button', { name: /^All$/ })).toBeNull();
+      expect(new URLSearchParams(window.location.search).get('musicSection')).toBe('lists');
+    });
+
+    it('opens the subtab named in the URL, and clears library filters when leaving the Library', async () => {
+      const user = userEvent.setup();
+      window.history.replaceState(null, '', '/profile?tab=plugin:music&musicSection=library&q=Soma&musicView=albums');
+      renderTab();
+      expect(((await screen.findByLabelText('Filter library')) as HTMLInputElement).value).toBe('Soma');
+      await user.click(screen.getByRole('button', { name: 'Lists' }));
+      const params = new URLSearchParams(window.location.search);
+      expect([params.get('musicSection'), params.has('q'), params.has('musicView')]).toEqual(['lists', false, false]);
+    });
+
+    it('follows back and forward', async () => {
+      renderTab();
+      await waitFor(() => screen.getByText('321'));
+      window.history.pushState(null, '', '/profile?tab=plugin:music&musicSection=lists');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await screen.findByRole('region', { name: 'Music lists' });
+      window.history.pushState(null, '', '/profile?tab=plugin:music');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await screen.findByText('Top songs');
+    });
   });
 
   it('collapses long lists and expands them on request', async () => {
@@ -115,14 +164,13 @@ describe('MusicTab', () => {
     expect(screen.queryByText('Song 11')).toBeNull();
   });
 
-  it('refetches stats and the library for a new period, and keeps the tab in the URL', async () => {
+  it('refetches stats for a new period, and keeps the tab in the URL', async () => {
     const user = userEvent.setup();
     renderTab();
     await waitFor(() => screen.getByText('321'));
     expect(new URLSearchParams(window.location.search).get('tab')).toBe('plugin:music');
     await user.click(screen.getByRole('button', { name: /^All$/ }));
     await waitFor(() => expect(statsMock).toHaveBeenLastCalledWith(undefined, undefined));
-    await waitFor(() => expect(libraryMock).toHaveBeenLastCalledWith('songs', undefined, undefined));
     expect(new URLSearchParams(window.location.search).get('musicPeriod')).toBe('all');
   });
 

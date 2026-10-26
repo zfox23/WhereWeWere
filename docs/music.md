@@ -69,14 +69,16 @@ Covers and release info come from [Deezer](https://developers.deezer.com/api) (n
 
 ## Lists
 
-Keep favorites, or any other lists, of songs and albums in **Profile → Music → Lists** (make a list there, or from the picker below).
+Profile → Music has three subtabs, like Profile → Places: **Overview** (the period selector, totals and Top songs/artists/albums), **Library** (every song, artist and album, over all time) and **Lists**. Only Overview has the period selector.
+
+Keep favorites, or any other lists, of songs and albums in the **Lists** subtab (make a list there, or from the picker below). It works like Places' lists: an index of your lists (with a cover mosaic, item count and last-updated date; rename, delete and create from there) that opens a ranked table.
 
 - **Adding:** click a cover, or an album name in the Library or Top albums, to open the album's details. **Add album to list** adds the album; the heart beside a track adds that song. Songs and albums mix freely in one list.
 - **Any album works:** an album with no catalog match opens the same details from your own plays (tracklist limited to what you've played, no cover or release info). Plays with no album at all gather under **Unknown album** for each artist; the album itself can't be listed, but its songs can.
 - **Only played music:** a track you have never played (shown on a matched album's tracklist) has no add button.
 - **Hearts:** songs and albums that are on a list show a heart in the Library, Top lists, listening sessions and the album details.
-- **Managing:** rename or delete a list, remove items, and reorder with the arrows. Clicking an item opens its album details.
+- **Ranking:** drag the handle (mouse, touch or keyboard) or use each row's ⋯ menu to rank items; ranked items form a 1..n block above an Unranked block. New items arrive unranked. Dragging works while sorted by Rank; the table also sorts by name, artist, type, plays, listening time and last played (all-time numbers). Clicking an item's name opens its album details; ⋯ → Remove takes it off the list. Phones get cards instead of a table.
 - **Identity:** a song is its title and artists, an album is its name and album artist (the same way the Library groups plays), so entries keep matching after re-imports and restores.
-- **Backups:** lists travel in backups (restores merge by list name and skip items already there). **Start Over → All music data** deletes them too.
+- **Backups:** lists and their ranks travel in backups (restores merge by list name and skip items already there; a list that already exists keeps its own ranking). **Start Over → All music data** deletes them too.
 - **Its own page:** middle-click or ctrl-click a cover or album name to open the same details as a page in a new tab (`/music/album`), which can be bookmarked and shared.
 - **Show in library:** the details also have a button that filters the Library to that album, which replaces clicking an album name in Top albums to filter.
