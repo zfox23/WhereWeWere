@@ -322,6 +322,25 @@ export async function recomputeTimezones(userId: string): Promise<number> {
   return changed;
 }
 
+/**
+ * Rebuild the sessions touching `at` (within one gap either side), whole, so a
+ * play added, moved or removed there regroups correctly.
+ */
+async function rebuildAround(db: Queryable, userId: string, gapMinutes: number, at: Date): Promise<void> {
+  const near = await db.query(
+    `SELECT MIN(started_at) AS from_at, MAX(ended_at) AS to_at
+     FROM music_sessions
+     WHERE user_id = $1
+       AND ended_at >= $2::timestamptz - make_interval(mins => $3::int)
+       AND started_at <= $2::timestamptz + make_interval(mins => $3::int)`,
+    [userId, at, gapMinutes],
+  );
+  const row = near.rows[0] ?? {};
+  const from = row.from_at && new Date(row.from_at) < at ? new Date(row.from_at) : at;
+  const to = row.to_at && new Date(row.to_at) > at ? new Date(row.to_at) : at;
+  await rebuildSessions(db, userId, gapMinutes, { from, to });
+}
+
 /** A play of the same song close to this one, from any source. */
 export interface NearDuplicate {
   id: string;
@@ -409,20 +428,7 @@ async function insertOne(
     const id: string | null = inserted.rows[0]?.id ?? null;
     if ((inserted.rowCount ?? 0) > 0) {
       if (opts.companions?.length) await setCompanions(PLUGIN_ID, id as string, opts.companions, client);
-      // Sessions within one gap of the new play may merge with it; widen the
-      // rebuilt range to cover them whole.
-      const near = await client.query(
-        `SELECT MIN(started_at) AS from_at, MAX(ended_at) AS to_at
-         FROM music_sessions
-         WHERE user_id = $1
-           AND ended_at >= $2::timestamptz - make_interval(mins => $3::int)
-           AND started_at <= $2::timestamptz + make_interval(mins => $3::int)`,
-        [userId, s.playedAt, settings.session_gap_minutes],
-      );
-      const row = near.rows[0] ?? {};
-      const from = row.from_at && new Date(row.from_at) < s.playedAt ? new Date(row.from_at) : s.playedAt;
-      const to = row.to_at && new Date(row.to_at) > s.playedAt ? new Date(row.to_at) : s.playedAt;
-      await rebuildSessions(client, userId, settings.session_gap_minutes, { from, to });
+      await rebuildAround(client, userId, settings.session_gap_minutes, s.playedAt);
       sessionId = (await client.query(`SELECT session_id FROM music_scrobbles WHERE id = $1`, [id])).rows[0]?.session_id ?? null;
     }
     await client.query('COMMIT');
@@ -458,35 +464,20 @@ export function insertManualScrobble(
   return insertOne(userId, { ...s, source: 'manual' }, { unlessNearDuplicate: !opts.force, companions: opts.companions });
 }
 
-/** Remove a hand-entered play (scrobbler plays aren't deletable here). False when there is none. */
-export async function deleteManualScrobble(userId: string, id: string): Promise<boolean> {
+/** Remove a play, whatever its source. False when there is none. */
+export async function deleteScrobble(userId: string, id: string): Promise<boolean> {
   const settings = await getMusicSettings(userId);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
-    const gone = await client.query(
-      `DELETE FROM music_scrobbles WHERE id = $2 AND user_id = $1 AND source = 'manual' RETURNING played_at`,
-      [userId, id],
-    );
+    const gone = await client.query(`DELETE FROM music_scrobbles WHERE id = $2 AND user_id = $1 RETURNING played_at`, [userId, id]);
     if ((gone.rowCount ?? 0) === 0) {
       await client.query('ROLLBACK');
       return false;
     }
     await deleteCompanionsForCheckins(PLUGIN_ID, [id], client);
-    const playedAt = new Date(gone.rows[0].played_at);
-    const near = await client.query(
-      `SELECT MIN(started_at) AS from_at, MAX(ended_at) AS to_at FROM music_sessions
-       WHERE user_id = $1
-         AND ended_at >= $2::timestamptz - make_interval(mins => $3::int)
-         AND started_at <= $2::timestamptz + make_interval(mins => $3::int)`,
-      [userId, playedAt, settings.session_gap_minutes],
-    );
-    const row = near.rows[0] ?? {};
-    await rebuildSessions(client, userId, settings.session_gap_minutes, {
-      from: row.from_at ? new Date(row.from_at) : playedAt,
-      to: row.to_at ? new Date(row.to_at) : playedAt,
-    });
+    await rebuildAround(client, userId, settings.session_gap_minutes, new Date(gone.rows[0].played_at));
     await client.query('COMMIT');
     return true;
   } catch (err) {
@@ -495,6 +486,156 @@ export async function deleteManualScrobble(userId: string, id: string): Promise<
   } finally {
     client.release();
   }
+}
+
+export interface ScrobbleEdit {
+  playedAt: Date;
+  title: string;
+  artists: string[];
+  album: string | null;
+  albumArtists: string[];
+  trackLength: number | null;
+  timezone: string | null;
+  note: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  locationAccuracy: number | null;
+  companions: string[];
+}
+
+/**
+ * Change any play. The sessions around where it was and where it now is are
+ * regrouped. 'conflict' when another play already has that time and song.
+ */
+export async function updateScrobble(
+  userId: string,
+  id: string,
+  e: ScrobbleEdit,
+): Promise<{ status: 'updated'; sessionId: string | null } | { status: 'not_found' | 'conflict' }> {
+  const settings = await getMusicSettings(userId);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
+    const old = await client.query(`SELECT played_at, timezone FROM music_scrobbles WHERE id = $2 AND user_id = $1 FOR UPDATE`, [userId, id]);
+    if ((old.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      return { status: 'not_found' };
+    }
+    const timezone = validZone(e.timezone) ?? old.rows[0].timezone;
+    let updated;
+    try {
+      updated = await client.query(
+        `UPDATE music_scrobbles SET played_at = $3, title = $4, artists = $5, album = $6, album_artists = $7,
+                track_length = $8, timezone = $9, note = $10, latitude = $11, longitude = $12, location_accuracy = $13
+         WHERE id = $2 AND user_id = $1 RETURNING album_key`,
+        [userId, id, e.playedAt, e.title, e.artists, e.album, e.albumArtists, e.trackLength, timezone, e.note, e.latitude, e.longitude, e.locationAccuracy],
+      );
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        await client.query('ROLLBACK');
+        return { status: 'conflict' };
+      }
+      throw err;
+    }
+    await setCompanions(PLUGIN_ID, id, e.companions, client);
+    const before = new Date(old.rows[0].played_at);
+    await rebuildAround(client, userId, settings.session_gap_minutes, before);
+    if (before.getTime() !== e.playedAt.getTime()) await rebuildAround(client, userId, settings.session_gap_minutes, e.playedAt);
+    const sessionId = (await client.query(`SELECT session_id FROM music_scrobbles WHERE id = $1`, [id])).rows[0]?.session_id ?? null;
+    await client.query('COMMIT');
+    lookupAlbumSoon(userId, updated.rows[0].album_key);
+    return { status: 'updated', sessionId };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export interface ScrobbleDetail {
+  id: string;
+  played_at: string;
+  timezone: string;
+  title: string;
+  artists: string[];
+  album: string | null;
+  album_artists: string[];
+  track_length: number | null;
+  listened_for: number | null;
+  source: string | null;
+  note: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  location_accuracy: number | null;
+  companions: string[];
+  art_id: string | null;
+  album_ref: string;
+  song_key: string;
+  /** Your plays of this song, all time. */
+  history: { plays: number; first_played_at: string; last_played_at: string };
+  /** Its listening session, or null while one is being rebuilt. */
+  session: {
+    id: string;
+    /** Local date the session is grouped under on the timeline. */
+    date: string;
+    position: number;
+    count: number;
+    previous: SessionNeighbour | null;
+    next: SessionNeighbour | null;
+  } | null;
+}
+
+export interface SessionNeighbour {
+  id: string;
+  title: string;
+  artists: string[];
+  played_at: string;
+}
+
+/** Everything the play's own page shows, or null when there is no such play. */
+export async function getScrobbleDetail(userId: string, id: string): Promise<ScrobbleDetail | null> {
+  const r = await query(
+    `SELECT m.id, m.played_at, m.timezone, m.title, m.artists, m.album, m.album_artists, m.track_length, m.listened_for,
+            m.source, m.note, m.latitude, m.longitude, m.location_accuracy, m.session_id,
+            a.id AS art_id, ${albumRefSql('m.')} AS album_ref, ${songKeySql('m.')} AS song_key,
+            (${companionNamesSql(PLUGIN_ID, 'm.id')}) AS companions
+     FROM music_scrobbles m
+     LEFT JOIN music_albums a ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
+     WHERE m.id = $2 AND m.user_id = $1`,
+    [userId, id],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  const { session_id: sessionId, ...play } = row;
+  const [history, session] = await Promise.all([
+    query(
+      `SELECT COUNT(*)::int AS plays, MIN(played_at) AS first_played_at, MAX(played_at) AS last_played_at
+       FROM music_scrobbles
+       WHERE user_id = $1 AND lower(btrim(title)) = split_part($2, chr(31), 1) AND ${songKeySql()} = $2`,
+      [userId, play.song_key],
+    ),
+    sessionId
+      ? query(
+          `SELECT s.id, s.title, s.artists, s.played_at, (ms.ended_at AT TIME ZONE ms.timezone)::date::text AS date
+           FROM music_scrobbles s JOIN music_sessions ms ON ms.id = s.session_id
+           WHERE s.user_id = $1 AND s.session_id = $2 ORDER BY s.played_at, s.id`,
+          [userId, sessionId],
+        )
+      : Promise.resolve({ rows: [] as any[] }),
+  ]);
+  const inSession = session.rows as (SessionNeighbour & { date: string })[];
+  const at = inSession.findIndex((x) => x.id === id);
+  const neighbour = (x: (SessionNeighbour & { date: string }) | undefined): SessionNeighbour | null =>
+    x ? { id: x.id, title: x.title, artists: x.artists, played_at: x.played_at } : null;
+  return {
+    ...play,
+    history: history.rows[0],
+    session: sessionId && at >= 0
+      ? { id: sessionId, date: inSession[at].date, position: at + 1, count: inSession.length, previous: neighbour(inSession[at - 1]), next: neighbour(inSession[at + 1]) }
+      : null,
+  } as ScrobbleDetail;
 }
 
 const BULK_BATCH = 1000;

@@ -76,7 +76,9 @@ import {
   getMusicSettings,
   getSessionTracks,
   getTotals,
-  deleteManualScrobble,
+  deleteScrobble,
+  getScrobbleDetail,
+  updateScrobble,
   insertManualScrobble,
   insertScrobble,
   insertScrobblesBulk,
@@ -85,6 +87,7 @@ import {
   regenerateScrobblerKey,
   updateMusicSettings,
   type LibraryView,
+  type ScrobbleEdit,
 } from './services/scrobbles';
 
 const MAX_UTC_OFFSET_MS = 14 * 60 * 60 * 1000;
@@ -556,39 +559,46 @@ musicRouter.get('/suggest', async (req: Request, res: Response) => {
 
 const clean = (v: unknown, max: number): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
+/** Read and check the fields of a hand-entered or edited play. */
+function parsePlay(b: Record<string, any>): { error: string } | { play: ScrobbleEdit } {
+  const title = clean(b.title, 300);
+  const names = (v: unknown) => (Array.isArray(v) ? v : []).flatMap((a: unknown) => (clean(a, 200) ? [clean(a, 200) as string] : [])).slice(0, 20);
+  const artists = names(b.artists);
+  const playedAt = new Date(b.played_at);
+  if (!title || artists.length === 0) return { error: 'A song needs a title and an artist' };
+  if (Number.isNaN(playedAt.getTime()) || playedAt.getTime() > Date.now() + 24 * 3600_000) {
+    return { error: 'Give the time it was played (not more than a day ahead)' };
+  }
+  const length = Number(b.track_length);
+  const lat = b.latitude === null || b.latitude === undefined ? null : Number(b.latitude);
+  const lng = b.longitude === null || b.longitude === undefined ? null : Number(b.longitude);
+  const located = lat !== null && lng !== null && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  return {
+    play: {
+      playedAt,
+      title,
+      artists,
+      album: clean(b.album, 300),
+      albumArtists: names(b.album_artists),
+      trackLength: Number.isFinite(length) && length > 0 && length <= 86_400 ? Math.round(length) : null,
+      timezone: typeof b.timezone === 'string' && isValidTimeZone(b.timezone) ? b.timezone : null,
+      note: clean(b.note, 2000),
+      latitude: located ? lat : null,
+      longitude: located ? lng : null,
+      locationAccuracy: located && Number.isInteger(b.location_accuracy) && b.location_accuracy >= 0 ? b.location_accuracy : null,
+      companions: normalizeCompanions(b.companions).slice(0, 20),
+    },
+  };
+}
+
 // POST /scrobbles - write down a song you heard. A play of the same song around
 // then already on file is reported (409) unless `force` is sent.
 musicRouter.post('/scrobbles', async (req: Request, res: Response) => {
   try {
-    const b = req.body ?? {};
-    const title = clean(b.title, 300);
-    const artists = (Array.isArray(b.artists) ? b.artists : []).flatMap((a: unknown) => (clean(a, 200) ? [clean(a, 200) as string] : [])).slice(0, 20);
-    const playedAt = new Date(b.played_at);
-    if (!title || artists.length === 0) return res.status(400).json({ error: 'A song needs a title and an artist' });
-    if (Number.isNaN(playedAt.getTime()) || playedAt.getTime() > Date.now() + 24 * 3600_000) {
-      return res.status(400).json({ error: 'Give the time it was played (not more than a day ahead)' });
-    }
-    const length = Number(b.track_length);
-    const lat = b.latitude === null || b.latitude === undefined ? null : Number(b.latitude);
-    const lng = b.longitude === null || b.longitude === undefined ? null : Number(b.longitude);
-    const located = lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && Number.isFinite(lat) && Number.isFinite(lng);
-    const outcome = await insertManualScrobble(
-      USER_ID,
-      {
-        playedAt,
-        title,
-        artists,
-        album: clean(b.album, 300),
-        albumArtists: (Array.isArray(b.album_artists) ? b.album_artists : []).flatMap((a: unknown) => (clean(a, 200) ? [clean(a, 200) as string] : [])).slice(0, 20),
-        trackLength: Number.isFinite(length) && length > 0 && length <= 86_400 ? Math.round(length) : null,
-        timezone: typeof b.timezone === 'string' && isValidTimeZone(b.timezone) ? b.timezone : null,
-        note: clean(b.note, 2000),
-        latitude: located ? lat : null,
-        longitude: located ? lng : null,
-        locationAccuracy: located && Number.isInteger(b.location_accuracy) && b.location_accuracy >= 0 ? b.location_accuracy : null,
-      },
-      { force: b.force === true, companions: normalizeCompanions(b.companions).slice(0, 20) },
-    );
+    const parsed = parsePlay(req.body ?? {});
+    if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+    const { companions, ...play } = parsed.play;
+    const outcome = await insertManualScrobble(USER_ID, play, { force: req.body?.force === true, companions });
     if (outcome.duplicate) {
       return res.status(409).json({ error: 'You already have this song around that time', duplicate: outcome.duplicate });
     }
@@ -600,16 +610,47 @@ musicRouter.post('/scrobbles', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /scrobbles/:id - take back a hand-entered play (scrobbler plays stay).
+// GET /scrobbles/:id - one play with its song history and place in its session.
+musicRouter.get('/scrobbles/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    if (!isUuid(id)) return res.status(400).json({ error: 'Invalid id' });
+    const detail = await getScrobbleDetail(USER_ID, id);
+    if (!detail) return res.status(404).json({ error: 'No such play' });
+    res.json(detail);
+  } catch (err) {
+    console.error('Error loading scrobble:', err);
+    res.status(500).json({ error: 'Failed to load the play' });
+  }
+});
+
+// PUT /scrobbles/:id - correct any play (a scrobbler's too).
+musicRouter.put('/scrobbles/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    if (!isUuid(id)) return res.status(400).json({ error: 'Invalid id' });
+    const parsed = parsePlay(req.body ?? {});
+    if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+    const result = await updateScrobble(USER_ID, id, parsed.play);
+    if (result.status === 'updated') return res.json({ id, session_id: result.sessionId });
+    if (result.status === 'conflict') return res.status(409).json({ error: 'Another play already has that time and song' });
+    res.status(404).json({ error: 'No such play' });
+  } catch (err) {
+    console.error('Error updating scrobble:', err);
+    res.status(500).json({ error: 'Failed to save the changes' });
+  }
+});
+
+// DELETE /scrobbles/:id - remove a play, whatever its source.
 musicRouter.delete('/scrobbles/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     if (!isUuid(id)) return res.status(400).json({ error: 'Invalid id' });
-    if (!(await deleteManualScrobble(USER_ID, id))) return res.status(404).json({ error: 'No hand-entered song with that id' });
+    if (!(await deleteScrobble(USER_ID, id))) return res.status(404).json({ error: 'No such play' });
     res.json({ id });
   } catch (err) {
-    console.error('Error deleting manual scrobble:', err);
-    res.status(500).json({ error: 'Failed to delete the song' });
+    console.error('Error deleting scrobble:', err);
+    res.status(500).json({ error: 'Failed to delete the play' });
   }
 });
 

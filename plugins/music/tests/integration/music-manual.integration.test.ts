@@ -141,13 +141,100 @@ describe('hand-entered plays', () => {
       expect(sessions).toEqual([{ track_count: 1, has_manual: false }]);
     });
 
-    it('refuses scrobbler plays and unknown ids', async () => {
+    it('removes a scrobbler\'s play too, and refuses unknown ids', async () => {
       await push('Sun & Moon', 0);
-      const id = (await query('SELECT id FROM music_scrobbles')).rows[0].id;
+      await push('Neighbour', 2);
+      const id = (await query(`SELECT id FROM music_scrobbles WHERE title = 'Sun & Moon'`)).rows[0].id;
+      expect((await request(app).delete(`/api/v1/music/scrobbles/${id}`)).status).toBe(200);
+      expect((await rows()).map((r: any) => r.title)).toEqual(['Neighbour']);
+      expect((await query('SELECT track_count FROM music_sessions')).rows).toEqual([{ track_count: 1 }]);
       expect((await request(app).delete(`/api/v1/music/scrobbles/${id}`)).status).toBe(404);
       expect((await request(app).delete('/api/v1/music/scrobbles/00000000-0000-4000-8000-000000000000')).status).toBe(404);
       expect((await request(app).delete('/api/v1/music/scrobbles/nope')).status).toBe(400);
-      expect((await rows()).length).toBe(1);
+    });
+  });
+
+  describe('a play\'s own page', () => {
+    const detail = (id: string) => request(app).get(`/api/v1/music/scrobbles/${id}`);
+    const idOf = async (title: string) => (await query('SELECT id FROM music_scrobbles WHERE title = $1 ORDER BY played_at LIMIT 1', [title])).rows[0].id;
+
+    it('describes the play, your history with the song, and its place in the session', async () => {
+      await push('First', 0);
+      await manual({ note: 'at the market', companions: ['Sam'], latitude: 1.5, longitude: 2.5, location_accuracy: 20, track_length: 321, played_at: new Date((T0 + 120) * 1000).toISOString() });
+      await push('Last', 4);
+      await push('Sun & Moon', 600); // another play of the song, in a later session
+      const res = await detail(await idOf('Sun & Moon'));
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        title: 'Sun & Moon', artists: ['Above & Beyond'], album: 'Group Therapy', source: 'manual', note: 'at the market',
+        companions: ['Sam'], latitude: 1.5, longitude: 2.5, location_accuracy: 20, track_length: 321, timezone: 'America/Chicago',
+        album_ref: 'group therapy|above & beyond', art_id: null,
+      });
+      expect(res.body.song_key).toEqual(expect.any(String));
+      expect(res.body.history).toMatchObject({ plays: 2 });
+      expect(new Date(res.body.history.first_played_at).getTime()).toBe((T0 + 120) * 1000);
+      expect(new Date(res.body.history.last_played_at).getTime()).toBe((T0 + 600 * 60) * 1000);
+      expect(res.body.session).toMatchObject({ position: 2, count: 3, previous: { title: 'First' }, next: { title: 'Last' } });
+      expect(res.body.session.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('has no neighbours at the ends of a session, and works for a scrobbled play', async () => {
+      await push('Only', 0);
+      const res = await detail(await idOf('Only'));
+      expect(res.body).toMatchObject({ source: 'multi-scrobbler', note: null, companions: [], latitude: null });
+      expect(res.body.session).toMatchObject({ position: 1, count: 1, previous: null, next: null });
+    });
+
+    it('404s for no such play and 400s for a bad id', async () => {
+      expect((await detail('00000000-0000-4000-8000-000000000000')).status).toBe(404);
+      expect((await detail('nope')).status).toBe(400);
+    });
+  });
+
+  describe('correcting a play', () => {
+    const edit = (id: string, over: Record<string, unknown> = {}) =>
+      request(app).put(`/api/v1/music/scrobbles/${id}`).send({
+        title: 'Sun & Moon', artists: ['Above & Beyond'], album: 'Group Therapy', played_at: new Date(T0 * 1000).toISOString(), ...over,
+      });
+    const first = async (title: string) => (await query('SELECT * FROM music_scrobbles WHERE title = $1', [title])).rows[0];
+
+    it('changes the song, album, length, note, companions and place of any play, including a scrobbler\'s', async () => {
+      await push('Wrong Title', 0);
+      const id = (await first('Wrong Title')).id;
+      const res = await edit(id, { album: 'Right Album', track_length: 200, note: 'fixed', companions: ['Riley'], latitude: 3, longitude: 4, timezone: 'Europe/Paris' });
+      expect(res.status).toBe(200);
+      const row = await first('Sun & Moon');
+      expect(row).toMatchObject({ id, source: 'multi-scrobbler', album: 'Right Album', track_length: 200, note: 'fixed', latitude: 3, longitude: 4, timezone: 'Europe/Paris' });
+      expect((await query(`SELECT name FROM companions WHERE checkin_id = $1`, [id])).rows.map((r: any) => r.name)).toEqual(['Riley']);
+      // Clearing optional fields works too.
+      await edit(id, { album: null, note: null, companions: [], latitude: null, longitude: null });
+      expect(await first('Sun & Moon')).toMatchObject({ album: null, note: null, latitude: null });
+      expect((await query(`SELECT 1 FROM companions WHERE checkin_id = $1`, [id])).rowCount).toBe(0);
+    });
+
+    it('regroups the sessions when the time moves', async () => {
+      await push('A', 0);
+      await push('B', 5);
+      const mover = await manual({ title: 'Mover', played_at: new Date((T0 + 10 * 60) * 1000).toISOString() });
+      await push('Far', 600);
+      const counts = async () => (await query('SELECT track_count FROM music_sessions ORDER BY started_at')).rows.map((r: any) => r.track_count);
+      expect(await counts()).toEqual([3, 1]);
+      // Move it next to the far play: the first session shrinks, the second grows.
+      expect((await edit(mover.body.id, { title: 'Mover', played_at: new Date((T0 + 601 * 60) * 1000).toISOString() })).status).toBe(200);
+      expect(await counts()).toEqual([2, 2]);
+      const sessions = (await query('SELECT has_manual FROM music_sessions ORDER BY started_at')).rows.map((r: any) => r.has_manual);
+      expect(sessions).toEqual([false, true]);
+    });
+
+    it('refuses a change that collides with another play, and unknown ids and bad input', async () => {
+      await push('Sun & Moon', 0);
+      await push('Other', 10);
+      const other = (await first('Other')).id;
+      expect((await edit(other, { title: 'Sun & Moon' })).status).toBe(409);
+      expect((await first('Other')).id).toBe(other); // unchanged
+      expect((await edit('00000000-0000-4000-8000-000000000000')).status).toBe(404);
+      expect((await edit('nope')).status).toBe(400);
+      expect((await edit(other, { title: ' ' })).status).toBe(400);
     });
   });
 
