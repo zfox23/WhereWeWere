@@ -8,7 +8,9 @@
 
 import {
   acceptsRelease,
+  isVariantOf,
   plausibleTitle,
+  rankCandidate,
   sameArtist,
   type AlbumMatch,
   type Played,
@@ -47,7 +49,7 @@ function gate(minGapMs: number) {
 // ---------------------------------------------------------------------------
 
 const DEEZER = 'https://api.deezer.com';
-const DEEZER_CANDIDATES = 10;
+const DEEZER_CANDIDATES = 25;
 const DEEZER_VERIFY = 3;
 
 export function createDeezerProvider(fetchImpl: FetchLike, gapMs = 150): AlbumProvider {
@@ -110,9 +112,23 @@ export function createDeezerProvider(fetchImpl: FetchLike, gapMs = 150): AlbumPr
 
   async function search(q: string, played: Played, requireArtist: boolean): Promise<AlbumMatch | null> {
     const found = await get('/search/album', { q, limit: String(DEEZER_CANDIDATES) });
+    const title = (c: any) => String(c.title ?? '');
     const candidates = (Array.isArray(found?.data) ? found.data : [])
-      .filter((c: any) => plausibleTitle(played.album, String(c.title ?? '')))
-      .filter((c: any) => !requireArtist || sameArtist(played.artist, String(c.artist?.name ?? '')))
+      .filter((c: any) => plausibleTitle(played.album, title(c)) || plausibleTitle(played.album, String(c.title_short ?? '')))
+      .filter((c: any) => !isVariantOf(played.album, title(c)))
+      // Even the album-only pass (compilations, soundtracks) needs the artist to agree
+      // or the release to be a "Various Artists" collection; a same-named single by
+      // someone else is not this album.
+      .filter((c: any) => {
+        const name = String(c.artist?.name ?? '');
+        return sameArtist(played.artist, name) || (!requireArtist && /^various artists$/i.test(name.trim()));
+      })
+      // Search relevance isn't title-exact: rank before spending the verification budget.
+      .sort(
+        (a: any, b: any) =>
+          rankCandidate(played, { title: title(b), artist: String(b.artist?.name ?? '') }) -
+          rankCandidate(played, { title: title(a), artist: String(a.artist?.name ?? '') }),
+      )
       .slice(0, DEEZER_VERIFY);
     for (const c of candidates) {
       const release = await loadAlbum(Number(c.id));
@@ -143,26 +159,37 @@ const CAA = 'https://coverartarchive.org/release';
 /** MusicBrainz requires a descriptive User-Agent and allows one request a second. */
 const MB_USER_AGENT = 'WhereWeWere/1.0 (https://github.com/zfox23/WhereWeWere)';
 
-export function createMusicBrainzProvider(fetchImpl: FetchLike, gapMs = 1100): AlbumProvider {
+const MB_ATTEMPTS = 4;
+
+export function createMusicBrainzProvider(fetchImpl: FetchLike, gapMs = 1100, retryMs = 3_000): AlbumProvider {
   const wait = gate(gapMs);
 
   async function get(path: string, params: Record<string, string>): Promise<any | null> {
-    await wait();
-    let res: HttpResponse;
-    try {
-      res = await fetchImpl(`${MB}${path}?${new URLSearchParams({ ...params, fmt: 'json' })}`, {
-        headers: { 'User-Agent': MB_USER_AGENT, Accept: 'application/json' },
-        signal: AbortSignal.timeout(30_000),
-      });
-    } catch (err) {
-      throw new ProviderUnavailableError(`Couldn't reach MusicBrainz: ${err instanceof Error ? err.message : 'network error'}`);
+    const url = `${MB}${path}?${new URLSearchParams({ ...params, fmt: 'json' })}`;
+    // MusicBrainz answers 503 when it is over its rate limit; that clears quickly.
+    for (let attempt = 0; attempt < MB_ATTEMPTS; attempt++) {
+      await wait();
+      let res: HttpResponse;
+      try {
+        res = await fetchImpl(url, {
+          headers: { 'User-Agent': MB_USER_AGENT, Accept: 'application/json' },
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (err) {
+        throw new ProviderUnavailableError(`Couldn't reach MusicBrainz: ${err instanceof Error ? err.message : 'network error'}`);
+      }
+      if (res.status === 404) return null;
+      if (res.status === 503 || res.status === 429 || res.status >= 500) {
+        if (attempt < MB_ATTEMPTS - 1) {
+          await sleep(retryMs * 2 ** attempt);
+          continue;
+        }
+        throw new ProviderUnavailableError(`MusicBrainz returned HTTP ${res.status}`);
+      }
+      if (!res.ok) return null;
+      return res.json().catch(() => null);
     }
-    if (res.status === 404) return null;
-    if (res.status === 503 || res.status === 429 || res.status >= 500) {
-      throw new ProviderUnavailableError(`MusicBrainz returned HTTP ${res.status}`);
-    }
-    if (!res.ok) return null;
-    return res.json().catch(() => null);
+    return null;
   }
 
   return {

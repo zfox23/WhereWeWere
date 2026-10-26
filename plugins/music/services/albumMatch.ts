@@ -33,9 +33,13 @@ const EDITION_WORDS =
 const BRACKETED = new RegExp(`\\s*[\\(\\[][^\\)\\]]*\\b(?:${EDITION_WORDS})\\b[^\\)\\]]*[\\)\\]]`, 'gi');
 const DASHED = new RegExp(`\\s+-\\s+(?:\\d{4}\\s+)?(?:${EDITION_WORDS})\\b.*$`, 'i');
 
+/** "(feat. X)" credits, which catalogs and scrobblers disagree about. */
+const FEATURING = /\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s[^\)\]]*[\)\]]/gi;
+
 export function normalizeTitle(title: string): string {
   return title
     .replace(BRACKETED, '')
+    .replace(FEATURING, '')
     .replace(DASHED, '')
     .toLowerCase()
     .normalize('NFKD')
@@ -85,4 +89,19 @@ export function plausibleTitle(played: string, candidate: string): boolean {
   const a = normalizeTitle(played);
   const b = normalizeTitle(candidate);
   return a === b || (a.length >= 4 && (b.includes(a) || a.includes(b)));
+}
+
+/** Mixes, live sets and the like are different albums even when the name contains the played one. */
+const VARIANT = /\b(?:dj mix|mixed|live|continuous|karaoke|tribute|instrumental)\b/i;
+
+export function isVariantOf(playedAlbum: string, candidate: string): boolean {
+  return VARIANT.test(candidate) && !VARIANT.test(playedAlbum);
+}
+
+/** Higher is better: exact title and artist first, so loose matches only use leftover verification budget. */
+export function rankCandidate(played: Played, candidate: { title: string; artist: string }): number {
+  return (
+    (normalizeTitle(candidate.title) === normalizeTitle(played.album) ? 2 : 0) +
+    (normalizeTitle(candidate.artist) === normalizeTitle(played.artist) ? 1 : 0)
+  );
 }

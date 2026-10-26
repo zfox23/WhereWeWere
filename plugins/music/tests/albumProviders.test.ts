@@ -87,7 +87,58 @@ describe('Deezer provider', () => {
   });
 });
 
+describe('Deezer provider, real result shapes', () => {
+  it('skips DJ mixes credited to a name containing the artist and still finds the studio album', async () => {
+    const mix = (id: number) => ({ id, title: `Group Therapy ${id} (DJ Mix)`, artist: { name: 'Above & Beyond Group Therapy' } });
+    const fetchImpl = deezerFetch({
+      '/search/album': { data: [mix(681), mix(679), mix(682), mix(680), { id: 42, title: 'Group Therapy', title_short: 'Group Therapy', artist: { name: 'Above & Beyond' } }] },
+      '/album/42': deezerAlbum,
+    });
+    const match = await createDeezerProvider(fetchImpl, 0).find(played);
+    expect(match?.externalId).toBe('42');
+    expect(fetchImpl.mock.calls.filter(([u]) => /\/album\/6\d\d/.test(String(u)))).toHaveLength(0);
+  });
+
+  it('ranks the exact title ahead of a longer title that merely contains it', async () => {
+    const fetchImpl = deezerFetch({
+      '/search/album': { data: [{ id: 1, title: 'Group Therapy Sessions', artist: { name: 'Above & Beyond' } }, { id: 42, title: 'Group Therapy', artist: { name: 'Above & Beyond' } }] },
+      '/album/1': { ...deezerAlbum, id: 1, title: 'Group Therapy Sessions' },
+      '/album/42': deezerAlbum,
+    });
+    expect((await createDeezerProvider(fetchImpl, 0).find(played))?.externalId).toBe('42');
+  });
+});
+
+describe('Deezer provider, artist agreement', () => {
+  it('rejects a same-titled album by someone else found by the album-only search', async () => {
+    const fetchImpl = deezerFetch({
+      '/search/album': { data: [{ id: 9, title: 'Ghost Hack', artist: { name: 'Yuki Miyagawa' } }] },
+      '/album/9': { ...deezerAlbum, id: 9, title: 'Ghost Hack', nb_tracks: 1, tracks: { data: [{ title: 'Ghost Hack', duration: 200 }] } },
+    });
+    expect(await createDeezerProvider(fetchImpl, 0).find({ album: 'Ghost Hack', artist: 'Dabin', titles: ['Ghost Hack'] })).toBeNull();
+  });
+
+  it('still accepts a Various Artists compilation through the album-only search', async () => {
+    const fetchImpl = deezerFetch({
+      '/search/album': { data: [{ id: 5, title: 'Cars (Original Motion Picture Soundtrack)', artist: { name: 'Various Artists' } }] },
+      '/album/5': { ...deezerAlbum, id: 5, title: 'Cars (Original Motion Picture Soundtrack)', artist: { name: 'Various Artists' }, nb_tracks: 2, tracks: { data: [{ title: 'Real Gone', duration: 200 }, { title: 'Our Town', duration: 180 }] } },
+    });
+    const match = await createDeezerProvider(fetchImpl, 0).find({ album: 'Cars (Original Motion Picture Soundtrack)', artist: 'Sheryl Crow', titles: ['Real Gone'] });
+    expect(match?.externalId).toBe('5');
+  });
+});
+
 describe('MusicBrainz provider', () => {
+  it('retries a 503 before giving up', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => (++calls < 3 ? json({}, 503) : json({ releases: [] })));
+    expect(await createMusicBrainzProvider(fetchImpl, 0, 0).find(played)).toBeNull();
+    expect(calls).toBe(3);
+    const down = vi.fn(async () => json({}, 503));
+    await expect(createMusicBrainzProvider(down, 0, 0).find(played)).rejects.toBeInstanceOf(ProviderUnavailableError);
+    expect(down).toHaveBeenCalledTimes(4);
+  });
+
   const release = {
     id: 'mbid-1',
     title: 'Group Therapy',

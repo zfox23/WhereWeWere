@@ -12,6 +12,8 @@ describe('normalizeTitle', () => {
     ['Rhythm & Bits', 'rhythm and bits'],
     ['Beyoncé', 'beyonce'],
     ['Cars (Original Soundtrack)', 'cars original soundtrack'],
+    ['Song (feat. Guest)', 'song'],
+    ['Song [ft. Guest & Other]', 'song'],
   ])('%s -> %s', (input, expected) => expect(normalizeTitle(input)).toBe(expected));
 });
 
