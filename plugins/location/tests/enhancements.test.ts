@@ -33,9 +33,6 @@ function app() {
 }
 
 
-/** closeGaps renumbers in its own transaction; a client that accepts anything is enough here. */
-const gapClient = () => ({ query: vi.fn(async () => ({ rows: [] })), release: vi.fn() });
-
 beforeEach(() => {
   queryMock.mockReset();
   poolConnectMock.mockReset();
@@ -192,11 +189,8 @@ describe('venue lists (endpoints)', () => {
 
   it('DELETE /lists/:id/items/:venueId removes a membership (404 if absent)', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ list_id: 'l1' }] });
-    const gaps = gapClient();
-    poolConnectMock.mockResolvedValueOnce(gaps);
     const ok = await request(app()).delete('/venues/lists/l1/items/v1');
     expect(ok.status).toBe(200);
-    expect(gaps.query.mock.calls.some((c) => String(c[0]).includes('UPDATE venue_list_items'))).toBe(true);
 
     queryMock.mockResolvedValueOnce({ rows: [] });
     const missing = await request(app()).delete('/venues/lists/l1/items/vX');
@@ -322,41 +316,12 @@ describe('checkin lists (endpoints)', () => {
 
   it('DELETE /lists/:id/items/:checkinId removes a membership (404 if absent)', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }] });
-    const gaps = gapClient();
-    poolConnectMock.mockResolvedValueOnce(gaps);
     const ok = await request(app()).delete('/location-checkins/lists/cl1/items/c1');
     expect(ok.status).toBe(200);
-    expect(gaps.query.mock.calls.some((c) => String(c[0]).includes('UPDATE checkin_list_items'))).toBe(true);
 
     queryMock.mockResolvedValueOnce({ rows: [] });
     const missing = await request(app()).delete('/location-checkins/lists/cl1/items/cX');
     expect(missing.status).toBe(404);
-  });
-
-  it('PUT /lists/:id/items/:checkinId/rank clears a rank with rank:null', async () => {
-    const client = {
-      query: vi.fn(async (sql: string) => {
-        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
-        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
-        if (sql.includes('SELECT rank FROM checkin_list_items')) return { rows: [{ rank: 3 }] };
-        if (sql.includes('UPDATE checkin_list_items SET rank = $3')) return { rows: [], rowCount: 1 };
-        if (sql.includes('rank = rank - 1')) return { rows: [] };
-        return { rows: [] };
-      }),
-      release: vi.fn(),
-    };
-    poolConnectMock.mockResolvedValueOnce(client);
-
-    const res = await request(app()).put('/location-checkins/lists/cl1/items/c1/rank').send({ rank: null });
-    expect(res.status).toBe(200);
-    expect(res.body.rank).toBeNull();
-    // Ranks below the removed one are renumbered down: parked above any real
-    // rank first (so the unique index can't collide mid-statement), then moved.
-    const calls = client.query.mock.calls as unknown as [string, unknown[]][];
-    const park = calls.find((c) => c[0].includes('SET rank = rank + $3'));
-    const settle = calls.find((c) => c[0].includes('SET rank = rank - $2 + $3'));
-    expect(park?.[1]).toEqual(['cl1', 4, 1_000_000]);
-    expect(settle?.[1]).toEqual(['cl1', 1_000_000, -1]);
   });
 
   it('POST /location-checkins rejects a missing venue_id without opening a transaction', async () => {

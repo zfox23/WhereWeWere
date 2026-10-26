@@ -223,6 +223,98 @@ describe('Location plugin API (integration)', () => {
     });
   });
 
+  describe('rank gaps closed when deletes cascade into lists', () => {
+    it('deleting a ranked check-in closes the gap in its check-in lists', async () => {
+      const venueId = await insertVenue('Cascade', 40, 40);
+      const ids: string[] = [];
+      for (let i = 0; i < 4; i++) ids.push(await insertCheckin(venueId, `2024-03-0${i + 1}T12:00:00Z`));
+      const list = (await request(app).post('/api/v1/location-checkins/lists').send({ name: 'Cascade' })).body;
+      for (const id of ids) await query('INSERT INTO checkin_list_items (list_id, checkin_id) VALUES ($1, $2)', [list.id, id]);
+      await request(app).put(`/api/v1/location-checkins/lists/${list.id}/ranks`).send({ ranked_ids: [ids[0], ids[1], ids[2]] });
+
+      expect((await request(app).delete(`/api/v1/location-checkins/${ids[1]}`)).status).toBe(200);
+      const rows = (await query('SELECT checkin_id, rank FROM checkin_list_items WHERE list_id = $1 ORDER BY rank NULLS LAST, checkin_id', [list.id])).rows;
+      expect(rows.filter((r) => r.rank !== null).map((r) => [r.checkin_id, r.rank])).toEqual([[ids[0], 1], [ids[2], 2]]);
+      expect(rows.filter((r) => r.rank === null)).toHaveLength(1);
+    });
+
+    it('deleting several ranked venues at once renumbers each list once, across lists', async () => {
+      const venues = [];
+      for (let i = 0; i < 5; i++) venues.push(await insertVenue(`V${i}`, 41 + i, 41));
+      const a = (await request(app).post('/api/v1/venues/lists').send({ name: 'A' })).body;
+      const b = (await request(app).post('/api/v1/venues/lists').send({ name: 'B' })).body;
+      for (const list of [a, b]) {
+        for (const v of venues) await query('INSERT INTO venue_list_items (list_id, venue_id) VALUES ($1, $2)', [list.id, v]);
+      }
+      await request(app).put(`/api/v1/venues/lists/${a.id}/ranks`).send({ ranked_ids: venues });
+      await request(app).put(`/api/v1/venues/lists/${b.id}/ranks`).send({ ranked_ids: [...venues].reverse() });
+
+      // One statement removes two venues from both lists (the cascade).
+      await query('DELETE FROM venues WHERE id = ANY($1::uuid[])', [[venues[1], venues[3]]]);
+      const ranks = async (id: string) =>
+        (await query('SELECT venue_id, rank FROM venue_list_items WHERE list_id = $1 ORDER BY rank', [id])).rows;
+      expect((await ranks(a.id)).map((r) => [r.venue_id, r.rank])).toEqual([[venues[0], 1], [venues[2], 2], [venues[4], 3]]);
+      expect((await ranks(b.id)).map((r) => [r.venue_id, r.rank])).toEqual([[venues[4], 1], [venues[2], 2], [venues[0], 3]]);
+    });
+  });
+
+  describe('PUT /location-checkins/lists/:id/items/:checkinId/rank', () => {
+    async function seedList(n: number, ranked: number) {
+      const venueId = await insertVenue('One rank', 60, 60);
+      const ids: string[] = [];
+      for (let i = 0; i < n; i++) ids.push(await insertCheckin(venueId, `2024-04-0${i + 1}T12:00:00Z`));
+      const list = (await request(app).post('/api/v1/location-checkins/lists').send({ name: 'One rank' })).body;
+      for (const id of ids) await query('INSERT INTO checkin_list_items (list_id, checkin_id) VALUES ($1, $2)', [list.id, id]);
+      await request(app).put(`/api/v1/location-checkins/lists/${list.id}/ranks`).send({ ranked_ids: ids.slice(0, ranked) });
+      const set = (id: string, rank: number | null) =>
+        request(app).put(`/api/v1/location-checkins/lists/${list.id}/items/${id}/rank`).send({ rank });
+      const order = async () =>
+        (await query('SELECT checkin_id, rank FROM checkin_list_items WHERE list_id = $1 ORDER BY rank NULLS LAST, checkin_id', [list.id])).rows;
+      return { ids, list, set, order };
+    }
+
+    it('inserting at a rank shifts the others down, and the ranks stay 1..n', async () => {
+      const { ids, set, order } = await seedList(4, 3);
+      const res = await set(ids[3], 2); // unranked -> rank 2
+      expect(res.status).toBe(200);
+      expect(res.body.rank).toBe(2);
+      expect((await order()).map((r) => [r.checkin_id, r.rank])).toEqual([[ids[0], 1], [ids[3], 2], [ids[1], 3], [ids[2], 4]]);
+    });
+
+    it('moves a ranked item up and down', async () => {
+      const { ids, set, order } = await seedList(4, 4);
+      await set(ids[3], 1);
+      expect((await order()).map((r) => r.checkin_id)).toEqual([ids[3], ids[0], ids[1], ids[2]]);
+      await set(ids[3], 4);
+      expect((await order()).map((r) => r.checkin_id)).toEqual([ids[0], ids[1], ids[2], ids[3]]);
+      expect((await order()).map((r) => r.rank)).toEqual([1, 2, 3, 4]);
+    });
+
+    it('a rank past the end lands at the end instead of leaving a gap', async () => {
+      const { ids, set, order } = await seedList(3, 2);
+      const res = await set(ids[2], 99);
+      expect(res.body.rank).toBe(3);
+      expect((await order()).map((r) => r.rank)).toEqual([1, 2, 3]);
+    });
+
+    it('clearing a rank closes the gap and leaves the unranked ones alone', async () => {
+      const { ids, set, order } = await seedList(4, 3);
+      const res = await set(ids[0], null);
+      expect(res.body.rank).toBeNull();
+      expect((await order()).map((r) => [r.checkin_id, r.rank])).toEqual([[ids[1], 1], [ids[2], 2], [ids[0], null], [ids[3], null]].sort((x: any, y: any) => (x[1] ?? 99) - (y[1] ?? 99) || String(x[0]).localeCompare(String(y[0]))));
+    });
+
+    it('treats a rank equal to the current one as no change, and 404s unknown lists and items', async () => {
+      const { ids, set, order, list } = await seedList(3, 3);
+      expect((await set(ids[1], 2)).body.rank).toBe(2);
+      expect((await order()).map((r) => r.checkin_id)).toEqual(ids);
+      const other = await insertCheckin(await insertVenue('Elsewhere', 61, 61), '2024-05-01T12:00:00Z');
+      expect((await set(other, 1)).status).toBe(404);
+      expect((await request(app).put(`/api/v1/location-checkins/lists/${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}/items/${ids[0]}/rank`).send({ rank: 1 })).status).toBe(404);
+      expect((await request(app).put(`/api/v1/location-checkins/lists/${list.id}/items/nope/rank`).send({ rank: 1 })).status).toBe(400);
+    });
+  });
+
   describe('shared list kit: bulk ranks, gaps and rank sessions', () => {
     const session = (ids: string[]) => ({
       mode: 'scratch', initialRanks: Object.fromEntries(ids.map((i) => [i, null])), itemIds: ids,

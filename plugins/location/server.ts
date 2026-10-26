@@ -456,7 +456,6 @@ router.delete('/lists/:id/items/:checkinId', async (req: Request, res: Response)
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in is not in this list' });
     }
-    await checkinListKit.closeGaps(String(req.params.id));
     res.json({ message: 'Removed from list' });
   } catch (err) {
     console.error('Error removing check-in from list:', err);
@@ -464,74 +463,8 @@ router.delete('/lists/:id/items/:checkinId', async (req: Request, res: Response)
   }
 });
 
-// PUT /lists/:id/items/:checkinId/rank - set (or clear, with rank: null) one rank
-router.put('/lists/:id/items/:checkinId/rank', async (req: Request, res: Response) => {
-  try {
-    const { rank } = req.body ?? {};
-    const rankValue =
-      rank == null ? null : typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 ? rank : null;
-
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const listResult = await client.query(
-        'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
-        [req.params.id, USER_ID]
-      );
-      if (listResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Checkin list not found' });
-      }
-      const itemResult = await client.query(
-        'SELECT rank FROM checkin_list_items WHERE list_id = $1 AND checkin_id = $2',
-        [req.params.id, req.params.checkinId]
-      );
-      if (itemResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Check-in is not in this list' });
-      }
-      const oldRank: number | null = itemResult.rows[0].rank;
-      if (rankValue != null && oldRank != null && oldRank === rankValue) {
-        await client.query('ROLLBACK');
-        return res.json({ rank: rankValue });
-      }
-      if (rankValue != null) {
-        await shiftRanks(client, String(req.params.id), rankValue, 1);
-      }
-      try {
-        const updateResult = await client.query(
-          'UPDATE checkin_list_items SET rank = $3 WHERE list_id = $1 AND checkin_id = $2',
-          [req.params.id, req.params.checkinId, rankValue]
-        );
-        if ((updateResult.rowCount ?? 0) === 0) {
-          await client.query('ROLLBACK');
-          return res.status(404).json({ error: 'Check-in is not in this list' });
-        }
-      } catch (updateErr: any) {
-        await client.query('ROLLBACK').catch(() => {});
-        if (updateErr?.code === '23505') {
-          return res.status(409).json({ error: 'That rank is already taken in this list' });
-        }
-        throw updateErr;
-      }
-      if (rankValue == null && oldRank != null) {
-        await shiftRanks(client, String(req.params.id), oldRank + 1, -1);
-      }
-      await client.query('COMMIT');
-      res.json({ rank: rankValue });
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error('Error setting checkin list rank:', err);
-    res.status(500).json({ error: 'Failed to set rank' });
-  }
-});
-
-// PUT /lists/:id/ranks (bulk re-rank) and /lists/:id/rank-session come from the shared list kit.
+// PUT /lists/:id/ranks (bulk re-rank), PUT /lists/:id/items/:itemId/rank (one rank) and
+// /lists/:id/rank-session come from the shared list kit.
 mountRankRoutes(router, checkinListKit, USER_ID);
 
 // GET / - list check-ins with venue info
@@ -661,29 +594,6 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to get check-in' });
   }
 });
-
-// Rank shifts must not trip the (non-deferrable) unique rank index mid-statement:
-// the index is checked row by row, so `rank = rank + 1` can collide with a
-// neighbour that hasn't moved yet. Park the affected rows far above any real
-// rank first, then move them to their final values.
-const RANK_PARK_OFFSET = 1_000_000;
-async function shiftRanks(
-  client: import('pg').PoolClient,
-  listId: string,
-  fromRank: number,
-  delta: 1 | -1
-): Promise<void> {
-  await client.query(
-    `UPDATE checkin_list_items SET rank = rank + $3
-     WHERE list_id = $1 AND rank IS NOT NULL AND rank >= $2`,
-    [listId, fromRank, RANK_PARK_OFFSET]
-  );
-  await client.query(
-    `UPDATE checkin_list_items SET rank = rank - $2 + $3
-     WHERE list_id = $1 AND rank >= $2`,
-    [listId, RANK_PARK_OFFSET, delta]
-  );
-}
 
 // POST / - create check-in
 router.post('/', async (req: Request, res: Response) => {
@@ -1793,7 +1703,6 @@ venuesRouter.delete('/lists/:id/items/:venueId', async (req: Request, res: Respo
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Venue not in list' });
     }
-    await venueListKit.closeGaps(String(req.params.id));
     res.json({ message: 'Removed from list' });
   } catch (err) {
     console.error('Error removing from venue list:', err);

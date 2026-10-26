@@ -1961,7 +1961,6 @@ router.delete('/lists/:id/items/:itemId', async (req: Request, res: Response) =>
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not in list' });
     }
-    await mediaListKit.closeGaps(String(req.params.id));
     res.json({ message: 'Removed from list' });
   } catch (err) {
     console.error('Error removing from media list:', err);

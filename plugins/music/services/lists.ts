@@ -264,8 +264,7 @@ export async function removeItem(userId: string, listId: string, itemId: string)
     [userId, listId, itemId],
   );
   if ((result.rowCount ?? 0) === 0) return false;
-  // Ranks stay gap-free: close the hole.
-  await kit.closeGaps(listId);
+  // (A trigger renumbers the ranks below the removed item, so they stay gap-free.)
   await touch(listId);
   return true;
 }

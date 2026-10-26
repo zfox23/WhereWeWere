@@ -988,6 +988,18 @@ describe('Media check-in API', () => {
       expect((await request(app).get('/api/v1/media/lists/not-a-uuid/items')).status).toBe(400);
     });
 
+    it('deleting ranked media items closes the gap in their lists', async () => {
+      const [a, b, c, d] = await makeItems('Alpha', 'Beta', 'Gamma', 'Delta');
+      const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Top' })).body;
+      for (const id of [a, b, c, d]) await request(app).post(`/api/v1/media/lists/${list.id}/items`).send({ media_item_id: id });
+      await request(app).put(`/api/v1/media/lists/${list.id}/ranks`).send({ ranked_ids: [a, b, c] });
+
+      const res = await request(app).post('/api/v1/media/items/bulk-delete').send({ ids: [a, c], dry_run: false });
+      expect(res.status).toBe(200);
+      const rows = (await request(app).get(`/api/v1/media/lists/${list.id}/items`)).body;
+      expect(rows.map((r: any) => [r.title, r.rank])).toEqual([['Beta', 1], ['Delta', null]]);
+    });
+
     it('saves, reads and discards a paused ranking session, which goes with the list', async () => {
       const [a, b] = await makeItems('Alpha', 'Beta');
       const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Duel' })).body;

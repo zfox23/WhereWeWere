@@ -50,9 +50,6 @@ export interface ListDescriptor {
   sessions: string;
 }
 
-// Parks ranks out of the way so a renumber never collides with a unique (list_id, rank) index mid-statement.
-const PARK_OFFSET = 1_000_000;
-
 async function inTransaction<T>(fn: (db: Db) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
@@ -78,18 +75,19 @@ export function createListKit(d: ListDescriptor) {
   const touch = (listId: string, db: Db = { query }) =>
     db.query(`UPDATE ${d.lists} SET updated_at = NOW() WHERE id = $1`, [listId]);
 
-  /** Renumber the ranked items to a gap-free 1..n, keeping their order. */
-  async function closeGaps(listId: string, db: Db = { query }): Promise<void> {
-    await inTx(db, async (tx) => {
-      await tx.query(`UPDATE ${d.items} SET rank = rank + ${PARK_OFFSET} WHERE list_id = $1 AND rank IS NOT NULL`, [listId]);
-      await tx.query(
-        `UPDATE ${d.items} i SET rank = r.rn
-         FROM (SELECT ${d.itemId} AS id, ROW_NUMBER() OVER (ORDER BY rank) AS rn
-               FROM ${d.items} WHERE list_id = $1 AND rank IS NOT NULL) r
-         WHERE i.list_id = $1 AND i.${d.itemId} = r.id`,
-        [listId],
-      );
-    });
+  /** Give `ids` ranks 1..n in that order and every other item on the list none. */
+  async function writeRanks(tx: Db, listId: string, ids: string[]): Promise<void> {
+    // Cleared first: the unique (list_id, rank) indexes check row by row.
+    await tx.query(`UPDATE ${d.items} SET rank = NULL WHERE list_id = $1 AND rank IS NOT NULL`, [listId]);
+    await tx.query(
+      `UPDATE ${d.items} i SET rank = l.rank
+       FROM (SELECT it.${d.itemId} AS id, ROW_NUMBER() OVER (ORDER BY r.ord) AS rank
+             FROM unnest($2::uuid[]) WITH ORDINALITY AS r(id, ord)
+             JOIN ${d.items} it ON it.${d.itemId} = r.id AND it.list_id = $1) l
+       WHERE i.list_id = $1 AND i.${d.itemId} = l.id`,
+      [listId, ids],
+    );
+    await touch(listId, tx);
   }
 
   /**
@@ -99,20 +97,41 @@ export function createListKit(d: ListDescriptor) {
    */
   async function setRanks(userId: string, listId: string, rankedIds: string[]): Promise<boolean> {
     if (!(await ownsList(userId, listId))) return false;
-    const unique = [...new Set(rankedIds)];
-    await inTransaction(async (tx) => {
-      await tx.query(`UPDATE ${d.items} SET rank = NULL WHERE list_id = $1 AND rank IS NOT NULL`, [listId]);
-      await tx.query(
-        `UPDATE ${d.items} i SET rank = l.rank
-         FROM (SELECT it.${d.itemId} AS id, ROW_NUMBER() OVER (ORDER BY r.ord) AS rank
-               FROM unnest($2::uuid[]) WITH ORDINALITY AS r(id, ord)
-               JOIN ${d.items} it ON it.${d.itemId} = r.id AND it.list_id = $1) l
-         WHERE i.list_id = $1 AND i.${d.itemId} = l.id`,
-        [listId, unique],
-      );
-      await touch(listId, tx);
-    });
+    await inTransaction((tx) => writeRanks(tx, listId, [...new Set(rankedIds)]));
     return true;
+  }
+
+  /**
+   * Put one item at `rank` (the others make room, so ranks stay 1..n; a rank
+   * past the end lands at the end) or, with null, take it out of the ranking
+   * (the ranks below close the gap). Unranked items stay unranked.
+   */
+  async function setRank(
+    userId: string,
+    listId: string,
+    itemId: string,
+    rank: number | null,
+  ): Promise<{ status: 'ok'; rank: number | null } | { status: 'no-list' } | { status: 'no-item' }> {
+    return inTransaction(async (tx) => {
+      // The list row serializes concurrent re-ranks of one list.
+      const list = await tx.query(`SELECT 1 FROM ${d.lists} WHERE id = $1 AND user_id = $2 FOR UPDATE`, [listId, userId]);
+      if ((list.rowCount ?? 0) === 0) return { status: 'no-list' as const };
+      const item = await tx.query(`SELECT 1 FROM ${d.items} WHERE list_id = $1 AND ${d.itemId} = $2`, [listId, itemId]);
+      if ((item.rowCount ?? 0) === 0) return { status: 'no-item' as const };
+      const others = await tx.query(
+        `SELECT ${d.itemId}::text AS id FROM ${d.items}
+         WHERE list_id = $1 AND rank IS NOT NULL AND ${d.itemId} <> $2 ORDER BY rank`,
+        [listId, itemId],
+      );
+      const order: string[] = others.rows.map((r: { id: string }) => r.id);
+      let placed: number | null = null;
+      if (rank !== null) {
+        placed = Math.min(rank, order.length + 1);
+        order.splice(placed - 1, 0, itemId);
+      }
+      await writeRanks(tx, listId, order);
+      return { status: 'ok' as const, rank: placed };
+    });
   }
 
   async function getRankSession(userId: string, listId: string): Promise<{ state: RankSessionStateDto; updated_at: string } | null> {
@@ -143,13 +162,7 @@ export function createListKit(d: ListDescriptor) {
     return (r.rowCount ?? 0) > 0;
   }
 
-  return { ownsList, touch, closeGaps, setRanks, getRankSession, saveRankSession, deleteRankSession };
-}
-
-/** Run in the caller's transaction when it has one (a client), else in a fresh one. */
-async function inTx(db: Db, fn: (tx: Db) => Promise<void>): Promise<void> {
-  if ((db as { release?: unknown }).release) return fn(db);
-  await inTransaction(fn);
+  return { ownsList, touch, setRanks, setRank, getRankSession, saveRankSession, deleteRankSession };
 }
 
 // ---- Paused ranking sessions -------------------------------------------

@@ -12,8 +12,11 @@ mountRankRoutes(venuesRouter, kit, USER_ID);
 ```
 
 - `mountRankRoutes` serves `PUT /lists/:id/ranks` (the item ids in their new order; everyone else becomes unranked) and `GET/PUT/DELETE /lists/:id/rank-session` (a paused ranking, so it can be resumed).
-- The kit also has `ownsList`, `closeGaps` (call after removing an item so ranks stay 1..n), `setRanks`, and `cleanName` / `nameTakenOrThrow` / `listError` for the name rules (400 invalid, 409 taken).
+- It also serves `PUT /lists/:id/items/:itemId/rank` (one item to a rank, the others make room; `rank: null` takes it out of the ranking).
+- The kit also has `ownsList`, `setRanks`, `setRank`, and `cleanName` / `nameTakenOrThrow` / `listError` for the name rules (400 invalid, 409 taken).
 - The plugin writes what differs: the item add and read queries, backup, and Start Over.
+
+Ranks stay gap-free without any route having to remember: a trigger on each item table (`close_list_rank_gaps`, migration 068) renumbers the ranks below anything deleted, including cascades from deleting a check-in, venue or media item. Give a new list type's item table the same trigger.
 
 A list's tables need: lists with `id` (UUID), `user_id`, `updated_at`; items with `list_id`, `rank INT NULL` and a UUID item id column; and a sessions table (`list_id` UUID primary key referencing the list `ON DELETE CASCADE`, `state` JSONB, `updated_at`). Item ids must be UUIDs.
 

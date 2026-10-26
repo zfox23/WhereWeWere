@@ -23,6 +23,24 @@ export function mountRankRoutes(router: Router, kit: ReturnType<typeof createLis
     }
   });
 
+  // Put one item at a rank, or take it out of the ranking with rank: null.
+  router.put('/lists/:id/items/:itemId/rank', async (req: Request, res: Response) => {
+    try {
+      const listId = String(req.params.id);
+      const itemId = String(req.params.itemId);
+      if (!isUuid(listId) || !isUuid(itemId)) return res.status(400).json({ error: 'Invalid id' });
+      const raw = req.body?.rank;
+      const rank = raw == null ? null : typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 ? raw : undefined;
+      if (rank === undefined) return res.status(400).json({ error: 'rank must be a whole number from 1, or null' });
+      const result = await kit.setRank(userId, listId, itemId, rank);
+      if (result.status === 'no-list') return res.status(404).json({ error: 'List not found' });
+      if (result.status === 'no-item') return res.status(404).json({ error: 'Item is not in this list' });
+      res.json({ rank: result.rank });
+    } catch (err) {
+      listError(res, err, 'ranking the item');
+    }
+  });
+
   // A paused "rank by comparing" session, so it can be resumed later.
   router.get('/lists/:id/rank-session', async (req: Request, res: Response) => {
     try {
