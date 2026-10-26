@@ -51,6 +51,8 @@ import {
   type LibraryView,
 } from './services/scrobbles';
 
+const MAX_UTC_OFFSET_MS = 14 * 60 * 60 * 1000;
+const ALL_PER_PAGE = 1_000_000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function dateParam(raw: unknown): string | null {
@@ -108,7 +110,12 @@ scrobblerRouter.post('/newscrobble', async (req: Request, res: Response) => {
 // it has already sent) without sending the key.
 scrobblerRouter.get('/scrobbles', async (req: Request, res: Response) => {
   try {
-    const perPage = clampInt(req.query.perpage, { fallback: 100, min: 1, max: 1000 });
+    // Like Maloja, no `perpage` means everything in range on one page.
+    // Multi-scrobbler's history fetch sends none and can't advance a page
+    // cursor, so a default page size would make it fail on any busy day.
+    const perPage = req.query.perpage === undefined
+      ? ALL_PER_PAGE
+      : clampInt(req.query.perpage, { fallback: 100, min: 1, max: 1000 });
     const page = clampInt(req.query.page, { fallback: 0, min: 0, max: 10_000_000 });
 
     let from: Date | null = null;
@@ -132,6 +139,12 @@ scrobblerRouter.get('/scrobbles', async (req: Request, res: Response) => {
       until = r.until;
     }
 
+    // Dates carry no zone and the caller's local day isn't known (multi-scrobbler
+    // sends days in its own TZ, so 10:46 PM Eastern is the 25th there but the
+    // 26th in UTC). Widen by the largest UTC offset each way: extra plays are
+    // harmless to a caller deduplicating by time, missing ones are not.
+    if (from) from = new Date(from.getTime() - MAX_UTC_OFFSET_MS);
+    if (until) until = new Date(until.getTime() + MAX_UTC_OFFSET_MS);
     const { rows, hasMore } = await listScrobbles(USER_ID, { from, until, page, perPage });
     const echoed = new URLSearchParams();
     for (const key of ['in', 'from', 'until'] as const) {

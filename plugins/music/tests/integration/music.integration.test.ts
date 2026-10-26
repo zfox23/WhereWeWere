@@ -102,6 +102,11 @@ describe('music plugin', () => {
 
     it('lists scrobbles newest first with pagination and date filters', async () => {
       for (let i = 0; i < 5; i++) await pushAt(i * 60);
+      // No perpage: everything in range on one page, never a next_page that
+      // multi-scrobbler can't follow.
+      const all = await request(app).get(`${BASE}/scrobbles`);
+      expect(all.body.list.length).toBeGreaterThan(2);
+      expect(all.body.pagination.next_page).toBeNull();
       const first = await request(app).get(`${BASE}/scrobbles`).query({ perpage: 2, page: 0 });
       expect(first.body.status).toBe('ok');
       expect(first.body.list.map((s: any) => s.track.title)).toEqual(['Song 240', 'Song 180']);
@@ -112,7 +117,7 @@ describe('music plugin', () => {
 
       const day = await request(app).get(`${BASE}/scrobbles`).query({ in: '2024/05/01' });
       expect(day.body.list).toHaveLength(5);
-      const none = await request(app).get(`${BASE}/scrobbles`).query({ in: '2024/05/02' });
+      const none = await request(app).get(`${BASE}/scrobbles`).query({ in: '2024/05/04' }); // beyond the ±14h zone allowance
       expect(none.body.list).toEqual([]);
       const from = await request(app).get(`${BASE}/scrobbles`).query({ from: '2024/05/01', until: '2024/05/01' });
       expect(from.body.list).toHaveLength(5);
@@ -177,6 +182,18 @@ describe('music plugin', () => {
       const res = await request(app).get(`/api/v1/music/sessions/${id}/tracks`);
       expect(res.body.map((t: any) => t.title)).toEqual(['first', 'second']);
       expect((await request(app).get('/api/v1/music/sessions/not-a-uuid/tracks')).status).toBe(400);
+    });
+  });
+
+  describe('history lookup for duplicate detection', () => {
+    it('finds a late-evening local play when asked for its local day', async () => {
+      // 10:46 PM Eastern on Oct 25 is already Oct 26 in UTC.
+      const time = Date.UTC(2026, 9, 26, 2, 46, 29) / 1000;
+      await push({ title: 'Smoke Signals', artists: ['PRAANA'], time });
+      for (let i = 0; i < 150; i++) await push({ title: `Filler ${i}`, artists: ['F'], time: time - 3600 - i * 60 });
+      const res = await request(app).get(`${BASE}/scrobbles`).query({ from: '2026/10/25', until: '2026/10/25' });
+      expect(res.body.pagination.next_page).toBeNull();
+      expect(res.body.list.map((e: any) => e.track.title)).toContain('Smoke Signals');
     });
   });
 
