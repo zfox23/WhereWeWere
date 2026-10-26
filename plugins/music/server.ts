@@ -32,6 +32,7 @@ import {
   scrobbleListResponse,
 } from './services/scrobblerApi';
 import { parseScrobbleExport } from './services/importParser';
+import { parseLastfmCsv } from './services/lastfmCsv';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './services/constants';
 import {
   getCounts,
@@ -280,34 +281,48 @@ musicRouter.get('/sessions/:id/tracks', async (req: Request, res: Response) => {
 
 const importUpload = createImportUpload({
   fileFilter: (file) =>
-    file.originalname.toLowerCase().endsWith('.json') ? null : 'Only .json scrobble exports are allowed',
+    /\.(json|csv)$/i.test(file.originalname) ? null : 'Only .json or .csv scrobble exports are allowed',
   fileSize: 200 * 1024 * 1024,
 });
 
-// POST /import/scrobbles - Maloja-format JSON export
-musicRouter.post('/import/scrobbles', importUpload.single('file'), async (req: Request, res: Response) => {
-  const file = req.file;
-  if (!file) return res.status(400).json({ error: 'No file uploaded' });
-  try {
-    const parsed = parseScrobbleExport(fs.readFileSync(file.path, 'utf8'));
-    const inserted = await insertScrobblesBulk(USER_ID, parsed.scrobbles);
-    res.json({
-      parsed: parsed.scrobbles.length,
-      inserted,
-      duplicates: parsed.scrobbles.length - inserted,
-      skipped: parsed.skipped,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Import failed';
-    if (message === 'File is not valid JSON' || message === 'No scrobbles found in file') {
-      return res.status(400).json({ error: message });
+/** Shared handler: read the uploaded file with `parse`, insert, report counts. */
+function importHandler(parse: (text: string) => ReturnType<typeof parseScrobbleExport>, badInput: string[]) {
+  return async (req: Request, res: Response) => {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+    try {
+      const parsed = parse(fs.readFileSync(file.path, 'utf8'));
+      const inserted = await insertScrobblesBulk(USER_ID, parsed.scrobbles);
+      res.json({
+        parsed: parsed.scrobbles.length,
+        inserted,
+        duplicates: parsed.scrobbles.length - inserted,
+        skipped: parsed.skipped,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Import failed';
+      if (badInput.includes(message)) return res.status(400).json({ error: message });
+      console.error('Error importing scrobbles:', err);
+      res.status(500).json({ error: 'Failed to import scrobbles' });
+    } finally {
+      removeImportFile(file.path);
     }
-    console.error('Error importing scrobbles:', err);
-    res.status(500).json({ error: 'Failed to import scrobbles' });
-  } finally {
-    removeImportFile(file.path);
-  }
-});
+  };
+}
+
+// POST /import/scrobbles - Maloja-format JSON export
+musicRouter.post(
+  '/import/scrobbles',
+  importUpload.single('file'),
+  importHandler(parseScrobbleExport, ['File is not valid JSON', 'No scrobbles found in file']),
+);
+
+// POST /import/lastfm - Last.fm CSV history export
+musicRouter.post(
+  '/import/lastfm',
+  importUpload.single('file'),
+  importHandler(parseLastfmCsv, ['Not a Last.fm CSV export', 'No scrobbles found in file']),
+);
 
 // ---------------------------------------------------------------------------
 // Plugin definition

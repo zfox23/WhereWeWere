@@ -362,7 +362,7 @@ describe('music plugin', () => {
       expect(mixed.body).toMatchObject({ inserted: 1, skipped: 1 });
       expect((await upload(Buffer.from('nope'))).status).toBe(400);
       expect((await upload(Buffer.from('{}'))).status).toBe(400);
-      expect((await upload(exportFile([entry(0)]), 'export.csv')).status).toBe(400);
+      expect((await upload(exportFile([entry(0)]), 'export.txt')).status).toBe(400);
     });
   });
 
@@ -588,6 +588,40 @@ describe('music plugin', () => {
       // Built with the backed-up gap (90m), not the default (30m).
       expect((await sessions()).map((r: any) => r.track_count)).toEqual([3]);
       expect((await query('SELECT timezone FROM music_sessions')).rows[0].timezone).toBe('America/Chicago');
+    });
+
+    it('imports a Last.fm CSV, idempotently, with whole artist credits', async () => {
+      const csv = [
+        'uts,utc_time,artist,artist_mbid,album,album_mbid,track,track_mbid',
+        `"${T0}","x","Above & Beyond","","Group Therapy","","Sun & Moon",""`,
+        `"${T0 + 240}","x","Above & Beyond","","Group Therapy","","Oceanic",""`,
+        `"${T0 + 480}","x","Above & Beyond","","","","Alone Tonight",""`,
+      ].join('\n');
+      const post = () => request(app).post('/api/v1/music/import/lastfm').attach('file', Buffer.from(csv), 'lastfm.csv');
+      const first = await post();
+      expect(first.status).toBe(200);
+      expect(first.body).toMatchObject({ parsed: 3, inserted: 3, duplicates: 0 });
+      expect((await post()).body).toMatchObject({ inserted: 0, duplicates: 3 });
+      const rows = (await query('SELECT DISTINCT artists FROM music_scrobbles')).rows;
+      expect(rows).toEqual([{ artists: ['Above & Beyond'] }]);
+      expect((await sessions()).map((r: any) => r.track_count)).toEqual([3]);
+      const bad = await request(app).post('/api/v1/music/import/lastfm').attach('file', Buffer.from('a,b\n1,2'), 'x.csv');
+      expect(bad.status).toBe(400);
+    });
+
+    it('removes every scrobble and session through POST /backup/start-over', async () => {
+      for (const i of [0, 5, 10, 200]) await pushAt(i);
+      expect((await sessions()).length).toBe(2);
+      const res = await request(app)
+        .post('/api/v1/backup/start-over')
+        .send({
+          first_confirmation: 'DELETE MY DATA',
+          second_confirmation: 'START OVER',
+          options: { delete_music_checkins: true },
+        });
+      expect(res.status).toBe(200);
+      expect((await query('SELECT 1 FROM music_scrobbles')).rowCount).toBe(0);
+      expect((await query('SELECT 1 FROM music_sessions')).rowCount).toBe(0);
     });
 
     it('deletes scrobbles and sessions on start-over', async () => {

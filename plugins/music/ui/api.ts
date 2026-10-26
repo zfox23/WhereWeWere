@@ -22,6 +22,17 @@ function rangeQuery(from?: string, to?: string, extra: Record<string, string> = 
   return qs ? `?${qs}` : '';
 }
 
+async function uploadImport(url: string, file: File): Promise<MusicImportResult> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(url, { method: 'POST', headers: withAuthHeader(), body: form });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(error.error || error.message || `Import failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export const music = {
   stats: (from?: string, to?: string, limit = 25) =>
     request<MusicStats>(`/music/stats${rangeQuery(from, to, { limit: String(limit) })}`),
@@ -36,18 +47,6 @@ export const music = {
     request<{ updated: number }>('/music/timezones/refresh', { method: 'POST' }),
   regenerateKey: () =>
     request<{ scrobbler_key: string }>('/music/settings/regenerate-key', { method: 'POST' }),
-  importScrobbles: async (file: File): Promise<MusicImportResult> => {
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch('/api/v1/music/import/scrobbles', {
-      method: 'POST',
-      headers: withAuthHeader(),
-      body: form,
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.error || error.message || `Import failed: ${res.status}`);
-    }
-    return res.json();
-  },
+  importScrobbles: (file: File) => uploadImport('/api/v1/music/import/scrobbles', file),
+  importLastfm: (file: File) => uploadImport('/api/v1/music/import/lastfm', file),
 };

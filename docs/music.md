@@ -28,12 +28,13 @@ The key is separate from `API_ACCESS_TOKEN`: the `/apis/` routes sit outside tha
 
 > **Note:** multi-scrobbler reads scrobble history without sending the key (it uses it to skip plays it has already sent), so `GET /apis/mlj_1/scrobbles` is readable by anyone who can reach the server port. Writes need the key. If that port is exposed beyond your network, keep it behind your reverse proxy's access controls.
 
-### Replacing an existing Maloja server
+### Importing history
 
-Point the existing `MALOJA_URL` / `MALOJA_API_KEY` at WhereWeWere as above, then bring over the history:
+**From Last.fm (preferred).** Export your history to a `.csv` (columns `uts,utc_time,artist,artist_mbid,album,album_mbid,track,track_mbid`) and upload it in **Settings → Music → Import from Last.fm**. Last.fm stores each artist credit as one string, so "Above & Beyond" stays whole. Last.fm has no album artist, so an album is credited to the artist of each play.
 
-1. Export your history from Maloja with `maloja export`, which writes a `maloja_export_<date>.json` file.
-2. In **Settings → Music → Import scrobbles**, upload the `.json` file.
+**From Maloja.** Point the existing `MALOJA_URL` / `MALOJA_API_KEY` at WhereWeWere as above, export with `maloja export` (a `maloja_export_<date>.json` file) and upload it in **Settings → Music → Import from Maloja**. Maloja splits credits such as "Above & Beyond" into separate artists when it imports them, and an export cannot undo that, so don't use it for history that came from Last.fm.
+
+To start over, tick **All music data** under **Settings → Start Over**: it deletes every scrobble and listening session, and the music settings, including the scrobbler key (update multi-scrobbler afterwards).
 
 Importing is safe to repeat and safe after live scrobbling has started: a play is identified by its time, title and artists, so overlaps are skipped. Doing the multi-scrobbler switch first and the import second leaves no gap.
 

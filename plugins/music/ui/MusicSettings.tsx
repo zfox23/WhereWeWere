@@ -186,7 +186,23 @@ function TimezoneSection({ onRefreshed }: { onRefreshed: () => void }) {
   );
 }
 
-function ImportSection({ onImported }: { onImported: () => void }) {
+function ImportSection({
+  title,
+  description,
+  warning,
+  accept,
+  fileLabel,
+  run: runImport,
+  onImported,
+}: {
+  title: string;
+  description: string;
+  warning?: string;
+  accept: string;
+  fileLabel: string;
+  run: (file: File) => Promise<MusicImportResult>;
+  onImported: () => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -199,7 +215,7 @@ function ImportSection({ onImported }: { onImported: () => void }) {
     setResult(null);
     setError(null);
     try {
-      setResult(await music.importScrobbles(file));
+      setResult(await runImport(file));
       setFile(null);
       if (inputRef.current) inputRef.current.value = '';
       onImported();
@@ -214,23 +230,27 @@ function ImportSection({ onImported }: { onImported: () => void }) {
     <div className={CARD}>
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
         <Upload size={20} className="text-gray-600 dark:text-gray-400" />
-        Import scrobbles
+        {title}
       </h2>
-      <p className="text-xs text-gray-500 dark:text-gray-400">
-        Import a Maloja .json export. Plays you already have are skipped, so it is safe to import after live scrobbling has started.
-      </p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>
+      {warning && (
+        <div className="flex items-start gap-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3 text-xs text-amber-800 dark:text-amber-200">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{warning}</span>
+        </div>
+      )}
       <div
         className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400 transition-colors"
         onClick={() => inputRef.current?.click()}
       >
         <Upload size={24} className="mx-auto text-gray-400 mb-2" />
-        <p className="text-sm text-gray-600 dark:text-gray-400">{file ? file.name : 'Select a scrobble export (.json)'}</p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">{file ? file.name : fileLabel}</p>
         <input
           ref={inputRef}
           type="file"
-          accept=".json,application/json"
+          accept={accept}
           className="hidden"
-          aria-label="Scrobble export file"
+          aria-label={fileLabel}
           onChange={(e) => {
             setFile(e.target.files?.[0] ?? null);
             setResult(null);
@@ -280,7 +300,23 @@ export function MusicSettings() {
       <ConnectionSection settings={settings} onKeyChanged={(key) => setSettings({ ...settings, scrobbler_key: key })} />
       <PreferencesSection settings={settings} onSaved={setSettings} />
       <TimezoneSection onRefreshed={load} />
-      <ImportSection onImported={load} />
+      <ImportSection
+        title="Import from Last.fm"
+        description="Import a Last.fm history export (.csv with the columns uts, artist, album, track). Last.fm keeps each artist credit whole, so names like Above & Beyond stay intact. Plays you already have are skipped."
+        accept=".csv,text/csv"
+        fileLabel="Last.fm export (.csv)"
+        run={music.importLastfm}
+        onImported={load}
+      />
+      <ImportSection
+        title="Import from Maloja"
+        description="Import a Maloja .json export. Plays you already have are skipped, so it is safe to import after live scrobbling has started."
+        warning="Maloja splits artist credits such as “Above & Beyond” into separate artists when it imports them, and an export cannot undo that. Prefer the Last.fm import for history that came from Last.fm."
+        accept=".json,application/json"
+        fileLabel="Scrobble export (.json)"
+        run={music.importScrobbles}
+        onImported={load}
+      />
     </div>
   );
 }
