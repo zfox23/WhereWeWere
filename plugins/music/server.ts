@@ -52,7 +52,7 @@ import {
   listThumbnailFiles,
   getAlbumArtFile,
   getAlbumCounts,
-  getAlbumDetail,
+  getAlbumView,
   getBackfillStatus,
   startBackfill,
 } from './services/albums';
@@ -322,11 +322,14 @@ musicRouter.post('/albums/backfill/cancel', (_req: Request, res: Response) => {
   res.json(getBackfillStatus());
 });
 
-musicRouter.get('/albums/:id', async (req: Request, res: Response) => {
+// ?ref=<album_ref from a row> or ?art_id=<cover id>
+musicRouter.get('/album-view', async (req: Request, res: Response) => {
   try {
-    const id = String(req.params.id);
-    if (!isUuid(id)) return res.status(400).json({ error: 'Invalid album id' });
-    const album = await getAlbumDetail(USER_ID, id);
+    const ref = typeof req.query.ref === 'string' && req.query.ref.length <= 2000 ? req.query.ref : undefined;
+    const artId = typeof req.query.art_id === 'string' ? req.query.art_id : undefined;
+    if (artId !== undefined && !isUuid(artId)) return res.status(400).json({ error: 'Invalid cover id' });
+    if (ref === undefined && artId === undefined) return res.status(400).json({ error: 'ref or art_id is required' });
+    const album = await getAlbumView(USER_ID, { ref, artId });
     if (!album) return res.status(404).json({ error: 'Album not found' });
     res.json(album);
   } catch (err) {

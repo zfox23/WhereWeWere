@@ -186,7 +186,7 @@ describe('music metadata', () => {
     useDeps(async () => match());
     await backfill();
     const id = (await query(`SELECT id FROM music_albums LIMIT 1`)).rows[0].id;
-    const res = await request(app).get(`/api/v1/music/albums/${id}`);
+    const res = await request(app).get('/api/v1/music/album-view').query({ art_id: id });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ title: 'Group Therapy', artist: 'Above & Beyond', release_date: '2011-06-14', label: 'Anjunabeats', plays: 4 });
     expect(res.body.tracks.map((t: any) => [t.title, t.length, t.plays])).toEqual([
@@ -194,8 +194,61 @@ describe('music metadata', () => {
       ['Sun & Moon', 321, 2],
       ['Oceanic', 250, 1],
     ]);
-    expect((await request(app).get('/api/v1/music/albums/not-a-uuid')).status).toBe(400);
-    expect((await request(app).get('/api/v1/music/albums/00000000-0000-4000-8000-000000000000')).status).toBe(404);
+    expect(res.body).toMatchObject({ matched: true, album_ref: 'group therapy|above & beyond' });
+    expect((await request(app).get('/api/v1/music/album-view').query({ art_id: 'not-a-uuid' })).status).toBe(400);
+    expect((await request(app).get('/api/v1/music/album-view').query({ art_id: '00000000-0000-4000-8000-000000000000' })).status).toBe(404);
+    expect((await request(app).get('/api/v1/music/album-view')).status).toBe(400);
+    expect((await request(app).get('/api/v1/music/album-view').query({ ref: 'never played|nobody' })).status).toBe(404);
+  });
+
+  describe('album view', () => {
+    const view = (ref: string) => request(app).get('/api/v1/music/album-view').query({ ref });
+
+    it('describes an album with no catalog match from the plays alone', async () => {
+      await push('Deep Cut', 'Obscure LP', ['Someone'], 0);
+      await push('Hit', 'Obscure LP', ['Someone'], 300);
+      await push('Hit', 'Obscure LP', ['Someone'], 600);
+      await request(app).post(`${BASE}/newscrobble`).send({ title: 'Hit', artists: ['Someone'], album: 'Obscure LP', time: T0 + 900, length: 200, key });
+      const res = await view('obscure lp|someone');
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        matched: false, art_id: null, title: 'Obscure LP', artist: 'Someone',
+        release_date: null, label: null, plays: 4,
+      });
+      // Most played first; lengths only where known; no catalog positions.
+      expect(res.body.tracks.map((t: any) => [t.title, t.plays, t.length, t.position])).toEqual([
+        ['Hit', 3, 200, null],
+        ['Deep Cut', 1, null, null],
+      ]);
+      expect(res.body.tracks[0]).toMatchObject({ artists: ['Someone'] });
+      expect(res.body.tracks[0].song_key).toEqual(expect.any(String));
+    });
+
+    it('gathers an artist\'s plays without an album under "Unknown album"', async () => {
+      await push('Loose One', undefined, ['Some Artist']);
+      await push('Loose Two', undefined, ['Some Artist'], 60);
+      await push('Not Theirs', undefined, ['Other Artist'], 120);
+      await push('Has Album', 'Real Album', ['Some Artist'], 180);
+      const res = await view('|some artist');
+      expect(res.body).toMatchObject({ title: 'Unknown album', artist: 'Some Artist', plays: 2, matched: false });
+      expect(res.body.tracks.map((t: any) => t.title).sort()).toEqual(['Loose One', 'Loose Two']);
+    });
+
+    it('lists the whole catalog tracklist for a match, then played tracks that are not on it', async () => {
+      await push('Sun & Moon', 'Group Therapy');
+      await push('Hidden Bonus', 'Group Therapy', ['Above & Beyond'], 60);
+      useDeps(async () => match());
+      await backfill();
+      const res = await view('group therapy|above & beyond');
+      expect(res.body).toMatchObject({ matched: true, art_id: expect.any(String), release_date: '2011-06-14', plays: 2 });
+      expect(res.body.tracks.map((t: any) => [t.position, t.title, t.plays, t.song_key !== null])).toEqual([
+        [1, 'Filaments', 0, false], // never played: nothing to add to a list
+        [2, 'Sun & Moon', 1, true],
+        [3, 'Oceanic', 0, false],
+        [null, 'Hidden Bonus', 1, true],
+      ]);
+      expect(res.body.tracks[0].artists).toEqual(['Above & Beyond']); // falls back to the album artist
+    });
   });
 
   it('fetches the large cover on first open and keeps it', async () => {
@@ -331,7 +384,7 @@ describe('music metadata', () => {
 
       const id = rows.length && (await query(`SELECT id FROM music_albums WHERE status = 'matched'`)).rows[0].id;
       expect((await request(app).get(`/api/v1/music/albums/${id}/art`)).status).toBe(200);
-      expect((await request(app).get(`/api/v1/music/albums/${id}`)).body.plays).toBe(1);
+      expect((await request(app).get('/api/v1/music/album-view').query({ art_id: id })).body.plays).toBe(1);
 
       // Nothing is left to look up: the not-found result was kept too.
       finds = [];

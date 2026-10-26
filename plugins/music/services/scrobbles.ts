@@ -10,6 +10,7 @@ import { query, pool } from '../../../server/src/db';
 import { allPlugins } from '../../../server/src/plugins/registry';
 import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
 import { lookupAlbumSoon } from './albums';
+import { albumRefSql, songKeySql } from './identity';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './constants';
 
 
@@ -532,7 +533,7 @@ export async function getLibrary(
            GROUP BY a.artist
            ORDER BY plays DESC, name ASC LIMIT $4`;
   } else if (view === 'albums') {
-    sql = `SELECT MIN(album) AS name, ${ALBUM_ARTISTS} AS artists, MIN(album_key) AS album_key,
+    sql = `SELECT MIN(album) AS name, ${ALBUM_ARTISTS} AS artists, MIN(${albumRefSql()}) AS album_ref,
                   COUNT(DISTINCT lower(title))::int AS unique_tracks, ${agg}
            FROM music_scrobbles
            WHERE user_id = $1 AND album IS NOT NULL AND album <> '' ${IN_RANGE}
@@ -540,7 +541,8 @@ export async function getLibrary(
            ORDER BY plays DESC, name ASC LIMIT $4`;
   } else {
     sql = `SELECT MIN(title) AS name, artists, MIN(album) AS album,
-                  MODE() WITHIN GROUP (ORDER BY album_key) AS album_key, ${agg}
+                  MODE() WITHIN GROUP (ORDER BY ${albumRefSql()}) AS album_ref,
+                  MIN(${songKeySql()}) AS song_key, ${agg}
            FROM music_scrobbles
            WHERE user_id = $1 ${IN_RANGE}
            GROUP BY lower(title), artists
@@ -551,11 +553,11 @@ export async function getLibrary(
     sql = `SELECT g.*, a.id AS art_id
            FROM (${sql}) g
            LEFT JOIN music_albums a
-             ON a.user_id = $1 AND a.album_key = g.album_key AND a.thumb_file IS NOT NULL
+             ON a.user_id = $1 AND a.album_key = g.album_ref AND a.thumb_file IS NOT NULL
            ORDER BY g.plays DESC, g.name ASC`;
   }
   const result = await query(sql, params);
-  return result.rows.map(({ album_key: _key, ...row }) => row);
+  return result.rows;
 }
 
 export interface ListeningBefore {
@@ -564,7 +566,7 @@ export interface ListeningBefore {
   /** Local date (YYYY-MM-DD) of the session's end, as the timeline groups it. */
   session_date: string;
   /** Up to three plays, newest first. */
-  tracks: { artists: string[]; title: string; time: number; art_id: string | null }[];
+  tracks: { artists: string[]; title: string; time: number; art_id: string | null; album_ref: string; song_key: string }[];
   /** True when the session has plays earlier than the oldest one returned. */
   has_more: boolean;
 }
@@ -587,7 +589,7 @@ export async function getListeningBefore(
   if (anchors.length === 0) return out;
   const result = await query(
     `SELECT a.id AS anchor_id, n.session_id, n.session_date,
-            p.played_at, p.title, p.artists, p.art_id,
+            p.played_at, p.title, p.artists, p.art_id, p.album_ref, p.song_key,
             EXISTS (SELECT 1 FROM music_scrobbles e
                     WHERE e.session_id = n.session_id AND e.played_at < p.played_at) AS older_exists
      FROM unnest($1::uuid[], $2::timestamptz[]) AS a(id, t)
@@ -602,7 +604,7 @@ export async function getListeningBefore(
        LIMIT 1
      ) n ON n.track_count >= $5
      JOIN LATERAL (
-       SELECT s2.played_at, s2.title, s2.artists,
+       SELECT s2.played_at, s2.title, s2.artists, ${albumRefSql('s2.')} AS album_ref, ${songKeySql('s2.')} AS song_key,
               (SELECT al.id FROM music_albums al
                WHERE al.user_id = s2.user_id AND al.album_key = s2.album_key AND al.thumb_file IS NOT NULL) AS art_id
        FROM music_scrobbles s2
@@ -624,6 +626,8 @@ export async function getListeningBefore(
       title: row.title,
       time: Math.floor(new Date(row.played_at).getTime() / 1000),
       art_id: row.art_id ?? null,
+      album_ref: row.album_ref,
+      song_key: row.song_key,
     });
     // Rows arrive newest first, so the last one seen is the oldest shown.
     entry.has_more = row.older_exists;
@@ -633,7 +637,8 @@ export async function getListeningBefore(
 
 export async function getSessionTracks(userId: string, sessionId: string) {
   const result = await query(
-    `SELECT m.played_at, m.title, m.artists, m.album, m.track_length, m.listened_for, m.timezone, a.id AS art_id
+    `SELECT m.played_at, m.title, m.artists, m.album, m.track_length, m.listened_for, m.timezone, a.id AS art_id,
+            ${albumRefSql('m.')} AS album_ref, ${songKeySql('m.')} AS song_key
      FROM music_scrobbles m
      LEFT JOIN music_albums a
        ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL

@@ -19,6 +19,7 @@ import sharp from 'sharp';
 import { query } from '../../../server/src/db';
 import { config } from '../../../server/src/config';
 import { normalizeTitle, type AlbumMatch } from './albumMatch';
+import { albumRefSql, songKeySql, UNKNOWN_ALBUM } from './identity';
 import {
   ProviderUnavailableError,
   chainProviders,
@@ -502,58 +503,125 @@ export async function getAlbumCounts(userId: string) {
   return { total: total.rows[0].n as number, matched, not_found: notFound, pending: Math.max(0, total.rows[0].n - matched - notFound) };
 }
 
-export interface AlbumDetail {
-  id: string;
+export interface AlbumViewTrack {
+  /** Catalog track number; null for plays that aren't on the matched tracklist. */
+  position: number | null;
+  title: string;
+  artists: string[];
+  length: number | null;
+  plays: number;
+  /** Identity for adding to a list; null for catalog tracks never played. */
+  song_key: string | null;
+}
+
+export interface AlbumView {
+  /** Identity of this album, handed back when adding it to a list. */
+  album_ref: string;
+  /** Cover id, when the album has one. */
+  art_id: string | null;
+  /** Whether a catalog (Deezer / MusicBrainz) match backs the details below. */
+  matched: boolean;
   title: string;
   artist: string;
   release_date: string | null;
   label: string | null;
   plays: number;
   listened_seconds: number;
-  tracks: { position: number; title: string; length: number | null; plays: number }[];
+  tracks: AlbumViewTrack[];
 }
 
-/** Everything the album modal shows, with the user's own play counts. */
-export async function getAlbumDetail(userId: string, id: string): Promise<AlbumDetail | null> {
-  const found = await query(
-    `SELECT id, provider, external_id, title, artist, release_date, label, tracks
-     FROM music_albums WHERE user_id = $1 AND id = $2 AND status = 'matched'`,
-    [userId, id],
-  );
-  const album = found.rows[0];
-  if (!album) return null;
+/**
+ * Everything the album modal shows, for an album identified by `ref` (or by the
+ * cover id of a matched one). The user's own plays always drive it; a catalog
+ * match only adds the cover, release info and the full tracklist.
+ */
+export async function getAlbumView(userId: string, id: { ref?: string; artId?: string }): Promise<AlbumView | null> {
+  let ref = id.ref ?? null;
+  if (id.artId) {
+    const row = (await query(`SELECT album_key FROM music_albums WHERE user_id = $1 AND id = $2 AND status = 'matched'`, [userId, id.artId])).rows[0];
+    if (!row) return null;
+    ref = row.album_key;
+  }
+  if (ref === null) return null;
+
+  const matchedRow = (await query(
+    `SELECT id, provider, external_id, title, artist, release_date, label, tracks, thumb_file
+     FROM music_albums WHERE user_id = $1 AND album_key = $2 AND status = 'matched'`,
+    [userId, ref],
+  )).rows[0];
   // Every local key that resolved to this release counts (a soundtrack
   // imported with a different artist per track is several keys).
-  const played = await query(
-    `SELECT MIN(m.title) AS title, COUNT(*)::int AS plays,
-            COALESCE(SUM(COALESCE(m.listened_for, m.track_length, 0)), 0)::int AS seconds
-     FROM music_scrobbles m
-     JOIN music_albums a ON a.user_id = m.user_id AND a.album_key = m.album_key
-     WHERE a.user_id = $1 AND a.provider = $2 AND a.external_id = $3
-     GROUP BY lower(m.title)`,
-    [userId, album.provider, album.external_id],
-  );
-  const playsByTitle = new Map<string, number>();
-  let plays = 0;
-  let seconds = 0;
-  for (const r of played.rows) {
+  const refs: string[] = matchedRow
+    ? (await query(
+        `SELECT album_key FROM music_albums WHERE user_id = $1 AND status = 'matched' AND provider = $2 AND external_id = $3`,
+        [userId, matchedRow.provider, matchedRow.external_id],
+      )).rows.map((r: { album_key: string }) => r.album_key)
+    : [ref];
+
+  const played = (await query(
+    `SELECT ${songKeySql()} AS song_key, MIN(title) AS title, MIN(artists) AS artists, COUNT(*)::int AS plays,
+            COALESCE(SUM(COALESCE(listened_for, track_length, 0)), 0)::int AS seconds,
+            MAX(track_length) AS length, MIN(album) AS album, MIN(COALESCE(album_artists[1], artists[1])) AS album_artist
+     FROM music_scrobbles WHERE user_id = $1 AND ${albumRefSql()} = ANY($2::text[])
+     GROUP BY ${songKeySql()}`,
+    [userId, refs],
+  )).rows as {
+    song_key: string; title: string; artists: string[]; plays: number; seconds: number;
+    length: number | null; album: string | null; album_artist: string;
+  }[];
+  if (played.length === 0 && !matchedRow) return null;
+
+  const plays = played.reduce((n, r) => n + r.plays, 0);
+  const seconds = played.reduce((n, r) => n + r.seconds, 0);
+  const albumArtist = matchedRow?.artist ?? played[0]?.album_artist ?? '';
+  const byTitle = new Map<string, typeof played>();
+  for (const r of played) {
     const key = normalizeTitle(r.title);
-    playsByTitle.set(key, (playsByTitle.get(key) ?? 0) + r.plays);
-    plays += r.plays;
-    seconds += r.seconds;
+    byTitle.set(key, [...(byTitle.get(key) ?? []), r]);
   }
+  const fromPlays = (rows: typeof played, position: number | null, catalogLength: number | null): AlbumViewTrack => {
+    const top = [...rows].sort((a, b) => b.plays - a.plays)[0];
+    return {
+      position,
+      title: top.title,
+      artists: top.artists,
+      length: catalogLength ?? top.length,
+      plays: rows.reduce((n, r) => n + r.plays, 0),
+      song_key: top.song_key,
+    };
+  };
+
+  let tracks: AlbumViewTrack[];
+  if (matchedRow) {
+    const used = new Set<string>();
+    tracks = (matchedRow.tracks as { position: number; title: string; length: number | null }[]).map((t) => {
+      const key = normalizeTitle(t.title);
+      const rows = byTitle.get(key);
+      if (rows) used.add(key);
+      return rows
+        ? { ...fromPlays(rows, t.position, t.length), title: t.title }
+        : { position: t.position, title: t.title, artists: [albumArtist], length: t.length, plays: 0, song_key: null };
+    });
+    // Plays that aren't on the catalog's tracklist (bonus tracks, other editions).
+    tracks.push(
+      ...[...byTitle].filter(([key]) => !used.has(key)).map(([, rows]) => fromPlays(rows, null, null)).sort((a, b) => b.plays - a.plays),
+    );
+  } else {
+    tracks = [...byTitle.values()].map((rows) => fromPlays(rows, null, null)).sort((a, b) => b.plays - a.plays || a.title.localeCompare(b.title));
+  }
+
+  const albumName = matchedRow?.title ?? played.find((r) => r.album)?.album ?? null;
   return {
-    id: album.id,
-    title: album.title,
-    artist: album.artist,
-    release_date: album.release_date,
-    label: album.label,
+    album_ref: ref,
+    art_id: matchedRow?.thumb_file ? matchedRow.id : null,
+    matched: Boolean(matchedRow),
+    title: albumName ?? UNKNOWN_ALBUM,
+    artist: albumArtist,
+    release_date: matchedRow?.release_date ?? null,
+    label: matchedRow?.label ?? null,
     plays,
     listened_seconds: seconds,
-    tracks: (album.tracks as { position: number; title: string; length: number | null }[]).map((t) => ({
-      ...t,
-      plays: playsByTitle.get(normalizeTitle(t.title)) ?? 0,
-    })),
+    tracks,
   };
 }
 
