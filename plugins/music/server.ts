@@ -33,6 +33,15 @@ import {
 } from './services/scrobblerApi';
 import { parseScrobbleExport } from './services/importParser';
 import { parseLastfmCsv } from './services/lastfmCsv';
+import {
+  albumLookupEnabled,
+  cancelBackfill,
+  getAlbumArtFile,
+  getAlbumCounts,
+  getAlbumDetail,
+  getBackfillStatus,
+  startBackfill,
+} from './services/albums';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './services/constants';
 import {
   getCounts,
@@ -272,6 +281,62 @@ musicRouter.get('/reflect', async (req: Request, res: Response) => {
   }
 });
 
+// ---- Album artwork and release info -------------------------------------
+
+musicRouter.get('/albums/status', async (_req: Request, res: Response) => {
+  try {
+    res.json({ enabled: albumLookupEnabled(), albums: await getAlbumCounts(USER_ID), job: getBackfillStatus() });
+  } catch (err) {
+    console.error('Error loading album status:', err);
+    res.status(500).json({ error: 'Failed to load album status' });
+  }
+});
+
+musicRouter.post('/albums/backfill', async (req: Request, res: Response) => {
+  try {
+    if (!albumLookupEnabled()) return res.status(503).json({ error: 'Album lookup is disabled' });
+    if (getBackfillStatus().state === 'running') return res.status(409).json({ error: 'A lookup is already running' });
+    res.status(202).json(await startBackfill(USER_ID, { retryMissing: req.body?.retry_missing === true }));
+  } catch (err) {
+    console.error('Error starting album lookup:', err);
+    res.status(500).json({ error: 'Failed to start album lookup' });
+  }
+});
+
+musicRouter.post('/albums/backfill/cancel', (_req: Request, res: Response) => {
+  cancelBackfill();
+  res.json(getBackfillStatus());
+});
+
+musicRouter.get('/albums/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    if (!isUuid(id)) return res.status(400).json({ error: 'Invalid album id' });
+    const album = await getAlbumDetail(USER_ID, id);
+    if (!album) return res.status(404).json({ error: 'Album not found' });
+    res.json(album);
+  } catch (err) {
+    console.error('Error loading album:', err);
+    res.status(500).json({ error: 'Failed to load album' });
+  }
+});
+
+// Ids never change what they point at, so the browser may keep covers a long
+// time; one page renders the same cover many times.
+musicRouter.get('/albums/:id/art', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    if (!isUuid(id)) return res.status(400).end();
+    const file = await getAlbumArtFile(USER_ID, id, req.query.size === 'large' ? 'large' : 'thumb');
+    if (!file) return res.status(404).end();
+    res.set('Cache-Control', 'private, max-age=31536000, immutable');
+    res.type('image/jpeg').sendFile(file);
+  } catch (err) {
+    console.error('Error serving album art:', err);
+    res.status(500).end();
+  }
+});
+
 // GET /around?checkin_ids=a,b - what was playing at the end of each check-in
 // (see getListeningBefore). Check-ins with nothing to show are omitted.
 musicRouter.get('/around', async (req: Request, res: Response) => {
@@ -461,6 +526,8 @@ export const server: CheckinTypeServerPlugin = {
       txClient ? txClient.query(sql, values) : query(sql, values);
     const result = await run('DELETE FROM music_scrobbles WHERE user_id = $1 RETURNING id', [user_id]);
     await run('DELETE FROM music_sessions WHERE user_id = $1', [user_id]);
+    // A rebuildable cache; orphaned image files are collected on the next lookup.
+    await run('DELETE FROM music_albums WHERE user_id = $1', [user_id]);
     return result.rowCount ?? 0;
   },
 

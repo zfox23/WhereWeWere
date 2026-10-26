@@ -9,6 +9,7 @@ import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../../server/src/db';
 import { allPlugins } from '../../../server/src/plugins/registry';
 import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
+import { lookupAlbumSoon } from './albums';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './constants';
 
 
@@ -323,7 +324,7 @@ export async function insertScrobble(userId: string, s: ScrobbleInput): Promise<
          (user_id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT DO NOTHING
-       RETURNING id`,
+       RETURNING id, album_key`,
       [
         userId, s.playedAt, s.title, s.artists, s.album ?? null, s.albumArtists ?? [],
         s.trackLength ?? null, s.listenedFor ?? null, s.source ?? null, timezone,
@@ -346,6 +347,7 @@ export async function insertScrobble(userId: string, s: ScrobbleInput): Promise<
       await rebuildSessions(client, userId, settings.session_gap_minutes, { from, to });
     }
     await client.query('COMMIT');
+    if ((inserted.rowCount ?? 0) > 0) lookupAlbumSoon(userId, inserted.rows[0].album_key);
     return (inserted.rowCount ?? 0) > 0;
   } catch (err) {
     await client.query('ROLLBACK');

@@ -4,6 +4,9 @@
 
 import { request, withAuthHeader } from '../../../client/src/api/client';
 import type {
+  AlbumBackfillStatus,
+  AlbumDetail,
+  AlbumStatus,
   MusicImportResult,
   MusicReflectionYear,
   MusicLibraryView,
@@ -34,6 +37,9 @@ async function uploadImport(url: string, file: File): Promise<MusicImportResult>
   return res.json();
 }
 
+export const albumArtUrl = (id: string, size: 'thumb' | 'large' = 'thumb') =>
+  `/api/v1/music/albums/${id}/art${size === 'large' ? '?size=large' : ''}`;
+
 export const music = {
   stats: (from?: string, to?: string, limit = 25) =>
     request<MusicStats>(`/music/stats${rangeQuery(from, to, { limit: String(limit) })}`),
@@ -42,6 +48,14 @@ export const music = {
   sessionTracks: (sessionId: string) =>
     request<SessionTrack[]>(`/music/sessions/${sessionId}/tracks`),
   reflect: (date: string) => request<MusicReflectionYear[]>(`/music/reflect?date=${date}`),
+  albumStatus: () => request<AlbumStatus>('/music/albums/status'),
+  startAlbumBackfill: (retryMissing: boolean) =>
+    request<AlbumBackfillStatus>('/music/albums/backfill', {
+      method: 'POST',
+      body: JSON.stringify({ retry_missing: retryMissing }),
+    }),
+  cancelAlbumBackfill: () => request<AlbumBackfillStatus>('/music/albums/backfill/cancel', { method: 'POST' }),
+  album: (id: string) => request<AlbumDetail>(`/music/albums/${id}`),
   settings: () => request<MusicSettingsData>('/music/settings'),
   updateSettings: (patch: Partial<Pick<MusicSettingsData, 'session_gap_minutes' | 'min_session_tracks' | 'timezone'>>) =>
     request<MusicSettingsData>('/music/settings', { method: 'PUT', body: JSON.stringify(patch) }),

@@ -71,3 +71,29 @@ export interface MusicReflectionYear {
   year: number;
   tracks: ReflectTrack[];
 }
+
+export interface AlbumBackfillStatus {
+  state: 'idle' | 'running' | 'done' | 'cancelled' | 'error';
+  processed: number;
+  total: number;
+  matched: number;
+  not_found: number;
+  error: string | null;
+}
+
+export interface AlbumStatus {
+  enabled: boolean;
+  albums: { total: number; matched: number; not_found: number; pending: number };
+  job: AlbumBackfillStatus;
+}
+
+export interface AlbumDetail {
+  id: string;
+  title: string;
+  artist: string;
+  release_date: string | null;
+  label: string | null;
+  plays: number;
+  listened_seconds: number;
+  tracks: { position: number; title: string; length: number | null; plays: number }[];
+}

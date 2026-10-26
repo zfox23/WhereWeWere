@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, Copy, Loader2, Music, RefreshCw, Upload } from 'lucide-react';
 import { copyText } from '../../../client/src/utils/clipboard';
 import { music } from './api';
-import type { MusicImportResult, MusicSettingsData } from './types';
+import type { AlbumStatus, MusicImportResult, MusicSettingsData } from './types';
 
 const CARD =
   'bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4';
@@ -283,6 +283,87 @@ function ImportSection({
   );
 }
 
+function ArtworkSection() {
+  const [status, setStatus] = useState<AlbumStatus | null>(null);
+  const [retryMissing, setRetryMissing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const running = status?.job.state === 'running';
+
+  const load = () => music.albumStatus().then(setStatus).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+  // Poll while the lookup runs.
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(load, 2000);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  const start = async () => {
+    setError(null);
+    try {
+      await music.startAlbumBackfill(retryMissing);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start.');
+    }
+  };
+
+  if (!status) return null;
+  const { albums, job } = status;
+  return (
+    <div className={CARD}>
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Album artwork</h2>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Covers, release dates and tracklists come from Deezer, with MusicBrainz as a fallback. Each album is looked up
+        once and stored on this server; new albums are looked up as their first scrobble arrives. Importing history
+        adds albums that need a lookup, so run this afterwards.
+      </p>
+      <p className="text-xs text-gray-600 dark:text-gray-300">
+        {albums.matched.toLocaleString()} matched, {albums.not_found.toLocaleString()} not found,{' '}
+        {albums.pending.toLocaleString()} waiting, of {albums.total.toLocaleString()} albums.
+      </p>
+      {!status.enabled && <p className="text-xs text-amber-600">Album lookup is turned off on this server.</p>}
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <input type="checkbox" checked={retryMissing} onChange={(e) => setRetryMissing(e.target.checked)} disabled={running} />
+        Also retry albums that weren't found
+      </label>
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={start} disabled={running || !status.enabled} className="btn-primary">
+          Look up album artwork
+        </button>
+        {running && (
+          <button type="button" onClick={() => music.cancelAlbumBackfill().then(load)} className="btn-secondary text-xs">
+            Cancel
+          </button>
+        )}
+      </div>
+      {running && (
+        <p className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2">
+          <Loader2 size={13} className="animate-spin" />
+          {job.processed.toLocaleString()} of {job.total.toLocaleString()} looked up: {job.matched.toLocaleString()} matched
+        </p>
+      )}
+      {(job.state === 'done' || job.state === 'cancelled') && (
+        <div className="flex items-start gap-2 rounded-lg bg-green-50 dark:bg-green-900/20 p-3 text-sm text-green-700 dark:text-green-300">
+          <Check size={16} className="mt-0.5 shrink-0" />
+          <span>
+            {job.state === 'cancelled' ? 'Cancelled. ' : ''}Looked up {job.processed.toLocaleString()} album
+            {job.processed === 1 ? '' : 's'}: {job.matched.toLocaleString()} matched, {job.not_found.toLocaleString()} not found.
+          </span>
+        </div>
+      )}
+      {(error || job.error) && (
+        <div className="flex items-start gap-2 rounded-lg bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{error ?? job.error}. Progress is kept; run it again to continue.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MusicSettings() {
   const [settings, setSettings] = useState<MusicSettingsData | null>(null);
   const [error, setError] = useState(false);
@@ -299,6 +380,7 @@ export function MusicSettings() {
     <div className="space-y-4">
       <ConnectionSection settings={settings} onKeyChanged={(key) => setSettings({ ...settings, scrobbler_key: key })} />
       <PreferencesSection settings={settings} onSaved={setSettings} />
+      <ArtworkSection />
       <TimezoneSection onRefreshed={load} />
       <ImportSection
         title="Import from Last.fm"

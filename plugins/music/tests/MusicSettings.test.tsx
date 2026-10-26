@@ -8,6 +8,8 @@ const updateMock = vi.fn();
 const regenerateMock = vi.fn();
 const importMock = vi.fn();
 const lastfmMock = vi.fn();
+const albumStatusMock = vi.fn();
+const albumStartMock = vi.fn();
 const refreshMock = vi.fn();
 vi.mock('../ui/api', () => ({
   music: {
@@ -16,6 +18,9 @@ vi.mock('../ui/api', () => ({
     regenerateKey: () => regenerateMock(),
     importScrobbles: (...args: unknown[]) => importMock(...args),
     importLastfm: (...args: unknown[]) => lastfmMock(...args),
+    albumStatus: () => albumStatusMock(),
+    startAlbumBackfill: (...args: unknown[]) => albumStartMock(...args),
+    cancelAlbumBackfill: vi.fn(),
     refreshTimezones: () => refreshMock(),
   },
 }));
@@ -32,6 +37,11 @@ const SETTINGS = {
 describe('MusicSettings', () => {
   beforeEach(() => {
     settingsMock.mockResolvedValue(SETTINGS);
+    albumStatusMock.mockResolvedValue({
+      enabled: true,
+      albums: { total: 10, matched: 6, not_found: 1, pending: 3 },
+      job: { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, error: null },
+    });
   });
   afterEach(() => {
     cleanup();
@@ -41,6 +51,8 @@ describe('MusicSettings', () => {
     regenerateMock.mockReset();
     importMock.mockReset();
     lastfmMock.mockReset();
+    albumStatusMock.mockReset();
+    albumStartMock.mockReset();
     refreshMock.mockReset();
   });
 
@@ -122,6 +134,16 @@ describe('MusicSettings', () => {
     await waitFor(() => expect(screen.getByText(/Imported 8 new scrobbles\./)).toBeTruthy());
     expect(lastfmMock).toHaveBeenCalledWith(file);
     expect(importMock).not.toHaveBeenCalled();
+  });
+
+  it('shows album lookup progress and starts a lookup, optionally retrying misses', async () => {
+    const user = userEvent.setup();
+    albumStartMock.mockResolvedValue({});
+    render(<MusicSettings />);
+    await waitFor(() => screen.getByText(/6 matched, 1 not found, 3 waiting, of 10 albums/));
+    await user.click(screen.getByLabelText(/retry albums that weren't found/));
+    await user.click(screen.getByRole('button', { name: 'Look up album artwork' }));
+    expect(albumStartMock).toHaveBeenCalledWith(true);
   });
 
   it('re-assigns play timezones on request and reports how many changed', async () => {
