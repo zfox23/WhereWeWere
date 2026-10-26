@@ -37,14 +37,30 @@ export function releaseDateLabel(date: string | null): string | null {
 const onMusicProfile = () =>
   window.location.pathname === '/profile' && new URLSearchParams(window.location.search).get('tab') === 'plugin:music';
 
-export function AlbumModal({
+/** Where an album's details open as a page (a new tab, say), identified by ref or, failing that, cover. */
+export function albumPageHref(id: { albumRef?: string | null; artId?: string | null }): string {
+  const params = new URLSearchParams();
+  if (id.albumRef != null) params.set('ref', id.albumRef);
+  else if (id.artId) params.set('art_id', id.artId);
+  return `/music/album?${params}`;
+}
+
+/**
+ * The album details, as a modal over the current page or (`page`) as the body
+ * of the album's own page. Same content either way.
+ */
+export function AlbumDetails({
   albumRef,
   artId,
   onClose,
+  page = false,
+  onLoaded,
 }: {
   albumRef?: string | null;
   artId?: string | null;
-  onClose: () => void;
+  onClose?: () => void;
+  page?: boolean;
+  onLoaded?: (album: AlbumView) => void;
 }) {
   const [album, setAlbum] = useState<AlbumView | null>(null);
   const [error, setError] = useState(false);
@@ -56,7 +72,11 @@ export function AlbumModal({
     let cancelled = false;
     music
       .albumView({ ref: albumRef, artId })
-      .then((a) => !cancelled && setAlbum(a))
+      .then((a) => {
+        if (cancelled) return;
+        setAlbum(a);
+        onLoaded?.(a);
+      })
       .catch(() => !cancelled && setError(true));
     return () => {
       cancelled = true;
@@ -64,13 +84,14 @@ export function AlbumModal({
   }, [albumRef, artId]);
 
   useEffect(() => {
+    if (page || !onClose) return;
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, page]);
 
   const date = releaseDateLabel(album?.release_date ?? null);
   const totalSeconds = album?.tracks.reduce((sum, t) => sum + (t.length ?? 0), 0) ?? 0;
@@ -81,42 +102,38 @@ export function AlbumModal({
     // An album is filtered by name; an "Unknown album" has none, so by its artist's songs.
     const view = unknown ? 'songs' : 'albums';
     const q = unknown ? album.artist : album.title;
-    if (onMusicProfile()) {
+    if (page) {
+      window.location.assign(libraryHref(view, q));
+    } else if (onMusicProfile()) {
       jumpToLibrary(view, q);
-      onClose();
+      onClose?.();
     } else {
       window.open(libraryHref(view, q), '_blank', 'noopener,noreferrer');
     }
   };
 
-  return createPortal(
-    // Portals bubble through the React tree, so swallow clicks here.
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={(e) => {
-        e.stopPropagation();
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+  const panel = (
       <div
-        role="dialog"
-        aria-modal="true"
+        role={page ? undefined : 'dialog'}
+        aria-modal={page ? undefined : true}
         aria-label={album ? `${album.title} by ${album.artist}` : 'Album details'}
-        className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-gray-900 ${
-          album?.art_id ? 'max-w-3xl sm:flex-row' : 'max-w-xl'
-        }`}
+        className={`relative mx-auto flex w-full flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-gray-900 ${
+          page ? '' : 'max-h-[90vh]'
+        } ${album?.art_id ? 'max-w-3xl sm:flex-row' : 'max-w-xl'}`}
       >
-        <button
-          ref={closeRef}
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className={`absolute right-2 top-2 z-10 rounded-full p-1.5 ${
-            album?.art_id ? 'bg-black/40 text-white hover:bg-black/60' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
-          }`}
-        >
-          <X size={16} />
-        </button>
+        {!page && onClose && (
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className={`absolute right-2 top-2 z-10 rounded-full p-1.5 ${
+              album?.art_id ? 'bg-black/40 text-white hover:bg-black/60' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+            }`}
+          >
+            <X size={16} />
+          </button>
+        )}
         {album?.art_id && (
           <img
             src={albumArtUrl(album.art_id, 'large')}
@@ -201,7 +218,24 @@ export function AlbumModal({
           </div>
         )}
       </div>
+  );
+
+  if (page) return panel;
+  return createPortal(
+    // Portals bubble through the React tree, so swallow clicks here.
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+    >
+      {panel}
     </div>,
     document.body,
   );
+}
+
+export function AlbumModal(props: { albumRef?: string | null; artId?: string | null; onClose: () => void }) {
+  return <AlbumDetails {...props} />;
 }

@@ -166,17 +166,29 @@ describe('AlbumLink', () => {
     const user = userEvent.setup();
     albumViewMock.mockResolvedValue(UNMATCHED);
     render(<AlbumLink albumRef="obscure lp|someone">Obscure LP</AlbumLink>);
-    await user.click(screen.getByRole('button', { name: 'Obscure LP' }));
+    await user.click(screen.getByRole('link', { name: 'Obscure LP' }));
     expect(await screen.findByRole('dialog', { name: 'Obscure LP by Someone' })).toBeTruthy();
     expect(albumViewMock).toHaveBeenCalledWith({ ref: 'obscure lp|someone', artId: undefined });
   });
 
+  it('is a real link to the album page: modified clicks follow it instead of opening the modal', async () => {
+    const user = userEvent.setup();
+    render(<AlbumLink albumRef="obscure lp|someone">Obscure LP</AlbumLink>);
+    const link = screen.getByRole('link', { name: 'Obscure LP' });
+    expect(link.getAttribute('href')).toBe('/music/album?ref=obscure+lp%7Csomeone');
+    await user.keyboard('{Control>}');
+    await user.click(link);
+    await user.keyboard('{/Control}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(albumViewMock).not.toHaveBeenCalled();
+  });
+
   it('defaults the name to "Unknown album" and stays plain text without an identity', () => {
     render(<AlbumLink albumRef="|someone" />);
-    expect(screen.getByRole('button', { name: 'Unknown album' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Unknown album' })).toBeTruthy();
     cleanup();
     render(<AlbumLink albumRef={null}>Plain</AlbumLink>);
-    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
     expect(screen.getByText('Plain')).toBeTruthy();
   });
 });

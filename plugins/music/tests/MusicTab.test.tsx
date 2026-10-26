@@ -94,7 +94,7 @@ describe('MusicTab', () => {
       album_ref: 'mowglis road|khruangbin', art_id: null, matched: false, title: "Mowgli's Road", artist: 'Khruangbin',
       release_date: null, label: null, plays: 4, listened_seconds: 0, tracks: [],
     });
-    await user.click(screen.getByRole('button', { name: "Mowgli's Road" }));
+    await user.click(screen.getByRole('link', { name: "Mowgli's Road" }));
     expect(await screen.findByRole('dialog', { name: "Mowgli's Road by Khruangbin" })).toBeTruthy();
     expect(albumViewMock).toHaveBeenCalledWith({ ref: 'mowglis road|khruangbin', artId: undefined });
     // ...and its "Show in library" filters this page.

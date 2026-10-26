@@ -49,7 +49,7 @@ describe('AlbumArt', () => {
     const user = userEvent.setup();
     const { container } = render(<AlbumArt artId="a1" />);
     expect(container.querySelector('img')?.getAttribute('src')).toBe('/art/a1/thumb');
-    await user.click(screen.getByRole('button', { name: 'Show album details' }));
+    await user.click(screen.getByRole('link', { name: 'Show album details' }));
     const dialog = await screen.findByRole('dialog', { name: 'Group Therapy by Above & Beyond' });
     expect(dialog.querySelector('img')?.getAttribute('src')).toBe('/art/a1/large');
     expect(dialog.textContent).toContain('Jun 14, 2011 · Anjunabeats');
@@ -62,7 +62,7 @@ describe('AlbumArt', () => {
   it('closes with Escape, the close button, or the backdrop', async () => {
     const user = userEvent.setup();
     render(<AlbumArt artId="a1" />);
-    const open = () => user.click(screen.getByRole('button', { name: 'Show album details' }));
+    const open = () => user.click(screen.getByRole('link', { name: 'Show album details' }));
     await open();
     await screen.findByRole('dialog');
     await user.keyboard('{Escape}');
@@ -74,6 +74,22 @@ describe('AlbumArt', () => {
     const dialog = await screen.findByRole('dialog');
     await user.click(dialog.parentElement!);
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('links to the album\'s own page, so a middle-click opens it in a new tab', async () => {
+    const user = userEvent.setup();
+    render(<AlbumArt artId="a1" albumRef="group therapy|above & beyond" />);
+    const link = screen.getByRole('link', { name: 'Show album details' });
+    expect(link.getAttribute('href')).toBe('/music/album?ref=group+therapy%7Cabove+%26+beyond');
+    // A ctrl-click follows the link (a new tab) instead of opening the modal.
+    await user.keyboard('{Control>}');
+    await user.click(link);
+    await user.keyboard('{/Control}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Without an identity the cover id stands in.
+    cleanup();
+    render(<AlbumArt artId="a1" />);
+    expect(screen.getByRole('link', { name: 'Show album details' }).getAttribute('href')).toBe('/music/album?art_id=a1');
   });
 
   it('disappears when the image fails to load', async () => {

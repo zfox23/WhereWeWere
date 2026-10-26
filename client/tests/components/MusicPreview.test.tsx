@@ -100,7 +100,7 @@ describe('MusicPreview', () => {
       ],
       has_more: false,
     }));
-    const covers = screen.getAllByRole('button', { name: 'Show album details' });
+    const covers = screen.getAllByRole('link', { name: 'Show album details' });
     expect(covers).toHaveLength(1);
     expect(covers[0].querySelector('img')?.getAttribute('src')).toBe('/api/v1/music/albums/art-1/art');
     await user.click(covers[0]);

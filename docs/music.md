@@ -78,4 +78,5 @@ Keep favorites, or any other lists, of songs and albums in **Profile → Music �
 - **Managing:** rename or delete a list, remove items, and reorder with the arrows. Clicking an item opens its album details.
 - **Identity:** a song is its title and artists, an album is its name and album artist (the same way the Library groups plays), so entries keep matching after re-imports and restores.
 - **Backups:** lists travel in backups (restores merge by list name and skip items already there). **Start Over → All music data** deletes them too.
+- **Its own page:** middle-click or ctrl-click a cover or album name to open the same details as a page in a new tab (`/music/album`), which can be bookmarked and shared.
 - **Show in library:** the details also have a button that filters the Library to that album, which replaces clicking an album name in Top albums to filter.

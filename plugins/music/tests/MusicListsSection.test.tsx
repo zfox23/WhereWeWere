@@ -144,6 +144,6 @@ describe('list badges', () => {
     expect(second.querySelectorAll('[aria-label^="On "]')).toHaveLength(0);
     // The album-less song's album reads "Unknown album" and opens details.
     expect(second.textContent).toContain('Unknown album');
-    expect(screen.getAllByRole('button', { name: 'Unknown album' })).toHaveLength(1);
+    expect(screen.getAllByRole('link', { name: 'Unknown album' })).toHaveLength(1);
   });
 });
