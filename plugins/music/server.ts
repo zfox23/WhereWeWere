@@ -34,6 +34,17 @@ import {
 import { parseScrobbleExport } from './services/importParser';
 import { parseLastfmCsv } from './services/lastfmCsv';
 import {
+  InvalidNameError,
+  NameTakenError,
+  addItem,
+  createList,
+  deleteList,
+  getLists,
+  removeItem,
+  renameList,
+  reorderItems,
+} from './services/lists';
+import {
   albumLookupEnabled,
   cancelBackfill,
   exportAlbums,
@@ -340,6 +351,103 @@ musicRouter.get('/albums/:id/art', async (req: Request, res: Response) => {
   }
 });
 
+// ---- Lists of songs and albums -------------------------------------------
+
+function listError(res: Response, err: unknown, what: string) {
+  if (err instanceof InvalidNameError) return res.status(400).json({ error: err.message });
+  if (err instanceof NameTakenError) return res.status(409).json({ error: err.message });
+  console.error(`Error ${what}:`, err);
+  return res.status(500).json({ error: `Failed ${what}` });
+}
+
+const IDENT_MAX = 2000;
+const ident = (v: unknown): string | null => (typeof v === 'string' && v.length <= IDENT_MAX ? v : null);
+
+musicRouter.get('/lists', async (_req: Request, res: Response) => {
+  try {
+    res.json(await getLists(USER_ID));
+  } catch (err) {
+    listError(res, err, 'loading lists');
+  }
+});
+
+musicRouter.post('/lists', async (req: Request, res: Response) => {
+  try {
+    res.status(201).json(await createList(USER_ID, req.body?.name));
+  } catch (err) {
+    listError(res, err, 'creating the list');
+  }
+});
+
+musicRouter.put('/lists/:id', async (req: Request, res: Response) => {
+  try {
+    if (!isUuid(String(req.params.id))) return res.status(400).json({ error: 'Invalid list id' });
+    const list = await renameList(USER_ID, String(req.params.id), req.body?.name);
+    if (!list) return res.status(404).json({ error: 'List not found' });
+    res.json(list);
+  } catch (err) {
+    listError(res, err, 'renaming the list');
+  }
+});
+
+musicRouter.delete('/lists/:id', async (req: Request, res: Response) => {
+  try {
+    if (!isUuid(String(req.params.id))) return res.status(400).json({ error: 'Invalid list id' });
+    if (!(await deleteList(USER_ID, String(req.params.id)))) return res.status(404).json({ error: 'List not found' });
+    res.json({ id: req.params.id });
+  } catch (err) {
+    listError(res, err, 'deleting the list');
+  }
+});
+
+// Body: { kind: 'album', album_ref } or { kind: 'song', song_key, album_ref? },
+// the opaque identities the server returned on rows.
+musicRouter.post('/lists/:id/items', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    const b = req.body ?? {};
+    let result = null;
+    if (b.kind === 'album' && ident(b.album_ref) !== null) {
+      result = await addItem(USER_ID, listId, { kind: 'album', album_ref: b.album_ref });
+    } else if (b.kind === 'song' && ident(b.song_key)) {
+      result = await addItem(USER_ID, listId, { kind: 'song', song_key: b.song_key, album_ref: ident(b.album_ref) });
+    } else {
+      return res.status(400).json({ error: 'Say which song or album to add' });
+    }
+    if (!result) return res.status(404).json({ error: 'List or music not found' });
+    res.status(result.added ? 201 : 200).json(result);
+  } catch (err) {
+    listError(res, err, 'adding to the list');
+  }
+});
+
+musicRouter.delete('/lists/:id/items/:itemId', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    const itemId = String(req.params.itemId);
+    if (!isUuid(listId) || !isUuid(itemId)) return res.status(400).json({ error: 'Invalid id' });
+    if (!(await removeItem(USER_ID, listId, itemId))) return res.status(404).json({ error: 'Item not found' });
+    res.json({ id: itemId });
+  } catch (err) {
+    listError(res, err, 'removing from the list');
+  }
+});
+
+musicRouter.put('/lists/:id/order', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    const ids: unknown = req.body?.item_ids;
+    if (!isUuid(listId) || !Array.isArray(ids) || !ids.every((i) => typeof i === 'string' && isUuid(i))) {
+      return res.status(400).json({ error: 'item_ids must be a list of item ids' });
+    }
+    if (!(await reorderItems(USER_ID, listId, ids as string[]))) return res.status(404).json({ error: 'List not found' });
+    res.json({ item_ids: ids });
+  } catch (err) {
+    listError(res, err, 'reordering the list');
+  }
+});
+
 // GET /around?checkin_ids=a,b - what was playing at the end of each check-in
 // (see getListeningBefore). Check-ins with nothing to show are omitted.
 musicRouter.get('/around', async (req: Request, res: Response) => {
@@ -539,6 +647,8 @@ export const server: CheckinTypeServerPlugin = {
     await run('DELETE FROM music_sessions WHERE user_id = $1', [user_id]);
     // A rebuildable cache; orphaned image files are collected on the next lookup.
     await run('DELETE FROM music_albums WHERE user_id = $1', [user_id]);
+    // Lists are the user's own curation, so Start Over removes them too (items cascade).
+    await run('DELETE FROM music_lists WHERE user_id = $1', [user_id]);
     return result.rowCount ?? 0;
   },
 
