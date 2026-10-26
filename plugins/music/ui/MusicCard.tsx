@@ -10,6 +10,7 @@ import type { CheckinCardProps } from 'wwp-shared';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { music } from './api';
 import { AlbumArt } from './AlbumArt';
+import { ListBadge, songItemKey } from './ListBadge';
 import { ArtistLinks, HomeLibraryLink } from './libraryLinks';
 import { formatClock, formatDuration } from './format';
 import type { MusicSessionData, SessionTrack } from './types';
@@ -113,12 +114,12 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
               <ol className="space-y-0.5">
                 {tracks.map((t, i) => (
                   <li key={i} className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                    <AlbumArt artId={t.art_id} size={24} />
+                    <AlbumArt artId={t.art_id} albumRef={t.album_ref} size={24} />
                     <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
                     <span>
                       <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
                       {' — '}
-                      <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink>
+                      <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink><ListBadge itemKey={songItemKey(t.song_key)} />
                     </span>
                   </li>
                 ))}

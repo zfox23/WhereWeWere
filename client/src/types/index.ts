@@ -355,7 +355,7 @@ export interface ListeningBefore {
   /** Local date (YYYY-MM-DD) the session is grouped under on the timeline. */
   session_date: string;
   /** Up to three plays, newest first. */
-  tracks: { artists: string[]; title: string; time: number; art_id?: string | null }[];
+  tracks: { artists: string[]; title: string; time: number; art_id?: string | null; album_ref?: string | null; song_key?: string | null }[];
   /** The session has plays earlier than the oldest one listed. */
   has_more: boolean;
 }

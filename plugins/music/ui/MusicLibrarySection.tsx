@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Search, X } from 'lucide-react';
 import { music } from './api';
 import { AlbumArt } from './AlbumArt';
+import { AlbumLink } from './AlbumLink';
+import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
 import { formatDay, formatDuration, joinArtists } from './format';
 import type { MusicAggregate, MusicLibraryView } from './types';
 
@@ -287,9 +289,16 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
                   >
                     {c.art ? (
                       <span className="flex items-center gap-2">
-                        <AlbumArt artId={row.art_id} size={28} />
-                        <span className="min-w-0">{c.render(row)}</span>
+                        <AlbumArt artId={row.art_id} albumRef={row.album_ref} size={28} />
+                        <span className="min-w-0">
+                          <AlbumLink albumRef={row.album_ref}>{c.render(row) || undefined}</AlbumLink>
+                          <ListBadge itemKey={albumItemKey(row.album_ref)} />
+                        </span>
                       </span>
+                    ) : view === 'songs' && c.key === 'name' ? (
+                      <>
+                        {c.render(row)}<ListBadge itemKey={songItemKey(row.song_key)} />
+                      </>
                     ) : (
                       c.render(row)
                     )}

@@ -39,7 +39,9 @@ import {
   addItem,
   createList,
   deleteList,
+  exportLists,
   getLists,
+  importLists,
   removeItem,
   renameList,
   reorderItems,
@@ -603,6 +605,8 @@ export const server: CheckinTypeServerPlugin = {
       scrobbles: result.rows,
       // Album matches, release info and tracklists; thumbnails travel as files.
       albums: await exportAlbums(user_id),
+      // The user's own curation, in list order.
+      lists: await exportLists(user_id),
     };
   },
 
@@ -614,6 +618,7 @@ export const server: CheckinTypeServerPlugin = {
       timezone?: unknown;
       scrobbles?: unknown;
       albums?: unknown;
+      lists?: unknown;
     };
     const rows = Array.isArray(body.scrobbles) ? body.scrobbles : Array.isArray(payload) ? payload : [];
     const scrobbles = rows.flatMap((r) => {
@@ -640,6 +645,8 @@ export const server: CheckinTypeServerPlugin = {
     });
     // A cache: it doesn't count toward what was restored.
     await importAlbums(client ?? { query }, user_id, body.albums, filesDir);
+    // Lists merge by name, items by identity; they don't count toward the scrobbles restored.
+    await importLists(client ?? { query }, user_id, body.lists);
     return inserted;
   },
 

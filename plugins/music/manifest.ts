@@ -29,6 +29,6 @@ export const manifest: CheckinTypeManifest = {
     confirmDelete: 'Delete this listening session?',
   },
   startOver: {
-    deleteLabel: 'All music data (every scrobble and listening session)',
+    deleteLabel: 'All music data (every scrobble, listening session and list)',
   },
 };

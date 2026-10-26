@@ -66,3 +66,16 @@ Covers and release info come from [Deezer](https://developers.deezer.com/api) (n
 - **Storage:** matches live in the `music_albums` table and thumbnails (and, once opened, large covers) in `DATA_DIR/music-art/`. **Start Over → All music data** clears them.
 - **Backups:** every album's match, release info and tracklist (and "not found" results) are in the backup, and ZIP backups carry the thumbnails as files. Large covers are not included; they download again when you open an album. A restore never contacts Deezer or MusicBrainz. If a restore had no thumbnails (a plain `.json` backup), press **Update music metadata** to download them again.
 - **Privacy:** lookups send album and artist names to Deezer (and MusicBrainz when Deezer has no match). Nothing else leaves your server, and your browser only ever talks to WhereWeWere for images.
+
+## Lists
+
+Keep favorites, or any other lists, of songs and albums in **Profile → Music → Lists** (make a list there, or from the picker below).
+
+- **Adding:** click a cover, or an album name in the Library or Top albums, to open the album's details. **Add album to list** adds the album; the heart beside a track adds that song. Songs and albums mix freely in one list.
+- **Any album works:** an album with no catalog match opens the same details from your own plays (tracklist limited to what you've played, no cover or release info). Plays with no album at all gather under **Unknown album** for each artist; the album itself can't be listed, but its songs can.
+- **Only played music:** a track you have never played (shown on a matched album's tracklist) has no add button.
+- **Hearts:** songs and albums that are on a list show a heart in the Library, Top lists, listening sessions and the album details.
+- **Managing:** rename or delete a list, remove items, and reorder with the arrows. Clicking an item opens its album details.
+- **Identity:** a song is its title and artists, an album is its name and album artist (the same way the Library groups plays), so entries keep matching after re-imports and restores.
+- **Backups:** lists travel in backups (restores merge by list name and skip items already there). **Start Over → All music data** deletes them too.
+- **Show in library:** the details also have a button that filters the Library to that album, which replaces clicking an album name in Top albums to filter.

@@ -57,7 +57,7 @@ export function MusicPreview({ listening, compact = false }: { listening: Listen
                   : undefined
               }
             >
-              <AlbumArt artId={t.art_id} size={compact ? 18 : 20} />
+              <AlbumArt artId={t.art_id} albumRef={t.album_ref} size={compact ? 18 : 20} />
               <span className="min-w-0 truncate">
                 <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
                 {' — '}

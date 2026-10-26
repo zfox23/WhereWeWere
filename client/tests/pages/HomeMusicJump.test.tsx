@@ -21,7 +21,7 @@ vi.mock('../../src/plugins/api', () => ({
   plugins: { settings: { get: () => Promise.resolve({}) } },
 }));
 vi.mock('../../../plugins/music/ui/api', () => ({
-  music: { sessionTracks: (...args: unknown[]) => sessionTracksMock(...args) },
+  music: { sessionTracks: (...args: unknown[]) => sessionTracksMock(...args), lists: () => Promise.resolve([]) },
 }));
 
 const SLEEP_ID = '11111111-1111-4111-8111-111111111111';

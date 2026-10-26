@@ -9,6 +9,9 @@ export interface MusicAggregate {
   name: string;
   /** Cover of the album (most played, for songs), when one was found. */
   art_id?: string | null;
+  /** Opaque identities for opening the album modal and for lists (songs and albums). */
+  album_ref?: string | null;
+  song_key?: string | null;
   /** Present for songs (artist list) and albums (album artists). */
   artists?: string[];
   album?: string | null;
@@ -54,6 +57,8 @@ export interface SessionTrack {
   /** IANA zone this play happened in. */
   timezone: string;
   art_id?: string | null;
+  album_ref?: string | null;
+  song_key?: string | null;
 }
 
 export interface MusicSessionData {
@@ -93,13 +98,49 @@ export interface AlbumStatus {
   job: AlbumBackfillStatus;
 }
 
-export interface AlbumDetail {
-  id: string;
+export interface AlbumViewTrack {
+  position: number | null;
+  title: string;
+  artists: string[];
+  length: number | null;
+  plays: number;
+  song_key: string | null;
+}
+
+export interface AlbumView {
+  album_ref: string;
+  art_id: string | null;
+  matched: boolean;
   title: string;
   artist: string;
   release_date: string | null;
   label: string | null;
   plays: number;
   listened_seconds: number;
-  tracks: { position: number; title: string; length: number | null; plays: number }[];
+  tracks: AlbumViewTrack[];
 }
+
+export interface ListItem {
+  id: string;
+  item_key: string;
+  kind: 'song' | 'album';
+  title: string;
+  artists: string[];
+  album: string | null;
+  album_ref: string | null;
+  art_id: string | null;
+}
+
+export interface MusicList {
+  id: string;
+  name: string;
+  items: ListItem[];
+}
+
+/** What can be put on a list: opaque identities from rows. */
+export type ListTarget =
+  | { kind: 'album'; album_ref: string }
+  | { kind: 'song'; song_key: string; album_ref?: string | null };
+
+/** The key a list item has when it holds this target. */
+export const targetItemKey = (t: ListTarget): string => (t.kind === 'album' ? `album:${t.album_ref}` : `song:${t.song_key}`);

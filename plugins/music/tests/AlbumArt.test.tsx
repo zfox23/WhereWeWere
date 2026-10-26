@@ -3,15 +3,19 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlbumArt } from '../ui/AlbumArt';
 import { releaseDateLabel } from '../ui/AlbumModal';
+import { resetMusicLists } from '../ui/useMusicLists';
 
 const albumMock = vi.fn();
+const listsMock = vi.fn();
 vi.mock('../ui/api', () => ({
   albumArtUrl: (id: string, size = 'thumb') => `/art/${id}/${size}`,
-  music: { album: (...args: unknown[]) => albumMock(...args) },
+  music: { albumView: (...args: unknown[]) => albumMock(...args), lists: () => listsMock() },
 }));
 
 const ALBUM = {
-  id: 'a1',
+  album_ref: 'group therapy|above & beyond',
+  art_id: 'a1',
+  matched: true,
   title: 'Group Therapy',
   artist: 'Above & Beyond',
   release_date: '2011-06-14',
@@ -19,16 +23,21 @@ const ALBUM = {
   plays: 3,
   listened_seconds: 900,
   tracks: [
-    { position: 1, title: 'Filaments', length: 300, plays: 0 },
-    { position: 2, title: 'Sun & Moon', length: 321, plays: 3 },
+    { position: 1, title: 'Filaments', artists: ['Above & Beyond'], length: 300, plays: 0, song_key: null },
+    { position: 2, title: 'Sun & Moon', artists: ['Above & Beyond'], length: 321, plays: 3, song_key: 'sun & moon\u001fabove & beyond' },
   ],
 };
 
 describe('AlbumArt', () => {
-  beforeEach(() => albumMock.mockResolvedValue(ALBUM));
+  beforeEach(() => {
+    albumMock.mockResolvedValue(ALBUM);
+    listsMock.mockResolvedValue([]);
+    resetMusicLists();
+  });
   afterEach(() => {
     cleanup();
     albumMock.mockReset();
+    listsMock.mockReset();
   });
 
   it('renders nothing without a cover', () => {
@@ -47,7 +56,7 @@ describe('AlbumArt', () => {
     expect(dialog.textContent).toContain('3 scrobbles');
     expect(dialog.textContent).toContain('5:21'); // track length
     expect(dialog.textContent).toContain('3x');
-    expect(albumMock).toHaveBeenCalledWith('a1');
+    expect(albumMock).toHaveBeenCalledWith({ artId: 'a1', ref: undefined });
   });
 
   it('closes with Escape, the close button, or the backdrop', async () => {

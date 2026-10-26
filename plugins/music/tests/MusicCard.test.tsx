@@ -7,7 +7,7 @@ import { MusicCard } from '../ui/MusicCard';
 
 const sessionTracksMock = vi.fn();
 vi.mock('../ui/api', () => ({
-  music: { sessionTracks: (...args: unknown[]) => sessionTracksMock(...args) },
+  music: { sessionTracks: (...args: unknown[]) => sessionTracksMock(...args), lists: () => Promise.resolve([]) },
 }));
 
 const item = {

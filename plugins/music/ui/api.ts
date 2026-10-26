@@ -5,7 +5,9 @@
 import { request, withAuthHeader } from '../../../client/src/api/client';
 import type {
   AlbumBackfillStatus,
-  AlbumDetail,
+  AlbumView,
+  ListTarget,
+  MusicList,
   AlbumStatus,
   MusicImportResult,
   MusicReflectionYear,
@@ -55,7 +57,23 @@ export const music = {
       body: JSON.stringify({ retry_missing: retryMissing }),
     }),
   cancelAlbumBackfill: () => request<AlbumBackfillStatus>('/music/albums/backfill/cancel', { method: 'POST' }),
-  album: (id: string) => request<AlbumDetail>(`/music/albums/${id}`),
+  albumView: (id: { ref?: string | null; artId?: string | null }) => {
+    const params = new URLSearchParams();
+    if (id.artId) params.set('art_id', id.artId);
+    else if (id.ref != null) params.set('ref', id.ref);
+    return request<AlbumView>(`/music/album-view?${params}`);
+  },
+  lists: () => request<MusicList[]>('/music/lists'),
+  createList: (name: string) => request<MusicList>('/music/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameList: (id: string, name: string) =>
+    request<{ id: string; name: string }>(`/music/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+  deleteList: (id: string) => request<{ id: string }>(`/music/lists/${id}`, { method: 'DELETE' }),
+  addToList: (listId: string, target: ListTarget) =>
+    request<{ added: boolean }>(`/music/lists/${listId}/items`, { method: 'POST', body: JSON.stringify(target) }),
+  removeFromList: (listId: string, itemId: string) =>
+    request<{ id: string }>(`/music/lists/${listId}/items/${itemId}`, { method: 'DELETE' }),
+  reorderList: (listId: string, itemIds: string[]) =>
+    request<{ item_ids: string[] }>(`/music/lists/${listId}/order`, { method: 'PUT', body: JSON.stringify({ item_ids: itemIds }) }),
   settings: () => request<MusicSettingsData>('/music/settings'),
   updateSettings: (patch: Partial<Pick<MusicSettingsData, 'session_gap_minutes' | 'min_session_tracks' | 'timezone'>>) =>
     request<MusicSettingsData>('/music/settings', { method: 'PUT', body: JSON.stringify(patch) }),

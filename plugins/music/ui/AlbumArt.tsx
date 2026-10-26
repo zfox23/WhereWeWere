@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { albumArtUrl } from './api';
 import { AlbumModal } from './AlbumModal';
 
-export function AlbumArt({ artId, size = 24 }: { artId?: string | null; size?: number }) {
+export function AlbumArt({ artId, albumRef, size = 24 }: { artId?: string | null; albumRef?: string | null; size?: number }) {
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   const box = { width: size, height: size };
@@ -38,7 +38,7 @@ export function AlbumArt({ artId, size = 24 }: { artId?: string | null; size?: n
           style={box}
         />
       </button>
-      {open && <AlbumModal artId={artId} onClose={() => setOpen(false)} />}
+      {open && <AlbumModal artId={artId} albumRef={albumRef} onClose={() => setOpen(false)} />}
     </>
   );
 }

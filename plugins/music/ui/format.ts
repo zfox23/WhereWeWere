@@ -30,3 +30,4 @@ export function formatDay(iso: string): string {
 export function joinArtists(artists: string[] | undefined | null): string {
   return (artists ?? []).join(', ');
 }
+export const UNKNOWN_ALBUM = 'Unknown album';

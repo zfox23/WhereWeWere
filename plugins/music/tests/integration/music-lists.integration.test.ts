@@ -170,4 +170,76 @@ describe('music lists', () => {
       .send({ first_confirmation: 'DELETE MY DATA', second_confirmation: 'START OVER', options: { reset_music_settings: true } });
     expect((await query('SELECT 1 FROM music_lists')).rowCount).toBe(1);
   });
+
+  describe('in backups', () => {
+  const seedLists = async () => {
+    await push('Sun & Moon', 'Group Therapy');
+    await push('Oceanic', 'Group Therapy', ['Above & Beyond'], 60);
+    const fav = await newList('Favorites');
+    const road = await newList('Road trip');
+    const sun = await identities('Sun & Moon');
+    const ocean = await identities('Oceanic');
+    await request(app).post(api(`/${fav}/items`)).send({ kind: 'song', ...ocean });
+    await request(app).post(api(`/${fav}/items`)).send({ kind: 'album', album_ref: sun.album_ref });
+    await request(app).post(api(`/${fav}/items`)).send({ kind: 'song', ...sun });
+    await request(app).post(api(`/${road}/items`)).send({ kind: 'album', album_ref: sun.album_ref });
+  };
+  const summary = async () =>
+    (await request(app).get(api())).body.map((l: any) => [l.name, l.items.map((i: any) => `${i.kind}:${i.title}`)]);
+
+  it('round-trips lists with their item order', async () => {
+    const { server } = await import('../../server');
+    await seedLists();
+    const before = await summary();
+    const payload = await server.backupExport!({ user_id: DEFAULT_USER_ID });
+    await server.deleteUserData!({ user_id: DEFAULT_USER_ID });
+    expect(await summary()).toEqual([]);
+    await server.backupImport!({ user_id: DEFAULT_USER_ID }, payload);
+    expect(await summary()).toEqual(before);
+    expect(before[0]).toEqual(['Favorites', ['song:Oceanic', 'album:Group Therapy', 'song:Sun & Moon']]);
+  });
+
+  it('merges into existing lists on a repeated restore instead of duplicating', async () => {
+    const { server } = await import('../../server');
+    await seedLists();
+    const before = await summary();
+    const payload = await server.backupExport!({ user_id: DEFAULT_USER_ID });
+    await server.backupImport!({ user_id: DEFAULT_USER_ID }, payload);
+    await server.backupImport!({ user_id: DEFAULT_USER_ID }, payload);
+    expect(await summary()).toEqual(before);
+  });
+
+  it('skips malformed lists and items', async () => {
+    const { server } = await import('../../server');
+    await server.backupImport!({ user_id: DEFAULT_USER_ID }, {
+      scrobbles: [],
+      lists: [
+        null,
+        { name: '   ', items: [] },
+        { name: 'Good', items: [
+          { kind: 'album', title: 'Ok', item_key: 'album:x|y', artists: ['y', 5] },
+          { kind: 'album', title: 'Wrong key', item_key: 'song:x' },
+          { kind: 'playlist', title: 'Bad kind', item_key: 'playlist:x' },
+          { kind: 'song', item_key: 'song:nothing' },
+        ] },
+      ],
+    });
+    expect(await summary()).toEqual([['Good', ['album:Ok']]]);
+  });
+
+  it('restores lists through the HTTP backup path', async () => {
+    await seedLists();
+    const before = await summary();
+    const zip = await new Promise<Buffer>((resolve, reject) => {
+      request(app).get('/api/v1/backup/export').buffer(true)
+        .parse((res: any, cb: any) => { const c: Buffer[] = []; res.on('data', (d: Buffer) => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); })
+        .end((err: any, res: any) => (err ? reject(err) : resolve(res.body as Buffer)));
+    });
+    const { server } = await import('../../server');
+    await server.deleteUserData!({ user_id: DEFAULT_USER_ID });
+    const res = await request(app).post('/api/v1/backup/import').attach('file', zip, 'backup.zip').set('Content-Type', 'application/zip');
+    expect(res.status).toBe(200);
+    expect(await summary()).toEqual(before);
+  });
+});
 });

@@ -7,7 +7,7 @@ import type { MusicAggregate, MusicLibraryView } from '../ui/types';
 
 const libraryMock = vi.fn();
 vi.mock('../ui/api', () => ({
-  music: { library: (...args: unknown[]) => libraryMock(...args) },
+  music: { library: (...args: unknown[]) => libraryMock(...args), lists: () => Promise.resolve([]) },
 }));
 
 const song = (name: string, artists: string[], plays: number, last: string, album: string | null = null): MusicAggregate => ({

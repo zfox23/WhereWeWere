@@ -21,7 +21,10 @@ import {
 import { music } from './api';
 import { formatDuration, joinArtists } from './format';
 import { AlbumArt } from './AlbumArt';
+import { AlbumLink } from './AlbumLink';
+import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
 import { MusicLibrarySection } from './MusicLibrarySection';
+import { MusicListsSection } from './MusicListsSection';
 import { ProfileLibraryLink } from './libraryLinks';
 import type { MusicAggregate, MusicLibraryView, MusicStats } from './types';
 
@@ -77,9 +80,18 @@ function TopList({
               <div className="flex items-baseline justify-between gap-2">
                 <span className="min-w-0 flex items-center gap-1.5 text-gray-900 dark:text-gray-100">
                   <span className="text-gray-400 tabular-nums">{i + 1}.</span>
-                  {withArt && <AlbumArt artId={row.art_id} size={28} />}
+                  {withArt && <AlbumArt artId={row.art_id} albumRef={row.album_ref} size={28} />}
                   <span className="min-w-0 truncate">
-                    <ProfileLibraryLink view={view} q={row.name}>{row.name}</ProfileLibraryLink>
+                    {view === 'albums' ? (
+                      <AlbumLink albumRef={row.album_ref}>{row.name}</AlbumLink>
+                    ) : (
+                      <ProfileLibraryLink view={view} q={row.name}>{row.name}</ProfileLibraryLink>
+                    )}
+                    {view !== 'artists' && (
+                      <>
+                        <ListBadge itemKey={view === 'songs' ? songItemKey(row.song_key) : albumItemKey(row.album_ref)} />
+                      </>
+                    )}
                     {detail(row) && <span className="text-xs text-gray-500 dark:text-gray-400"> · {detail(row)}</span>}
                   </span>
                 </span>
@@ -239,6 +251,8 @@ export function MusicTab(_props: PluginProfileTabProps) {
           <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt />
         </div>
       </div>
+
+      <MusicListsSection />
 
       <MusicLibrarySection from={visibleRange.from} to={visibleRange.to} />
     </div>

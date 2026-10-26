@@ -67,7 +67,8 @@ export async function getLists(userId: string): Promise<MusicList[]> {
 
 async function insertList(db: Db, userId: string, name: string): Promise<{ id: string; name: string } | null> {
   const result = await db.query(
-    `INSERT INTO music_lists (user_id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id, name`,
+    // clock_timestamp(): inside a restore transaction NOW() is the same for every list, which would scramble their order.
+    `INSERT INTO music_lists (user_id, name, created_at) VALUES ($1, $2, clock_timestamp()) ON CONFLICT DO NOTHING RETURNING id, name`,
     [userId, name],
   );
   return result.rows[0] ?? null;

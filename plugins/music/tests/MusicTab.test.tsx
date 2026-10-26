@@ -6,10 +6,13 @@ import { MusicTab } from '../ui/MusicTab';
 
 const statsMock = vi.fn();
 const libraryMock = vi.fn();
+const albumViewMock = vi.fn();
 vi.mock('../ui/api', () => ({
   music: {
     stats: (...args: unknown[]) => statsMock(...args),
     library: (...args: unknown[]) => libraryMock(...args),
+    lists: () => Promise.resolve([]),
+    albumView: (...args: unknown[]) => albumViewMock(...args),
   },
 }));
 vi.mock('../../../client/src/api/client', () => ({
@@ -69,7 +72,7 @@ describe('MusicTab', () => {
     window.history.replaceState(null, '', '/profile?tab=plugin:music&musicPeriod=twelve&sort=plays&dir=asc');
     statsMock.mockResolvedValue({
       ...STATS,
-      top_albums: [agg('Mowgli\'s Road', 4, { artists: ['Khruangbin'] })],
+      top_albums: [agg('Mowgli\'s Road', 4, { artists: ['Khruangbin'], album_ref: 'mowglis road|khruangbin' })],
     });
     renderTab();
     await waitFor(() => screen.getByText('Song 1'));
@@ -86,7 +89,16 @@ describe('MusicTab', () => {
     expect([params.get('musicView'), params.get('q')]).toEqual([null, 'Song 3']); // songs is the default view
     expect((screen.getByLabelText('Filter library') as HTMLInputElement).value).toBe('Song 3');
 
-    await user.click(screen.getByRole('link', { name: "Mowgli's Road" }));
+    // An album opens its details instead of filtering, whether or not it has a catalog match.
+    albumViewMock.mockResolvedValue({
+      album_ref: 'mowglis road|khruangbin', art_id: null, matched: false, title: "Mowgli's Road", artist: 'Khruangbin',
+      release_date: null, label: null, plays: 4, listened_seconds: 0, tracks: [],
+    });
+    await user.click(screen.getByRole('button', { name: "Mowgli's Road" }));
+    expect(await screen.findByRole('dialog', { name: "Mowgli's Road by Khruangbin" })).toBeTruthy();
+    expect(albumViewMock).toHaveBeenCalledWith({ ref: 'mowglis road|khruangbin', artId: undefined });
+    // ...and its "Show in library" filters this page.
+    await user.click(screen.getByRole('button', { name: 'Show in library' }));
     params = new URLSearchParams(window.location.search);
     expect([params.get('musicView'), params.get('q')]).toEqual(['albums', "Mowgli's Road"]);
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
