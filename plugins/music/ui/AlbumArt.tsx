@@ -1,6 +1,6 @@
 /**
- * A tiny album cover. Clicking it opens the album's details; without a cover it
- * leaves a quiet placeholder so rows stay aligned.
+ * A tiny album cover. Clicking it opens the album's details. Music without a
+ * cover (no album, no match, or an image that fails to load) shows nothing.
  */
 
 import { useState } from 'react';
@@ -12,9 +12,7 @@ export function AlbumArt({ artId, size = 24 }: { artId?: string | null; size?: n
   const [failed, setFailed] = useState(false);
   const box = { width: size, height: size };
 
-  if (!artId || failed) {
-    return <span aria-hidden="true" className="inline-block shrink-0 rounded bg-gray-200/60 dark:bg-gray-700/50" style={box} />;
-  }
+  if (!artId || failed) return null;
   return (
     <>
       <button

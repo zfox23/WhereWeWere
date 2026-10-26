@@ -31,10 +31,9 @@ describe('AlbumArt', () => {
     albumMock.mockReset();
   });
 
-  it('leaves a placeholder without a cover', () => {
+  it('renders nothing without a cover', () => {
     const { container } = render(<AlbumArt artId={null} size={24} />);
-    expect(screen.queryByRole('button')).toBeNull();
-    expect(container.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+    expect(container.innerHTML).toBe('');
   });
 
   it('opens the album details with the large cover, release info and play counts', async () => {
@@ -68,10 +67,10 @@ describe('AlbumArt', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('falls back to the placeholder when the image fails to load', async () => {
+  it('disappears when the image fails to load', async () => {
     const { container } = render(<AlbumArt artId="a1" />);
     container.querySelector('img')!.dispatchEvent(new Event('error'));
-    await waitFor(() => expect(screen.queryByRole('button')).toBeNull());
+    await waitFor(() => expect(container.innerHTML).toBe(''));
   });
 
   it('formats release dates, leaving partial ones as they are', () => {
