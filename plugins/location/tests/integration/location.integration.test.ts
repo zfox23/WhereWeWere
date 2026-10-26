@@ -154,6 +154,75 @@ describe('Location plugin API (integration)', () => {
     });
   });
 
+  describe('GET /venues/library: search, filter, sort and paging', () => {
+    const lib = async (qs = '') => (await request(app).get(`/api/v1/venues/library${qs}`)).body as { rows: any[]; total: number };
+
+    async function seed() {
+      const cafe = (await query(`INSERT INTO venue_categories (name) VALUES ('Cafe') RETURNING id`)).rows[0].id;
+      const park = (await query(`INSERT INTO venue_categories (name) VALUES ('Park') RETURNING id`)).rows[0].id;
+      const ids: Record<string, string> = {};
+      for (const [name, cat, rating, at] of [
+        ['Alpha Cafe', cafe, 1, '2024-01-01T12:00:00Z'],
+        ['Beta 50%_Off Cafe', cafe, 3, '2024-02-01T12:00:00Z'],
+        ['Gamma Park', park, null, '2024-03-01T12:00:00Z'],
+        ['Delta Park', park, 4, '2024-04-01T12:00:00Z'],
+      ] as const) {
+        const id = await insertVenue(name, 20 + Object.keys(ids).length, 20);
+        await query('UPDATE venues SET category_id = $2, rating = $3 WHERE id = $1', [id, cat, rating]);
+        await insertCheckin(id, at);
+        ids[name] = id;
+      }
+      await insertVenue('Never Visited', 30, 30);
+      return ids;
+    }
+
+    it('pages the results and reports the total across all pages', async () => {
+      await seed();
+      const first = await lib('?limit=3');
+      expect(first.total).toBe(4); // venues without check-ins are not in the library
+      expect(first.rows.map((r) => r.name)).toEqual(['Delta Park', 'Gamma Park', 'Beta 50%_Off Cafe']);
+      const second = await lib('?limit=3&offset=3');
+      expect(second.rows.map((r) => r.name)).toEqual(['Alpha Cafe']);
+      expect(second.total).toBe(4);
+    });
+
+    it('searches by name, treating % and _ literally', async () => {
+      await seed();
+      expect((await lib('?q=park')).rows.map((r) => r.name).sort()).toEqual(['Delta Park', 'Gamma Park']);
+      expect((await lib('?q=50%25_off')).rows.map((r) => r.name)).toEqual(['Beta 50%_Off Cafe']);
+      expect((await lib('?q=%25')).rows.map((r) => r.name)).toEqual(['Beta 50%_Off Cafe']);
+      expect((await lib('?q=park')).total).toBe(2);
+    });
+
+    it('filters by category and by list, together with a search', async () => {
+      const ids = await seed();
+      expect((await lib('?category=caf')).rows.map((r) => r.name).sort()).toEqual(['Alpha Cafe', 'Beta 50%_Off Cafe']);
+      const list = (await request(app).post('/api/v1/venues/lists').send({ name: 'Picks' })).body;
+      await query('INSERT INTO venue_list_items (list_id, venue_id) VALUES ($1, $2), ($1, $3)', [list.id, ids['Alpha Cafe'], ids['Gamma Park']]);
+      expect((await lib(`?list=${list.id}`)).rows.map((r) => r.name).sort()).toEqual(['Alpha Cafe', 'Gamma Park']);
+      expect((await lib(`?list=${list.id}&category=park`)).rows.map((r) => r.name)).toEqual(['Gamma Park']);
+      expect((await lib(`?list=${list.id}&q=zzz`)).total).toBe(0);
+      expect((await lib('?list=not-a-uuid')).total).toBe(4); // ignored
+    });
+
+    it('sorts by the whitelisted columns with nulls last, and ignores unknown sorts', async () => {
+      await seed();
+      expect((await lib('?sort=name&dir=asc')).rows.map((r) => r.name)).toEqual(['Alpha Cafe', 'Beta 50%_Off Cafe', 'Delta Park', 'Gamma Park']);
+      expect((await lib('?sort=rating&dir=desc')).rows.map((r) => r.name)).toEqual(['Delta Park', 'Beta 50%_Off Cafe', 'Alpha Cafe', 'Gamma Park']);
+      expect((await lib('?sort=rating&dir=asc')).rows.map((r) => r.name)).toEqual(['Alpha Cafe', 'Beta 50%_Off Cafe', 'Delta Park', 'Gamma Park']);
+      expect((await lib('?sort=bogus;DROP')).rows[0].name).toBe('Delta Park');
+    });
+
+    it('respects the date range and attaches list names to the page', async () => {
+      const ids = await seed();
+      const list = (await request(app).post('/api/v1/venues/lists').send({ name: 'Picks' })).body;
+      await query('INSERT INTO venue_list_items (list_id, venue_id) VALUES ($1, $2)', [list.id, ids['Gamma Park']]);
+      const ranged = await lib('?from=2024-02-15&to=2024-03-15');
+      expect(ranged.total).toBe(1);
+      expect(ranged.rows[0]).toMatchObject({ name: 'Gamma Park', lists: ['Picks'], checkin_count: 1 });
+    });
+  });
+
   describe('shared list kit: bulk ranks, gaps and rank sessions', () => {
     const session = (ids: string[]) => ({
       mode: 'scratch', initialRanks: Object.fromEntries(ids.map((i) => [i, null])), itemIds: ids,

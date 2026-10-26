@@ -20,6 +20,7 @@ import { createImportUpload, removeImportFile } from '../../server/src/plugins/u
 import { pluginTimestampUnion } from '../../server/src/plugins/registry';
 import { parseCheckinIdList, isUuid } from '../../server/src/services/batching';
 import { clampInt } from '../../server/src/services/queryParams';
+import { parseLibraryParams } from '../../server/src/services/libraryQuery';
 import { normalizeCompanions } from '../../server/src/services/companions';
 import { tokensMatch } from '../../server/src/services/tokens';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
@@ -69,6 +70,7 @@ import {
   getListeningBefore,
   getReflectionTracks,
   getLibrary,
+  LIBRARY_SORTS,
   getMusicSettings,
   getSessionTracks,
   getTotals,
@@ -287,12 +289,8 @@ musicRouter.get('/library', async (req: Request, res: Response) => {
       : 'songs';
     const from = dateParam(req.query.from);
     const to = dateParam(req.query.to);
-    const limit = clampInt(req.query.limit, { fallback: 100, min: 1, max: 500 });
-    const offset = clampInt(req.query.offset, { fallback: 0, min: 0, max: 1_000_000 });
-    const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : '';
-    const sort = typeof req.query.sort === 'string' ? req.query.sort : undefined;
-    const dir = req.query.dir === 'asc' ? 'asc' : 'desc';
-    res.json(await getLibrary(USER_ID, view, from, to, { limit, offset, q, sort, dir }));
+    const params = parseLibraryParams(req.query, { sorts: Object.keys(LIBRARY_SORTS), defaultSort: 'plays' });
+    res.json(await getLibrary(USER_ID, view, from, to, params));
   } catch (err) {
     console.error('Error loading music library:', err);
     res.status(500).json({ error: 'Failed to load library' });

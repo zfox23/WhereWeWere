@@ -90,13 +90,21 @@ export const venues = {
   list: (params?: Record<string, string>) =>
     request<any[]>(`/venues?${new URLSearchParams(params)}`),
   get: (id: string) => request<any>(`/venues/${id}`),
-  // "All Venues" library view (venues with at least one check-in).
-  library: (from?: string, to?: string) => {
+  // "All Venues" library view (venues with at least one check-in), searched,
+  // filtered, sorted and paged by the server.
+  library: (
+    from?: string,
+    to?: string,
+    opts: { q?: string; category?: string; list?: string; sort?: string; dir?: 'asc' | 'desc'; limit?: number; offset?: number } = {},
+  ) => {
     const qp = new URLSearchParams();
     if (from) qp.set('from', from);
     if (to) qp.set('to', to);
+    for (const [key, value] of Object.entries(opts)) {
+      if (value !== undefined && value !== '') qp.set(key, String(value));
+    }
     const qs = qp.toString();
-    return request<any[]>(`/venues/library${qs ? `?${qs}` : ''}`);
+    return request<{ rows: any[]; total: number }>(`/venues/library${qs ? `?${qs}` : ''}`);
   },
   create: (data: any) =>
     request<any>('/venues', { method: 'POST', body: JSON.stringify(data) }),

@@ -38,6 +38,8 @@ import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
 import { pagination, parseYear, parseMonth } from '../../server/src/services/queryParams';
 import { createListKit } from '../../server/src/services/lists';
+import { isUuid } from '../../server/src/services/batching';
+import { likeText, orderBy, pageResult, parseLibraryParams } from '../../server/src/services/libraryQuery';
 import { mountRankRoutes } from '../../server/src/services/lists/routes';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
@@ -1804,41 +1806,75 @@ venuesRouter.delete('/lists/:id/items/:venueId', async (req: Request, res: Respo
 // with at least one check-in in range (all venues with check-ins when no range),
 // including its rating, most recent check-in, check-in count, and list names.
 // ---------------------------------------------------------------------------
+const VENUE_LIBRARY_SORTS: Record<string, string> = {
+  name: 'lower(g.name)',
+  category: 'lower(g.category_name)',
+  rating: 'g.rating',
+  checkin_count: 'g.checkin_count',
+  last_checkin: 'g.last_checkin_at',
+};
+
+// Also: q (name contains), category (category name contains), list (a venue list id),
+// sort (name|category|rating|checkin_count|last_checkin), dir, limit (1-500, default 100)
+// and offset. Responds { rows, total }, where total counts every match, not just this page.
 venuesRouter.get('/library', async (req: Request, res: Response) => {
   try {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
     const includeUnchecked = !from && !to;
+    const p = parseLibraryParams(req.query, { sorts: Object.keys(VENUE_LIBRARY_SORTS), defaultSort: 'last_checkin' });
+    const category = typeof req.query.category === 'string' ? req.query.category.trim().slice(0, 200) : '';
+    const listId = typeof req.query.list === 'string' && isUuid(req.query.list) ? req.query.list : null;
 
     const params: unknown[] = [USER_ID];
-    const dateConditions: string[] = [];
+    const conditions: string[] = [];
     if (from) {
-      dateConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${params.length + 1}::date`);
+      conditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${params.length + 1}::date`);
       params.push(from);
     }
     if (to) {
-      dateConditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $${params.length + 1}::date`);
+      conditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date <= $${params.length + 1}::date`);
       params.push(to);
+    }
+    if (p.q) {
+      params.push(likeText(p.q));
+      conditions.push(`lower(v.name) LIKE '%' || $${params.length} || '%' ESCAPE '\\'`);
+    }
+    if (category) {
+      params.push(likeText(category));
+      conditions.push(`lower(vc.name) LIKE '%' || $${params.length} || '%' ESCAPE '\\'`);
+    }
+    if (listId) {
+      params.push(listId);
+      conditions.push(
+        `EXISTS (SELECT 1 FROM venue_list_items vli JOIN venue_lists vl ON vl.id = vli.list_id
+                 WHERE vli.venue_id = v.id AND vli.list_id = $${params.length} AND vl.user_id = $1)`
+      );
     }
     const join = includeUnchecked
       ? `LEFT JOIN checkins c ON c.venue_id = v.id AND c.user_id = $1`
       : `JOIN checkins c ON c.venue_id = v.id AND c.user_id = $1`;
 
-    const result = await query(
-      `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.rating,
-              vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
-              (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_at,
-              (ARRAY_AGG(c.checkin_timezone ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_timezone,
-              COUNT(c.id) FILTER (WHERE c.id IS NOT NULL)::int AS checkin_count
-       FROM venues v
-       ${join}
-       LEFT JOIN venue_categories vc ON v.category_id = vc.id
-       ${dateConditions.length ? `WHERE ${dateConditions.join(' AND ')}` : ''}
-       GROUP BY v.id, vc.id, vc.name, vc.icon
-       HAVING COUNT(c.id) > 0
-       ORDER BY last_checkin_at DESC NULLS LAST`,
+    const paged = pageResult((await query(
+      `SELECT g.*, COUNT(*) OVER()::int AS total
+       FROM (
+         SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.rating,
+                vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
+                (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_at,
+                (ARRAY_AGG(c.checkin_timezone ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_timezone,
+                COUNT(c.id) FILTER (WHERE c.id IS NOT NULL)::int AS checkin_count
+         FROM venues v
+         ${join}
+         LEFT JOIN venue_categories vc ON v.category_id = vc.id
+         ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+         GROUP BY v.id, vc.id, vc.name, vc.icon
+         HAVING COUNT(c.id) > 0
+       ) g
+       ORDER BY ${orderBy(VENUE_LIBRARY_SORTS, p.sort, p.dir, 'g.last_checkin_at DESC NULLS LAST, lower(g.name)')}
+       LIMIT ${p.limit} OFFSET ${p.offset}`,
       params
-    );
+    )).rows);
+    const result = { rows: paged.rows };
 
     // List names per venue (only for venues returned above).
     const venueIds = result.rows.map((r: any) => r.id);
@@ -1859,10 +1895,13 @@ venuesRouter.get('/library', async (req: Request, res: Response) => {
       }
     }
 
-    res.json(result.rows.map((r: any) => serializeVenue({
-      ...r,
-      lists: listNamesByVenue.get(r.id) || [],
-    })));
+    res.json({
+      rows: result.rows.map((r: any) => serializeVenue({
+        ...r,
+        lists: listNamesByVenue.get(r.id) || [],
+      })),
+      total: paged.total,
+    });
   } catch (err) {
     console.error('Error getting venue library:', err);
     res.status(500).json({ error: 'Failed to get venue library' });

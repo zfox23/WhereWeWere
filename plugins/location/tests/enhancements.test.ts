@@ -451,6 +451,7 @@ describe('venue library (endpoints)', () => {
             last_checkin_at: '2026-05-01T12:00:00Z',
             last_checkin_timezone: 'America/New_York',
             checkin_count: 2,
+            total: 1,
           },
         ],
       })
@@ -458,8 +459,9 @@ describe('venue library (endpoints)', () => {
 
     const res = await request(app()).get('/venues/library');
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(1);
-    expect(res.body[0]).toMatchObject({
+    expect(res.body.total).toBe(1);
+    expect(res.body.rows).toHaveLength(1);
+    expect(res.body.rows[0]).toMatchObject({
       id: 'v1',
       name: 'Coffee',
       rating: 3,
@@ -475,6 +477,46 @@ describe('venue library (endpoints)', () => {
     expect(sql).toContain('HAVING COUNT(c.id) > 0');
     expect(sql).toContain('JOIN checkins c ON c.venue_id = v.id AND c.user_id = $1');
     expect(values).toEqual([USER_ID, '2026-01-01', '2026-01-31']);
+  });
+});
+
+describe('venue library search, sort and paging (endpoints)', () => {
+  const LIST = '00000000-0000-4000-8000-0000000000aa';
+
+  it('passes search, category and list as bound parameters, escaping wildcards', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await request(app()).get(`/venues/library?q=50%25_Off&category=Caf%C3%A9&list=${LIST}`);
+    const [sql, values] = queryMock.mock.calls[0];
+    expect(values).toEqual([USER_ID, '50\\%\\_off', 'café', LIST]);
+    expect(sql).toContain("lower(v.name) LIKE '%' || $2 || '%'");
+    expect(sql).toContain("lower(vc.name) LIKE '%' || $3 || '%'");
+    expect(sql).toContain('vli.list_id = $4');
+  });
+
+  it('ignores a list id that is not a UUID', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await request(app()).get('/venues/library?list=1;DROP');
+    const [sql, values] = queryMock.mock.calls[0];
+    expect(values).toEqual([USER_ID]);
+    expect(sql).not.toContain('venue_list_items vli');
+  });
+
+  it('orders by a whitelisted sort and bounds limit and offset', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await request(app()).get('/venues/library?sort=rating&dir=asc&limit=9999&offset=-5');
+    const [sql] = queryMock.mock.calls[0];
+    expect(sql).toContain('ORDER BY g.rating ASC NULLS LAST');
+    expect(sql).toContain('LIMIT 500 OFFSET 0');
+
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await request(app()).get('/venues/library?sort=name;DROP');
+    expect(queryMock.mock.calls[1][0]).toContain('ORDER BY g.last_checkin_at DESC NULLS LAST');
+  });
+
+  it('returns an empty page with a zero total', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app()).get('/venues/library');
+    expect(res.body).toEqual({ rows: [], total: 0 });
   });
 });
 

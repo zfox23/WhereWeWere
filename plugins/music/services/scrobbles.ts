@@ -11,7 +11,7 @@ import { allPlugins } from '../../../server/src/plugins/registry';
 import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
 import { lookupAlbumSoon } from './albums';
 import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql } from './identity';
-import { escapeLike } from '../../../server/src/services/queryParams';
+import { likeText, orderBy } from '../../../server/src/services/libraryQuery';
 import { companionNamesSql, deleteCompanionsForCheckins, setCompanions } from '../../../server/src/services/companions';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './constants';
 
@@ -806,7 +806,7 @@ export interface LibraryOptions {
 }
 
 /** Sortable columns, as the outer query names them. */
-const LIBRARY_SORTS: Record<string, string> = {
+export const LIBRARY_SORTS: Record<string, string> = {
   name: 'lower(g.name)',
   artists: 'lower(g.artists::text)',
   album: "lower(COALESCE(g.album, ''))",
@@ -833,7 +833,7 @@ export async function getLibrary(
   to: string | null,
   opts: LibraryOptions,
 ): Promise<{ rows: any[]; total: number }> {
-  const q = escapeLike((opts.q ?? '').trim().toLowerCase());
+  const q = likeText(opts.q ?? '');
   // $1 user, $2/$3 range (IN_RANGE), $4 search text, $5 limit, $6 offset.
   const params = [...rangeParams(userId, from, to), q, opts.limit, opts.offset ?? 0];
   const agg = `COUNT(*)::int AS plays,
@@ -873,13 +873,12 @@ export async function getLibrary(
                GROUP BY ${songKeySql()}
                HAVING $4 = '' OR ${like("title || ' ' || array_to_string(artists, ' ') || ' ' || COALESCE(album, '')")}`;
   }
-  const sortExpr = LIBRARY_SORTS[opts.sort ?? ''] ?? LIBRARY_SORTS.plays;
-  const dir = opts.dir === 'asc' ? 'ASC' : 'DESC';
+  const sort = opts.sort && LIBRARY_SORTS[opts.sort] ? opts.sort : 'plays';
   const sql = `SELECT g.*, a.id AS art_id, COUNT(*) OVER()::int AS total
                FROM (${grouped}) g
                LEFT JOIN music_albums a
                  ON a.user_id = $1 AND a.album_key = g.album_ref AND a.thumb_file IS NOT NULL
-               ORDER BY ${sortExpr} ${dir} NULLS LAST, g.last_played_at DESC, lower(g.name)
+               ORDER BY ${orderBy(LIBRARY_SORTS, sort, opts.dir ?? 'desc', 'g.last_played_at DESC, lower(g.name)')}
                LIMIT $5 OFFSET $6`;
   const result = await query(sql, params);
   const rows = result.rows.map(({ total: _t, ...row }) => {

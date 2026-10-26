@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { usePagedLibrary, useDebouncedValue } from '../../../client/src/hooks/usePagedLibrary';
+import { PagingFooter } from '../../../client/src/components/lists/PagingFooter';
 import { ArrowDown, ArrowUp, Loader2, Search, Tag } from 'lucide-react';
 import { venues, venueLists } from '../../../client/src/api/client';
 import { formatDate } from '../../../client/src/utils/checkin';
@@ -14,77 +16,58 @@ interface VenuesLibrarySectionProps {
 type SortKey = 'name' | 'category' | 'rating' | 'checkin_count' | 'last_checkin';
 type SortDir = 'asc' | 'desc';
 
-function sortValue(item: VenueLibraryItem, key: SortKey): number {
-  switch (key) {
-    case 'rating':
-      return item.rating ?? -Infinity;
-    case 'checkin_count':
-      return item.checkin_count ?? 0;
-    case 'last_checkin':
-      return item.last_checkin_at ? new Date(item.last_checkin_at).getTime() : -Infinity;
-    default:
-      return 0;
-  }
-}
+const PAGE_SIZE = 100;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
-  const [items, setItems] = useState<VenueLibraryItem[]>([]);
   const [lists, setLists] = useState<VenueList[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [initialLoaded, setInitialLoaded] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>('last_checkin');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [nameQuery, setNameQuery] = useState('');
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [categoryQuery, setCategoryQuery] = useState('');
   const [categoryFocused, setCategoryFocused] = useState(false);
+  const [knownCategories, setKnownCategories] = useState<string[]>([]);
 
-  // Distinct category names present in the loaded items (for autocomplete).
+  // Text filters go to the server a moment after typing stops.
+  const nameText = useDebouncedValue(nameQuery.trim(), SEARCH_DEBOUNCE_MS);
+  const categoryText = useDebouncedValue(categoryQuery.trim(), SEARCH_DEBOUNCE_MS);
+
+  // A new filter, sort or period starts again from the first page.
+  const { rows: items, total, loading, loadingMore, loadMore } = usePagedLibrary<VenueLibraryItem>(
+    (offset) =>
+      venues.library(from || undefined, to || undefined, {
+        q: nameText, category: categoryText, list: selectedListId ?? undefined,
+        sort: sortBy, dir: sortDir, limit: PAGE_SIZE, offset: offset || undefined,
+      }) as Promise<{ rows: VenueLibraryItem[]; total: number }>,
+    [from, to, nameText, categoryText, selectedListId, sortBy, sortDir],
+  );
+
+  // Category names for the autocomplete: every category, plus any seen on loaded rows.
+  useEffect(() => {
+    Promise.resolve()
+      .then(() => venues.categories())
+      .then((cats) => setKnownCategories((cats as { name: string }[]).map((c) => c.name)))
+      .catch(() => {});
+  }, []);
+
   const categoryOptions = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const item of items) {
-      const name = item.category_name?.trim();
-      if (!name) continue;
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
+    for (const raw of [...knownCategories, ...items.map((i) => i.category_name ?? '')]) {
+      const name = raw.trim();
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
       out.push(name);
     }
     return out.sort((a, b) => a.localeCompare(b));
-  }, [items]);
+  }, [knownCategories, items]);
 
   const categorySuggestions = useMemo(() => {
     const q = categoryQuery.trim().toLowerCase();
     if (!q) return [];
-    return categoryOptions
-      .filter((c) => c.toLowerCase().includes(q))
-      .slice(0, 8);
+    return categoryOptions.filter((c) => c.toLowerCase().includes(q)).slice(0, 8);
   }, [categoryOptions, categoryQuery]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    venues
-      .library(from || undefined, to || undefined)
-      .then((data) => {
-        if (cancelled) return;
-        setItems(data as VenueLibraryItem[]);
-      })
-      .catch((err) => {
-        console.error('Failed to load venue library:', err);
-        if (!cancelled) setItems([]);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setInitialLoaded(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [from, to]);
 
   useEffect(() => {
     venueLists
@@ -92,57 +75,6 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
       .then((data) => setLists(data as VenueList[]))
       .catch(() => setLists([]));
   }, []);
-
-  const selectedList = useMemo(
-    () => lists.find((l) => l.id === selectedListId) ?? null,
-    [lists, selectedListId]
-  );
-
-  const visibleItems = useMemo(() => {
-    let filtered = items;
-
-    // Filter by list membership.
-    if (selectedList) {
-      const ids = new Set(selectedList.items.map((i) => i.id));
-      filtered = filtered.filter((item) => ids.has(item.id));
-    }
-
-    // Filter by name (text).
-    const name = nameQuery.trim().toLowerCase();
-    if (name) {
-      filtered = filtered.filter((item) => item.name.toLowerCase().includes(name));
-    }
-
-    // Filter by venue category (text with autocomplete; substring match).
-    const cat = categoryQuery.trim().toLowerCase();
-    if (cat) {
-      filtered = filtered.filter((item) =>
-        item.category_name?.toLowerCase().includes(cat)
-      );
-    }
-
-    const sorted = [...filtered];
-    sorted.sort((a, b) => {
-      let cmp: number;
-      if (sortBy === 'name') {
-        cmp = a.name.localeCompare(b.name);
-      } else if (sortBy === 'category') {
-        cmp = (a.category_name ?? '').localeCompare(b.category_name ?? '');
-      } else {
-        const va = sortValue(a, sortBy);
-        const vb = sortValue(b, sortBy);
-        cmp = va - vb;
-      }
-      if (cmp === 0) {
-        const ta = a.last_checkin_at ? new Date(a.last_checkin_at).getTime() : 0;
-        const tb = b.last_checkin_at ? new Date(b.last_checkin_at).getTime() : 0;
-        if (tb - ta !== 0) return tb - ta;
-        return a.name.localeCompare(b.name);
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [items, selectedList, nameQuery, categoryQuery, sortBy, sortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortBy === key) {
@@ -154,7 +86,7 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
   };
 
   const hasActiveFilter = Boolean(
-    nameQuery.trim() || categoryQuery.trim() || selectedListId
+    nameText || categoryText || selectedListId
   );
 
   const headerCell = (key: SortKey, label: string) => (
@@ -187,7 +119,7 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
           All Venues
           {!loading && (
             <span className="ml-2 text-xs font-normal text-gray-400">
-              {visibleItems.length}{hasActiveFilter ? ` of ${items.length}` : ''}
+              {total.toLocaleString()}
             </span>
           )}
         </h2>
@@ -260,11 +192,11 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
         </select>
       </div>
 
-      {loading ? (
+      {loading && items.length === 0 ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="animate-spin text-primary-600" size={24} />
         </div>
-      ) : visibleItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <p className="text-sm text-gray-400">
           {hasActiveFilter
             ? 'No venues match the current filters.'
@@ -273,7 +205,8 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
               : 'No venues in your library yet.'}
         </p>
       ) : (
-        <div className="overflow-x-auto -mx-1 px-1">
+        // Rows stay up (dimmed) while a new sort or filter loads, so the headers don't vanish under the pointer.
+        <div className={`overflow-x-auto -mx-1 px-1 transition-opacity ${loading ? 'opacity-50' : ''}`} aria-busy={loading}>
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -284,7 +217,7 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
               </tr>
             </thead>
             <tbody>
-              {visibleItems.map((item) => (
+              {items.map((item) => (
                 <tr
                   key={item.id}
                   className="border-b border-gray-100 dark:border-gray-800 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
@@ -328,6 +261,9 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
           </table>
         </div>
       )}
+      <div className="mt-3">
+        <PagingFooter shown={items.length} total={total} loadingMore={loadingMore} onMore={loadMore} />
+      </div>
     </div>
   );
 }

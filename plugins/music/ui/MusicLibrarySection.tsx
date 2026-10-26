@@ -7,6 +7,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Search, X } from 'lucide-react';
+import { usePagedLibrary, useDebouncedValue } from '../../../client/src/hooks/usePagedLibrary';
+import { PagingFooter } from '../../../client/src/components/lists/PagingFooter';
 import { music } from './api';
 import { AlbumArt } from './AlbumArt';
 import { AlbumLink } from './AlbumLink';
@@ -107,59 +109,18 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   const [sortBy, setSortBy] = useState(initial.sortBy);
   const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
   const [query, setQuery] = useState(initial.query);
-  const [rows, setRows] = useState<MusicAggregate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
 
   // The search text is sent a moment after typing stops.
-  const [searchText, setSearchText] = useState(initial.query.trim());
-  useEffect(() => {
-    const timer = setTimeout(() => setSearchText(query.trim()), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  const [total, setTotal] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const searchText = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
 
   // A new view, search, sort or range starts again from the first page.
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(false);
-    music
-      .library(view, from || undefined, to || undefined, { q: searchText, sort: sortBy, dir: sortDir, limit: PAGE_SIZE })
-      .then((data) => {
-        if (cancelled) return;
-        setRows(data.rows);
-        setTotal(data.total);
-      })
-      .catch((err) => {
-        console.error('Failed to load music library:', err);
-        if (!cancelled) {
-          setRows([]);
-          setTotal(0);
-          setError(true);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [view, from, to, searchText, sortBy, sortDir]);
-
-  const loadMore = () => {
-    setLoadingMore(true);
-    music
-      .library(view, from || undefined, to || undefined, { q: searchText, sort: sortBy, dir: sortDir, limit: PAGE_SIZE, offset: rows.length })
-      .then((data) => {
-        setRows((prev) => [...prev, ...data.rows]);
-        setTotal(data.total);
-      })
-      .catch(() => setError(true))
-      .finally(() => setLoadingMore(false));
-  };
+  const { rows, total, loading, loadingMore, error, loadMore } = usePagedLibrary<MusicAggregate>(
+    (offset) =>
+      music.library(view, from || undefined, to || undefined, {
+        q: searchText, sort: sortBy, dir: sortDir, limit: PAGE_SIZE, ...(offset ? { offset } : {}),
+      }),
+    [view, from, to, searchText, sortBy, sortDir],
+  );
 
   // Re-sync with the URL on back/forward.
   useEffect(() => {
@@ -330,19 +291,7 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
           </tbody>
         </table>
       </div>
-      {rows.length > 0 && (
-        <div className="flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
-          <span>
-            Showing {rows.length.toLocaleString()} of {total.toLocaleString()}
-          </span>
-          {rows.length < total && (
-            <button type="button" onClick={loadMore} disabled={loadingMore} className="btn-secondary inline-flex items-center gap-1.5 !py-1 text-xs">
-              {loadingMore && <Loader2 size={12} className="animate-spin" />}
-              Show more
-            </button>
-          )}
-        </div>
-      )}
+      <PagingFooter shown={rows.length} total={total} loadingMore={loadingMore} onMore={loadMore} />
     </section>
   );
 }
