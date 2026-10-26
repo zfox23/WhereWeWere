@@ -255,6 +255,105 @@ describe('music metadata', () => {
     expect((await query(`SELECT track_length FROM music_scrobbles WHERE title = 'Late Arrival'`)).rows[0].track_length).toBe(200);
   });
 
+  describe('backup', () => {
+    const exportZip = () =>
+      new Promise<Buffer>((resolve, reject) => {
+        request(app)
+          .get('/api/v1/backup/export')
+          .buffer(true)
+          .parse((res: any, cb: any) => {
+            const chunks: Buffer[] = [];
+            res.on('data', (c: Buffer) => chunks.push(c));
+            res.on('end', () => cb(null, Buffer.concat(chunks)));
+          })
+          .end((err: any, res: any) => (err ? reject(err) : resolve(res.body as Buffer)));
+      });
+    const wipe = async () => {
+      const { server } = await import('../../server');
+      await server.deleteUserData!({ user_id: DEFAULT_USER_ID });
+      fs.rmSync(path.join(dataDir, 'music-art'), { recursive: true, force: true });
+    };
+    const seed = async () => {
+      await push('Sun & Moon', 'Group Therapy');
+      await push('Mystery', 'Unfindable', ['Someone'], 600);
+      useDeps(async (album) => (album === 'Group Therapy' ? match() : null));
+      await backfill();
+    };
+
+    it('round-trips matches, tracklists and thumbnails through a ZIP backup, with no network', async () => {
+      await seed();
+      const zip = await exportZip();
+      await wipe();
+      expect((await query('SELECT 1 FROM music_albums')).rowCount).toBe(0);
+
+      setAlbumDeps(null); // restoring must not look anything up
+      const res = await request(app).post('/api/v1/backup/import').attach('file', zip, 'backup.zip').set('Content-Type', 'application/zip');
+      expect(res.status).toBe(200);
+      expect(res.body.errors).toHaveLength(0);
+
+      const rows = (await query(`SELECT album_key, status, title, release_date, label, thumb_file, large_url, tracks FROM music_albums ORDER BY album_key`)).rows;
+      expect(rows.map((r: any) => [r.album_key, r.status])).toEqual([
+        ['group therapy|above & beyond', 'matched'],
+        ['unfindable|someone', 'not_found'],
+      ]);
+      expect(rows[0]).toMatchObject({ title: 'Group Therapy', release_date: '2011-06-14', label: 'Anjunabeats', thumb_file: 'deezer-42-thumb.jpg', large_url: 'https://img/1000.jpg' });
+      expect(rows[0].tracks.map((t: any) => [t.title, t.length])).toEqual([['Filaments', 300], ['Sun & Moon', 321], ['Oceanic', 250]]);
+      expect(fs.existsSync(path.join(dataDir, 'music-art', 'deezer-42-thumb.jpg'))).toBe(true);
+
+      const id = rows.length && (await query(`SELECT id FROM music_albums WHERE status = 'matched'`)).rows[0].id;
+      expect((await request(app).get(`/api/v1/music/albums/${id}/art`)).status).toBe(200);
+      expect((await request(app).get(`/api/v1/music/albums/${id}`)).body.plays).toBe(1);
+
+      // Nothing is left to look up: the not-found result was kept too.
+      finds = [];
+      useDeps(async () => { throw new Error('should not be called'); });
+      await backfill();
+      expect(finds).toEqual([]);
+    });
+
+    it('restores from JSON alone and downloads the missing thumbnails on the next update', async () => {
+      await seed();
+      const { server } = await import('../../server');
+      const payload = await server.backupExport!({ user_id: DEFAULT_USER_ID });
+      await wipe();
+      await server.backupImport!({ user_id: DEFAULT_USER_ID }, payload);
+      const row = (await query(`SELECT thumb_file, thumb_url FROM music_albums WHERE status = 'matched'`)).rows[0];
+      expect(row).toEqual({ thumb_file: null, thumb_url: 'https://img/250.jpg' });
+
+      imageHits = [];
+      await backfill();
+      expect((await status()).job.thumbnails_restored).toBe(1);
+      expect(imageHits).toEqual(['https://img/250.jpg']);
+      expect((await query(`SELECT thumb_file FROM music_albums WHERE status = 'matched'`)).rows[0].thumb_file).toBe('deezer-42-thumb.jpg');
+    });
+
+    it('does not repeat a thumbnail download for a release that has no cover', async () => {
+      await push('Sun & Moon', 'Group Therapy');
+      useDeps(async () => match(), 404);
+      await backfill();
+      imageHits = [];
+      await backfill();
+      expect(imageHits).toEqual([]);
+    });
+
+    it('ignores malformed album rows and untrusted file names', async () => {
+      const { server } = await import('../../server');
+      await push('Sun & Moon', 'Group Therapy');
+      await server.backupImport!({ user_id: DEFAULT_USER_ID }, {
+        scrobbles: [],
+        albums: [
+          null,
+          { album_key: 'x', status: 'matched', provider: 'evil', external_id: '1' },
+          { album_key: 'y', status: 'matched', provider: 'deezer', external_id: '../../etc/passwd', title: 'T', tracks: [{ title: 'ok', length: -5 }, { nope: 1 }], has_thumb: true },
+        ],
+      });
+      const rows = (await query(`SELECT album_key, external_id, thumb_file, tracks FROM music_albums`)).rows;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].thumb_file).toBeNull();
+      expect(rows[0].tracks).toEqual([{ position: 1, title: 'ok', length: null }]);
+    });
+  });
+
   it('removes albums on start-over and collects their files on the next lookup', async () => {
     await push('Sun & Moon', 'Group Therapy');
     useDeps(async () => match());

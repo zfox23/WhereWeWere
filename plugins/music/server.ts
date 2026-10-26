@@ -36,6 +36,9 @@ import { parseLastfmCsv } from './services/lastfmCsv';
 import {
   albumLookupEnabled,
   cancelBackfill,
+  exportAlbums,
+  importAlbums,
+  listThumbnailFiles,
   getAlbumArtFile,
   getAlbumCounts,
   getAlbumDetail,
@@ -487,14 +490,19 @@ export const server: CheckinTypeServerPlugin = {
       session_gap_minutes: settings.session_gap_minutes,
       timezone: settings.timezone,
       scrobbles: result.rows,
+      // Album matches, release info and tracklists; thumbnails travel as files.
+      albums: await exportAlbums(user_id),
     };
   },
 
-  backupImport: async ({ user_id, client }, payload) => {
+  backupFiles: async ({ user_id }) => ({ files: await listThumbnailFiles(user_id) }),
+
+  backupImport: async ({ user_id, client, filesDir }, payload) => {
     const body = (payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}) as {
       session_gap_minutes?: unknown;
       timezone?: unknown;
       scrobbles?: unknown;
+      albums?: unknown;
     };
     const rows = Array.isArray(body.scrobbles) ? body.scrobbles : Array.isArray(payload) ? payload : [];
     const scrobbles = rows.flatMap((r) => {
@@ -514,11 +522,14 @@ export const server: CheckinTypeServerPlugin = {
       }];
     });
     const gap = Number(body.session_gap_minutes);
-    return insertScrobblesBulk(user_id, scrobbles, {
+    const inserted = await insertScrobblesBulk(user_id, scrobbles, {
       db: client,
       sessionGapMinutes: Number.isInteger(gap) && gap >= 1 ? gap : undefined,
       fallbackTimezone: typeof body.timezone === 'string' && isValidTimeZone(body.timezone) ? body.timezone : undefined,
     });
+    // A cache: it doesn't count toward what was restored.
+    await importAlbums(client ?? { query }, user_id, body.albums, filesDir);
+    return inserted;
   },
 
   deleteUserData: async ({ user_id, client: txClient }) => {

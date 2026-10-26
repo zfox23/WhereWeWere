@@ -82,6 +82,7 @@ export interface AlbumBackfillStatus {
   matched: number;
   not_found: number;
   durations_filled: number;
+  thumbnails_restored: number;
   error: string | null;
 }
 

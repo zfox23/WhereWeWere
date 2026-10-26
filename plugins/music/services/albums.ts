@@ -134,17 +134,17 @@ async function storeMatch(userId: string, target: Target, match: AlbumMatch): Pr
     (match.thumbUrl ? await downloadImage(match.thumbUrl, THUMB_PX, 78, 'cover', thumbName) : false);
   await query(
     `INSERT INTO music_albums
-       (user_id, album_key, status, provider, external_id, title, artist, release_date, label, tracks, thumb_file, large_url)
-     VALUES ($1, $2, 'matched', $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+       (user_id, album_key, status, provider, external_id, title, artist, release_date, label, tracks, thumb_file, large_url, thumb_url)
+     VALUES ($1, $2, 'matched', $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12)
      ON CONFLICT (user_id, album_key) DO UPDATE SET
        status = 'matched', provider = EXCLUDED.provider, external_id = EXCLUDED.external_id,
        title = EXCLUDED.title, artist = EXCLUDED.artist, release_date = EXCLUDED.release_date,
        label = EXCLUDED.label, tracks = EXCLUDED.tracks, thumb_file = EXCLUDED.thumb_file,
-       large_url = EXCLUDED.large_url, looked_up_at = NOW()`,
+       large_url = EXCLUDED.large_url, thumb_url = EXCLUDED.thumb_url, looked_up_at = NOW()`,
     [
       userId, target.album_key, match.provider, match.externalId, match.title, match.artist,
       match.releaseDate, match.label, JSON.stringify(match.tracks),
-      haveThumb ? thumbName : null, match.largeUrl,
+      haveThumb ? thumbName : null, match.largeUrl, haveThumb ? match.thumbUrl : null,
     ],
   );
 }
@@ -183,6 +183,131 @@ const UNLOOKED = `
   FROM music_scrobbles m
   LEFT JOIN music_albums a ON a.user_id = m.user_id AND a.album_key = m.album_key
   WHERE m.user_id = $1 AND m.album_key IS NOT NULL AND a.album_key IS NULL`;
+
+// ---------------------------------------------------------------------------
+// Backup and restore
+// ---------------------------------------------------------------------------
+
+export interface AlbumBackupRow {
+  album_key: string;
+  status: 'matched' | 'not_found';
+  provider: string | null;
+  external_id: string | null;
+  title: string | null;
+  artist: string | null;
+  release_date: string | null;
+  label: string | null;
+  tracks: { position: number; title: string; length: number | null }[];
+  large_url: string | null;
+  thumb_url: string | null;
+  /** Whether a thumbnail file ships with the backup (named by provider + external id). */
+  has_thumb: boolean;
+}
+
+export async function exportAlbums(userId: string): Promise<AlbumBackupRow[]> {
+  const result = await query(
+    `SELECT album_key, status, provider, external_id, title, artist, release_date, label, tracks,
+            large_url, thumb_url, thumb_file
+     FROM music_albums WHERE user_id = $1 ORDER BY album_key`,
+    [userId],
+  );
+  return result.rows.map(({ thumb_file, ...row }) => ({
+    ...row,
+    has_thumb: Boolean(thumb_file) && fs.existsSync(artPath(thumb_file)),
+  }));
+}
+
+/** Thumbnail files to bundle in a ZIP backup, one per distinct release. */
+export async function listThumbnailFiles(userId: string): Promise<{ zipPath: string; absPath: string }[]> {
+  const result = await query(
+    `SELECT DISTINCT thumb_file FROM music_albums WHERE user_id = $1 AND status = 'matched' AND thumb_file IS NOT NULL`,
+    [userId],
+  );
+  return result.rows
+    .map((r: { thumb_file: string }) => r.thumb_file)
+    .filter((file: string) => fs.existsSync(artPath(file)))
+    .map((file: string) => ({ zipPath: `thumbnails/${file}`, absPath: artPath(file) }));
+}
+
+const PROVIDERS = new Set(['deezer', 'musicbrainz']);
+const text = (v: unknown, max = 500): string | null => (typeof v === 'string' && v.trim() ? v.slice(0, max) : null);
+
+/**
+ * Restore album rows (and, from a ZIP backup, their thumbnails) inside the
+ * restore transaction. Existing rows win. A row without its thumbnail keeps
+ * its `thumb_url`, so the next metadata update downloads it again.
+ */
+export async function importAlbums(
+  db: { query: typeof query },
+  userId: string,
+  rows: unknown,
+  filesDir?: string,
+): Promise<number> {
+  if (!Array.isArray(rows)) return 0;
+  let inserted = 0;
+  for (const raw of rows) {
+    const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const key = text(r.album_key, 1000);
+    if (!key || (r.status !== 'matched' && r.status !== 'not_found')) continue;
+    let provider: string | null = null;
+    let externalId: string | null = null;
+    let tracks: unknown[] = [];
+    let thumbFile: string | null = null;
+    if (r.status === 'matched') {
+      provider = text(r.provider, 20);
+      externalId = text(r.external_id, 200);
+      if (!provider || !PROVIDERS.has(provider) || !externalId) continue;
+      tracks = (Array.isArray(r.tracks) ? r.tracks : []).slice(0, 500).flatMap((t: any, i: number) => {
+        const title = text(t?.title, 500);
+        const length = Number(t?.length);
+        return title
+          ? [{ position: Number(t?.position) || i + 1, title, length: Number.isFinite(length) && length > 0 ? Math.round(length) : null }]
+          : [];
+      });
+      // The file name is derived, never taken from the backup.
+      const file = artFileName(provider, externalId, 'thumb');
+      const dest = artPath(file);
+      if (!fs.existsSync(dest) && filesDir && r.has_thumb === true) {
+        const src = path.resolve(filesDir, 'thumbnails', file);
+        if (src.startsWith(path.resolve(filesDir) + path.sep) && fs.existsSync(src)) {
+          fs.mkdirSync(artDir(), { recursive: true });
+          fs.copyFileSync(src, dest);
+        }
+      }
+      if (fs.existsSync(dest)) thumbFile = file;
+    }
+    const result = await db.query(
+      `INSERT INTO music_albums
+         (user_id, album_key, status, provider, external_id, title, artist, release_date, label, tracks, thumb_file, large_url, thumb_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)
+       ON CONFLICT (user_id, album_key) DO NOTHING`,
+      [
+        userId, key, r.status, provider, externalId, text(r.title), text(r.artist), text(r.release_date, 20), text(r.label),
+        JSON.stringify(tracks), thumbFile, text(r.large_url, 2000), text(r.thumb_url, 2000),
+      ],
+    );
+    inserted += result.rowCount ?? 0;
+  }
+  return inserted;
+}
+
+/** Download thumbnails that matched albums should have but don't (after a restore without images). */
+export async function repairThumbnails(userId: string): Promise<number> {
+  const missing = await query(
+    `SELECT id, provider, external_id, thumb_url FROM music_albums
+     WHERE user_id = $1 AND status = 'matched' AND thumb_file IS NULL AND thumb_url IS NOT NULL`,
+    [userId],
+  );
+  let repaired = 0;
+  for (const a of missing.rows as { id: string; provider: string; external_id: string; thumb_url: string }[]) {
+    const file = artFileName(a.provider, a.external_id, 'thumb');
+    if (fs.existsSync(artPath(file)) || (await downloadImage(a.thumb_url, THUMB_PX, 78, 'cover', file))) {
+      await query(`UPDATE music_albums SET thumb_file = $2 WHERE id = $1`, [a.id, file]);
+      repaired++;
+    }
+  }
+  return repaired;
+}
 
 // ---------------------------------------------------------------------------
 // Track lengths
@@ -259,11 +384,13 @@ export interface BackfillStatus {
   not_found: number;
   /** Plays that were given a track length from an album's tracklist. */
   durations_filled: number;
+  /** Thumbnails downloaded again after a restore without images. */
+  thumbnails_restored: number;
   error: string | null;
 }
 
 const BATCH = 25;
-let status: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, durations_filled: 0, error: null };
+let status: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
 let cancelRequested = false;
 let running: Promise<void> | null = null;
 
@@ -283,7 +410,7 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
   if (opts.retryMissing) await query(`DELETE FROM music_albums WHERE user_id = $1 AND status = 'not_found'`, [userId]);
   const total = (await query(`SELECT COUNT(*)::int AS n FROM (${UNLOOKED} GROUP BY m.album_key) u`, [userId])).rows[0].n;
   cancelRequested = false;
-  status = { state: 'running', processed: 0, total, matched: 0, not_found: 0, durations_filled: 0, error: null };
+  status = { state: 'running', processed: 0, total, matched: 0, not_found: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
   running = (async () => {
     try {
       await collectOrphanArt();
@@ -306,6 +433,7 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
         }
       }
       // Albums matched in earlier runs may have lengths the plays still lack.
+      status.thumbnails_restored += await repairThumbnails(userId);
       status.durations_filled += await fillTrackLengths(userId);
       status.state = 'done';
     } catch (err) {

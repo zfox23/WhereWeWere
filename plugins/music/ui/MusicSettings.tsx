@@ -353,7 +353,8 @@ function ArtworkSection() {
           <span>
             {job.state === 'cancelled' ? 'Cancelled. ' : ''}Looked up {job.processed.toLocaleString()} album
             {job.processed === 1 ? '' : 's'}: {job.matched.toLocaleString()} matched, {job.not_found.toLocaleString()} not found.{' '}
-            Filled in the length of {job.durations_filled.toLocaleString()} play{job.durations_filled === 1 ? '' : 's'}.
+            Filled in the length of {job.durations_filled.toLocaleString()} play{job.durations_filled === 1 ? '' : 's'}
+            {job.thumbnails_restored > 0 ? `, restored ${job.thumbnails_restored.toLocaleString()} cover thumbnail${job.thumbnails_restored === 1 ? '' : 's'}` : ''}.
           </span>
         </div>
       )}
