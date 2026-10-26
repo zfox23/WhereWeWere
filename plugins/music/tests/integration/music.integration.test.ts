@@ -180,7 +180,7 @@ describe('music plugin', () => {
       await pushAt(0, 'first');
       const id = (await query('SELECT id FROM music_sessions')).rows[0].id;
       const res = await request(app).get(`/api/v1/music/sessions/${id}/tracks`);
-      expect(res.body.map((t: any) => t.title)).toEqual(['first', 'second']);
+      expect(res.body.map((t: any) => t.title)).toEqual(['second', 'first']); // newest first
       expect((await request(app).get('/api/v1/music/sessions/not-a-uuid/tracks')).status).toBe(400);
     });
   });
@@ -479,7 +479,7 @@ describe('music plugin', () => {
       expect(session[0].timezone).toBe(CHICAGO);
       const tracks = await request(app).get(`/api/v1/music/sessions/${session[0].id}/tracks`);
       expect(tracks.body.map((t: any) => [t.title, t.timezone])).toEqual([
-        ['one', CHICAGO], ['two', CHICAGO], ['three', AUCKLAND],
+        ['three', AUCKLAND], ['two', CHICAGO], ['one', CHICAGO],
       ]);
     });
 

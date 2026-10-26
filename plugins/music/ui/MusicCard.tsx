@@ -1,6 +1,6 @@
 /**
  * Music timeline card: one listening session (see the server's
- * `buildTimelineSelect`). Expands to the tracks played in the session.
+ * `buildTimelineSelect`). Expands to the tracks played in the session, newest first.
  */
 
 import { useEffect, useRef, useState } from 'react';

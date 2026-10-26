@@ -211,7 +211,7 @@ describe('album artwork', () => {
 
     const sessionId = (await query(`SELECT id FROM music_sessions`)).rows[0].id;
     const tracks = (await request(app).get(`/api/v1/music/sessions/${sessionId}/tracks`)).body;
-    expect(tracks.map((t: any) => t.art_id)).toEqual([artId, artId, artId, null]);
+    expect(tracks.map((t: any) => t.art_id)).toEqual([null, artId, artId, artId]); // newest first
 
     const stats = (await request(app).get('/api/v1/music/stats')).body;
     expect(stats.top_songs.find((r: any) => r.name === 'Sun & Moon').art_id).toBe(artId);

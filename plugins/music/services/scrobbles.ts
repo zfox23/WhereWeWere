@@ -638,7 +638,7 @@ export async function getSessionTracks(userId: string, sessionId: string) {
      LEFT JOIN music_albums a
        ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
      WHERE m.user_id = $1 AND m.session_id = $2
-     ORDER BY m.played_at ASC, m.id ASC`,
+     ORDER BY m.played_at DESC, m.id DESC`,
     [userId, sessionId],
   );
   return result.rows;
