@@ -124,14 +124,21 @@ export const media = {
     if (to) qp.set('to', to);
     return request<MediaStats>(`/media/stats?${qp.toString()}`);
   },
-  library: (from?: string, to?: string, types?: MediaSubtype[], limit?: number) => {
+  library: (
+    from?: string,
+    to?: string,
+    types?: MediaSubtype[],
+    opts: { q?: string; list?: string; sort?: string; dir?: 'asc' | 'desc'; limit?: number; offset?: number } = {},
+  ) => {
     const qp = new URLSearchParams();
     if (from) qp.set('from', from);
     if (to) qp.set('to', to);
     if (types && types.length > 0) qp.set('types', types.join(','));
-    if (limit) qp.set('limit', String(limit));
+    for (const [key, value] of Object.entries(opts)) {
+      if (value !== undefined && value !== '') qp.set(key, String(value));
+    }
     const qs = qp.toString();
-    return request<MediaLibraryItem[]>(`/media/library${qs ? `?${qs}` : ''}`);
+    return request<{ rows: MediaLibraryItem[]; total: number }>(`/media/library${qs ? `?${qs}` : ''}`);
   },
   lists: () => request<MediaList[]>('/media/lists'),
   listItems: lists.items,

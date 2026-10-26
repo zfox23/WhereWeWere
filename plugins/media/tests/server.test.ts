@@ -443,3 +443,15 @@ describe('POST /items/:id/sync resolves against draft title/external id', () => 
     expect(igdbDetailsMock).toHaveBeenCalledWith('cid', 'csecret', '123');
   });
 });
+
+describe('library search words', () => {
+  it('match the type and status labels the library shows', async () => {
+    const { TYPE_SEARCH_WORDS, STATUS_SEARCH_WORDS } = await import('../server');
+    const { MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS } = await import('../utils/media');
+    for (const [type, cfg] of Object.entries(MEDIA_SUBTYPES)) {
+      expect(TYPE_SEARCH_WORDS[type]).toBe(`${cfg.label} ${cfg.plural}`);
+    }
+    expect(Object.keys(TYPE_SEARCH_WORDS).sort()).toEqual(Object.keys(MEDIA_SUBTYPES).sort());
+    expect(STATUS_SEARCH_WORDS).toEqual(CHECKIN_TYPE_LABELS);
+  });
+});

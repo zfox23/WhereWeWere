@@ -71,5 +71,14 @@ export function usePagedLibrary<T>(fetchPage: (offset: number) => Promise<Page<T
       .finally(() => setLoadingMore(false));
   }, [rows.length]);
 
-  return { rows, total, loading, loadingMore, error, loadMore, setRows };
+  /** Drop rows the user just deleted or removed, without reloading. */
+  const removeWhere = useCallback((predicate: (row: T) => boolean) => {
+    setRows((prev) => {
+      const kept = prev.filter((r) => !predicate(r));
+      setTotal((t) => Math.max(0, t - (prev.length - kept.length)));
+      return kept;
+    });
+  }, []);
+
+  return { rows, total, loading, loadingMore, error, loadMore, removeWhere };
 }

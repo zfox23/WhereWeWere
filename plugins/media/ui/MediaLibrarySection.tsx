@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Loader2, Pencil, Search, Trash2, X } from 'lucide-react';
+import { usePagedLibrary, useDebouncedValue } from '../../../client/src/hooks/usePagedLibrary';
+import { PagingFooter } from '../../../client/src/components/lists/PagingFooter';
 import { media } from './api';
 import Stars from '../../../client/src/components/Stars';
 import {
@@ -72,27 +74,12 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'list', label: 'Time added' },
 ];
 
-function sortValue(item: MediaLibraryItem, key: SortKey, addedAtById?: Map<string, string>): number {
-  switch (key) {
-    case 'rating':
-      return item.latest_rating ?? -Infinity;
-    case 'checkin':
-      return item.last_checkin_at ? new Date(item.last_checkin_at).getTime() : -Infinity;
-    case 'completed':
-      return item.completed_count ?? 0;
-    case 'time_played':
-      return item.time_played_minutes ?? 0;
-    case 'list':
-      return addedAtById?.get(item.id) ? new Date(addedAtById.get(item.id)!).getTime() : -Infinity;
-  }
-}
+const PAGE_SIZE = 100;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
   const [initialState] = useState<LibraryUrlState>(getLibraryStateFromLocation);
   const [selectedTypes, setSelectedTypes] = useState<MediaSubtype[]>(initialState.selectedTypes);
-  const [items, setItems] = useState<MediaLibraryItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [initialLoaded, setInitialLoaded] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>(initialState.sortBy);
   const [sortDir, setSortDir] = useState<SortDir>(initialState.sortDir);
   const [filterQuery, setFilterQuery] = useState(initialState.filterQuery);
@@ -114,15 +101,8 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
     [lists, selectedListId]
   );
 
-  const selectedListIds = useMemo(
-    () => (selectedList ? new Set(selectedList.items.map((i) => i.id)) : null),
-    [selectedList]
-  );
-
-  const selectedListAddedAt = useMemo(
-    () => (selectedList ? new Map(selectedList.items.map((i) => [i.id, i.added_at])) : undefined),
-    [selectedList]
-  );
+  // The search text is sent a moment after typing stops.
+  const searchText = useDebouncedValue(filterQuery.trim(), SEARCH_DEBOUNCE_MS);
 
   // "Time added to this list" only makes sense with a list selected; fall back
   // to the default sort if the list is cleared while that option is active.
@@ -141,6 +121,24 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
     () => MEDIA_SUBTYPE_LIST.filter((t) => selectedTypes.includes(t)),
     [selectedTypes]
   );
+
+  // The server searches, filters, sorts and pages; a new filter, sort or period
+  // starts again from the first page.
+  const { rows: items, total, loading, loadingMore, loadMore, removeWhere } = usePagedLibrary<MediaLibraryItem>(
+    async (offset) => {
+      if (activeTypes.length === 0) return { rows: [], total: 0 };
+      return media.library(from || undefined, to || undefined, activeTypes, {
+        q: searchText, list: selectedListId ?? undefined, sort: sortBy, dir: sortDir,
+        limit: PAGE_SIZE, offset: offset || undefined,
+      });
+    },
+    [from, to, activeTypes, searchText, selectedListId, sortBy, sortDir],
+  );
+  const visibleItems = items;
+  const [initialLoaded, setInitialLoaded] = useState(false);
+  useEffect(() => {
+    if (!loading) setInitialLoaded(true);
+  }, [loading]);
 
   const toggleType = (type: MediaSubtype) => {
     setSelectedTypes((prev) =>
@@ -231,6 +229,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
             : l
         )
       );
+      removeWhere((i) => i.id === item.id);
     } catch (err) {
       console.error('Failed to remove item from list:', err);
     }
@@ -247,43 +246,6 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       console.error('Failed to delete list:', err);
     }
   };
-
-  const visibleItems = useMemo(() => {
-    let filtered = selectedListIds
-      ? items.filter((item) => selectedListIds.has(item.id))
-      : items;
-    const query = filterQuery.trim().toLowerCase();
-    if (query) {
-      filtered = filtered.filter((item) => {
-        const haystack = [
-          item.title,
-          item.author,
-          MEDIA_SUBTYPES[item.media_type]?.label,
-          MEDIA_SUBTYPES[item.media_type]?.plural,
-          item.last_checkin_type ? CHECKIN_TYPE_LABELS[item.last_checkin_type] : 'no check-ins',
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        return haystack.includes(query);
-      });
-    }
-    const sorted = [...filtered];
-    sorted.sort((a, b) => {
-      const va = sortValue(a, sortBy, selectedListAddedAt);
-      const vb = sortValue(b, sortBy, selectedListAddedAt);
-      // Both null ratings compare equal (avoid Infinity - Infinity = NaN).
-      if (va === vb) {
-        const ta = a.last_checkin_at ? new Date(a.last_checkin_at).getTime() : 0;
-        const tb = b.last_checkin_at ? new Date(b.last_checkin_at).getTime() : 0;
-        if (tb - ta !== 0) return tb - ta;
-        return a.title.localeCompare(b.title);
-      }
-      const diff = va - vb;
-      return sortDir === 'asc' ? diff : -diff;
-    });
-    return sorted;
-  }, [items, filterQuery, sortBy, sortDir, selectedListIds, selectedListAddedAt]);
 
   const toggleDirection = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 
@@ -363,7 +325,7 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       const ids = [...selectedIds];
       await media.bulkDeleteItems(ids, false);
       const deleted = new Set(ids);
-      setItems((prev) => prev.filter((i) => !deleted.has(i.id)));
+      removeWhere((i) => deleted.has(i.id));
       // Refresh lists so memberships reflect the deletion.
       media.lists().then(setLists).catch(() => { /* keep stale list data */ });
       setSelectedIds(new Set());
@@ -375,39 +337,6 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
       setDeleting(false);
     }
   };
-
-  useEffect(() => {
-    if (activeTypes.length === 0) {
-      setItems([]);
-      setLoading(false);
-      setInitialLoaded(true);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    media
-      .library(from || undefined, to || undefined, activeTypes)
-      .then((data) => {
-        if (cancelled) return;
-        setItems(data);
-      })
-      .catch((err) => {
-        console.error('Failed to load media library:', err);
-        if (cancelled) return;
-        setItems([]);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setInitialLoaded(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [from, to, activeTypes]);
 
   if (!initialLoaded) {
     return (
@@ -560,13 +489,13 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
 
       {activeTypes.length === 0 ? (
         <p className="text-sm text-gray-400">Select at least one media type to view.</p>
-      ) : loading ? (
+      ) : loading && items.length === 0 ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="animate-spin text-primary-600" size={24} />
         </div>
       ) : visibleItems.length === 0 ? (
         <p className="text-sm text-gray-400">
-          {items.length > 0 && filterQuery.trim()
+          {filterQuery.trim()
             ? `No media matching "${filterQuery.trim()}".`
             : selectedList
               ? `No media from "${selectedList.name}" checked in during this period.`
@@ -575,7 +504,8 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
                 : 'No media in your library.'}
         </p>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        // Cards stay up (dimmed) while a new search, sort or filter loads.
+        <div className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 transition-opacity ${loading ? 'opacity-50' : ''}`} aria-busy={loading}>
           {visibleItems.map((item, index) => {
             const config = MEDIA_SUBTYPES[item.media_type] || MEDIA_SUBTYPES.movie;
             const href = `${config.detailBase}/${item.id}/${item.title ? slugify(item.title) : ''}`;
@@ -711,6 +641,9 @@ export function MediaLibrarySection({ from, to }: MediaLibrarySectionProps) {
           })}
         </div>
       )}
+      <div className="mt-3">
+        <PagingFooter shown={items.length} total={total} loadingMore={loadingMore} onMore={loadMore} />
+      </div>
 
       {/* Bulk delete confirmation */}
       {confirmState && (

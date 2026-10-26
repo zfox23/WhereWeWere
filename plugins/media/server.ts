@@ -34,6 +34,7 @@ import type {
 import { isValidTimeZone } from 'wwp-shared';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 import { createListKit, cleanName, nameTakenOrThrow, listError } from '../../server/src/services/lists';
+import { likeText, orderBy, pageResult, parseLibraryParams } from '../../server/src/services/libraryQuery';
 import { mountRankRoutes } from '../../server/src/services/lists/routes';
 
 import { tmdb } from './services/tmdb';
@@ -1541,16 +1542,54 @@ async function refreshEpisodesFromTmdb(
   }
 }
 
-// GET /library?from=YYYY-MM-DD&to=YYYY-MM-DD&types=movie,tv_show&limit=10
-// `limit` caps the rows returned (most recently checked-in first).
-// Media library view: one row per media item with at least one check-in in range,
-// including the latest rating, most recent check-in timestamp, and its type.
+// Words a library search matches besides the title and author: the type's name
+// (singular and plural) and the status of the last check-in. These mirror the
+// labels the library shows (utils/media.ts), which is how the UI searched before
+// the server did.
+export const TYPE_SEARCH_WORDS: Record<string, string> = {
+  movie: 'Movie Movies',
+  tv_show: 'TV Show TV Shows',
+  book: 'Book Books',
+  game: 'Game Games',
+  board_game: 'Board Game Board Games',
+};
+export const STATUS_SEARCH_WORDS: Record<string, string> = {
+  completed: 'Completed',
+  in_progress: 'In-Progress',
+  started: 'Started',
+  dropped: 'Dropped',
+};
+const sqlCase = (col: string, words: Record<string, string>, otherwise: string) =>
+  `CASE ${col} ${Object.entries(words).map(([k, v]) => `WHEN '${k}' THEN '${v}'`).join(' ')} ELSE '${otherwise}' END`;
+
+const MEDIA_LIBRARY_SORTS: Record<string, string> = {
+  checkin: 'g.last_checkin_at',
+  rating: 'COALESCE(g.rating, g.latest_checkin_rating)',
+  completed: 'g.completed_count',
+  time_played: 'COALESCE(g.time_played_minutes, 0)',
+  title: 'lower(g.title)',
+  // Only with a `list`: when the item was added to it.
+  list: 'g.list_added_at',
+};
+
+// GET /library?from=YYYY-MM-DD&to=YYYY-MM-DD&types=movie,tv_show
+//   &q=&list=<list id>&sort=checkin|rating|completed|time_played|title|list&dir=&limit=&offset=
+// Media library view: one row per media item with at least one check-in in range
+// (every item when there is no range), including the latest rating, most recent
+// check-in and its type. Searched, filtered, sorted and paged here; responds
+// { rows, total } with the total counting every match, not just this page.
+// Defaults to 100 rows, most recently checked-in first.
 router.get('/library', async (req: Request, res: Response) => {
   try {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
     const typesParam = req.query.types as string | undefined;
-    const limit = Number.parseInt(req.query.limit as string, 10);
+    const listId = typeof req.query.list === 'string' && isUuid(req.query.list) ? req.query.list : null;
+    const p = parseLibraryParams(req.query, {
+      sorts: Object.keys(MEDIA_LIBRARY_SORTS), defaultSort: 'checkin', defaultLimit: 100, maxLimit: 500,
+    });
+    // "Time added" only means something inside a list.
+    const sort = p.sort === 'list' && !listId ? 'checkin' : p.sort;
 
     const requestedTypes = (typesParam ? typesParam.split(',') : [])
       .map((t) => t.trim())
@@ -1577,43 +1616,75 @@ router.get('/library', async (req: Request, res: Response) => {
       ? `LEFT JOIN media_checkins mc ON mc.media_item_id = mi.id AND mc.user_id = $1`
       : `JOIN media_checkins mc ON mc.media_item_id = mi.id`;
 
-    const result = await query(
-      `SELECT mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
-              mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status,
-              (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.id DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_checkin_rating,
-              (ARRAY_AGG(mc.checked_in_at ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_at,
-              (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_timezone,
-              (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_type,
-              COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count
-       FROM media_items mi
-       ${join}
-       ${where}
-       GROUP BY mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
-                mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status
-       ORDER BY last_checkin_at DESC NULLS LAST${Number.isInteger(limit) && limit > 0 ? ` LIMIT ${Math.min(limit, 1000)}` : ''}`,
-      params
-    );
+    let listJoin = '';
+    let listColumn = 'NULL::timestamptz AS list_added_at';
+    let listGroup = '';
+    if (listId) {
+      params.push(listId);
+      listJoin = `JOIN media_list_items mli ON mli.media_item_id = mi.id AND mli.list_id = $${params.length}
+                  AND EXISTS (SELECT 1 FROM media_lists ml WHERE ml.id = mli.list_id AND ml.user_id = $1)`;
+      listColumn = 'mli.added_at AS list_added_at';
+      listGroup = ', mli.added_at';
+    }
+    let search = '';
+    if (p.q) {
+      params.push(likeText(p.q));
+      search = `WHERE g.search_text LIKE '%' || $${params.length} || '%' ESCAPE '\\'`;
+    }
+    const lastType = `(ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.id DESC))[1]`;
 
-    res.json(result.rows.map((r) => ({
-      id: r.id,
-      media_type: r.media_type,
-      title: r.title,
-      author: r.author,
-      image_url: r.image_url,
-      rating: r.rating != null ? Number(r.rating) : null,
-      raw_score: r.raw_score != null ? Number(r.raw_score) : null,
-      notes: r.notes || null,
-      time_played_minutes: r.time_played_minutes != null ? Number(r.time_played_minutes) : null,
-      status: r.status || null,
-      // Display rating: item rating if set, else the latest check-in's rating.
-      latest_rating: r.rating != null
-        ? Number(r.rating)
-        : r.latest_checkin_rating != null ? Number(r.latest_checkin_rating) : null,
-      last_checkin_at: r.last_checkin_at,
-      last_checkin_timezone: r.last_checkin_timezone,
-      last_checkin_type: r.last_checkin_type,
-      completed_count: Number(r.completed_count),
-    })));
+    const paged = pageResult((await query(
+      `SELECT g.*, COUNT(*) OVER()::int AS total
+       FROM (
+         SELECT mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
+                mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status,
+                ${listColumn},
+                (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.id DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_checkin_rating,
+                (ARRAY_AGG(mc.checked_in_at ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_at,
+                (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC, mc.id DESC))[1] AS last_checkin_timezone,
+                ${lastType} AS last_checkin_type,
+                COUNT(*) FILTER (WHERE mc.checkin_type = 'completed') AS completed_count,
+                lower(concat_ws(' ', mi.title, mi.author,
+                                ${sqlCase('mi.media_type', TYPE_SEARCH_WORDS, '')},
+                                ${sqlCase(lastType, STATUS_SEARCH_WORDS, 'no check-ins')})) AS search_text
+         FROM media_items mi
+         ${join}
+         ${listJoin}
+         ${where}
+         GROUP BY mi.id, mi.media_type, mi.title, mi.author, mi.image_url,
+                  mi.rating, mi.raw_score, mi.notes, mi.time_played_minutes, mi.status${listGroup}
+       ) g
+       ${search}
+       ORDER BY ${orderBy(MEDIA_LIBRARY_SORTS, sort, p.dir, 'g.last_checkin_at DESC NULLS LAST, lower(g.title)')}
+       LIMIT ${p.limit} OFFSET ${p.offset}`,
+      params
+    )).rows);
+
+    res.json({
+      total: paged.total,
+      rows: paged.rows.map((r: any) => ({
+        id: r.id,
+        media_type: r.media_type,
+        title: r.title,
+        author: r.author,
+        image_url: r.image_url,
+        rating: r.rating != null ? Number(r.rating) : null,
+        raw_score: r.raw_score != null ? Number(r.raw_score) : null,
+        notes: r.notes || null,
+        time_played_minutes: r.time_played_minutes != null ? Number(r.time_played_minutes) : null,
+        status: r.status || null,
+        // Display rating: item rating if set, else the latest check-in's rating.
+        latest_rating: r.rating != null
+          ? Number(r.rating)
+          : r.latest_checkin_rating != null ? Number(r.latest_checkin_rating) : null,
+        last_checkin_at: r.last_checkin_at,
+        last_checkin_timezone: r.last_checkin_timezone,
+        last_checkin_type: r.last_checkin_type,
+        completed_count: Number(r.completed_count),
+        // Only inside a list: when the item was added to it.
+        ...(listId ? { list_added_at: r.list_added_at } : {}),
+      })),
+    });
   } catch (err) {
     console.error('Error getting media library:', err);
     res.status(500).json({ error: 'Failed to get media library' });

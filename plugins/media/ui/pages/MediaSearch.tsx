@@ -67,8 +67,8 @@ export default function MediaSearch({ subtype }: MediaSearchProps) {
     let cancelled = false;
     setSuggestions([]);
     media
-      .library(undefined, undefined, [subtype], SUGGESTION_COUNT)
-      .then((items) => {
+      .library(undefined, undefined, [subtype], { limit: SUGGESTION_COUNT })
+      .then(({ rows: items }) => {
         if (cancelled) return;
         setSuggestions(
           items

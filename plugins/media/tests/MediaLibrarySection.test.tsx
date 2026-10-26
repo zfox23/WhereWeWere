@@ -6,6 +6,40 @@ import { MediaLibrarySection } from '../ui/MediaLibrarySection';
 import type { MediaLibraryItem } from '../ui/types';
 
 const libraryMock = vi.fn();
+/** What the server answers: one page of rows and the total. */
+const page = (rows: MediaLibraryItem[]) => ({ rows, total: rows.length });
+
+type Opts = { q?: string; list?: string; sort?: string; dir?: string; limit?: number; offset?: number };
+/**
+ * Stands in for the server's searching, list filtering and sorting (nulls
+ * last, like the real thing); `lists` maps a list id to item id -> when added.
+ */
+function fakeServer(all: MediaLibraryItem[], lists: Record<string, Record<string, string>> = {}) {
+  return async (_from: string | undefined, _to: string | undefined, _types: string[], o: Opts = {}) => {
+    let rows = all.filter((r) =>
+      (!o.list || r.id in (lists[o.list] ?? {})) &&
+      (!o.q || [r.title, r.author].join(' ').toLowerCase().includes(o.q.toLowerCase())));
+    const value = (r: MediaLibraryItem): number | string | null => {
+      switch (o.sort) {
+        case 'rating': return r.latest_rating;
+        case 'completed': return r.completed_count;
+        case 'time_played': return r.time_played_minutes ?? 0;
+        case 'list': return lists[o.list ?? '']?.[r.id] ?? null;
+        default: return r.last_checkin_at;
+      }
+    };
+    const sign = o.dir === 'asc' ? 1 : -1;
+    rows = [...rows].sort((x, y) => {
+      const vx = value(x), vy = value(y);
+      if (vx === vy) return 0;
+      if (vx === null) return 1;
+      if (vy === null) return -1;
+      return (vx < vy ? -1 : 1) * sign;
+    });
+    return { rows, total: rows.length };
+  };
+}
+const lastOpts = () => (libraryMock.mock.calls.at(-1) as unknown[])[3] as Opts;
 const listsMock = vi.fn();
 const removeItemFromListMock = vi.fn();
 const deleteListMock = vi.fn();
@@ -67,7 +101,7 @@ function renderSection(props: { from?: string; to?: string } = {}) {
 
 beforeEach(() => {
   libraryMock.mockReset();
-  libraryMock.mockResolvedValue([item]);
+  libraryMock.mockResolvedValue(page([item]));
   listsMock.mockReset();
   listsMock.mockResolvedValue([]);
   removeItemFromListMock.mockReset();
@@ -121,11 +155,11 @@ describe('MediaLibrarySection', () => {
   });
 
   it('shows total time played on game cards only', async () => {
-    libraryMock.mockResolvedValueOnce([
+    libraryMock.mockResolvedValueOnce(page([
       { ...item, id: 'g1', title: 'Hades', media_type: 'game', time_played_minutes: 330 },
       { ...item, id: 'g2', title: 'Celeste', media_type: 'game', time_played_minutes: null },
       { ...item, id: 'm1', title: 'Dune', media_type: 'movie', time_played_minutes: 330 },
-    ]);
+    ]));
     renderSection();
     await waitFor(() => expect(screen.getByText('Hades')).toBeTruthy());
 
@@ -138,7 +172,7 @@ describe('MediaLibrarySection', () => {
   });
 
   it('shows the completed count in the badge when an item has been completed multiple times', async () => {
-    libraryMock.mockResolvedValueOnce([{ ...item, completed_count: 3 }]);
+    libraryMock.mockResolvedValueOnce(page([{ ...item, completed_count: 3 }]));
     renderSection();
     await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
     expect(screen.getByText('Completed 3x')).toBeTruthy();
@@ -148,9 +182,10 @@ describe('MediaLibrarySection', () => {
     renderSection({ from: '2023-01-01', to: '2023-01-31' });
     await waitFor(() => expect(screen.getByText('Dune')).toBeTruthy());
 
-    expect(libraryMock).toHaveBeenCalledWith('2023-01-01', '2023-01-31', [
-      'movie', 'tv_show', 'book', 'game', 'board_game',
-    ]);
+    expect(libraryMock).toHaveBeenCalledWith(
+      '2023-01-01', '2023-01-31', ['movie', 'tv_show', 'book', 'game', 'board_game'],
+      expect.objectContaining({ q: '', sort: 'checkin', dir: 'desc', limit: 100 }),
+    );
   });
 
   it('toggles media type filters and refetches', async () => {
@@ -170,19 +205,19 @@ describe('MediaLibrarySection', () => {
   });
 
   it('shows an empty state when the API returns no items', async () => {
-    libraryMock.mockResolvedValueOnce([]);
+    libraryMock.mockResolvedValueOnce(page([]));
     renderSection();
     await waitFor(() => expect(screen.getByText('No media in your library.')).toBeTruthy());
   });
 
   it('shows the check-in empty state when a date range is set', async () => {
-    libraryMock.mockResolvedValueOnce([]);
+    libraryMock.mockResolvedValueOnce(page([]));
     renderSection({ from: '2023-01-01', to: '2023-01-31' });
     await waitFor(() => expect(screen.getByText('No media checked in during this period.')).toBeTruthy());
   });
 
   it('renders items without check-ins with a neutral badge and no date', async () => {
-    libraryMock.mockResolvedValueOnce([
+    libraryMock.mockResolvedValueOnce(page([
       {
         ...item,
         id: 'g1',
@@ -196,7 +231,7 @@ describe('MediaLibrarySection', () => {
         completed_count: 0,
         time_played_minutes: 326,
       },
-    ]);
+    ]));
     renderSection();
     await waitFor(() => expect(screen.getByText('Hades')).toBeTruthy());
 
@@ -207,42 +242,74 @@ describe('MediaLibrarySection', () => {
     expect(screen.queryByText(/Jan 4, 2023/)).toBeNull();
   });
 
-  it('sorts items by the selected key and direction', async () => {
-    libraryMock.mockResolvedValueOnce([
+  it('asks the server to sort by the selected key and direction', async () => {
+    libraryMock.mockImplementation(fakeServer([
       { ...item, id: 'a', title: 'Alpha', latest_rating: 2, last_checkin_at: '2023-01-01T00:00:00Z', completed_count: 1 },
       { ...item, id: 'b', title: 'Bravo', latest_rating: 5, last_checkin_at: '2023-01-02T00:00:00Z', completed_count: 3 },
       { ...item, id: 'c', title: 'Charlie', latest_rating: null, last_checkin_at: '2023-01-03T00:00:00Z', completed_count: 0 },
-    ]);
+    ]));
     renderSection();
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
 
-    const cardTitles = () =>
-      screen.getAllByRole('link').map((el) => el.textContent ?? '');
-    const orderOf = (...titles: string[]) =>
-      titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
+    const cardTitles = () => screen.getAllByRole('link').map((el) => el.textContent ?? '');
+    const orderOf = (...titles: string[]) => titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
     // Default: last check-in descending.
+    expect(lastOpts()).toMatchObject({ sort: 'checkin', dir: 'desc' });
     expect(orderOf('Charlie', 'Bravo', 'Alpha')).toEqual([0, 1, 2]);
 
-    // Switch to rating descending first, then toggle to ascending; unrated items sort last in desc, first in asc.
+    // Rating descending; unrated sorts last.
     const select = screen.getByRole('combobox', { name: 'Sort library by' });
     await user.selectOptions(select, 'rating');
-    expect(orderOf('Bravo', 'Alpha', 'Charlie')).toEqual([0, 1, 2]);
-    // Direction starts as descending; button offers the switch to ascending.
+    await waitFor(() => expect(lastOpts()).toMatchObject({ sort: 'rating', dir: 'desc' }));
+    await waitFor(() => expect(orderOf('Bravo', 'Alpha', 'Charlie')).toEqual([0, 1, 2]));
+    // The direction button offers the switch to ascending.
     await user.click(screen.getByRole('button', { name: 'Sort ascending' }));
-    expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
+    await waitFor(() => expect(lastOpts()).toMatchObject({ sort: 'rating', dir: 'asc' }));
+    await waitFor(() => expect(orderOf('Alpha', 'Bravo', 'Charlie')).toEqual([0, 1, 2]));
 
-    // Completed count ascending (0, 1, 3).
     await user.selectOptions(select, 'completed');
-    expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
+    await waitFor(() => expect(lastOpts()).toMatchObject({ sort: 'completed', dir: 'asc' }));
+    await waitFor(() => expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]));
+  });
+
+  it('sends the search text to the server once typing pauses', async () => {
+    libraryMock.mockImplementation(fakeServer([
+      { ...item, id: 'a', title: 'Alpha' },
+      { ...item, id: 'b', title: 'Bravo' },
+    ]));
+    renderSection();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
+    await user.type(screen.getByRole('searchbox'), 'brav');
+    await waitFor(() => expect(screen.queryByText('Alpha')).toBeNull());
+    expect(lastOpts().q).toBe('brav');
+    expect(libraryMock.mock.calls.some((c) => (c[3] as Opts).q === 'b')).toBe(false); // not one request per keystroke
+    expect(screen.getByText('Bravo')).toBeTruthy();
+  });
+
+  it('shows the first page, and appends the next when Show more is pressed', async () => {
+    const many = Array.from({ length: 130 }, (_, i) =>
+      ({ ...item, id: `m${i}`, title: `Title ${String(i).padStart(3, '0')}`, last_checkin_at: new Date(2023, 0, 1, 0, 0, 130 - i).toISOString() }));
+    libraryMock.mockImplementation(async (f: string | undefined, t: string | undefined, ty: string[], o: Opts = {}) => {
+      const all = await fakeServer(many)(f, t, ty, o);
+      return { rows: all.rows.slice(o.offset ?? 0, (o.offset ?? 0) + (o.limit ?? 100)), total: all.total };
+    });
+    renderSection();
+    const user = userEvent.setup();
+    expect(await screen.findByText('Showing 100 of 130')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    expect(await screen.findByText('Showing 130 of 130')).toBeTruthy();
+    expect(lastOpts()).toMatchObject({ offset: 100 });
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
   it('sorts by time played and narrows the library to games when selected', async () => {
-    libraryMock.mockResolvedValue([
+    libraryMock.mockImplementation(fakeServer([
       { ...item, id: 'a', title: 'Alpha', media_type: 'game', time_played_minutes: 120, last_checkin_at: '2023-01-01T00:00:00Z' },
       { ...item, id: 'b', title: 'Bravo', media_type: 'game', time_played_minutes: 300, last_checkin_at: '2023-01-02T00:00:00Z' },
       { ...item, id: 'c', title: 'Charlie', media_type: 'game', time_played_minutes: null, last_checkin_at: '2023-01-03T00:00:00Z' },
-    ]);
+    ]));
     renderSection();
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
@@ -252,7 +319,7 @@ describe('MediaLibrarySection', () => {
 
     // Choosing time played narrows the media type filter to games.
     await waitFor(() =>
-      expect(libraryMock).toHaveBeenLastCalledWith(undefined, undefined, ['game'])
+      expect(libraryMock).toHaveBeenLastCalledWith(undefined, undefined, ['game'], expect.objectContaining({ sort: 'time_played' }))
     );
     // Non-game type chips are no longer active.
     expect(screen.getByRole('button', { name: 'Movies', pressed: false })).toBeTruthy();
@@ -264,16 +331,17 @@ describe('MediaLibrarySection', () => {
       titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
     expect(orderOf('Bravo', 'Alpha', 'Charlie')).toEqual([0, 1, 2]);
 
-    // Toggle to ascending: unplayed first.
+    // Toggle to ascending: unplayed (counted as 0) first.
     await user.click(screen.getByRole('button', { name: 'Sort ascending' }));
-    expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]);
+    await waitFor(() => expect(lastOpts()).toMatchObject({ sort: 'time_played', dir: 'asc' }));
+    await waitFor(() => expect(orderOf('Charlie', 'Alpha', 'Bravo')).toEqual([0, 1, 2]));
   });
 
   it('falls back to the default sort when games are filtered out while sorting by time played', async () => {
-    libraryMock.mockResolvedValue([
+    libraryMock.mockResolvedValue(page([
       { ...item, id: 'a', title: 'Alpha', media_type: 'game', time_played_minutes: 120 },
       { ...item, id: 'b', title: 'Bravo', media_type: 'game', time_played_minutes: 300 },
-    ]);
+    ]));
     renderSection();
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
@@ -288,50 +356,47 @@ describe('MediaLibrarySection', () => {
   });
 
   it('sorts by time added to this list when a list is selected', async () => {
-    libraryMock.mockResolvedValueOnce([
+    const added = { a: '2023-05-03T00:00:00Z', b: '2023-05-01T00:00:00Z', c: '2023-05-02T00:00:00Z' };
+    libraryMock.mockImplementation(fakeServer([
       { ...item, id: 'a', title: 'Alpha', last_checkin_at: '2023-03-01T00:00:00Z' },
       { ...item, id: 'b', title: 'Bravo', last_checkin_at: '2023-03-02T00:00:00Z' },
       { ...item, id: 'c', title: 'Charlie', last_checkin_at: '2023-03-03T00:00:00Z' },
-    ]);
+    ], { 'list-1': added }));
     listsMock.mockResolvedValueOnce([
       {
         id: 'list-1',
         name: 'Watchlist',
         created_at: '2023-01-01T00:00:00Z',
-        items: [
-          { id: 'a', media_type: 'movie', title: 'Alpha', image_url: null, author: null, added_at: '2023-05-03T00:00:00Z' },
-          { id: 'b', media_type: 'movie', title: 'Bravo', image_url: null, author: null, added_at: '2023-05-01T00:00:00Z' },
-          { id: 'c', media_type: 'movie', title: 'Charlie', image_url: null, author: null, added_at: '2023-05-02T00:00:00Z' },
-        ],
+        items: (['a', 'b', 'c'] as const).map((id) => ({
+          id, media_type: 'movie', title: id, image_url: null, author: null, added_at: added[id],
+        })),
       },
     ]);
     renderSection();
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeTruthy());
 
-    const listSelect = screen.getByRole('combobox', { name: 'Filter by list' });
-    await user.selectOptions(listSelect, 'list-1');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by list' }), 'list-1');
+    await waitFor(() => expect(lastOpts()).toMatchObject({ list: 'list-1', sort: 'checkin' }));
 
     const cardTitles = () => screen.getAllByRole('link').map((el) => el.textContent ?? '');
-    const orderOf = (...titles: string[]) =>
-      titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
-
+    const orderOf = (...titles: string[]) => titles.map((t) => cardTitles().findIndex((text) => text.includes(t)));
     // Last check-in descending (default) is independent of time added.
     expect(orderOf('Charlie', 'Bravo', 'Alpha')).toEqual([0, 1, 2]);
 
-    const sortSelect = screen.getByRole('combobox', { name: 'Sort library by' });
-    await user.selectOptions(sortSelect, 'list');
-    // Default direction is descending: most recently added first.
-    expect(orderOf('Alpha', 'Charlie', 'Bravo')).toEqual([0, 1, 2]);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort library by' }), 'list');
+    await waitFor(() => expect(lastOpts()).toMatchObject({ list: 'list-1', sort: 'list', dir: 'desc' }));
+    // Descending: most recently added first.
+    await waitFor(() => expect(orderOf('Alpha', 'Charlie', 'Bravo')).toEqual([0, 1, 2]));
     await user.click(screen.getByRole('button', { name: 'Sort ascending' }));
-    expect(orderOf('Bravo', 'Charlie', 'Alpha')).toEqual([0, 1, 2]);
+    await waitFor(() => expect(orderOf('Bravo', 'Charlie', 'Alpha')).toEqual([0, 1, 2]));
   });
 
   it('filters the library to items on the selected list and offers per-card removal', async () => {
-    libraryMock.mockResolvedValueOnce([
+    libraryMock.mockImplementation(fakeServer([
       { ...item, id: 'a', title: 'Alpha' },
       { ...item, id: 'b', title: 'Bravo' },
-    ]);
+    ], { 'list-1': { a: '2023-05-01T00:00:00Z' } }));
     listsMock.mockResolvedValueOnce([
       {
         id: 'list-1',
@@ -358,6 +423,7 @@ describe('MediaLibrarySection', () => {
     // Confirm the removal.
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await user.click(removeBtn);
+    expect(lastOpts().list).toBe('list-1'); // the server filtered to the list
     expect(confirmSpy).toHaveBeenCalledWith('Remove "Alpha" from "Watchlist"?');
     expect(removeItemFromListMock).toHaveBeenCalledWith('list-1', 'a');
     // Item disappears from the filtered view after local removal.
@@ -409,7 +475,7 @@ describe('MediaLibrarySection batch edit mode', () => {
   }
 
   beforeEach(() => {
-    libraryMock.mockResolvedValue(threeItems);
+    libraryMock.mockResolvedValue(page(threeItems));
   });
 
   it('shows a checkbox on each card and toggles selection on click', async () => {

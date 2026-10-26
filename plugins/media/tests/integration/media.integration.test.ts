@@ -637,21 +637,21 @@ describe('Media check-in API', () => {
 
       const response = await request(app).get('/api/v1/media/library');
       expect(response.status).toBe(200);
-      expect(response.body).toHaveLength(2);
+      expect(response.body.rows).toHaveLength(2);
 
       // Most recent check-in first.
-      expect(response.body[0].title).toBe('Severance');
-      expect(response.body[0].media_type).toBe('tv_show');
-      expect(response.body[0].latest_rating).toBe(4);
-      expect(response.body[0].last_checkin_type).toBe('completed');
-      expect(response.body[0].last_checkin_at).toBe('2023-01-05T20:00:00.000Z');
+      expect(response.body.rows[0].title).toBe('Severance');
+      expect(response.body.rows[0].media_type).toBe('tv_show');
+      expect(response.body.rows[0].latest_rating).toBe(4);
+      expect(response.body.rows[0].last_checkin_type).toBe('completed');
+      expect(response.body.rows[0].last_checkin_at).toBe('2023-01-05T20:00:00.000Z');
       // One completed check-in (the in_progress one is not counted).
-      expect(response.body[0].completed_count).toBe(1);
+      expect(response.body.rows[0].completed_count).toBe(1);
 
-      expect(response.body[1].title).toBe('Dune');
-      expect(response.body[1].latest_rating).toBe(2);
-      expect(response.body[1].last_checkin_type).toBe('completed');
-      expect(response.body[1].completed_count).toBe(1);
+      expect(response.body.rows[1].title).toBe('Dune');
+      expect(response.body.rows[1].latest_rating).toBe(2);
+      expect(response.body.rows[1].last_checkin_type).toBe('completed');
+      expect(response.body.rows[1].completed_count).toBe(1);
     });
 
     it('reports the item-level time played, rating, and status for library rows', async () => {
@@ -672,7 +672,7 @@ describe('Media check-in API', () => {
 
       const response = await request(app).get('/api/v1/media/library');
       expect(response.status).toBe(200);
-      const byTitle = Object.fromEntries(response.body.map((row: { title: string }) => [row.title, row]));
+      const byTitle = Object.fromEntries(response.body.rows.map((row: { title: string }) => [row.title, row]));
       // Item-level fields are reported as stored (not derived from check-ins).
       expect(byTitle.Hades.time_played_minutes).toBe(540);
       expect(byTitle.Hades.rating).toBe(3);
@@ -697,7 +697,7 @@ describe('Media check-in API', () => {
       // Without a date range (period "all"), the item without check-ins appears…
       const all = await request(app).get('/api/v1/media/library');
       expect(all.status).toBe(200);
-      const allByTitle = Object.fromEntries(all.body.map((row: { title: string }) => [row.title, row]));
+      const allByTitle = Object.fromEntries(all.body.rows.map((row: { title: string }) => [row.title, row]));
       expect(allByTitle.Celeste).toBeDefined();
       expect(allByTitle.Celeste.last_checkin_at).toBeNull();
       expect(allByTitle.Celeste.last_checkin_type).toBeNull();
@@ -707,14 +707,14 @@ describe('Media check-in API', () => {
       // …but with a date range only checked-in items within it appear.
       const ranged = await request(app).get('/api/v1/media/library?from=2023-01-01&to=2023-01-31');
       expect(ranged.status).toBe(200);
-      const rangedByTitle = Object.fromEntries(ranged.body.map((row: { title: string }) => [row.title, row]));
+      const rangedByTitle = Object.fromEntries(ranged.body.rows.map((row: { title: string }) => [row.title, row]));
       expect(rangedByTitle.Hades).toBeDefined();
       expect(rangedByTitle.Celeste).toBeUndefined();
 
       // A date range that excludes the check-in drops the item entirely.
       const outside = await request(app).get('/api/v1/media/library?from=2024-01-01&to=2024-01-31');
       expect(outside.status).toBe(200);
-      const outsideByTitle = Object.fromEntries(outside.body.map((row: { title: string }) => [row.title, row]));
+      const outsideByTitle = Object.fromEntries(outside.body.rows.map((row: { title: string }) => [row.title, row]));
       expect(outsideByTitle.Hades).toBeUndefined();
       expect(outsideByTitle.Celeste).toBeUndefined();
     });
@@ -734,21 +734,21 @@ describe('Media check-in API', () => {
       const byRange = await request(app)
         .get('/api/v1/media/library')
         .query({ from: '2023-01-04', to: '2023-01-04' });
-      expect(byRange.body).toHaveLength(1);
-      expect(byRange.body[0].title).toBe('Dune');
+      expect(byRange.body.rows).toHaveLength(1);
+      expect(byRange.body.rows[0].title).toBe('Dune');
 
       // Type filter excluding movies.
       const byType = await request(app)
         .get('/api/v1/media/library')
         .query({ types: 'tv_show' });
-      expect(byType.body).toHaveLength(1);
-      expect(byType.body[0].title).toBe('Severance');
+      expect(byType.body.rows).toHaveLength(1);
+      expect(byType.body.rows[0].title).toBe('Severance');
 
       // Combined: type filter excludes the only item in the range.
       const neither = await request(app)
         .get('/api/v1/media/library')
         .query({ from: '2023-01-04', to: '2023-01-04', types: 'tv_show' });
-      expect(neither.body).toHaveLength(0);
+      expect(neither.body.rows).toHaveLength(0);
     });
 
     it('respects item timezone when matching the date range', async () => {
@@ -762,14 +762,100 @@ describe('Media check-in API', () => {
       const byLocalDate = await request(app)
         .get('/api/v1/media/library')
         .query({ from: '2023-01-04', to: '2023-01-04' });
-      expect(byLocalDate.body).toHaveLength(1);
-      expect(byLocalDate.body[0].last_checkin_timezone).toBe('America/New_York');
+      expect(byLocalDate.body.rows).toHaveLength(1);
+      expect(byLocalDate.body.rows[0].last_checkin_timezone).toBe('America/New_York');
 
       // …and does not match the UTC date (Jan 5).
       const byUtcDate = await request(app)
         .get('/api/v1/media/library')
         .query({ from: '2023-01-05', to: '2023-01-05' });
-      expect(byUtcDate.body).toHaveLength(0);
+      expect(byUtcDate.body.rows).toHaveLength(0);
+    });
+
+    describe('search, filter, sort and paging', () => {
+      const lib = async (qs = '') => (await request(app).get(`/api/v1/media/library${qs}`)).body as { rows: any[]; total: number };
+
+      async function seed() {
+        const mk = async (media_type: string, title: string, extra: Record<string, unknown> = {}) =>
+          (await request(app).post('/api/v1/media/items').send({ media_type, title, ...extra })).body.id as string;
+        const ids = {
+          dune: await mk('movie', 'Dune'),
+          severance: await mk('tv_show', 'Severance'),
+          hades: await mk('game', 'Hades'),
+          fifty: await mk('book', '50%_Off Tales', { author: 'Ada Lovelace' }),
+          unseen: await mk('book', 'Unseen Book'),
+        };
+        const checkin = (id: string, body: Record<string, unknown>) =>
+          request(app).post(`/api/v1/media/items/${id}/checkins`).send({ timezone: 'UTC', ...body });
+        await checkin(ids.dune, { checkin_type: 'completed', rating: 2, checked_in_at: '2023-01-04T20:00:00Z' });
+        await checkin(ids.severance, { checkin_type: 'completed', rating: 4, checked_in_at: '2023-01-05T20:00:00Z' });
+        await checkin(ids.severance, { checkin_type: 'completed', checked_in_at: '2023-01-06T20:00:00Z' });
+        await checkin(ids.hades, { checkin_type: 'in_progress', checked_in_at: '2023-01-07T20:00:00Z' });
+        await request(app).put(`/api/v1/media/items/${ids.hades}`).send({ time_played_minutes: 540 });
+        await checkin(ids.fifty, { checkin_type: 'dropped', checked_in_at: '2023-01-03T20:00:00Z' });
+        return ids;
+      }
+      const titles = (r: { rows: any[] }) => r.rows.map((x) => x.title);
+
+      it('pages the results and reports the total across all pages', async () => {
+        await seed();
+        const first = await lib('?limit=2');
+        expect(first.total).toBe(5);
+        expect(titles(first)).toEqual(['Hades', 'Severance']);
+        const last = await lib('?limit=2&offset=4');
+        expect(titles(last)).toEqual(['Unseen Book']);
+        expect(last.total).toBe(5);
+      });
+
+      it('searches title, author, type words and last-check-in status, treating % and _ literally', async () => {
+        await seed();
+        expect(titles(await lib('?q=dun'))).toEqual(['Dune']);
+        expect(titles(await lib('?q=lovelace'))).toEqual(['50%_Off Tales']);
+        expect(titles(await lib('?q=tv%20shows'))).toEqual(['Severance']);
+        expect(titles(await lib('?q=in-progress'))).toEqual(['Hades']);
+        expect(titles(await lib('?q=dropped'))).toEqual(['50%_Off Tales']);
+        expect(titles(await lib('?q=no%20check-ins'))).toEqual(['Unseen Book']);
+        expect(titles(await lib('?q=50%25_off'))).toEqual(['50%_Off Tales']);
+        expect(titles(await lib('?q=%25'))).toEqual(['50%_Off Tales']);
+        expect((await lib('?q=book')).total).toBe(2);
+        expect((await lib('?q=zzz')).total).toBe(0);
+      });
+
+      it('combines search with the type filter and the date range', async () => {
+        await seed();
+        expect(titles(await lib('?q=book&types=book'))).toEqual(['50%_Off Tales', 'Unseen Book']);
+        expect(titles(await lib('?q=e&from=2023-01-05&to=2023-01-06'))).toEqual(['Severance']);
+      });
+
+      it('sorts by rating, completed count, time played and title, with the tiebreak stable', async () => {
+        await seed();
+        expect(titles(await lib('?sort=rating&dir=desc')).slice(0, 2)).toEqual(['Severance', 'Dune']);
+        expect(titles(await lib('?sort=completed&dir=desc')).slice(0, 2)).toEqual(['Severance', 'Dune']);
+        expect(titles(await lib('?sort=time_played&dir=desc'))[0]).toBe('Hades');
+        expect(titles(await lib('?sort=title&dir=asc'))).toEqual(['50%_Off Tales', 'Dune', 'Hades', 'Severance', 'Unseen Book']);
+        expect(titles(await lib('?sort=bogus;DROP'))[0]).toBe('Hades'); // falls back to last check-in
+      });
+
+      it('filters to a list and sorts by when each item was added to it', async () => {
+        const ids = await seed();
+        const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Picks' })).body;
+        for (const id of [ids.severance, ids.dune, ids.hades]) {
+          await request(app).post(`/api/v1/media/lists/${list.id}/items`).send({ media_item_id: id });
+          await query('UPDATE media_list_items SET added_at = added_at + ($3 || \' seconds\')::interval WHERE list_id = $1 AND media_item_id = $2',
+            [list.id, id, String([ids.severance, ids.dune, ids.hades].indexOf(id) * 10)]);
+        }
+        const inList = await lib(`?list=${list.id}`);
+        expect(inList.total).toBe(3);
+        expect(titles(inList).sort()).toEqual(['Dune', 'Hades', 'Severance']);
+        expect(inList.rows.every((r) => typeof r.list_added_at === 'string')).toBe(true);
+        expect(titles(await lib(`?list=${list.id}&sort=list&dir=asc`))).toEqual(['Severance', 'Dune', 'Hades']);
+        expect(titles(await lib(`?list=${list.id}&sort=list&dir=desc`))).toEqual(['Hades', 'Dune', 'Severance']);
+        expect(titles(await lib(`?list=${list.id}&q=dun`))).toEqual(['Dune']);
+        // Not a list id, or sorting by "time added" without a list: ignored.
+        expect((await lib('?list=nope')).total).toBe(5);
+        expect((await lib('?sort=list')).rows[0].title).toBe('Hades');
+        expect((await lib('?sort=list')).rows[0]).not.toHaveProperty('list_added_at');
+      });
     });
   });
 
