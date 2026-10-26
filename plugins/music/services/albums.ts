@@ -1,5 +1,5 @@
 /**
- * Music plugin — album artwork and release info.
+ * Music plugin — album artwork, release info and track lengths.
  *
  * Albums are looked up once each against public catalogs (see
  * albumProviders.ts) and cached in `music_albums`: the metadata and tracklist
@@ -7,6 +7,10 @@
  * time it is opened. Lookups run as a user-started backfill (Settings → Music)
  * or, for albums on a newly arrived scrobble, in the background after the
  * response has been sent.
+ *
+ * A matched album's tracklist also supplies lengths for plays that have none
+ * (imports), which listening time falls back to. Lengths are only ever filled
+ * in, never overwritten, so those sent by multi-scrobbler stay as they are.
  */
 
 import fs from 'fs';
@@ -159,6 +163,8 @@ async function lookupOne(userId: string, target: Target): Promise<'matched' | 'n
   });
   if (match) {
     await storeMatch(userId, target, match);
+    const filled = await fillTrackLengths(userId, target.album_key);
+    if (status.state === 'running') status.durations_filled += filled;
     return 'matched';
   }
   await query(
@@ -179,6 +185,69 @@ const UNLOOKED = `
   WHERE m.user_id = $1 AND m.album_key IS NOT NULL AND a.album_key IS NULL`;
 
 // ---------------------------------------------------------------------------
+// Track lengths
+// ---------------------------------------------------------------------------
+
+const FILL_BATCH = 2000;
+
+/**
+ * Give plays without a length the length of the same track on their matched
+ * album's tracklist (all albums, or just `albumKey`), then refresh the
+ * listening time of the sessions they belong to. Returns plays updated.
+ */
+export async function fillTrackLengths(userId: string, albumKey?: string): Promise<number> {
+  const albums = await query(
+    `SELECT a.album_key, a.tracks, ARRAY_AGG(DISTINCT m.title) AS titles
+     FROM music_albums a
+     JOIN music_scrobbles m ON m.user_id = a.user_id AND m.album_key = a.album_key AND m.track_length IS NULL
+     WHERE a.user_id = $1 AND a.status = 'matched' AND ($2::text IS NULL OR a.album_key = $2)
+     GROUP BY a.album_key, a.tracks`,
+    [userId, albumKey ?? null],
+  );
+  const keys: string[] = [];
+  const titles: string[] = [];
+  const lengths: number[] = [];
+  for (const row of albums.rows as { album_key: string; tracks: { title: string; length: number | null }[]; titles: string[] }[]) {
+    const byTitle = new Map<string, number>();
+    for (const t of row.tracks) {
+      const norm = normalizeTitle(t.title);
+      if (t.length && t.length > 0 && !byTitle.has(norm)) byTitle.set(norm, t.length);
+    }
+    for (const title of row.titles) {
+      const length = byTitle.get(normalizeTitle(title));
+      if (length) {
+        keys.push(row.album_key);
+        titles.push(title);
+        lengths.push(length);
+      }
+    }
+  }
+  let updated = 0;
+  const sessions = new Set<string>();
+  for (let i = 0; i < keys.length; i += FILL_BATCH) {
+    const result = await query(
+      `UPDATE music_scrobbles m SET track_length = v.len
+       FROM unnest($2::text[], $3::text[], $4::int[]) AS v(key, title, len)
+       WHERE m.user_id = $1 AND m.album_key = v.key AND m.title = v.title AND m.track_length IS NULL
+       RETURNING m.session_id`,
+      [userId, keys.slice(i, i + FILL_BATCH), titles.slice(i, i + FILL_BATCH), lengths.slice(i, i + FILL_BATCH)],
+    );
+    updated += result.rowCount ?? 0;
+    for (const r of result.rows) if (r.session_id) sessions.add(r.session_id);
+  }
+  if (sessions.size > 0) {
+    await query(
+      `UPDATE music_sessions s SET listened_seconds = t.seconds
+       FROM (SELECT session_id, COALESCE(SUM(COALESCE(listened_for, track_length)), 0)::int AS seconds
+             FROM music_scrobbles WHERE user_id = $1 AND session_id = ANY($2::uuid[]) GROUP BY session_id) t
+       WHERE s.id = t.session_id`,
+      [userId, [...sessions]],
+    );
+  }
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
 // Backfill job
 // ---------------------------------------------------------------------------
 
@@ -188,11 +257,13 @@ export interface BackfillStatus {
   total: number;
   matched: number;
   not_found: number;
+  /** Plays that were given a track length from an album's tracklist. */
+  durations_filled: number;
   error: string | null;
 }
 
 const BATCH = 25;
-let status: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, error: null };
+let status: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, durations_filled: 0, error: null };
 let cancelRequested = false;
 let running: Promise<void> | null = null;
 
@@ -212,7 +283,7 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
   if (opts.retryMissing) await query(`DELETE FROM music_albums WHERE user_id = $1 AND status = 'not_found'`, [userId]);
   const total = (await query(`SELECT COUNT(*)::int AS n FROM (${UNLOOKED} GROUP BY m.album_key) u`, [userId])).rows[0].n;
   cancelRequested = false;
-  status = { state: 'running', processed: 0, total, matched: 0, not_found: 0, error: null };
+  status = { state: 'running', processed: 0, total, matched: 0, not_found: 0, durations_filled: 0, error: null };
   running = (async () => {
     try {
       await collectOrphanArt();
@@ -234,6 +305,8 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
           status.total = Math.max(status.total, status.processed);
         }
       }
+      // Albums matched in earlier runs may have lengths the plays still lack.
+      status.durations_filled += await fillTrackLengths(userId);
       status.state = 'done';
     } catch (err) {
       status.state = 'error';

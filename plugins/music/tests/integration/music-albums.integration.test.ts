@@ -65,7 +65,7 @@ const backfill = async (body: object = {}) => {
 };
 const status = async () => (await request(app).get('/api/v1/music/albums/status')).body;
 
-describe('album artwork', () => {
+describe('music metadata', () => {
   beforeAll(async () => {
     await setupIntegrationDatabase();
     png = await sharp({ create: { width: 400, height: 300, channels: 3, background: '#c33' } }).png().toBuffer();
@@ -222,6 +222,37 @@ describe('album artwork', () => {
     const library = (await request(app).get('/api/v1/music/library').query({ view: 'songs' })).body;
     expect(library.find((r: any) => r.name === 'Loose Single').art_id).toBeNull();
     expect(library.find((r: any) => r.name === 'Oceanic').art_id).toBe(artId);
+  });
+
+  it('fills missing track lengths from the album, never overwriting, and updates session time', async () => {
+    // Filaments (no length), Sun & Moon (multi-scrobbler length 100 must stay), a remastered title, a bonus track not on the album.
+    await push('Filaments', 'Group Therapy');
+    await request(app).post(`${BASE}/newscrobble`).send({ title: 'Sun & Moon', artists: ['Above & Beyond'], album: 'Group Therapy', time: T0 + 300, length: 100, key });
+    await push('Oceanic (Remastered)', 'Group Therapy', ['Above & Beyond'], 600);
+    await push('Hidden Bonus', 'Group Therapy', ['Above & Beyond'], 900);
+    const secondsOf = async () => (await query('SELECT listened_seconds FROM music_sessions')).rows[0].listened_seconds;
+    expect(await secondsOf()).toBe(100);
+
+    useDeps(async () => match());
+    await backfill();
+    const lengths = (await query(`SELECT title, track_length FROM music_scrobbles ORDER BY played_at`)).rows;
+    expect(lengths.map((r: any) => [r.title, r.track_length])).toEqual([
+      ['Filaments', 300],
+      ['Sun & Moon', 100], // not overwritten
+      ['Oceanic (Remastered)', 250],
+      ['Hidden Bonus', null],
+    ]);
+    expect(await secondsOf()).toBe(650);
+    expect((await status()).job.durations_filled).toBe(2);
+    // Library listening time now counts them.
+    const library = (await request(app).get('/api/v1/music/library').query({ view: 'songs' })).body;
+    expect(library.find((r: any) => r.name === 'Filaments').listened_seconds).toBe(300);
+
+    // Already-matched albums are topped up by a later run, once nothing is left to look up.
+    await push('Late Arrival', 'Group Therapy', ['Above & Beyond'], 1200);
+    await query(`UPDATE music_albums SET tracks = tracks || '[{"position":4,"title":"Late Arrival","length":200}]'::jsonb`);
+    await backfill();
+    expect((await query(`SELECT track_length FROM music_scrobbles WHERE title = 'Late Arrival'`)).rows[0].track_length).toBe(200);
   });
 
   it('removes albums on start-over and collects their files on the next lookup', async () => {

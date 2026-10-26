@@ -189,7 +189,7 @@ async function rebuildSessions(
   await db.query(
     `CREATE TEMP TABLE music_grp ON COMMIT DROP AS
      WITH ordered AS (
-       SELECT id, played_at, title, artists, listened_for, timezone,
+       SELECT id, played_at, title, artists, listened_for, track_length, timezone,
               CASE WHEN played_at - LAG(played_at) OVER (ORDER BY played_at, id)
                         > make_interval(mins => $2::int) THEN 1 ELSE 0 END AS brk
        FROM music_scrobbles
@@ -200,7 +200,7 @@ async function rebuildSessions(
      grp AS (
        SELECT *, SUM(brk) OVER (ORDER BY played_at, id) AS g FROM ordered
      )
-     SELECT id, played_at, title, artists, listened_for, g,
+     SELECT id, played_at, title, artists, listened_for, track_length, g,
             FIRST_VALUE(id) OVER (PARTITION BY g ORDER BY played_at, id) AS sid,
             FIRST_VALUE(timezone) OVER (PARTITION BY g ORDER BY played_at, id) AS stz
      FROM grp`,
@@ -225,7 +225,7 @@ async function rebuildSessions(
               MIN(played_at) AS started_at,
               MAX(played_at) AS ended_at,
               COUNT(*)::int AS track_count,
-              COALESCE(SUM(listened_for), 0)::int AS listened_seconds,
+              COALESCE(SUM(COALESCE(listened_for, track_length)), 0)::int AS listened_seconds,
               string_agg(DISTINCT title || ' ' || array_to_string(artists, ' '), ' ') AS search_text
        FROM music_grp
        GROUP BY sid

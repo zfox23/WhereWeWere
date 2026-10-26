@@ -40,7 +40,7 @@ describe('MusicSettings', () => {
     albumStatusMock.mockResolvedValue({
       enabled: true,
       albums: { total: 10, matched: 6, not_found: 1, pending: 3 },
-      job: { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, error: null },
+      job: { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, durations_filled: 0, error: null },
     });
   });
   afterEach(() => {
@@ -136,13 +136,13 @@ describe('MusicSettings', () => {
     expect(importMock).not.toHaveBeenCalled();
   });
 
-  it('shows album lookup progress and starts a lookup, optionally retrying misses', async () => {
+  it('shows metadata lookup progress and starts a lookup, optionally retrying misses', async () => {
     const user = userEvent.setup();
     albumStartMock.mockResolvedValue({});
     render(<MusicSettings />);
     await waitFor(() => screen.getByText(/6 matched, 1 not found, 3 waiting, of 10 albums/));
     await user.click(screen.getByLabelText(/retry albums that weren't found/));
-    await user.click(screen.getByRole('button', { name: 'Look up album artwork' }));
+    await user.click(screen.getByRole('button', { name: 'Update music metadata' }));
     expect(albumStartMock).toHaveBeenCalledWith(true);
   });
 

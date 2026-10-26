@@ -54,13 +54,14 @@ A new play joins the session whose last play was within the gap, merges two sess
 
 Scrobbles are included in backups and restored without duplicates.
 
-## Album artwork
+## Music metadata: artwork, release info and track lengths
 
 Tiny album covers appear beside tracks in expanded listening sessions, in the music preview under other check-ins, in **Profile → Music** (Top songs, Top albums and the Library table), and clicking one opens a modal with the full-size cover, release date, label, the tracklist with lengths and your own scrobble count for each track.
 
 Covers and release info come from [Deezer](https://developers.deezer.com/api) (no key needed), with [MusicBrainz](https://musicbrainz.org) and the Cover Art Archive as a fallback. An album is only accepted when its title agrees and the release's tracklist contains something you played, so an unmatched album shows a blank placeholder rather than a wrong cover.
 
-- **Existing history:** run **Settings → Music → Album artwork → Look up album artwork**. It works through your albums most-played first, keeps its progress if a catalog is unreachable, and shows progress as it goes. Expect a large library to take a while (the catalogs are rate limited). Tick "Also retry albums that weren't found" to try earlier misses again.
+- **Existing history:** run **Settings → Music → Music metadata → Update music metadata**. It works through your albums most-played first, keeps its progress if a catalog is unreachable, and shows progress as it goes. Expect a large library to take a while (the catalogs are rate limited). Tick "Also retry albums that weren't found" to try earlier misses again.
+- **Track lengths:** plays without a length (imports) take the length of the same track on their matched album's tracklist, which listening time on the Profile tab, in sessions and in the album modal falls back to. Lengths already recorded, such as those multi-scrobbler sends, are never overwritten. Singles with no album can't be filled this way. The same button also tops up albums matched in earlier runs.
 - **New scrobbles:** the album of each new scrobble is looked up in the background after multi-scrobbler has been answered.
 - **Storage:** matches live in the `music_albums` table and thumbnails (and, once opened, large covers) in `DATA_DIR/music-art/`. This is a rebuildable cache, so it is not part of backups; **Start Over → All music data** clears it.
 - **Privacy:** lookups send album and artist names to Deezer (and MusicBrainz when Deezer has no match). Nothing else leaves your server, and your browser only ever talks to WhereWeWere for images.

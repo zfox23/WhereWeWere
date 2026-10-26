@@ -314,11 +314,12 @@ function ArtworkSection() {
   const { albums, job } = status;
   return (
     <div className={CARD}>
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Album artwork</h2>
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Music metadata</h2>
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Covers, release dates and tracklists come from Deezer, with MusicBrainz as a fallback. Each album is looked up
-        once and stored on this server; new albums are looked up as their first scrobble arrives. Importing history
-        adds albums that need a lookup, so run this afterwards.
+        Album covers, release dates and tracklists come from Deezer, with MusicBrainz as a fallback. Each album is looked
+        up once and stored on this server; new albums are looked up as their first scrobble arrives. Plays that have no
+        length (such as imported history) borrow the track's length from its album, which listening time falls back to;
+        lengths already recorded are never changed. Importing history adds albums that need a lookup, so run this afterwards.
       </p>
       <p className="text-xs text-gray-600 dark:text-gray-300">
         {albums.matched.toLocaleString()} matched, {albums.not_found.toLocaleString()} not found,{' '}
@@ -331,7 +332,7 @@ function ArtworkSection() {
       </label>
       <div className="flex items-center gap-3">
         <button type="button" onClick={start} disabled={running || !status.enabled} className="btn-primary">
-          Look up album artwork
+          Update music metadata
         </button>
         {running && (
           <button type="button" onClick={() => music.cancelAlbumBackfill().then(load)} className="btn-secondary text-xs">
@@ -342,7 +343,8 @@ function ArtworkSection() {
       {running && (
         <p className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2">
           <Loader2 size={13} className="animate-spin" />
-          {job.processed.toLocaleString()} of {job.total.toLocaleString()} looked up: {job.matched.toLocaleString()} matched
+          {job.processed.toLocaleString()} of {job.total.toLocaleString()} looked up: {job.matched.toLocaleString()} matched,{' '}
+          {job.durations_filled.toLocaleString()} play lengths filled
         </p>
       )}
       {(job.state === 'done' || job.state === 'cancelled') && (
@@ -350,7 +352,8 @@ function ArtworkSection() {
           <Check size={16} className="mt-0.5 shrink-0" />
           <span>
             {job.state === 'cancelled' ? 'Cancelled. ' : ''}Looked up {job.processed.toLocaleString()} album
-            {job.processed === 1 ? '' : 's'}: {job.matched.toLocaleString()} matched, {job.not_found.toLocaleString()} not found.
+            {job.processed === 1 ? '' : 's'}: {job.matched.toLocaleString()} matched, {job.not_found.toLocaleString()} not found.{' '}
+            Filled in the length of {job.durations_filled.toLocaleString()} play{job.durations_filled === 1 ? '' : 's'}.
           </span>
         </div>
       )}
