@@ -32,6 +32,10 @@ function app() {
   return a;
 }
 
+
+/** closeGaps renumbers in its own transaction; a client that accepts anything is enough here. */
+const gapClient = () => ({ query: vi.fn(async () => ({ rows: [] })), release: vi.fn() });
+
 beforeEach(() => {
   queryMock.mockReset();
   poolConnectMock.mockReset();
@@ -188,8 +192,11 @@ describe('venue lists (endpoints)', () => {
 
   it('DELETE /lists/:id/items/:venueId removes a membership (404 if absent)', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ list_id: 'l1' }] });
+    const gaps = gapClient();
+    poolConnectMock.mockResolvedValueOnce(gaps);
     const ok = await request(app()).delete('/venues/lists/l1/items/v1');
     expect(ok.status).toBe(200);
+    expect(gaps.query.mock.calls.some((c) => String(c[0]).includes('UPDATE venue_list_items'))).toBe(true);
 
     queryMock.mockResolvedValueOnce({ rows: [] });
     const missing = await request(app()).delete('/venues/lists/l1/items/vX');
@@ -223,29 +230,6 @@ describe('venue list ranking (endpoints)', () => {
     expect(res.body).toEqual([{ venue_id: 'v1', venue_name: 'Coaster', rank: 1 }]);
   });
 
-  it('PUT /lists/:id/ranks clears all ranks then assigns 1..n in order', async () => {
-    const client = {
-      query: vi.fn(async (sql: string) => {
-        if (sql.includes('SELECT id FROM venue_lists')) return { rows: [{ id: 'l1' }] };
-        return { rows: [], rowCount: 1 };
-      }),
-      release: vi.fn(),
-    };
-    poolConnectMock.mockResolvedValueOnce(client);
-    const res = await request(app()).put('/venues/lists/l1/ranks').send({ ranked_ids: ['b', 'a', 'b'] });
-    expect(res.status).toBe(200);
-    expect(res.body.ranked_ids).toEqual(['b', 'a']);
-    const sets = client.query.mock.calls.filter((c) => (c[0] as string).includes('SET rank = $3'));
-    expect(sets.map((c) => c[1])).toEqual([['l1', 'b', 1], ['l1', 'a', 2]]);
-    expect(client.query.mock.calls.some((c) => (c[0] as string).includes('SET rank = NULL'))).toBe(true);
-  });
-
-  it('PUT /lists/:id/ranks validates the body and 404s on an unknown list', async () => {
-    expect((await request(app()).put('/venues/lists/l1/ranks').send({ ranked_ids: 'x' })).status).toBe(400);
-    const client = { query: vi.fn(async () => ({ rows: [] })), release: vi.fn() };
-    poolConnectMock.mockResolvedValueOnce(client);
-    expect((await request(app()).put('/venues/lists/l1/ranks').send({ ranked_ids: [] })).status).toBe(404);
-  });
 });
 
 describe('checkin lists (endpoints)', () => {
@@ -338,8 +322,11 @@ describe('checkin lists (endpoints)', () => {
 
   it('DELETE /lists/:id/items/:checkinId removes a membership (404 if absent)', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }] });
+    const gaps = gapClient();
+    poolConnectMock.mockResolvedValueOnce(gaps);
     const ok = await request(app()).delete('/location-checkins/lists/cl1/items/c1');
     expect(ok.status).toBe(200);
+    expect(gaps.query.mock.calls.some((c) => String(c[0]).includes('UPDATE checkin_list_items'))).toBe(true);
 
     queryMock.mockResolvedValueOnce({ rows: [] });
     const missing = await request(app()).delete('/location-checkins/lists/cl1/items/cX');
@@ -380,31 +367,6 @@ describe('checkin lists (endpoints)', () => {
     expect(res.status).toBe(400);
     expect(client.query).not.toHaveBeenCalled();
     expect(client.release).toHaveBeenCalled();
-  });
-
-  it('PUT /lists/:id/ranks bulk re-ranks the given order and clears the rest', async () => {
-    const client = {
-      query: vi.fn(async (sql: string) => {
-        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
-        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
-        if (sql.includes('SET rank = NULL')) return { rows: [] };
-        if (sql.includes('UPDATE checkin_list_items SET rank = $3')) return { rows: [], rowCount: 1 };
-        return { rows: [] };
-      }),
-      release: vi.fn(),
-    };
-    poolConnectMock.mockResolvedValueOnce(client);
-
-    const res = await request(app()).put('/location-checkins/lists/cl1/ranks').send({ ranked_ids: ['c2', 'c1'] });
-    expect(res.status).toBe(200);
-    expect(res.body.ranked_ids).toEqual(['c2', 'c1']);
-    const updates = client.query.mock.calls
-      .filter((c) => c[0].includes('UPDATE checkin_list_items SET rank = $3'))
-      .map((c) => c as unknown[]);
-    expect(updates.map((c) => c[1])).toEqual([
-      ['cl1', 'c2', 1],
-      ['cl1', 'c1', 2],
-    ]);
   });
 
   it('PUT /lists/:id/ranks rejects a non-array body', async () => {

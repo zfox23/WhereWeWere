@@ -154,6 +154,61 @@ describe('Location plugin API (integration)', () => {
     });
   });
 
+  describe('shared list kit: bulk ranks, gaps and rank sessions', () => {
+    const session = (ids: string[]) => ({
+      mode: 'scratch', initialRanks: Object.fromEntries(ids.map((i) => [i, null])), itemIds: ids,
+      answers: [{ a: ids[0], b: ids[1], r: 'a' }],
+    });
+
+    it('check-in lists: bulk re-rank, gap closing on removal and a rank session that goes with the list', async () => {
+      const venueId = await insertVenue('Kit', 11, 11);
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) ids.push(await insertCheckin(venueId, `2024-02-0${i + 1}T12:00:00Z`));
+      const list = await request(app).post('/api/v1/location-checkins/lists').send({ name: 'Kit' });
+      const listId = list.body.id as string;
+      for (const id of ids) await query('INSERT INTO checkin_list_items (list_id, checkin_id) VALUES ($1, $2)', [listId, id]);
+      const base = `/api/v1/location-checkins/lists/${listId}`;
+
+      expect((await request(app).put(`${base}/ranks`).send({ ranked_ids: [ids[2], ids[0]] })).status).toBe(200);
+      const ranks = async () => (await query('SELECT checkin_id, rank FROM checkin_list_items WHERE list_id = $1 ORDER BY rank NULLS LAST, checkin_id', [listId])).rows;
+      expect((await ranks()).map((r) => r.rank)).toEqual([1, 2, null]);
+      expect((await ranks())[0].checkin_id).toBe(ids[2]);
+      expect((await request(app).put(`${base}/ranks`).send({ ranked_ids: ['nope'] })).status).toBe(400);
+
+      // Removing the rank-1 item closes the hole.
+      expect((await request(app).delete(`${base}/items/${ids[2]}`)).status).toBe(200);
+      expect((await ranks()).map((r) => r.rank)).toEqual([1, null]);
+
+      expect((await request(app).get(`${base}/rank-session`)).status).toBe(404);
+      expect((await request(app).put(`${base}/rank-session`).send({ state: session([ids[0], ids[1]]) })).status).toBe(200);
+      expect((await request(app).get(`${base}/rank-session`)).body.state.answers).toHaveLength(1);
+      expect((await request(app).delete(`/api/v1/location-checkins/lists/${listId}`)).status).toBe(200);
+      expect((await query('SELECT 1 FROM checkin_rank_sessions')).rowCount).toBe(0);
+    });
+
+    it('venue lists: bulk re-rank with the unique index, gap closing and rank sessions', async () => {
+      const venues = [await insertVenue('K1', 12, 12), await insertVenue('K2', 13, 13), await insertVenue('K3', 14, 14)];
+      const list = await request(app).post('/api/v1/venues/lists').send({ name: 'Kit venues' });
+      const listId = list.body.id as string;
+      for (const v of venues) await query('INSERT INTO venue_list_items (list_id, venue_id) VALUES ($1, $2)', [listId, v]);
+      const base = `/api/v1/venues/lists/${listId}`;
+
+      expect((await request(app).put(`${base}/ranks`).send({ ranked_ids: [venues[0], venues[1], venues[2]] })).status).toBe(200);
+      // Reversing every rank must not trip the unique (list_id, rank) index.
+      expect((await request(app).put(`${base}/ranks`).send({ ranked_ids: [venues[2], venues[1], venues[0]] })).status).toBe(200);
+      const ranks = async () => (await query('SELECT venue_id, rank FROM venue_list_items WHERE list_id = $1 ORDER BY rank', [listId])).rows;
+      expect((await ranks()).map((r) => r.venue_id)).toEqual([venues[2], venues[1], venues[0]]);
+
+      expect((await request(app).delete(`${base}/items/${venues[2]}`)).status).toBe(200);
+      expect((await ranks()).map((r) => r.rank)).toEqual([1, 2]);
+
+      expect((await request(app).put(`${base}/rank-session`).send({ state: session([venues[0], venues[1]]) })).status).toBe(200);
+      expect((await request(app).put(`${base}/rank-session`).send({ state: { mode: 'x' } })).status).toBe(400);
+      expect((await request(app).delete(`${base}/rank-session`)).status).toBe(200);
+      expect((await request(app).get(`${base}/rank-session`)).status).toBe(404);
+    });
+  });
+
   describe('POST /venues/:id/merge-into', () => {
     it('moves check-ins, list memberships and children in one go', async () => {
       const source = await insertVenue('Source', 10, 10);

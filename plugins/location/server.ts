@@ -37,6 +37,8 @@ import type {
 import { isValidTimeZone } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
 import { pagination, parseYear, parseMonth } from '../../server/src/services/queryParams';
+import { createListKit } from '../../server/src/services/lists';
+import { mountRankRoutes } from '../../server/src/services/lists/routes';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import {
@@ -177,6 +179,9 @@ function haversineMeters(fromLat: number, fromLon: number, toLat: number, toLon:
 // ---------------------------------------------------------------------------
 
 const router = Router();
+const checkinListKit = createListKit({
+  lists: 'checkin_lists', items: 'checkin_list_items', itemId: 'checkin_id', sessions: 'checkin_rank_sessions',
+});
 
 // ---------------------------------------------------------------------------
 // Checkin lists — named lists of location CHECK-INS (not venues), so events
@@ -449,6 +454,7 @@ router.delete('/lists/:id/items/:checkinId', async (req: Request, res: Response)
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in is not in this list' });
     }
+    await checkinListKit.closeGaps(String(req.params.id));
     res.json({ message: 'Removed from list' });
   } catch (err) {
     console.error('Error removing check-in from list:', err);
@@ -523,55 +529,8 @@ router.put('/lists/:id/items/:checkinId/rank', async (req: Request, res: Respons
   }
 });
 
-// PUT /lists/:id/ranks - bulk re-rank (drag-to-rank).
-// Body: { ranked_ids: string[] } — the check-in ids in their new rank order
-// (1..n); every other member of the list becomes unranked (NULL).
-router.put('/lists/:id/ranks', async (req: Request, res: Response) => {
-  try {
-    const { ranked_ids } = req.body ?? {};
-    if (!Array.isArray(ranked_ids) || !ranked_ids.every((v) => typeof v === 'string')) {
-      return res.status(400).json({ error: 'ranked_ids must be an array of check-in ids' });
-    }
-    const ordered = Array.from(new Set(ranked_ids as string[]));
-
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const listResult = await client.query(
-        'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
-        [req.params.id, USER_ID]
-      );
-      if (listResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Checkin list not found' });
-      }
-      // Clear everything first; only list members are touched.
-      await client.query(
-        `UPDATE checkin_list_items
-         SET rank = NULL
-         WHERE list_id = $1
-           AND checkin_id IN (SELECT checkin_id FROM checkin_list_items WHERE list_id = $1)`,
-        [req.params.id]
-      );
-      for (let i = 0; i < ordered.length; i += 1) {
-        await client.query(
-          'UPDATE checkin_list_items SET rank = $3 WHERE list_id = $1 AND checkin_id = $2',
-          [req.params.id, ordered[i], i + 1]
-        );
-      }
-      await client.query('COMMIT');
-      res.json({ ranked_ids: ordered });
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error('Error re-ranking checkin list:', err);
-    res.status(500).json({ error: 'Failed to re-rank list' });
-  }
-});
+// PUT /lists/:id/ranks (bulk re-rank) and /lists/:id/rank-session come from the shared list kit.
+mountRankRoutes(router, checkinListKit, USER_ID);
 
 // GET / - list check-ins with venue info
 router.get('/', async (req: Request, res: Response) => {
@@ -1368,6 +1327,9 @@ router.use('/stats', statsRouter);
 // ---------------------------------------------------------------------------
 
 const venuesRouter = Router();
+const venueListKit = createListKit({
+  lists: 'venue_lists', items: 'venue_list_items', itemId: 'venue_id', sessions: 'venue_rank_sessions',
+});
 
 // GET / - list venues with optional search, category filter, pagination
 venuesRouter.get('/', async (req: Request, res: Response) => {
@@ -1765,48 +1727,8 @@ venuesRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /lists/:id/ranks - bulk re-rank (drag-to-rank).
-// Body: { ranked_ids: string[] } — the venue ids in their new rank order
-// (1..n); every other member of the list becomes unranked (NULL).
-venuesRouter.put('/lists/:id/ranks', async (req: Request, res: Response) => {
-  try {
-    const { ranked_ids } = req.body ?? {};
-    if (!Array.isArray(ranked_ids) || !ranked_ids.every((v) => typeof v === 'string')) {
-      return res.status(400).json({ error: 'ranked_ids must be an array of venue ids' });
-    }
-    const ordered = Array.from(new Set(ranked_ids as string[]));
-
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const listResult = await client.query(
-        'SELECT id FROM venue_lists WHERE id = $1 AND user_id = $2',
-        [req.params.id, USER_ID]
-      );
-      if (listResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Venue list not found' });
-      }
-      await client.query('UPDATE venue_list_items SET rank = NULL WHERE list_id = $1', [req.params.id]);
-      for (let i = 0; i < ordered.length; i += 1) {
-        await client.query(
-          'UPDATE venue_list_items SET rank = $3 WHERE list_id = $1 AND venue_id = $2',
-          [req.params.id, ordered[i], i + 1]
-        );
-      }
-      await client.query('COMMIT');
-      res.json({ ranked_ids: ordered });
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error('Error re-ranking venue list:', err);
-    res.status(500).json({ error: 'Failed to re-rank list' });
-  }
-});
+// PUT /lists/:id/ranks (bulk re-rank) and /lists/:id/rank-session come from the shared list kit.
+mountRankRoutes(venuesRouter, venueListKit, USER_ID);
 
 // POST /lists/:id/items - add a venue to a list (idempotent)
 venuesRouter.post('/lists/:id/items', async (req: Request, res: Response) => {
@@ -1869,6 +1791,7 @@ venuesRouter.delete('/lists/:id/items/:venueId', async (req: Request, res: Respo
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Venue not in list' });
     }
+    await venueListKit.closeGaps(String(req.params.id));
     res.json({ message: 'Removed from list' });
   } catch (err) {
     console.error('Error removing from venue list:', err);

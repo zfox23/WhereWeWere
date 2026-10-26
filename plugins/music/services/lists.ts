@@ -7,9 +7,16 @@
  */
 
 import { query } from '../../../server/src/db';
+import {
+  createListKit, cleanName, nameTakenOrThrow, NameTakenError, InvalidNameError, MAX_NAME, validateRankSession,
+  type Db, type RankSessionStateDto,
+} from '../../../server/src/services/lists';
 import { albumRefSql, songKeySql, UNKNOWN_ALBUM } from './identity';
 
-export const MAX_NAME = 100;
+export { cleanName, NameTakenError, InvalidNameError, MAX_NAME, validateRankSession };
+export type { Db, RankSessionStateDto };
+
+export const kit = createListKit({ lists: 'music_lists', items: 'music_list_items', itemId: 'id', sessions: 'music_rank_sessions' });
 
 export interface ListItem {
   id: string;
@@ -43,18 +50,6 @@ export interface ListItemWithStats extends ListItem {
   listened_seconds: number;
   last_played_at: string | null;
 }
-
-export class NameTakenError extends Error {}
-export class InvalidNameError extends Error {}
-
-export function cleanName(raw: unknown): string {
-  const name = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
-  if (!name || name.length > MAX_NAME) throw new InvalidNameError(`Give the list a name of 1 to ${MAX_NAME} characters`);
-  return name;
-}
-
-/** The pool helper or a transaction client. */
-export type Db = { query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount: number | null }> };
 
 // position is the order of adding (restores add many items in one instant, so added_at alone ties).
 const ITEM_ORDER = `i.rank NULLS LAST, i.position, i.added_at, i.id`;
@@ -117,7 +112,7 @@ export async function getListItems(userId: string, listId: string): Promise<List
     .map(({ position: _position, ...item }) => item);
 }
 
-const touch = (listId: string) => query(`UPDATE music_lists SET updated_at = NOW() WHERE id = $1`, [listId]);
+const touch = (listId: string) => kit.touch(listId);
 
 async function insertList(db: Db, userId: string, name: string): Promise<{ id: string; name: string } | null> {
   const result = await db.query(
@@ -178,9 +173,8 @@ export async function renameList(userId: string, id: string, rawName: unknown) {
   try {
     const result = await query(`UPDATE music_lists SET name = $3, updated_at = NOW() WHERE id = $2 AND user_id = $1 RETURNING id, name`, [userId, id, name]);
     return result.rows[0] ?? null;
-  } catch (err: any) {
-    if (err?.code === '23505') throw new NameTakenError('You already have a list with that name');
-    throw err;
+  } catch (err) {
+    return nameTakenOrThrow(err);
   }
 }
 
@@ -210,8 +204,7 @@ async function describeAlbum(db: Db, userId: string, ref: string) {
  * otherwise whether it was newly added (false: already on the list).
  */
 export async function addItem(userId: string, listId: string, req: AddItemRequest): Promise<{ added: boolean } | null> {
-  const list = await query(`SELECT 1 FROM music_lists WHERE id = $1 AND user_id = $2`, [listId, userId]);
-  if ((list.rowCount ?? 0) === 0) return null;
+  if (!(await kit.ownsList(userId, listId))) return null;
 
   let item: { key: string; kind: 'song' | 'album'; title: string; artists: string[]; album: string | null; albumRef: string | null };
   if (req.kind === 'album') {
@@ -272,36 +265,12 @@ export async function removeItem(userId: string, listId: string, itemId: string)
   );
   if ((result.rowCount ?? 0) === 0) return false;
   // Ranks stay gap-free: close the hole.
-  await query(
-    `UPDATE music_list_items i SET rank = r.rn
-     FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY rank) AS rn FROM music_list_items WHERE list_id = $1 AND rank IS NOT NULL) r
-     WHERE i.id = r.id`,
-    [listId],
-  );
+  await kit.closeGaps(listId);
   await touch(listId);
   return true;
 }
 
-/**
- * Drag-to-rank: the given item ids become ranks 1..n in that order and every
- * other item on the list becomes unranked. Ids not on the list are ignored.
- */
-export async function setRanks(userId: string, listId: string, rankedIds: string[]): Promise<boolean> {
-  const list = await query(`SELECT 1 FROM music_lists WHERE id = $1 AND user_id = $2`, [listId, userId]);
-  if ((list.rowCount ?? 0) === 0) return false;
-  const unique = [...new Set(rankedIds)];
-  await query(
-    `WITH listed AS (
-       SELECT i.id, ROW_NUMBER() OVER (ORDER BY r.ord) AS rank
-       FROM unnest($2::uuid[]) WITH ORDINALITY AS r(id, ord)
-       JOIN music_list_items i ON i.id = r.id AND i.list_id = $1
-     )
-     UPDATE music_list_items i SET rank = (SELECT l.rank FROM listed l WHERE l.id = i.id) WHERE i.list_id = $1`,
-    [listId, unique],
-  );
-  await touch(listId);
-  return true;
-}
+export const setRanks = kit.setRanks;
 
 // ---- Backup -------------------------------------------------------------
 
@@ -366,61 +335,4 @@ export async function importLists(db: Db, userId: string, payload: unknown): Pro
 
 // ---- Paused ranking sessions -------------------------------------------
 
-export interface RankSessionStateDto {
-  mode: 'continue' | 'scratch';
-  initialRanks: Record<string, number | null>;
-  itemIds: string[];
-  answers: { a: string; b: string; r: 'a' | 'b' | 'tie' }[];
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_SESSION_ITEMS = 1000;
-const MAX_SESSION_ANSWERS = 10_000;
-
-/** Check a client-supplied session; null when it isn't one. Nothing is trusted beyond its shape. */
-export function validateRankSession(raw: unknown): RankSessionStateDto | null {
-  const s = (raw && typeof raw === 'object' ? raw : null) as Record<string, any> | null;
-  if (!s || (s.mode !== 'continue' && s.mode !== 'scratch')) return null;
-  if (!Array.isArray(s.itemIds) || s.itemIds.length > MAX_SESSION_ITEMS || !s.itemIds.every((i: unknown) => typeof i === 'string' && UUID.test(i))) return null;
-  if (!Array.isArray(s.answers) || s.answers.length > MAX_SESSION_ANSWERS) return null;
-  const ids = new Set<string>(s.itemIds);
-  const answers: RankSessionStateDto['answers'] = [];
-  for (const a of s.answers) {
-    if (!a || !ids.has(a.a) || !ids.has(a.b) || a.a === a.b || !['a', 'b', 'tie'].includes(a.r)) return null;
-    answers.push({ a: a.a, b: a.b, r: a.r });
-  }
-  const initialRanks: Record<string, number | null> = {};
-  for (const id of ids) {
-    const r = s.initialRanks?.[id];
-    initialRanks[id] = Number.isInteger(r) && r > 0 && r <= MAX_SESSION_ITEMS ? r : null;
-  }
-  return { mode: s.mode, initialRanks, itemIds: [...s.itemIds], answers };
-}
-
-export async function getRankSession(userId: string, listId: string): Promise<{ state: RankSessionStateDto; updated_at: string } | null> {
-  const r = await query(
-    `SELECT s.state, s.updated_at FROM music_rank_sessions s JOIN music_lists l ON l.id = s.list_id WHERE s.list_id = $2 AND l.user_id = $1`,
-    [userId, listId],
-  );
-  return r.rows[0] ?? null;
-}
-
-/** Save (replace) a list's paused session. False when there is no such list. */
-export async function saveRankSession(userId: string, listId: string, state: RankSessionStateDto): Promise<boolean> {
-  const r = await query(
-    `INSERT INTO music_rank_sessions (list_id, state, updated_at)
-     SELECT l.id, $3::jsonb, NOW() FROM music_lists l WHERE l.id = $2 AND l.user_id = $1
-     ON CONFLICT (list_id) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()
-     RETURNING list_id`,
-    [userId, listId, JSON.stringify(state)],
-  );
-  return (r.rowCount ?? 0) > 0;
-}
-
-export async function deleteRankSession(userId: string, listId: string): Promise<boolean> {
-  const r = await query(
-    `DELETE FROM music_rank_sessions s USING music_lists l WHERE s.list_id = l.id AND l.id = $2 AND l.user_id = $1 RETURNING s.list_id`,
-    [userId, listId],
-  );
-  return (r.rowCount ?? 0) > 0;
-}
+export const { getRankSession, saveRankSession, deleteRankSession } = kit;
