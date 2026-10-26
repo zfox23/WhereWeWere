@@ -71,12 +71,24 @@ describe('MusicPreview', () => {
     const link = screen.getByRole('link', { name: 'Show this listening session on the timeline' });
     expect(link.getAttribute('href')).toBe('/?from=2024-05-01&to=2024-05-01');
     expect(link.querySelector('svg')).not.toBeNull();
-    await user.click(screen.getByText('Middle', { exact: false }));
+    await user.click(screen.getByText('Middle', { exact: false }).closest('li')!);
     expect(screen.getByTestId('probe').textContent).toBe(JUMP);
     cleanup();
     renderPreview(listening());
     await user.click(screen.getByRole('link', { name: 'Show this listening session on the timeline' }));
     expect(screen.getByTestId('probe').textContent).toBe(JUMP);
+  });
+
+  it('links artists and titles to the library in a new tab without jumping to the session', async () => {
+    const user = userEvent.setup();
+    renderPreview(listening());
+    const artist = screen.getByRole('link', { name: 'Khruangbin' });
+    const title = screen.getByRole('link', { name: 'Newest' });
+    expect(artist.getAttribute('href')).toContain('musicView=artists&q=Khruangbin');
+    expect(title.getAttribute('href')).toContain('q=Newest');
+    expect([artist.getAttribute('target'), title.getAttribute('target')]).toEqual(['_blank', '_blank']);
+    await user.click(title);
+    expect(screen.queryByTestId('probe')).toBeNull(); // the preview's own jump did not fire
   });
 
   it('shows a cover per play; clicking one opens the album instead of jumping', async () => {

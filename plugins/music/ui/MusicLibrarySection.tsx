@@ -206,7 +206,7 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   };
 
   return (
-    <section className="space-y-3" aria-label="Music library">
+    <section id="music-library" className="space-y-3 scroll-mt-4" aria-label="Music library">
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" role="group">
           {VIEWS.map((v) => (

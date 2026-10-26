@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Music } from 'lucide-react';
 import { AlbumArt } from '../../../plugins/music/ui/AlbumArt';
+import { ArtistLinks, HomeLibraryLink } from '../../../plugins/music/ui/libraryLinks';
 import type { ListeningBefore } from '../types';
 
 /** Router state that tells Home which listening session to reveal. */
@@ -58,9 +59,9 @@ export function MusicPreview({ listening, compact = false }: { listening: Listen
             >
               <AlbumArt artId={t.art_id} size={compact ? 18 : 20} />
               <span className="min-w-0 truncate">
-                <span className="font-medium text-gray-600 dark:text-gray-300">{t.artists.join(', ')}</span>
+                <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
                 {' — '}
-                {t.title}
+                <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink>
               </span>
             </li>
           );

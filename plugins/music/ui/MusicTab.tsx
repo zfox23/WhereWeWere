@@ -22,7 +22,8 @@ import { music } from './api';
 import { formatDuration, joinArtists } from './format';
 import { AlbumArt } from './AlbumArt';
 import { MusicLibrarySection } from './MusicLibrarySection';
-import type { MusicAggregate, MusicStats } from './types';
+import { ProfileLibraryLink } from './libraryLinks';
+import type { MusicAggregate, MusicLibraryView, MusicStats } from './types';
 
 function getMonthFromLocation(): string {
   const param = new URLSearchParams(window.location.search).get('musicMonth');
@@ -45,12 +46,15 @@ function TopList({
   icon: Icon,
   rows,
   detail,
+  view,
   withArt = false,
 }: {
   title: string;
   icon: React.ElementType;
   rows: MusicAggregate[];
   detail: (row: MusicAggregate) => string;
+  /** Library view a row links to. */
+  view: MusicLibraryView;
   /** Show each row's album cover (songs and albums, not artists). */
   withArt?: boolean;
 }) {
@@ -75,7 +79,7 @@ function TopList({
                   <span className="text-gray-400 tabular-nums">{i + 1}.</span>
                   {withArt && <AlbumArt artId={row.art_id} size={28} />}
                   <span className="min-w-0 truncate">
-                    {row.name}
+                    <ProfileLibraryLink view={view} q={row.name}>{row.name}</ProfileLibraryLink>
                     {detail(row) && <span className="text-xs text-gray-500 dark:text-gray-400"> · {detail(row)}</span>}
                   </span>
                 </span>
@@ -230,9 +234,9 @@ export function MusicTab(_props: PluginProfileTabProps) {
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-          <TopList title="Top songs" icon={Music} rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt />
-          <TopList title="Top artists" icon={Mic2} rows={data?.top_artists ?? []} detail={() => ''} />
-          <TopList title="Top albums" icon={Disc3} rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt />
+          <TopList title="Top songs" icon={Music} view="songs" rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt />
+          <TopList title="Top artists" icon={Mic2} view="artists" rows={data?.top_artists ?? []} detail={() => ''} />
+          <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt />
         </div>
       </div>
 

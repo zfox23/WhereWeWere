@@ -137,8 +137,8 @@ describe('Home: jumping from a check-in to its listening session', () => {
     await waitFor(() => screen.getByText('Newest Song', { exact: false }));
     expect(screen.queryByText(/Listening/)).toBeNull();
 
-    // Any part of the preview works; click a song line.
-    await user.click(screen.getByText('Middle Song', { exact: false }));
+    // Any part of a line that isn't an artist/title link works.
+    await user.click(screen.getByText('Middle Song', { exact: false }).closest('li')!);
 
     // The day is filtered to the session's date...
     await waitFor(() => expect(timelineListMock).toHaveBeenLastCalledWith(
@@ -160,7 +160,7 @@ describe('Home: jumping from a check-in to its listening session', () => {
     const user = userEvent.setup();
     renderHome();
     await waitFor(() => screen.getByText('Newest Song', { exact: false }));
-    await user.click(screen.getByText('Middle Song', { exact: false }));
+    await user.click(screen.getByText('Middle Song', { exact: false }).closest('li')!);
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toContain(SESSION_ID));
     // Real timers: the clear delay is a few seconds.
     await waitFor(

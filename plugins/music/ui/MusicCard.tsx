@@ -10,7 +10,8 @@ import type { CheckinCardProps } from 'wwp-shared';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { music } from './api';
 import { AlbumArt } from './AlbumArt';
-import { formatClock, formatDuration, joinArtists } from './format';
+import { ArtistLinks, HomeLibraryLink } from './libraryLinks';
+import { formatClock, formatDuration } from './format';
 import type { MusicSessionData, SessionTrack } from './types';
 
 /** How long the jump highlight stays on the card. */
@@ -115,9 +116,9 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
                     <AlbumArt artId={t.art_id} size={24} />
                     <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
                     <span>
-                      <span className="font-medium text-gray-600 dark:text-gray-300">{joinArtists(t.artists)}</span>
+                      <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
                       {' — '}
-                      {t.title}
+                      <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink>
                     </span>
                   </li>
                 ))}

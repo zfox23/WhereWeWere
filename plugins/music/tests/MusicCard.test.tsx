@@ -57,6 +57,11 @@ describe('MusicCard', () => {
     await user.click(toggle);
     await waitFor(() => expect(screen.getByText(/Maria También/)).toBeTruthy());
     expect(sessionTracksMock).toHaveBeenCalledWith('session-1');
+    // Artist and title open the library in a new tab, without toggling the card.
+    const artist = screen.getAllByRole('link', { name: 'Khruangbin' })[0];
+    expect(artist.getAttribute('href')).toContain('musicView=artists&q=Khruangbin');
+    expect(artist.getAttribute('target')).toBe('_blank');
+    expect(screen.getByRole('link', { name: 'Evidence' }).getAttribute('href')).toContain('q=Evidence');
     // Each track's clock time is in the zone it was played in.
     expect(screen.getByText('12:00 PM UTC')).toBeTruthy();
     expect(screen.getByText(/^12:30 AM (GMT\+12|NZST)$/)).toBeTruthy();
