@@ -20,6 +20,7 @@ import { createImportUpload, removeImportFile } from '../../server/src/plugins/u
 import { pluginTimestampUnion } from '../../server/src/plugins/registry';
 import { parseCheckinIdList, isUuid } from '../../server/src/services/batching';
 import { clampInt } from '../../server/src/services/queryParams';
+import { normalizeCompanions } from '../../server/src/services/companions';
 import { tokensMatch } from '../../server/src/services/tokens';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
 import {
@@ -31,6 +32,7 @@ import {
   parseNewScrobble,
   scrobbleListResponse,
 } from './services/scrobblerApi';
+import { suggest } from './services/suggest';
 import { parseScrobbleExport } from './services/importParser';
 import { parseLastfmCsv } from './services/lastfmCsv';
 import {
@@ -74,6 +76,8 @@ import {
   getMusicSettings,
   getSessionTracks,
   getTotals,
+  deleteManualScrobble,
+  insertManualScrobble,
   insertScrobble,
   insertScrobblesBulk,
   listScrobbles,
@@ -537,6 +541,78 @@ musicRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
   }
 });
 
+// ---- Hand-entered plays ---------------------------------------------------
+
+// GET /suggest?artist=&title= - autocomplete: your own songs first, then the catalog.
+musicRouter.get('/suggest', async (req: Request, res: Response) => {
+  try {
+    const text = (v: unknown) => (typeof v === 'string' ? v.slice(0, 200) : '');
+    res.json(await suggest(USER_ID, { artist: text(req.query.artist), title: text(req.query.title) }));
+  } catch (err) {
+    console.error('Error suggesting songs:', err);
+    res.status(500).json({ error: 'Failed to look up songs' });
+  }
+});
+
+const clean = (v: unknown, max: number): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+
+// POST /scrobbles - write down a song you heard. A play of the same song around
+// then already on file is reported (409) unless `force` is sent.
+musicRouter.post('/scrobbles', async (req: Request, res: Response) => {
+  try {
+    const b = req.body ?? {};
+    const title = clean(b.title, 300);
+    const artists = (Array.isArray(b.artists) ? b.artists : []).flatMap((a: unknown) => (clean(a, 200) ? [clean(a, 200) as string] : [])).slice(0, 20);
+    const playedAt = new Date(b.played_at);
+    if (!title || artists.length === 0) return res.status(400).json({ error: 'A song needs a title and an artist' });
+    if (Number.isNaN(playedAt.getTime()) || playedAt.getTime() > Date.now() + 24 * 3600_000) {
+      return res.status(400).json({ error: 'Give the time it was played (not more than a day ahead)' });
+    }
+    const length = Number(b.track_length);
+    const lat = b.latitude === null || b.latitude === undefined ? null : Number(b.latitude);
+    const lng = b.longitude === null || b.longitude === undefined ? null : Number(b.longitude);
+    const located = lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && Number.isFinite(lat) && Number.isFinite(lng);
+    const outcome = await insertManualScrobble(
+      USER_ID,
+      {
+        playedAt,
+        title,
+        artists,
+        album: clean(b.album, 300),
+        albumArtists: (Array.isArray(b.album_artists) ? b.album_artists : []).flatMap((a: unknown) => (clean(a, 200) ? [clean(a, 200) as string] : [])).slice(0, 20),
+        trackLength: Number.isFinite(length) && length > 0 && length <= 86_400 ? Math.round(length) : null,
+        timezone: typeof b.timezone === 'string' && isValidTimeZone(b.timezone) ? b.timezone : null,
+        note: clean(b.note, 2000),
+        latitude: located ? lat : null,
+        longitude: located ? lng : null,
+        locationAccuracy: located && Number.isInteger(b.location_accuracy) && b.location_accuracy >= 0 ? b.location_accuracy : null,
+      },
+      { force: b.force === true, companions: normalizeCompanions(b.companions).slice(0, 20) },
+    );
+    if (outcome.duplicate) {
+      return res.status(409).json({ error: 'You already have this song around that time', duplicate: outcome.duplicate });
+    }
+    if (!outcome.inserted) return res.status(409).json({ error: 'That play is already recorded' });
+    res.status(201).json({ id: outcome.id, session_id: outcome.sessionId });
+  } catch (err) {
+    console.error('Error saving manual scrobble:', err);
+    res.status(500).json({ error: 'Failed to save the song' });
+  }
+});
+
+// DELETE /scrobbles/:id - take back a hand-entered play (scrobbler plays stay).
+musicRouter.delete('/scrobbles/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    if (!isUuid(id)) return res.status(400).json({ error: 'Invalid id' });
+    if (!(await deleteManualScrobble(USER_ID, id))) return res.status(404).json({ error: 'No hand-entered song with that id' });
+    res.json({ id });
+  } catch (err) {
+    console.error('Error deleting manual scrobble:', err);
+    res.status(500).json({ error: 'Failed to delete the song' });
+  }
+});
+
 // GET /around?checkin_ids=a,b - what was playing at the end of each check-in
 // (see getListeningBefore). Check-ins with nothing to show are omitted.
 musicRouter.get('/around', async (req: Request, res: Response) => {
@@ -655,6 +731,10 @@ export const server: CheckinTypeServerPlugin = {
           'top_artists', ms.top_artists
         )::jsonb`,
         timezone: 'ms.timezone',
+        // Who was there for any hand-entered play in the session.
+        companions: `(SELECT COALESCE(json_agg(DISTINCT c.name), '[]'::json)
+                      FROM music_scrobbles s JOIN companions c ON c.checkin_type = '${PLUGIN_ID}' AND c.checkin_id = s.id
+                      WHERE s.session_id = ms.id)`,
       })}
       FROM music_sessions ms
     `,
@@ -668,7 +748,8 @@ export const server: CheckinTypeServerPlugin = {
       search: (c, q) => c.push(`ms.search_text ILIKE '%' || ? || '%'`, q),
     });
     // Short sessions stay in the data but out of the feed.
-    conds.push(`ms.track_count >= ${MIN_TRACKS_SQL}`);
+    // A session holding a play the user wrote down by hand is always shown.
+    conds.push(`(ms.track_count >= ${MIN_TRACKS_SQL} OR ms.has_manual)`);
     return conds.build();
   },
 
@@ -678,7 +759,8 @@ export const server: CheckinTypeServerPlugin = {
     const [settings, result] = await Promise.all([
       getMusicSettings(user_id),
       query(
-        `SELECT played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone
+        `SELECT id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone,
+                note, latitude, longitude, location_accuracy
          FROM music_scrobbles WHERE user_id = $1 ORDER BY played_at ASC`,
         [user_id],
       ),
@@ -719,6 +801,12 @@ export const server: CheckinTypeServerPlugin = {
         listenedFor: r.listened_for ?? null,
         source: r.source ?? null,
         timezone: typeof r.timezone === 'string' ? r.timezone : null,
+        // Kept so a hand entry's companions (stored by scrobble id) stay attached.
+        id: typeof r.id === 'string' && /^[0-9a-f-]{36}$/i.test(r.id) ? r.id : null,
+        note: typeof r.note === 'string' ? r.note : null,
+        latitude: Number.isFinite(Number(r.latitude)) && r.latitude !== null ? Number(r.latitude) : null,
+        longitude: Number.isFinite(Number(r.longitude)) && r.longitude !== null ? Number(r.longitude) : null,
+        locationAccuracy: Number.isInteger(r.location_accuracy) ? r.location_accuracy : null,
       }];
     });
     const gap = Number(body.session_gap_minutes);
@@ -741,10 +829,16 @@ export const server: CheckinTypeServerPlugin = {
     await run('DELETE FROM music_sessions WHERE user_id = $1', [user_id]);
     // A rebuildable cache; orphaned image files are collected on the next lookup.
     await run('DELETE FROM music_albums WHERE user_id = $1', [user_id]);
+    await run(`DELETE FROM companions WHERE checkin_type = '${PLUGIN_ID}'`, []);
     // Lists are the user's own curation, so Start Over removes them too (items cascade).
     await run('DELETE FROM music_lists WHERE user_id = $1', [user_id]);
     return result.rowCount ?? 0;
   },
+
+  // Hand-entered plays carry companions, which the Companions tab resolves to a time.
+  resolveTimestamps: () => ({
+    sql: `SELECT id, played_at AS checked_in_at FROM music_scrobbles WHERE id = ANY($1::uuid[])`,
+  }),
 
   earliestDate: () => ({
     sql: `SELECT MIN((played_at AT TIME ZONE timezone)::date)::text AS date

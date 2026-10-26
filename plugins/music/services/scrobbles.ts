@@ -11,6 +11,7 @@ import { allPlugins } from '../../../server/src/plugins/registry';
 import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
 import { lookupAlbumSoon } from './albums';
 import { albumRefSql, songKeySql } from './identity';
+import { companionNamesSql, deleteCompanionsForCheckins, setCompanions } from '../../../server/src/services/companions';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './constants';
 
 
@@ -25,6 +26,14 @@ export interface ScrobbleInput {
   source?: string | null;
   /** IANA zone the play happened in; assigned from check-ins when absent. */
   timezone?: string | null;
+  /** Hand-entered plays only. */
+  note?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** Meters. */
+  locationAccuracy?: number | null;
+  /** Keep this id (a restore, so companions stay attached); generated when absent. */
+  id?: string | null;
 }
 
 export interface MusicSettings {
@@ -190,7 +199,7 @@ async function rebuildSessions(
   await db.query(
     `CREATE TEMP TABLE music_grp ON COMMIT DROP AS
      WITH ordered AS (
-       SELECT id, played_at, title, artists, listened_for, track_length, timezone,
+       SELECT id, played_at, title, artists, listened_for, track_length, source, timezone,
               CASE WHEN played_at - LAG(played_at) OVER (ORDER BY played_at, id)
                         > make_interval(mins => $2::int) THEN 1 ELSE 0 END AS brk
        FROM music_scrobbles
@@ -201,7 +210,7 @@ async function rebuildSessions(
      grp AS (
        SELECT *, SUM(brk) OVER (ORDER BY played_at, id) AS g FROM ordered
      )
-     SELECT id, played_at, title, artists, listened_for, track_length, g,
+     SELECT id, played_at, title, artists, listened_for, track_length, source, g,
             FIRST_VALUE(id) OVER (PARTITION BY g ORDER BY played_at, id) AS sid,
             FIRST_VALUE(timezone) OVER (PARTITION BY g ORDER BY played_at, id) AS stz
      FROM grp`,
@@ -227,14 +236,15 @@ async function rebuildSessions(
               MAX(played_at) AS ended_at,
               COUNT(*)::int AS track_count,
               COALESCE(SUM(COALESCE(listened_for, track_length)), 0)::int AS listened_seconds,
+              COALESCE(BOOL_OR(source = 'manual'), FALSE) AS has_manual,
               string_agg(DISTINCT title || ' ' || array_to_string(artists, ' '), ' ') AS search_text
        FROM music_grp
        GROUP BY sid
      )
      INSERT INTO music_sessions
-       (id, user_id, started_at, ended_at, timezone, track_count, listened_seconds, top_artists, search_text)
+       (id, user_id, started_at, ended_at, timezone, track_count, listened_seconds, top_artists, search_text, has_manual)
      SELECT b.sid, $1, b.started_at, b.ended_at, b.stz, b.track_count, b.listened_seconds,
-            COALESCE(t.top_artists, '[]'::jsonb), b.search_text
+            COALESCE(t.top_artists, '[]'::jsonb), b.search_text, b.has_manual
      FROM base b LEFT JOIN top_agg t ON t.sid = b.sid`,
     [userId],
   );
@@ -312,26 +322,93 @@ export async function recomputeTimezones(userId: string): Promise<number> {
   return changed;
 }
 
-/** Insert one scrobble. Returns false when it was already stored. */
-export async function insertScrobble(userId: string, s: ScrobbleInput): Promise<boolean> {
+/** A play of the same song close to this one, from any source. */
+export interface NearDuplicate {
+  id: string;
+  played_at: string;
+  title: string;
+  artists: string[];
+  source: string | null;
+}
+
+/** How close in time two plays of one song must be to count as the same listen. */
+export const NEAR_DUPLICATE_MINUTES = 6;
+
+async function findNearDuplicate(
+  db: Queryable,
+  userId: string,
+  s: Pick<ScrobbleInput, 'playedAt' | 'title' | 'artists'>,
+  onlySource: string | null,
+): Promise<NearDuplicate | null> {
+  const r = await db.query(
+    `SELECT id, played_at, title, artists, source FROM music_scrobbles
+     WHERE user_id = $1
+       AND played_at BETWEEN $2::timestamptz - make_interval(mins => $3::int) AND $2::timestamptz + make_interval(mins => $3::int)
+       AND lower(btrim(title)) = lower(btrim($4))
+       AND lower(array_to_string(artists, chr(31))) = lower(array_to_string($5::text[], chr(31)))
+       AND ($6::text IS NULL OR source = $6)
+     ORDER BY abs(extract(epoch FROM played_at - $2::timestamptz)) LIMIT 1`,
+    [userId, s.playedAt, NEAR_DUPLICATE_MINUTES, s.title, s.artists, onlySource],
+  );
+  return (r.rows[0] as NearDuplicate | undefined) ?? null;
+}
+
+export interface InsertOutcome {
+  inserted: boolean;
+  id: string | null;
+  sessionId: string | null;
+  /** Set when nothing was stored because a near-identical play exists. */
+  duplicate: NearDuplicate | null;
+}
+
+/**
+ * Insert one scrobble and fold it into the listening sessions. `onlyIfNoNearManual`
+ * leaves a scrobbler's play out when the user already wrote down that song by hand
+ * around then; `unlessNearDuplicate` (hand entries) stops short and reports any
+ * near-identical play instead, so the user can decide.
+ */
+async function insertOne(
+  userId: string,
+  s: ScrobbleInput,
+  opts: { onlyIfNoNearManual?: boolean; unlessNearDuplicate?: boolean; companions?: string[] } = {},
+): Promise<InsertOutcome> {
   const settings = await getMusicSettings(userId);
   const timezone = validZone(s.timezone) ?? (await resolveTimezones(userId, [s.playedAt], settings.timezone))[0];
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
+    if (opts.onlyIfNoNearManual) {
+      const manual = await findNearDuplicate(client, userId, s, 'manual');
+      if (manual) {
+        await client.query('COMMIT');
+        return { inserted: false, id: null, sessionId: null, duplicate: manual };
+      }
+    }
+    if (opts.unlessNearDuplicate) {
+      const near = await findNearDuplicate(client, userId, s, null);
+      if (near) {
+        await client.query('COMMIT');
+        return { inserted: false, id: null, sessionId: null, duplicate: near };
+      }
+    }
     const inserted = await client.query(
       `INSERT INTO music_scrobbles
-         (user_id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (id, user_id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone,
+          note, latitude, longitude, location_accuracy)
+       VALUES (COALESCE($11::uuid, gen_random_uuid()), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $12, $13, $14, $15)
        ON CONFLICT DO NOTHING
-       RETURNING id, album_key`,
+       RETURNING id, album_key, session_id`,
       [
         userId, s.playedAt, s.title, s.artists, s.album ?? null, s.albumArtists ?? [],
         s.trackLength ?? null, s.listenedFor ?? null, s.source ?? null, timezone,
+        s.id ?? null, s.note ?? null, s.latitude ?? null, s.longitude ?? null, s.locationAccuracy ?? null,
       ],
     );
+    let sessionId: string | null = null;
+    const id: string | null = inserted.rows[0]?.id ?? null;
     if ((inserted.rowCount ?? 0) > 0) {
+      if (opts.companions?.length) await setCompanions(PLUGIN_ID, id as string, opts.companions, client);
       // Sessions within one gap of the new play may merge with it; widen the
       // rebuilt range to cover them whole.
       const near = await client.query(
@@ -346,10 +423,72 @@ export async function insertScrobble(userId: string, s: ScrobbleInput): Promise<
       const from = row.from_at && new Date(row.from_at) < s.playedAt ? new Date(row.from_at) : s.playedAt;
       const to = row.to_at && new Date(row.to_at) > s.playedAt ? new Date(row.to_at) : s.playedAt;
       await rebuildSessions(client, userId, settings.session_gap_minutes, { from, to });
+      sessionId = (await client.query(`SELECT session_id FROM music_scrobbles WHERE id = $1`, [id])).rows[0]?.session_id ?? null;
     }
     await client.query('COMMIT');
     if ((inserted.rowCount ?? 0) > 0) lookupAlbumSoon(userId, inserted.rows[0].album_key);
-    return (inserted.rowCount ?? 0) > 0;
+    return { inserted: (inserted.rowCount ?? 0) > 0, id, sessionId, duplicate: null };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Insert one scrobbler play. Returns false when it was already stored, or when
+ * the user wrote that song down by hand around the same time (the hand entry,
+ * with its note, wins).
+ */
+export async function insertScrobble(userId: string, s: ScrobbleInput): Promise<boolean> {
+  return (await insertOne(userId, s, { onlyIfNoNearManual: s.source !== 'manual' })).inserted;
+}
+
+/**
+ * Record a play by hand. Unless `force`, a near-identical play already on file
+ * (a scrobbler got there first, or it was entered twice) is reported back
+ * instead of stored.
+ */
+export function insertManualScrobble(
+  userId: string,
+  s: ScrobbleInput,
+  opts: { force?: boolean; companions?: string[] } = {},
+): Promise<InsertOutcome> {
+  return insertOne(userId, { ...s, source: 'manual' }, { unlessNearDuplicate: !opts.force, companions: opts.companions });
+}
+
+/** Remove a hand-entered play (scrobbler plays aren't deletable here). False when there is none. */
+export async function deleteManualScrobble(userId: string, id: string): Promise<boolean> {
+  const settings = await getMusicSettings(userId);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`music_sessions:${userId}`]);
+    const gone = await client.query(
+      `DELETE FROM music_scrobbles WHERE id = $2 AND user_id = $1 AND source = 'manual' RETURNING played_at`,
+      [userId, id],
+    );
+    if ((gone.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await deleteCompanionsForCheckins(PLUGIN_ID, [id], client);
+    const playedAt = new Date(gone.rows[0].played_at);
+    const near = await client.query(
+      `SELECT MIN(started_at) AS from_at, MAX(ended_at) AS to_at FROM music_sessions
+       WHERE user_id = $1
+         AND ended_at >= $2::timestamptz - make_interval(mins => $3::int)
+         AND started_at <= $2::timestamptz + make_interval(mins => $3::int)`,
+      [userId, playedAt, settings.session_gap_minutes],
+    );
+    const row = near.rows[0] ?? {};
+    await rebuildSessions(client, userId, settings.session_gap_minutes, {
+      from: row.from_at ? new Date(row.from_at) : playedAt,
+      to: row.to_at ? new Date(row.to_at) : playedAt,
+    });
+    await client.query('COMMIT');
+    return true;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -398,18 +537,26 @@ export async function insertScrobblesBulk(
         track_length: r.trackLength ?? null,
         listened_for: r.listenedFor ?? null,
         source: r.source ?? null,
+        id: r.id ?? null,
+        note: r.note ?? null,
+        latitude: r.latitude ?? null,
+        longitude: r.longitude ?? null,
+        location_accuracy: r.locationAccuracy ?? null,
       }));
       const result = await client.query(
         `INSERT INTO music_scrobbles
-           (user_id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone)
-         SELECT $1, r.played_at, r.title,
+           (id, user_id, played_at, title, artists, album, album_artists, track_length, listened_for, source, timezone,
+            note, latitude, longitude, location_accuracy)
+         SELECT COALESCE(r.id, gen_random_uuid()), $1, r.played_at, r.title,
                 ARRAY(SELECT jsonb_array_elements_text(r.artists)),
                 r.album,
                 ARRAY(SELECT jsonb_array_elements_text(r.album_artists)),
-                r.track_length, r.listened_for, r.source, r.timezone
+                r.track_length, r.listened_for, r.source, r.timezone,
+                r.note, r.latitude, r.longitude, r.location_accuracy
          FROM jsonb_to_recordset($2::jsonb) AS r(
-           played_at timestamptz, title text, artists jsonb, album text, album_artists jsonb,
-           track_length int, listened_for int, source text, timezone text)
+           id uuid, played_at timestamptz, title text, artists jsonb, album text, album_artists jsonb,
+           track_length int, listened_for int, source text, timezone text,
+           note text, latitude double precision, longitude double precision, location_accuracy int)
          ON CONFLICT DO NOTHING`,
         [userId, JSON.stringify(batch)],
       );
@@ -594,7 +741,7 @@ export async function getListeningBefore(
                     WHERE e.session_id = n.session_id AND e.played_at < p.played_at) AS older_exists
      FROM unnest($1::uuid[], $2::timestamptz[]) AS a(id, t)
      JOIN LATERAL (
-       SELECT s.session_id, ms.track_count,
+       SELECT s.session_id, ms.track_count, ms.has_manual,
               (ms.ended_at AT TIME ZONE ms.timezone)::date::text AS session_date
        FROM music_scrobbles s JOIN music_sessions ms ON ms.id = s.session_id
        WHERE s.user_id = $3
@@ -602,7 +749,7 @@ export async function getListeningBefore(
          AND s.played_at >= a.t - make_interval(mins => $4::int)
        ORDER BY s.played_at DESC, s.id DESC
        LIMIT 1
-     ) n ON n.track_count >= $5
+     ) n ON (n.track_count >= $5 OR n.has_manual)
      JOIN LATERAL (
        SELECT s2.played_at, s2.title, s2.artists, ${albumRefSql('s2.')} AS album_ref, ${songKeySql('s2.')} AS song_key,
               (SELECT al.id FROM music_albums al
@@ -638,7 +785,9 @@ export async function getListeningBefore(
 export async function getSessionTracks(userId: string, sessionId: string) {
   const result = await query(
     `SELECT m.played_at, m.title, m.artists, m.album, m.track_length, m.listened_for, m.timezone, a.id AS art_id,
-            ${albumRefSql('m.')} AS album_ref, ${songKeySql('m.')} AS song_key
+            ${albumRefSql('m.')} AS album_ref, ${songKeySql('m.')} AS song_key,
+            m.id, m.note, (m.source = 'manual') AS manual, m.latitude, m.longitude,
+            (${companionNamesSql(PLUGIN_ID, 'm.id')}) AS companions
      FROM music_scrobbles m
      LEFT JOIN music_albums a
        ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
