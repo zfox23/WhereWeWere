@@ -12,8 +12,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ListSectionShell, RankedListDetail, compareByRank, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
+import { ListSectionShell, compareByRank, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
+import { RankableListDetail } from '../../../client/src/components/lists/RankableListDetail';
+import type { Contender } from '../../../client/src/components/lists/RankByComparing';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
 import { useLists } from '../../../client/src/components/lists/useLists';
 import { checkinLists } from '../../../client/src/api/client';
@@ -166,10 +168,27 @@ const renderCheckinCard = (item: CheckinListItem) => (
   </>
 );
 
+const renderCheckinContender = (item: CheckinListItem): Contender => ({
+  body: (
+    <>
+      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">{item.venue_name || 'Unknown Venue'}</p>
+      <p className="text-sm text-gray-600 dark:text-gray-300">
+        {[formatDate(item.checked_in_at, item.venue_timezone), item.companions.join(', ')].filter(Boolean).join(' · ')}
+      </p>
+      {item.rating != null && item.rating >= 1 && (
+        <div className="mt-1">
+          <Stars value={item.rating} size={14} />
+        </div>
+      )}
+      {item.notes && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{commentsPreview(item.notes)}</p>}
+    </>
+  ),
+});
+
 function CheckinListDetail({ list, onBack }: { list: CheckinList; onBack: () => void }) {
   const state = useRankedList<CheckinListItem>({ listId: list.id, api: checkinLists, getId: getCheckinId, withRank });
   return (
-    <RankedListDetail
+    <RankableListDetail
       list={list}
       onBack={onBack}
       state={state}
@@ -185,6 +204,9 @@ function CheckinListDetail({ list, onBack }: { list: CheckinList; onBack: () => 
       compareUnranked={compareNewestFirst}
       removeMessage={(i) => `Remove "${i.venue_name}" from "${list.name}"? The check-in itself is kept.`}
       onRemove={(i) => checkinLists.removeCheckin(list.id, i.checkin_id)}
+      rankApi={checkinLists}
+      getSubtitle={(i) => formatDate(i.checked_in_at, i.venue_timezone)}
+      renderContender={renderCheckinContender}
     />
   );
 }

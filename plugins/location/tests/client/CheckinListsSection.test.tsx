@@ -176,6 +176,14 @@ describe('CheckinListsSection', () => {
     await waitFor(() => expect(screen.queryByText('Apollo')).toBeNull());
   });
 
+  it('offers rank by comparing on a list of two or more check-ins', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><CheckinListsSection /></MemoryRouter>);
+    await openListDetail(user, 'Concerts');
+    const button = (await screen.findByRole('button', { name: 'Rank by comparing' })) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
   it('does not remove a check-in from the list when confirmation is cancelled', async () => {
     const user = userEvent.setup();
     confirmSpy.mockReturnValue(false);

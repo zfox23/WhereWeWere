@@ -47,6 +47,14 @@ describe('MediaListsSection', () => {
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('mediaList')).toBe('l1'));
   });
 
+  it('offers rank by comparing on a list of two or more items', async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await user.click(await screen.findByRole('button', { name: /^Watchlist/ }));
+    const button = (await screen.findByRole('button', { name: 'Rank by comparing' })) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
   it('removing an item confirms, removes it and reloads the list', async () => {
     const user = userEvent.setup();
     renderSection();

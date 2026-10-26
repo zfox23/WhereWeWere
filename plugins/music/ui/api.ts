@@ -3,7 +3,7 @@
  */
 
 import { request, withAuthHeader } from '../../../client/src/api/client';
-import type { RankSessionState } from './ranking/engine';
+import type { RankSessionState } from '../../../client/src/components/lists/ranking/engine';
 import type {
   AlbumBackfillStatus,
   ManualScrobbleInput,

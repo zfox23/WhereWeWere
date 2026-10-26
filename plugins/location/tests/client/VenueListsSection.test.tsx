@@ -109,4 +109,13 @@ describe('VenueListsSection', () => {
     expect(screen.getByText('Millennium Force')).toBeTruthy();
     expect(apiMocks.reRank).not.toHaveBeenCalled();
   });
+
+  it('offers rank by comparing on a list of two or more venues', async () => {
+    const user = userEvent.setup();
+    apiMocks.items.mockResolvedValue([ITEM({ rank: 1 }), ITEM({ venue_id: 'v2', venue_name: 'Millennium Force', rank: 2 })]);
+    render(<VenueListsSection />);
+    await user.click(await screen.findByRole('button', { name: /^Favorite coasters/ }));
+    const button = (await screen.findByRole('button', { name: 'Rank by comparing' })) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
 });

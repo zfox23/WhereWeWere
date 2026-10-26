@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cdf, newSession, nextPair, orderOf, priorMeans, progress, questionBudget, reachability, reconcile, replay,
   type Answer, type RankSessionState,
-} from '../ui/ranking/engine';
+} from '../../src/components/lists/ranking/engine';
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `item${String(i).padStart(3, '0')}`);
 const scratch = (list: string[]) => newSession(list.map((id) => ({ id, rank: null })), 'scratch');

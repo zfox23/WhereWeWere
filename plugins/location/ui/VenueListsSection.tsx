@@ -11,8 +11,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { venueLists } from '../../../client/src/api/client';
 import { formatDate } from '../../../client/src/utils/checkin';
 import Stars from '../../../client/src/components/Stars';
-import { ListSectionShell, RankedListDetail, compareByRank, dash, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
+import { ListSectionShell, compareByRank, dash, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
+import { RankableListDetail } from '../../../client/src/components/lists/RankableListDetail';
+import type { Contender } from '../../../client/src/components/lists/RankByComparing';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
 import { useLists } from '../../../client/src/components/lists/useLists';
 import type { VenueList, VenueListItem } from '../../../client/src/types';
@@ -129,10 +131,29 @@ const renderVenueCard = (item: VenueListItem) => (
   </>
 );
 
+const renderVenueContender = (item: VenueListItem): Contender => ({
+  body: (
+    <>
+      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">{item.venue_name || 'Unknown Venue'}</p>
+      <p className="text-sm text-gray-600 dark:text-gray-300">
+        {[item.category_name, locationLabel(item)].filter(Boolean).join(' · ') || '—'}
+      </p>
+      {item.rating != null && item.rating >= 1 && (
+        <div className="mt-1">
+          <Stars value={item.rating} size={14} />
+        </div>
+      )}
+      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        {item.checkin_count} check-in{item.checkin_count === 1 ? '' : 's'}
+      </p>
+    </>
+  ),
+});
+
 function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void }) {
   const state = useRankedList<VenueListItem>({ listId: list.id, api: venueLists, getId: getVenueId, withRank });
   return (
-    <RankedListDetail
+    <RankableListDetail
       list={list}
       onBack={onBack}
       state={state}
@@ -148,6 +169,9 @@ function VenueListDetail({ list, onBack }: { list: VenueList; onBack: () => void
       compareUnranked={compareByName}
       removeMessage={(i) => `Remove "${i.venue_name}" from "${list.name}"? The venue itself is kept.`}
       onRemove={(i) => venueLists.removeVenue(list.id, i.venue_id)}
+      rankApi={venueLists}
+      getSubtitle={(i) => [i.category_name, locationLabel(i)].filter(Boolean).join(' · ')}
+      renderContender={renderVenueContender}
     />
   );
 }

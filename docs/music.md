@@ -86,7 +86,7 @@ Keep favorites, or any other lists, of songs and albums in the **Lists** subtab 
 
 ### Rank by comparing
 
-On a list's page, **Rank by comparing** (or **Resume ranking**) helps you rank a whole list by choosing between two items at a time, instead of dragging.
+On a list's page, **Rank by comparing** (or **Resume ranking**) helps you rank a whole list by choosing between two items at a time, instead of dragging. Check-in, venue and media lists have it too, and work the same way (see [lists.md](lists.md)).
 
 - **Start:** if some items are already ranked you choose **Continue from my ranking** (your ranks are a starting guess, which saves questions when they are mostly right; it costs more than starting fresh if they are badly off) or **Start from scratch**. A paused session offers **Resume**. Songs and albums are compared together.
 - **Questions:** pick the one you like more by clicking it, or with the ← and → keys. **Can't decide** (↓ or T) calls it a tie, **Undo** (Backspace or Z) takes back the last answer, and **Finish now** jumps to the result with whatever has been settled.

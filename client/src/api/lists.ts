@@ -8,6 +8,8 @@ import { request } from './client';
 
 export function createListsApi<List = any, Item = any>(base: string) {
   const json = (body: unknown) => JSON.stringify(body);
+  const reRank = (listId: string, rankedIds: string[]) =>
+    request<{ ranked_ids: string[] }>(`${base}/lists/${listId}/ranks`, { method: 'PUT', body: json({ ranked_ids: rankedIds }) });
   return {
     list: () => request<List[]>(`${base}/lists`),
     create: (name: string) => request<any>(`${base}/lists`, { method: 'POST', body: json({ name }) }),
@@ -17,8 +19,8 @@ export function createListsApi<List = any, Item = any>(base: string) {
     removeItem: (listId: string, itemId: string) =>
       request<unknown>(`${base}/lists/${listId}/items/${itemId}`, { method: 'DELETE' }),
     // Drag-to-rank: the item ids in their new rank order (1..n); everyone else becomes unranked.
-    reRank: (listId: string, rankedIds: string[]) =>
-      request<{ ranked_ids: string[] }>(`${base}/lists/${listId}/ranks`, { method: 'PUT', body: json({ ranked_ids: rankedIds }) }),
+    reRank: reRank,
+    rankList: reRank,
     // A paused "rank by comparing" session.
     rankSession: (listId: string) => request<{ state: any; updated_at: string }>(`${base}/lists/${listId}/rank-session`),
     saveRankSession: (listId: string, state: unknown) =>

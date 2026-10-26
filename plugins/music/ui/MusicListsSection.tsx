@@ -6,14 +6,15 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { List, Swords } from 'lucide-react';
+import { List } from 'lucide-react';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
-import { ListSectionShell, RankedListDetail, compareByRank, dash, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
+import { ListSectionShell, compareByRank, dash, useRankedList } from '../../../client/src/components/lists/RankedListDetail';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
 import { music, albumArtUrl } from './api';
 import { AlbumArt } from './AlbumArt';
 import { AlbumLink } from './AlbumLink';
-import { RankByComparing } from './RankByComparing';
+import { RankableListDetail } from '../../../client/src/components/lists/RankableListDetail';
+import { renderContender } from './RankByComparing';
 import { formatDay, formatDuration, joinArtists } from './format';
 import { refreshMusicLists, useMusicLists } from './useMusicLists';
 import type { ListItemWithStats, MusicList } from './types';
@@ -111,32 +112,9 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
     withRank: (i, rank) => ({ ...i, rank }),
     onChanged: () => void refreshMusicLists(),
   });
-  const [ranking, setRanking] = useState(false);
-  const [paused, setPaused] = useState(false);
-
-  // Is there a paused "rank by comparing" session to resume?
-  const checkPaused = () => music.rankSession(list.id).then((s) => setPaused(s.state.answers.length > 0)).catch(() => setPaused(false));
-  useEffect(() => {
-    void checkPaused();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list.id]);
-
-  if (ranking) {
-    return (
-      <RankByComparing
-        list={list}
-        items={state.items}
-        onDone={(applied) => {
-          setRanking(false);
-          void checkPaused();
-          if (applied) void Promise.all([state.reload(), refreshMusicLists()]);
-        }}
-      />
-    );
-  }
 
   return (
-    <RankedListDetail
+    <RankableListDetail
       list={list}
       onBack={onBack}
       state={state}
@@ -152,18 +130,10 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
       compareUnranked={compareByName}
       removeMessage={(i) => `Remove "${i.title}" from "${list.name}"? The music itself is kept.`}
       onRemove={(i) => music.removeFromList(list.id, i.id)}
-      headerActions={
-        <button
-          type="button"
-          onClick={() => setRanking(true)}
-          disabled={state.loading || state.items.length < 2}
-          title={state.items.length < 2 ? 'Add at least two items to rank them' : 'Pick between two at a time to rank the whole list'}
-          className="btn-secondary inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs disabled:opacity-40"
-        >
-          <Swords size={13} />
-          {paused ? 'Resume ranking' : 'Rank by comparing'}
-        </button>
-      }
+      rankApi={music}
+      getSubtitle={(i) => joinArtists(i.artists)}
+      renderContender={renderContender}
+      onRankingApplied={() => void refreshMusicLists()}
     />
   );
 }

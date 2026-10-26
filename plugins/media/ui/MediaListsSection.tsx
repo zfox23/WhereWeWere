@@ -8,9 +8,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
 import {
-  ListSectionShell, RankedListDetail, compareByRank, dash, useRankedList,
+  ListSectionShell, compareByRank, dash, useRankedList,
 } from '../../../client/src/components/lists/RankedListDetail';
 import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
+import { RankableListDetail } from '../../../client/src/components/lists/RankableListDetail';
+import type { Contender } from '../../../client/src/components/lists/RankByComparing';
 import { useLists } from '../../../client/src/components/lists/useLists';
 import Stars from '../../../client/src/components/Stars';
 import { slugify } from '../../../client/src/utils/slugify';
@@ -103,6 +105,26 @@ const renderCard = (i: MediaListItem) => (
   </>
 );
 
+const renderContender = (item: MediaListItem): Contender => ({
+  media: item.image_url ? <img src={item.image_url} alt="" className="aspect-[2/3] max-h-72 w-full object-cover" /> : undefined,
+  badge: (
+    <span className="rounded-full bg-pink-50 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-pink-600 dark:bg-pink-900/30 dark:text-pink-300">
+      {MEDIA_SUBTYPES[item.media_type]?.label ?? item.media_type}
+    </span>
+  ),
+  body: (
+    <>
+      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">{item.title}</p>
+      <p className="text-sm text-gray-600 dark:text-gray-300">{[item.author, item.release_year].filter(Boolean).join(' · ')}</p>
+      {item.rating != null && item.rating > 0 && (
+        <div className="mt-1">
+          <Stars value={item.rating} size={14} />
+        </div>
+      )}
+    </>
+  ),
+});
+
 function MediaListDetail({ list, onBack, onChanged }: { list: MediaList; onBack: () => void; onChanged: () => void }) {
   const state = useRankedList<MediaListItem>({
     listId: list.id,
@@ -112,7 +134,7 @@ function MediaListDetail({ list, onBack, onChanged }: { list: MediaList; onBack:
     onChanged,
   });
   return (
-    <RankedListDetail
+    <RankableListDetail
       list={list}
       onBack={onBack}
       state={state}
@@ -128,6 +150,9 @@ function MediaListDetail({ list, onBack, onChanged }: { list: MediaList; onBack:
       compareUnranked={compareByTitle}
       removeMessage={(i) => `Remove "${i.title}" from "${list.name}"? The item itself is kept.`}
       onRemove={(i) => media.removeItemFromList(list.id, i.id)}
+      rankApi={media}
+      getSubtitle={(i) => [i.author, i.release_year].filter(Boolean).join(' · ')}
+      renderContender={renderContender}
     />
   );
 }

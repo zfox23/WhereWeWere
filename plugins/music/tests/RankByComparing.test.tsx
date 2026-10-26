@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RankByComparing } from '../ui/RankByComparing';
-import { orderOf, type RankSessionState } from '../ui/ranking/engine';
+import { orderOf, type RankSessionState } from '../../../client/src/components/lists/ranking/engine';
 
 const api = {
   rankSession: vi.fn(),
