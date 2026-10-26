@@ -634,3 +634,47 @@ export async function getCounts(userId: string): Promise<{ scrobbles: number; la
   );
   return result.rows[0];
 }
+
+export interface ReflectTrack {
+  title: string;
+  artists: string[];
+  count: number;
+}
+
+/**
+ * Most-played tracks (up to `limit`) on `date`'s month and day in each earlier
+ * year, with each play placed on a day by the zone it was played in.
+ */
+export async function getReflectionTracks(
+  userId: string,
+  date: string,
+  limit = 7,
+): Promise<{ year: number; tracks: ReflectTrack[] }[]> {
+  const result = await query(
+    `WITH plays AS (
+       SELECT EXTRACT(YEAR FROM played_at AT TIME ZONE timezone)::int AS year,
+              played_at, title, artists
+       FROM music_scrobbles
+       WHERE user_id = $1
+         AND TO_CHAR(played_at AT TIME ZONE timezone, 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
+         AND EXTRACT(YEAR FROM played_at AT TIME ZONE timezone) < EXTRACT(YEAR FROM $2::date)
+     ), ranked AS (
+       SELECT year, (ARRAY_AGG(title ORDER BY played_at DESC))[1] AS title, artists, COUNT(*)::int AS count,
+              ROW_NUMBER() OVER (
+                PARTITION BY year
+                ORDER BY COUNT(*) DESC, MAX(played_at) DESC, lower(title)
+              ) AS rank
+       FROM plays
+       GROUP BY year, lower(title), artists
+     )
+     SELECT year, title, artists, count FROM ranked WHERE rank <= $3 ORDER BY year DESC, rank`,
+    [userId, date, limit],
+  );
+  const byYear = new Map<number, ReflectTrack[]>();
+  for (const r of result.rows) {
+    const list = byYear.get(r.year) ?? [];
+    list.push({ title: r.title, artists: r.artists, count: r.count });
+    byYear.set(r.year, list);
+  }
+  return [...byYear].map(([year, tracks]) => ({ year, tracks }));
+}

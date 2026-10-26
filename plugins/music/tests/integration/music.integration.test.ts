@@ -180,6 +180,35 @@ describe('music plugin', () => {
     });
   });
 
+  describe('reflect', () => {
+    const play = (iso: string, title: string, timezone = 'UTC', artists = ['Artist']) =>
+      query(
+        `INSERT INTO music_scrobbles (user_id, played_at, title, artists, timezone) VALUES ($1, $2, $3, $4, $5)`,
+        [DEFAULT_USER_ID, iso, title, artists, timezone],
+      );
+    const reflect = (date: string) => request(app).get('/api/v1/music/reflect').query({ date });
+
+    it('ranks each earlier year\'s tracks by count, top seven, by the zone played in', async () => {
+      // 2023-05-01: Song A x3 (one play at 02:00 UTC is still April 30 in Chicago, so use Chicago zone only for B)
+      for (const h of [8, 9, 10]) await play(`2023-05-01T${String(h).padStart(2, '0')}:00:00Z`, 'Song A');
+      await play('2023-05-01T11:00:00Z', 'song a'); // same song, different case
+      for (const [i, t] of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'].entries()) await play(`2023-05-01T${12 + i}:00:00Z`, `Song ${t}`);
+      await play('2023-05-02T03:00:00Z', 'Evening in Chicago', 'America/Chicago'); // May 1 locally
+      await play('2023-05-02T03:30:00Z', 'Late UTC', 'UTC'); // May 2: not this day
+      await play('2022-05-01T12:00:00Z', 'Older', 'UTC', ['Other']);
+      await play('2026-05-01T12:00:00Z', 'This year'); // not a reflection
+      const res = await reflect('2026-05-01');
+      expect(res.status).toBe(200);
+      expect(res.body.map((y: any) => y.year)).toEqual([2023, 2022]);
+      const tracks = res.body[0].tracks;
+      expect(tracks).toHaveLength(7);
+      expect(tracks[0]).toMatchObject({ title: 'song a', count: 4 }); // latest spelling
+      expect(tracks.map((t: any) => t.title)).not.toContain('Late UTC');
+      expect(res.body[1].tracks).toEqual([{ title: 'Older', artists: ['Other'], count: 1 }]);
+      expect((await reflect('nope')).status).toBe(400);
+    });
+  });
+
   describe('home timeline', () => {
     const timeline = async (params: Record<string, string> = {}) =>
       (await request(app).get('/api/v1/timeline').query({ user_id: DEFAULT_USER_ID, ...params })).body as any[];
@@ -194,6 +223,12 @@ describe('music plugin', () => {
       expect(items[0].data).toMatchObject({ track_count: 3, top_artists: ['Artist'] });
       expect(items[0].timezone).toBe('UTC');
       expect((await query('SELECT 1 FROM music_sessions')).rowCount).toBe(2);
+    });
+
+    it('pins the feed to listening sessions with the music filter param', async () => {
+      for (const i of [0, 5, 10]) await pushAt(i);
+      const items = await timeline({ from: '2024-05-01', to: '2024-05-01', music: 'sessions' });
+      expect(items.map((i) => i.type)).toEqual(['music']);
     });
 
     it('honours the minimum-tracks setting and the type filter', async () => {

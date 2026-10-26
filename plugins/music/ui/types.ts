@@ -60,3 +60,14 @@ export interface MusicSessionData {
   listened_seconds?: number;
   top_artists?: string[];
 }
+
+export interface ReflectTrack {
+  title: string;
+  artists: string[];
+  count: number;
+}
+
+export interface MusicReflectionYear {
+  year: number;
+  tracks: ReflectTrack[];
+}

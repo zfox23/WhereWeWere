@@ -37,6 +37,7 @@ import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } fr
 import {
   getCounts,
   getListeningBefore,
+  getReflectionTracks,
   getLibrary,
   getMusicSettings,
   getSessionTracks,
@@ -243,6 +244,18 @@ musicRouter.get('/library', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error loading music library:', err);
     res.status(500).json({ error: 'Failed to load library' });
+  }
+});
+
+// GET /reflect?date=YYYY-MM-DD - top tracks on that month and day in earlier years
+musicRouter.get('/reflect', async (req: Request, res: Response) => {
+  try {
+    const date = dateParam(req.query.date);
+    if (!date) return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
+    res.json(await getReflectionTracks(USER_ID, date));
+  } catch (err) {
+    console.error('Error loading music reflection:', err);
+    res.status(500).json({ error: 'Failed to load music reflection' });
   }
 });
 

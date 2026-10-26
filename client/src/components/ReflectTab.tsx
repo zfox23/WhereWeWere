@@ -9,6 +9,9 @@ import { sleepStats } from '../../../plugins/sleep/ui/api';
 import type { SleepDailyPoint } from '../../../plugins/sleep/ui/types';
 import { plugins } from '../plugins/api';
 import { getClientPlugin, pluginDetailPath } from '../plugins/registry';
+import { music as musicApi } from '../../../plugins/music/ui/api';
+import { MusicReflectionCard } from '../../../plugins/music/ui/MusicReflectionCard';
+import type { ReflectTrack } from '../../../plugins/music/ui/types';
 import { PhotoStrip } from './PhotoStrip';
 import { LifeSummarySection } from './LifeSummarySection';
 import { PostcardSection } from './PostcardSection';
@@ -152,14 +155,27 @@ function OnThisDaySection({
   immichUrl,
   photosByYear,
   dawarichUrl,
+  musicByYear,
 }: {
   data: ReflectionYear[];
   moodIconPack: 'emoji' | 'lucide' | 'nature';
   immichUrl: string | null;
   photosByYear: Record<number, ImmichAsset[]>;
   dawarichUrl: string | null;
+  musicByYear: Record<number, ReflectTrack[]>;
 }) {
-  if (data.length === 0) {
+  // A year with only listening history still gets a section.
+  const todayIso = getLocalDateIso();
+  const currentYear = Number(todayIso.slice(0, 4));
+  const years: ReflectionYear[] = [
+    ...data,
+    ...Object.keys(musicByYear)
+      .map(Number)
+      .filter((y) => !data.some((d) => d.year === y))
+      .map((y) => ({ year: y, years_ago: currentYear - y, items: [] })),
+  ].sort((a, b) => b.year - a.year);
+
+  if (years.length === 0) {
     return (
       <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-2">
@@ -172,7 +188,7 @@ function OnThisDaySection({
   }
 
   function handleYearClick(year: ReflectionYear) {
-    if (year.items.length === 0) return;
+    if (year.items.length === 0 && !musicByYear[year.year]) return;
     const today = getLocalDateIso();
     const date = `${year.year}-${today.slice(5)}`;
     window.open(`/?from=${date}&to=${date}`, '_blank', 'noopener,noreferrer');
@@ -185,12 +201,13 @@ function OnThisDaySection({
         On This Day
       </h3>
       <div className="space-y-4">
-        {data.map((year) => {
+        {years.map((year) => {
           const sortedItems = [...year.items].sort(
             (a, b) =>
               new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
           );
-          const yearDate = sortedItems.length > 0
+          const yearTracks = musicByYear[year.year] ?? [];
+          const yearDate = sortedItems.length > 0 || yearTracks.length > 0
             ? reflectionDateForYear(year.year, getLocalDateIso())
             : null;
           const yearTimeZone = reflectionItemTimezone(sortedItems[0]);
@@ -241,6 +258,8 @@ function OnThisDaySection({
                 return <PluginReflectionFallback key={`${item.type}-${item.id}`} item={item} />;
               })}
 
+              {yearDate && <MusicReflectionCard date={yearDate} tracks={yearTracks} />}
+
               {immichUrl && yearDate && yearAssets.length > 0 && (
                 <PhotoStrip
                   assets={yearAssets}
@@ -265,6 +284,7 @@ export function ReflectTab() {
   const [reflections, setReflections] = useState<ReflectionYear[]>([]);
   const [immichUrl, setImmichUrl] = useState<string | null>(null);
   const [dawarichUrl, setDawarichUrl] = useState<string | null>(null);
+  const [musicByYear, setMusicByYear] = useState<Record<number, ReflectTrack[]>>({});
   const [photosByYear, setPhotosByYear] = useState<Record<number, ImmichAsset[]>>({});
   const [moodIconPack, setMoodIconPack] = useState<'emoji' | 'lucide' | 'nature'>('emoji');
   const [llmConfigured, setLlmConfigured] = useState(false);
@@ -292,6 +312,19 @@ export function ReflectTab() {
       .catch(() => {});
   }, []);
 
+
+  useEffect(() => {
+    let cancelled = false;
+    musicApi
+      .reflect(getLocalDateIso())
+      .then((rows) => {
+        if (!cancelled) setMusicByYear(Object.fromEntries(rows.map((r) => [r.year, r.tracks])));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -499,6 +532,7 @@ export function ReflectTab() {
           immichUrl={immichUrl}
           photosByYear={photosByYear}
           dawarichUrl={dawarichUrl}
+          musicByYear={musicByYear}
         />
       )}
 

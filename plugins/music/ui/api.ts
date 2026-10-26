@@ -5,6 +5,7 @@
 import { request, withAuthHeader } from '../../../client/src/api/client';
 import type {
   MusicImportResult,
+  MusicReflectionYear,
   MusicLibraryView,
   MusicAggregate,
   MusicSettingsData,
@@ -40,6 +41,7 @@ export const music = {
     request<MusicAggregate[]>(`/music/library${rangeQuery(from, to, { view })}`),
   sessionTracks: (sessionId: string) =>
     request<SessionTrack[]>(`/music/sessions/${sessionId}/tracks`),
+  reflect: (date: string) => request<MusicReflectionYear[]>(`/music/reflect?date=${date}`),
   settings: () => request<MusicSettingsData>('/music/settings'),
   updateSettings: (patch: Partial<Pick<MusicSettingsData, 'session_gap_minutes' | 'min_session_tracks' | 'timezone'>>) =>
     request<MusicSettingsData>('/music/settings', { method: 'PUT', body: JSON.stringify(patch) }),

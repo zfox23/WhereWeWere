@@ -18,6 +18,8 @@ export const manifest: CheckinTypeManifest = {
     { name: 'track_count', kind: 'integer', label: 'Tracks', min: 0 },
     { name: 'listened_seconds', kind: 'integer', label: 'Listening time', min: 0, unit: 's' },
   ],
+  // `?music=sessions` pins Home to listening sessions; Reflect links to it.
+  filterParams: ['music'],
   strings: {
     title: 'Music',
     singular: 'listening session',
