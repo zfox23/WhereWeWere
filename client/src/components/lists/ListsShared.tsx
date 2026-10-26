@@ -4,8 +4,9 @@
  */
 
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { List, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
-import { formatDate } from '../../../client/src/utils/checkin';
+import { formatDate } from '../../utils/checkin';
 
 export interface ListSummary {
   id: string;
@@ -34,6 +35,7 @@ export function ListsIndex({
   createLabel,
   onOpenList,
   onRefresh,
+  renderLeading,
 }: {
   lists: ListSummary[];
   api: ListsIndexApi;
@@ -43,6 +45,8 @@ export function ListsIndex({
   createLabel: string;
   onOpenList: (id: string) => void;
   onRefresh: () => void;
+  /** Replaces the default list icon on each card (e.g. a cover mosaic). */
+  renderLeading?: (list: ListSummary) => ReactNode;
 }) {
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -102,7 +106,7 @@ export function ListsIndex({
               key={list.id}
               className="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 px-3 py-2.5 hover:border-primary-300 dark:hover:border-primary-700 transition-colors"
             >
-              <List size={16} className="text-primary-500 shrink-0" />
+              {renderLeading ? renderLeading(list) : <List size={16} className="text-primary-500 shrink-0" />}
               {renamingId === list.id ? (
                 <input
                   type="text"

@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RankedListView, moveToRank } from '../../ui/RankedListView';
+import { RankedListView, moveToRank } from '../../../../client/src/components/lists/RankedListView';
 
 interface Row {
   id: string;

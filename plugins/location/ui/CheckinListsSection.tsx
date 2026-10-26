@@ -13,9 +13,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
-import { RankedListView } from './RankedListView';
-import type { RankedColumn, RankedSortOption } from './RankedListView';
-import { ListsIndex } from './ListsShared';
+import { RankedListView } from '../../../client/src/components/lists/RankedListView';
+import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
+import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
 import { checkinLists } from '../../../client/src/api/client';
 import { formatDate } from '../../../client/src/utils/checkin';
 import Stars from '../../../client/src/components/Stars';

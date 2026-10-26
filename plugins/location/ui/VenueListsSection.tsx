@@ -12,9 +12,9 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { venueLists } from '../../../client/src/api/client';
 import { formatDate } from '../../../client/src/utils/checkin';
 import Stars from '../../../client/src/components/Stars';
-import { RankedListView } from './RankedListView';
-import type { RankedColumn, RankedSortOption } from './RankedListView';
-import { ListsIndex } from './ListsShared';
+import { RankedListView } from '../../../client/src/components/lists/RankedListView';
+import type { RankedColumn, RankedSortOption } from '../../../client/src/components/lists/RankedListView';
+import { ListsIndex } from '../../../client/src/components/lists/ListsShared';
 import type { VenueList, VenueListItem } from '../../../client/src/types';
 
 const getVenueId = (i: VenueListItem) => i.venue_id;
