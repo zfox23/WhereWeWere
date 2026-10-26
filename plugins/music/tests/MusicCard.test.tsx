@@ -40,7 +40,7 @@ describe('MusicCard', () => {
 
   it('summarises the session', () => {
     renderCard();
-    expect(screen.getByText(/Listening 12:00 PM – 1:15 PM/)).toBeTruthy();
+    expect(screen.getByText(/Listening 12:00 PM – 1:15 PM UTC/)).toBeTruthy();
     expect(screen.getByText('1h 15m')).toBeTruthy();
     expect(screen.getByText('42 tracks · Khruangbin, Men I Trust, Boards of Canada, +1')).toBeTruthy();
     expect(sessionTracksMock).not.toHaveBeenCalled();
@@ -58,8 +58,8 @@ describe('MusicCard', () => {
     await waitFor(() => expect(screen.getByText(/Maria También/)).toBeTruthy());
     expect(sessionTracksMock).toHaveBeenCalledWith('session-1');
     // Each track's clock time is in the zone it was played in.
-    expect(screen.getByText('12:00 PM')).toBeTruthy();
-    expect(screen.getByText('12:30 AM')).toBeTruthy();
+    expect(screen.getByText('12:00 PM UTC')).toBeTruthy();
+    expect(screen.getByText(/^12:30 AM (GMT\+12|NZST)$/)).toBeTruthy();
     await user.click(toggle);
     await user.click(toggle);
     expect(sessionTracksMock).toHaveBeenCalledTimes(1);

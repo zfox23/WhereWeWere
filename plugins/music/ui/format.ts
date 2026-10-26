@@ -1,3 +1,5 @@
+import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
+
 export function formatDuration(totalSeconds: number): string {
   const minutes = Math.round(totalSeconds / 60);
   const h = Math.floor(minutes / 60);
@@ -6,10 +8,16 @@ export function formatDuration(totalSeconds: number): string {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
-export function formatClock(iso: string, timeZone?: string | null): string {
-  const options: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+/** Clock time in `timeZone`, optionally followed by its abbreviation (e.g. "3:05 PM CDT"). */
+export function formatClock(iso: string, timeZone?: string | null, withZone = false): string {
+  const zone = normalizeTimezoneForDisplay(timeZone);
+  const options: Intl.DateTimeFormatOptions = {
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(withZone ? { timeZoneName: 'short' as const } : {}),
+  };
   try {
-    return new Intl.DateTimeFormat('en-US', { ...options, ...(timeZone ? { timeZone } : {}) }).format(new Date(iso));
+    return new Intl.DateTimeFormat('en-US', { ...options, ...(zone ? { timeZone: zone } : {}) }).format(new Date(iso));
   } catch {
     return new Intl.DateTimeFormat('en-US', options).format(new Date(iso));
   }

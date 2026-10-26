@@ -72,7 +72,7 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
   }, []);
 
-  const range = `${formatClock(startedAt, timezone)} – ${formatClock(endedAt, timezone)}`;
+  const range = `${formatClock(startedAt, timezone)} – ${formatClock(endedAt, timezone, true)}`;
 
   return (
     <div
@@ -111,7 +111,7 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
               <ol className="space-y-0.5">
                 {tracks.map((t, i) => (
                   <li key={i} className="text-xs text-gray-500 dark:text-gray-400 flex gap-2">
-                    <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone)}</span>
+                    <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
                     <span>
                       <span className="font-medium text-gray-600 dark:text-gray-300">{joinArtists(t.artists)}</span>
                       {' — '}
