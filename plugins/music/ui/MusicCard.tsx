@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Loader2, MapPin, Music, Trash2, Users } from 'lucide-react';
 import type { CheckinCardProps } from 'wwp-shared';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
@@ -13,6 +13,7 @@ import { AlbumArt } from './AlbumArt';
 import { ListBadge, songItemKey } from './ListBadge';
 import { ArtistLinks, HomeLibraryLink } from './libraryLinks';
 import { formatClock, formatDuration } from './format';
+import { playPath } from './listTitle';
 import type { MusicSessionData, SessionTrack } from './types';
 
 /** How long the jump highlight stays on the card. */
@@ -129,7 +130,17 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
                   <li key={t.id ?? i} className="text-xs text-gray-500 dark:text-gray-400">
                     <div className="flex items-center gap-2">
                       <AlbumArt artId={t.art_id} albumRef={t.album_ref} size={24} />
-                      <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
+                      {t.id ? (
+                        <Link
+                          to={playPath(t.id)}
+                          title="Open this play"
+                          className="tabular-nums shrink-0 hover:text-pink-600 hover:underline dark:hover:text-pink-400"
+                        >
+                          {formatClock(t.played_at, t.timezone || timezone, true)}
+                        </Link>
+                      ) : (
+                        <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
+                      )}
                       <span className="min-w-0">
                         <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
                         {' — '}

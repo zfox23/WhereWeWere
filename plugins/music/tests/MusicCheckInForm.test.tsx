@@ -1,11 +1,13 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MusicCheckInForm from '../ui/MusicCheckInForm';
 
 const suggestMock = vi.fn();
 const createMock = vi.fn();
+const scrobbleMock = vi.fn();
+const updateMock = vi.fn();
 vi.mock('../ui/api', () => {
   class NearDuplicateError extends Error {
     constructor(readonly duplicate: unknown) {
@@ -14,7 +16,12 @@ vi.mock('../ui/api', () => {
   }
   return {
     NearDuplicateError,
-    music: { suggest: (...a: unknown[]) => suggestMock(...a), createScrobble: (...a: unknown[]) => createMock(...a) },
+    music: {
+      suggest: (...a: unknown[]) => suggestMock(...a),
+      createScrobble: (...a: unknown[]) => createMock(...a),
+      scrobble: (...a: unknown[]) => scrobbleMock(...a),
+      updateScrobble: (...a: unknown[]) => updateMock(...a),
+    },
   };
 });
 vi.mock('../../../client/src/components/CompanionChipInput', () => ({
@@ -230,5 +237,121 @@ describe('MusicCheckInForm', () => {
   it('opens on the day it was reached from', () => {
     renderForm({ dateParam: '2026-03-09' });
     expect((screen.getByLabelText(/^When/) as HTMLInputElement).value).toBe('2026-03-09T12:00');
+  });
+});
+
+describe('MusicCheckInForm: editing a play', () => {
+  const PLAY = {
+    id: 'p1', played_at: '2024-05-01T20:05:00Z', timezone: 'America/Chicago', title: 'Sun & Moon', artists: ['Tyler, The Creator'],
+    album: 'Group Therapy', album_artists: ['Above & Beyond'], track_length: 321, listened_for: null, source: 'multi-scrobbler',
+    note: 'old note', latitude: 41.88, longitude: -87.63, location_accuracy: 35, companions: ['Sam'],
+  };
+  function Probe() {
+    return <div data-testid="probe">{useLocation().pathname}</div>;
+  }
+  function renderEdit() {
+    return render(
+      <MemoryRouter initialEntries={['/music-check-in?edit=p1']}>
+        <Routes>
+          <Route path="/music-check-in" element={<MusicCheckInForm editId="p1" onCreated={vi.fn()} onUpdated={() => {}} />} />
+          <Route path="*" element={<Probe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    suggestMock.mockResolvedValue({ suggestions: [], catalog_unavailable: false });
+    scrobbleMock.mockResolvedValue(PLAY);
+    updateMock.mockResolvedValue({ id: 'p1', session_id: 's1' });
+    Object.defineProperty(navigator, 'geolocation', { value: geo, configurable: true });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it('fills every field from the play, with the time on the wall clock of the zone it was played in', async () => {
+    renderEdit();
+    expect(await screen.findByRole('heading', { name: 'Edit song' })).toBeTruthy();
+    expect(scrobbleMock).toHaveBeenCalledWith('p1');
+    expect((screen.getByLabelText('Artist') as HTMLInputElement).value).toBe('Tyler, The Creator');
+    expect((screen.getByLabelText('Song') as HTMLInputElement).value).toBe('Sun & Moon');
+    expect((screen.getByLabelText('Album') as HTMLInputElement).value).toBe('Group Therapy');
+    expect((screen.getByLabelText('Album artist') as HTMLInputElement).value).toBe('Above & Beyond');
+    expect((screen.getByLabelText('Length') as HTMLInputElement).value).toBe('5:21');
+    expect((screen.getByLabelText(/^When/) as HTMLInputElement).value).toBe('2024-05-01T15:05'); // Chicago, not the device
+    expect(screen.getByLabelText(/^When/).closest('div')?.textContent).toContain('CDT');
+    expect((screen.getByLabelText('Note') as HTMLTextAreaElement).value).toBe('old note');
+    expect(screen.getByRole('button', { name: /add companion \(Sam\)/ })).toBeTruthy();
+    // It does not go and ask the device for a position.
+    expect(geo.getCurrentPosition).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Keep the saved location/)).toBeTruthy();
+  });
+
+  it('saves the changes in the play\'s own zone and returns to the play', async () => {
+    const user = userEvent.setup();
+    renderEdit();
+    await screen.findByRole('heading', { name: 'Edit song' });
+    await user.clear(screen.getByLabelText('Album'));
+    await user.type(screen.getByLabelText('Album'), 'Live');
+    await user.clear(screen.getByLabelText(/^When/));
+    await user.type(screen.getByLabelText(/^When/), '2024-05-01T15:30');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    const [id, sent] = updateMock.mock.calls[0];
+    expect(id).toBe('p1');
+    expect(sent).toMatchObject({
+      title: 'Sun & Moon', artists: ['Tyler, The Creator'], album: 'Live', album_artists: ['Above & Beyond'], track_length: 321,
+      timezone: 'America/Chicago', note: 'old note', companions: ['Sam'], latitude: 41.88, longitude: -87.63, location_accuracy: 35,
+    });
+    expect(sent.played_at).toBe('2024-05-01T20:30:00.000Z'); // 3:30 PM Chicago
+    expect(sent).not.toHaveProperty('force');
+    expect(createMock).not.toHaveBeenCalled();
+    expect((await screen.findByTestId('probe')).textContent).toBe('/music/plays/p1');
+  });
+
+  it('drops the saved location when unchecked', async () => {
+    const user = userEvent.setup();
+    renderEdit();
+    await screen.findByRole('heading', { name: 'Edit song' });
+    await user.click(screen.getByLabelText(/Keep the saved location/));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalled());
+    expect(updateMock.mock.calls[0][1]).toMatchObject({ latitude: null, longitude: null, location_accuracy: null });
+  });
+
+  it('has no location option for a play that never had one', async () => {
+    scrobbleMock.mockResolvedValue({ ...PLAY, latitude: null, longitude: null, location_accuracy: null });
+    renderEdit();
+    await screen.findByRole('heading', { name: 'Edit song' });
+    expect(screen.queryByLabelText(/location/i)).toBeNull();
+  });
+
+  it('does not let a lookup overwrite the album it already has', async () => {
+    suggestMock.mockResolvedValue({
+      suggestions: [{ source: 'deezer', title: 'Sun & Moon', artists: ['Tyler, The Creator'], album: 'Some Other Album', album_artist: 'X', length: 100, cover_url: null, plays: null }],
+      catalog_unavailable: false,
+    });
+    renderEdit();
+    await screen.findByRole('heading', { name: 'Edit song' });
+    await new Promise((r) => setTimeout(r, 400));
+    expect((screen.getByLabelText('Album') as HTMLInputElement).value).toBe('Group Therapy');
+  });
+
+  it('shows a save failure (such as another play having that time) and stays', async () => {
+    const user = userEvent.setup();
+    updateMock.mockRejectedValue(new Error('Another play already has that time and song'));
+    renderEdit();
+    await screen.findByRole('heading', { name: 'Edit song' });
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Another play already has that time and song')).toBeTruthy();
+    expect(screen.queryByTestId('probe')).toBeNull();
+  });
+
+  it('says so when the play can\'t be loaded', async () => {
+    scrobbleMock.mockRejectedValue(new Error('No such play'));
+    renderEdit();
+    expect(await screen.findByText('No such play')).toBeTruthy();
   });
 });

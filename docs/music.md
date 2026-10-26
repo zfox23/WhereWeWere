@@ -103,5 +103,18 @@ Heard something out in the world, off a device that doesn't scrobble? Use the Mu
 - **Note, companions and location:** a free-text note, the people you were with (the same companions as other check-ins), and this device's approximate location (taken once, with your permission, and optional). The note, companions and a "Where I heard it" map link show under the song in its listening session.
 - **Always visible:** a listening session that contains a hand-entered song is always shown on the Home timeline, even when it is shorter than the minimum-tracks setting (everything else still follows it). Its companions make the session appear when you filter Home by that companion, and the song counts in stats, lists and the "listening before" preview on other check-ins.
 - **Duplicates:** if you already have the same song within about six minutes (a scrobbler got there first, or you saved it twice), the form tells you and asks before adding it anyway. In the other direction, when multi-scrobbler later sends a play of a song you wrote down within about six minutes, that play is skipped (your entry, with its note, wins) so counts and listening time aren't doubled.
-- **Taking one back:** expand its listening session and use the trash icon beside a hand-entered song. Scrobbled plays have none. There is no edit form; delete and re-enter.
+- **Fixing or taking one back:** open the play's page (see below) to edit or delete it. The trash icon beside a hand-entered song in its expanded session also deletes it.
 - **Backups:** hand-entered songs keep their notes, locations and companions through a backup and restore.
+
+## A play's own page
+
+Click the time beside any song in an expanded listening session on Home to open that play's page (`/music/plays/<id>`). It shows:
+
+- the song: large cover (when the album was matched), title, artists (each opens the library), album (opens the album's details), length, and an **Add to list** button;
+- when it was played, with the timezone it was played in, a link to that day on Home, and where it came from (written by hand, multi-scrobbler, a Last.fm or Maloja import) and how long you listened when that is known;
+- the note, who you were with, and a map of where you heard it, when the play has them;
+- your history with the song: how many times you've played it, first and last played, and a link to it in the library;
+- its place in its session ("3rd of 12"), the song before and after, and a link to the session on Home;
+- photos from that moment, when Immich is connected, like a place check-in.
+
+**Edit** reopens the check-in form filled in (title, artists, album, length, time in the play's own timezone, note, companions, saved location), and **Delete** removes the play. Both work on any play, including scrobbled ones, and regroup the listening sessions around the old and new time. A scrobbled play you delete is not re-added unless the scrobbler sends it again.

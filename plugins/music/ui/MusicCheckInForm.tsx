@@ -17,6 +17,8 @@ import { deviceTimezone, localDatetimeToIso, nowLocalDatetimeValue } from '../..
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 import { music, NearDuplicateError } from './api';
 import { formatClock, formatLength, parseLength } from './format';
+import { playPath } from './listTitle';
+import { utcToZonedLocalValue, zonedLocalToIso } from './zoned';
 import type { NearDuplicate, SongSuggestion } from './types';
 
 const norm = (s: string) =>
@@ -117,8 +119,9 @@ function SuggestionList({
   );
 }
 
-export default function MusicCheckInForm({ dateParam, onCreated }: CheckInFormProps) {
-  usePageTitle('Music check-in');
+export default function MusicCheckInForm({ editId, dateParam, onCreated }: CheckInFormProps) {
+  const isEdit = Boolean(editId);
+  usePageTitle(isEdit ? 'Edit song' : 'Music check-in');
   const navigate = useNavigate();
 
   const [artist, setArtist] = useState('');
@@ -136,9 +139,15 @@ export default function MusicCheckInForm({ dateParam, onCreated }: CheckInFormPr
   const [focus, setFocus] = useState<Field | null>(null);
   const [highlight, setHighlight] = useState(-1);
   const { suggestions, catalogUnavailable, loading: suggesting } = useSuggestions(artist, title);
-  const albumTouched = useRef(false);
+  // Editing keeps what the play already says; a lookup never overwrites it.
+  const albumTouched = useRef(isEdit);
+  // The timezone the time is read in: the device's for a new song, the play's own when editing.
+  const [zone, setZone] = useState(deviceTimezone);
+  const [loadingEdit, setLoadingEdit] = useState(isEdit);
+  const [savedLocation, setSavedLocation] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(null);
+  const [keepLocation, setKeepLocation] = useState(true);
 
-  const [attachLocation, setAttachLocation] = useState(() => typeof navigator !== 'undefined' && 'geolocation' in navigator);
+  const [attachLocation, setAttachLocation] = useState(() => !isEdit && typeof navigator !== 'undefined' && 'geolocation' in navigator);
   const [coords, setCoords] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationNote, setLocationNote] = useState<string | null>(null);
@@ -146,6 +155,34 @@ export default function MusicCheckInForm({ dateParam, onCreated }: CheckInFormPr
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<NearDuplicate | null>(null);
+
+  // Editing: load the play and fill every field from it.
+  useEffect(() => {
+    if (!editId) return;
+    let cancelled = false;
+    setLoadingEdit(true);
+    music
+      .scrobble(editId)
+      .then((p) => {
+        if (cancelled) return;
+        setArtist(p.artists.join(', '));
+        setPickedArtists(p.artists);
+        setTitle(p.title);
+        setAlbum(p.album ?? '');
+        setAlbumArtist(p.album_artists[0] ?? '');
+        setLength(formatLength(p.track_length));
+        setZone(p.timezone);
+        setWhen(utcToZonedLocalValue(p.played_at, p.timezone));
+        setNote(p.note ?? '');
+        setCompanions(p.companions);
+        setSavedLocation(p.latitude !== null && p.longitude !== null ? { lat: p.latitude, lon: p.longitude, accuracy: p.location_accuracy } : null);
+      })
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : 'Could not load this play.'))
+      .finally(() => !cancelled && setLoadingEdit(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [editId]);
 
   // Ask for the device's location once (coarse is fine), while it is wanted.
   useEffect(() => {
@@ -225,33 +262,47 @@ export default function MusicCheckInForm({ dateParam, onCreated }: CheckInFormPr
 
   const lengthSeconds = parseLength(length);
   const lengthInvalid = length.trim() !== '' && lengthSeconds === null;
-  const canSave = artist.trim() !== '' && title.trim() !== '' && !lengthInvalid && !!localDatetimeToIso(when) && !submitting;
+  const playedAtIso = isEdit ? zonedLocalToIso(when, zone) : localDatetimeToIso(when);
+  const canSave = artist.trim() !== '' && title.trim() !== '' && !lengthInvalid && !!playedAtIso && !submitting && !loadingEdit;
   const zoneLabel = useMemo(() => {
-    const d = new Date(when);
-    if (Number.isNaN(d.getTime())) return deviceTimezone();
-    return new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(d).find((p) => p.type === 'timeZoneName')?.value ?? deviceTimezone();
-  }, [when]);
+    const d = new Date(playedAtIso ?? Date.now());
+    return new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' }).formatToParts(d).find((p) => p.type === 'timeZoneName')?.value ?? zone;
+  }, [playedAtIso, zone]);
 
   const save = async (force: boolean) => {
     setSubmitting(true);
     setError(null);
     try {
       const artists = pickedArtists && pickedArtists.join(', ') === artist.trim() ? pickedArtists : [artist.trim()];
-      const created = await music.createScrobble({
+      const fields = {
         title: title.trim(),
         artists,
         album: album.trim() || null,
         album_artists: albumArtist.trim() ? [albumArtist.trim()] : [],
         track_length: lengthSeconds,
-        played_at: localDatetimeToIso(when) as string,
-        timezone: deviceTimezone(),
+        played_at: playedAtIso as string,
+        timezone: zone,
         note: note.trim() || null,
         companions,
-        latitude: attachLocation && coords ? Number(coords.lat.toFixed(5)) : null,
-        longitude: attachLocation && coords ? Number(coords.lon.toFixed(5)) : null,
-        location_accuracy: attachLocation && coords ? coords.accuracy : null,
-        force,
-      });
+        // New: the device's position if wanted. Editing: the saved one, kept or dropped.
+        ...(isEdit
+          ? {
+              latitude: keepLocation && savedLocation ? savedLocation.lat : null,
+              longitude: keepLocation && savedLocation ? savedLocation.lon : null,
+              location_accuracy: keepLocation && savedLocation ? savedLocation.accuracy : null,
+            }
+          : {
+              latitude: attachLocation && coords ? Number(coords.lat.toFixed(5)) : null,
+              longitude: attachLocation && coords ? Number(coords.lon.toFixed(5)) : null,
+              location_accuracy: attachLocation && coords ? coords.accuracy : null,
+            }),
+      };
+      if (editId) {
+        await music.updateScrobble(editId, fields);
+        navigate(playPath(editId));
+        return;
+      }
+      const created = await music.createScrobble({ ...fields, force });
       onCreated(created.session_id ?? created.id);
     } catch (err) {
       if (err instanceof NearDuplicateError) setDuplicate(err.duplicate);
@@ -276,13 +327,21 @@ export default function MusicCheckInForm({ dateParam, onCreated }: CheckInFormPr
     onKeyDown,
   });
 
+  if (loadingEdit) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="animate-spin text-primary-600" size={32} />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-lg space-y-3 pb-28">
       <div className="flex items-center gap-3 text-gray-900 dark:text-gray-100">
         <button type="button" onClick={() => navigate(-1)} aria-label="Back" className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800">
           <ArrowLeft size={20} />
         </button>
-        <h1 className="text-xl font-bold">What are you listening to?</h1>
+        <h1 className="text-xl font-bold">{isEdit ? 'Edit song' : 'What are you listening to?'}</h1>
       </div>
 
       <form
@@ -394,21 +453,33 @@ export default function MusicCheckInForm({ dateParam, onCreated }: CheckInFormPr
           <CompanionChipInput value={companions} onChange={setCompanions} />
         </div>
 
-        <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-          <input type="checkbox" checked={attachLocation} onChange={(e) => setAttachLocation(e.target.checked)} className="mt-0.5" />
-          <span>
-            <span className="flex items-center gap-1.5 font-medium">
-              <MapPin size={14} className="text-pink-500" />
-              Attach my location
-              {locating && <Loader2 size={12} className="animate-spin" aria-label="Finding your location" />}
+        {isEdit ? (
+          savedLocation && (
+            <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input type="checkbox" checked={keepLocation} onChange={(e) => setKeepLocation(e.target.checked)} className="mt-0.5" />
+              <span className="flex items-center gap-1.5 font-medium">
+                <MapPin size={14} className="text-pink-500" />
+                Keep the saved location
+              </span>
+            </label>
+          )
+        ) : (
+          <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input type="checkbox" checked={attachLocation} onChange={(e) => setAttachLocation(e.target.checked)} className="mt-0.5" />
+            <span>
+              <span className="flex items-center gap-1.5 font-medium">
+                <MapPin size={14} className="text-pink-500" />
+                Attach my location
+                {locating && <Loader2 size={12} className="animate-spin" aria-label="Finding your location" />}
+              </span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                {coords
+                  ? `Found you${coords.accuracy ? ` (within about ${coords.accuracy} m)` : ''}.`
+                  : locationNote ?? 'Uses this device’s approximate position.'}
+              </span>
             </span>
-            <span className="block text-xs text-gray-500 dark:text-gray-400">
-              {coords
-                ? `Found you${coords.accuracy ? ` (within about ${coords.accuracy} m)` : ''}.`
-                : locationNote ?? 'Uses this device’s approximate position.'}
-            </span>
-          </span>
-        </label>
+          </label>
+        )}
 
         {duplicate && (
           <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
@@ -428,7 +499,7 @@ export default function MusicCheckInForm({ dateParam, onCreated }: CheckInFormPr
 
         <button type="submit" disabled={!canSave} className="btn-primary flex items-center justify-center gap-2">
           {submitting ? <Loader2 size={16} className="animate-spin" /> : <Music size={16} />}
-          Save
+          {isEdit ? 'Save changes' : 'Save'}
         </button>
       </form>
     </div>

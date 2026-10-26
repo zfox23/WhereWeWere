@@ -38,3 +38,6 @@ export function openMusicList(listId: string): void {
   // The tab and the lists section both re-read the URL on popstate.
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
+
+/** The page of one play. */
+export const playPath = (scrobbleId: string): string => `/music/plays/${scrobbleId}`;

@@ -48,6 +48,19 @@ describe('MusicCard', () => {
     expect(sessionTracksMock).not.toHaveBeenCalled();
   });
 
+  it('links each track\'s time to that play\'s own page', async () => {
+    const user = userEvent.setup();
+    sessionTracksMock.mockResolvedValue([
+      { id: 'p1', played_at: '2024-05-01T12:00:00Z', title: 'Maria También', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'UTC' },
+    ]);
+    renderCard();
+    await user.click(screen.getByRole('button'));
+    const time = await screen.findByRole('link', { name: '12:00 PM UTC' });
+    expect(time.getAttribute('href')).toBe('/music/plays/p1');
+    // Following it doesn't fold the card up.
+    expect(screen.getByRole('button', { name: /Listening/ }).getAttribute('aria-expanded')).toBe('true');
+  });
+
   describe('songs written down by hand', () => {
     const tracks = () => [
       { id: 'm1', manual: true, played_at: '2024-05-01T12:30:00Z', title: 'Sun & Moon', artists: ['Above & Beyond'], album: null, track_length: null, listened_for: null, timezone: 'UTC',

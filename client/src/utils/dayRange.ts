@@ -41,7 +41,7 @@ export function zoneOffsetMinutes(utcMs: number, timeZone: string): number {
 }
 
 /** UTC instant (ms) at which the wall clock in `timeZone` reads the given local time. */
-function wallTimeToUtcMs(
+export function wallTimeToUtcMs(
   y: number, mo: number, d: number, h: number, mi: number, s: number, ms: number, timeZone: string,
 ): number {
   const baseMs = Date.UTC(y, mo - 1, d, h, mi, s, ms);

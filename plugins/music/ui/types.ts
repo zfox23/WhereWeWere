@@ -205,3 +205,41 @@ export interface NearDuplicate {
   artists: string[];
   source: string | null;
 }
+
+export interface SessionNeighbour {
+  id: string;
+  title: string;
+  artists: string[];
+  played_at: string;
+}
+
+/** One play, as its own page shows it. */
+export interface ScrobbleDetail {
+  id: string;
+  played_at: string;
+  timezone: string;
+  title: string;
+  artists: string[];
+  album: string | null;
+  album_artists: string[];
+  track_length: number | null;
+  listened_for: number | null;
+  source: string | null;
+  note: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  location_accuracy: number | null;
+  companions: string[];
+  art_id: string | null;
+  album_ref: string;
+  song_key: string;
+  history: { plays: number; first_played_at: string; last_played_at: string };
+  session: {
+    id: string;
+    date: string;
+    position: number;
+    count: number;
+    previous: SessionNeighbour | null;
+    next: SessionNeighbour | null;
+  } | null;
+}

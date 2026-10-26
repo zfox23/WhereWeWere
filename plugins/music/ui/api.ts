@@ -7,6 +7,7 @@ import type { RankSessionState } from './ranking/engine';
 import type {
   AlbumBackfillStatus,
   ManualScrobbleInput,
+  ScrobbleDetail,
   NearDuplicate,
   SongSuggestion,
   AlbumView,
@@ -71,6 +72,10 @@ export const music = {
     if (!res.ok) throw new Error(body.error || body.message || `Request failed: ${res.status}`);
     return body;
   },
+  scrobble: (id: string) => request<ScrobbleDetail>(`/music/scrobbles/${id}`),
+  /** Correct any play. */
+  updateScrobble: (id: string, input: Omit<ManualScrobbleInput, 'force'>) =>
+    request<{ id: string; session_id: string | null }>(`/music/scrobbles/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
   deleteScrobble: (id: string) => request<{ id: string }>(`/music/scrobbles/${id}`, { method: 'DELETE' }),
   stats: (from?: string, to?: string, limit = 25) =>
     request<MusicStats>(`/music/stats${rangeQuery(from, to, { limit: String(limit) })}`),
