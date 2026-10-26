@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CheckSquare, Loader2, MapPin, Plus, Square, Trash2 } from 'lucide-react';
+import { Loader2, MapPin, Trash2 } from 'lucide-react';
 import { checkins, checkinLists, venues } from '../../../client/src/api/client';
+import { ListPicker } from '../../../client/src/components/lists/ListPicker';
 import type { CheckinList } from '../../../client/src/types';
 import VenueSearch from './VenueSearch';
 import ScorePicker from '../../../client/src/components/ScorePicker';
@@ -79,8 +80,6 @@ export default function CheckInForm({
   const [venueAddress, setVenueAddress] = useState<string | null>(null);
   const [allLists, setAllLists] = useState<CheckinList[]>([]);
   const [selectedListIds, setSelectedListIds] = useState<string[]>(initialListIds ?? []);
-  const [newListName, setNewListName] = useState('');
-  const [creatingList, setCreatingList] = useState(false);
   const timeZoneAbbreviation = getLocalTimeZoneAbbreviation(checkedInAt);
 
   const isEditMode = !!editCheckinId;
@@ -154,20 +153,10 @@ export default function CheckInForm({
     );
   };
 
-  const handleCreateList = async () => {
-    const name = newListName.trim();
-    if (!name || creatingList) return;
-    setCreatingList(true);
-    try {
-      const created = await checkinLists.create(name);
-      setAllLists((prev) => [...prev, { ...created, item_count: 0 }].sort((a, b) => a.name.localeCompare(b.name)));
-      setSelectedListIds((prev) => [...prev, created.id]);
-      setNewListName('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create list.');
-    } finally {
-      setCreatingList(false);
-    }
+  const handleCreateList = async (name: string) => {
+    const created = await checkinLists.create(name);
+    setAllLists((prev) => [...prev, { ...created, item_count: 0 }].sort((a, b) => a.name.localeCompare(b.name)));
+    setSelectedListIds((prev) => [...prev, created.id]);
   };
 
   const handleDelete = async () => {
@@ -395,58 +384,13 @@ export default function CheckInForm({
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
           Add to list
         </label>
-        {allLists.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Checkin lists">
-            {allLists.map((list) => {
-              const selected = selectedListIds.includes(list.id);
-              return (
-                <button
-                  key={list.id}
-                  type="button"
-                  onClick={() => toggleList(list.id)}
-                  aria-pressed={selected}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm transition-colors ${
-                    selected
-                      ? 'border-primary-300 bg-primary-50 text-primary-800 dark:border-primary-600 dark:bg-primary-900/40 dark:text-primary-300'
-                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-gray-500'
-                  }`}
-                >
-                  {selected ? <CheckSquare size={14} /> : <Square size={14} />}
-                  {list.name}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-xs text-gray-400 mb-1.5">
-            No lists yet — create one below.
-          </p>
-        )}
-        <div className="mt-2 flex items-center gap-1.5">
-          <input
-            type="text"
-            value={newListName}
-            onChange={(e) => setNewListName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void handleCreateList();
-              }
-            }}
-            placeholder="New list name…"
-            aria-label="New list name"
-            className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-          />
-          <button
-            type="button"
-            onClick={() => void handleCreateList()}
-            disabled={creatingList || !newListName.trim()}
-            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2.5 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {creatingList ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Add
-          </button>
-        </div>
+        <ListPicker
+          lists={allLists}
+          isOn={(l) => selectedListIds.includes(l.id)}
+          onToggle={(l) => toggleList(l.id)}
+          onCreate={handleCreateList}
+          emptyText="No lists yet — create one below."
+        />
       </div>
 
       {/* Notes */}

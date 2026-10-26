@@ -3,8 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   MapPin, Tag, Navigation, Loader2, AlertCircle,
   Edit2, Save, X, GitMerge, Search, ArrowRight, AlertTriangle, ChevronDown, ChevronUp, Camera, ExternalLink,
-  Navigation2, List, Plus, Trash2, LocateFixed
+  Navigation2, List, LocateFixed
 } from 'lucide-react';
+import { ListPicker } from '../../../client/src/components/lists/ListPicker';
 import { venues, checkins, settings, immich as immichApi, venueLists } from '../../../client/src/api/client';
 import { Venue, CheckIn, VenueCategory, ImmichAsset, VenueList } from '../../../client/src/types';
 import ScorePicker from '../../../client/src/components/ScorePicker';
@@ -118,8 +119,6 @@ export default function VenueDetail() {
   // ── Lists ───────────────────────────────────────────────────────────────
   const [lists, setLists] = useState<VenueList[]>([]);
   const [listsOpen, setListsOpen] = useState(false);
-  const [newListName, setNewListName] = useState('');
-  const [listsBusy, setListsBusy] = useState(false);
   const [listsError, setListsError] = useState<string | null>(null);
 
   // ── Merge mode ────────────────────────────────────────────────────────────
@@ -161,7 +160,6 @@ export default function VenueDetail() {
   const venueListItems = lists
     .filter((l) => l.items.some((i) => i.id === venue?.id))
     .map((l) => ({ id: l.id, name: l.name }));
-  const availableLists = lists.filter((l) => !venueListItems.some((v) => v.id === l.id));
 
   // Bumped per fetch: navigating between venues quickly must not let a slow
   // response for the previous venue overwrite the current one.
@@ -313,51 +311,6 @@ export default function VenueDetail() {
   const toggleListsPanel = () => {
     setListsOpen((o) => !o);
     setListsError(null);
-  };
-
-  const handleCreateList = async () => {
-    const name = newListName.trim();
-    if (!name || !id) return;
-    setListsBusy(true);
-    setListsError(null);
-    try {
-      const created = await venueLists.create(name) as VenueList;
-      await venueLists.addVenue(created.id, id);
-      setNewListName('');
-      loadLists();
-    } catch (err) {
-      setListsError(err instanceof Error ? err.message : 'Failed to create list.');
-    } finally {
-      setListsBusy(false);
-    }
-  };
-
-  const handleAddToList = async (listId: string) => {
-    if (!listId || !id) return;
-    setListsBusy(true);
-    setListsError(null);
-    try {
-      await venueLists.addVenue(listId, id);
-      loadLists();
-    } catch (err) {
-      setListsError(err instanceof Error ? err.message : 'Failed to add to list.');
-    } finally {
-      setListsBusy(false);
-    }
-  };
-
-  const handleRemoveFromList = async (listId: string) => {
-    if (!listId || !id) return;
-    setListsBusy(true);
-    setListsError(null);
-    try {
-      await venueLists.removeVenue(listId, id);
-      loadLists();
-    } catch (err) {
-      setListsError(err instanceof Error ? err.message : 'Failed to remove from list.');
-    } finally {
-      setListsBusy(false);
-    }
   };
 
   if (loading) {
@@ -718,55 +671,16 @@ export default function VenueDetail() {
             {listsOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
           </button>
           {listsOpen && (
-            <div className="border-t border-gray-100 dark:border-gray-800 px-5 pb-5 pt-4 space-y-4">
-              {listsError && <p className="text-xs text-red-500">{listsError}</p>}
-
-              {/* Current lists */}
-              {venueListItems.length > 0 ? (
-                <ul className="divide-y divide-gray-100 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                  {venueListItems.map((l) => (
-                    <li key={l.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                      <span className="text-sm text-gray-800 dark:text-gray-200">{l.name}</span>
-                      <button onClick={() => handleRemoveFromList(l.id)} disabled={listsBusy}
-                        aria-label={`Remove from ${l.name}`}
-                        className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50">
-                        <Trash2 size={14} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-gray-400">This venue isn't in any lists yet.</p>
-              )}
-
-              {/* Add to an existing list */}
-              {availableLists.length > 0 && (
-                <div>
-                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Add to a list</span>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {availableLists.map((l) => (
-                      <button key={l.id} onClick={() => handleAddToList(l.id)} disabled={listsBusy}
-                        className="inline-flex items-center gap-1 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">
-                        <Plus size={12} /> {l.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Create a new list */}
-              <div className="flex items-center gap-2">
-                <input type="text" value={newListName}
-                  onChange={(e) => setNewListName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreateList(); } }}
-                  placeholder="New list name…"
-                  className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-500" />
-                <button onClick={handleCreateList} disabled={listsBusy || !newListName.trim()}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700 transition-colors disabled:opacity-50">
-                  {listsBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  Create
-                </button>
-              </div>
+            <div className="border-t border-gray-100 dark:border-gray-800 px-5 pb-5 pt-4">
+              {listsError && <p className="mb-2 text-xs text-red-500">{listsError}</p>}
+              <ListPicker
+                lists={lists}
+                isOn={(l) => l.items.some((i) => i.id === venue?.id)}
+                onToggle={(l, on) => (on ? venueLists.addVenue(l.id, id!) : venueLists.removeVenue(l.id, id!))}
+                onCreate={async (name) => venueLists.addVenue(((await venueLists.create(name)) as VenueList).id, id!)}
+                onChanged={loadLists}
+                emptyText="This venue isn't in any lists yet. Name one to start."
+              />
             </div>
           )}
         </div>

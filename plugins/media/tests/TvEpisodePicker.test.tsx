@@ -125,7 +125,7 @@ describe('TvEpisodePicker', () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /add to list/i }));
-    await user.click(await screen.findByRole('button', { name: 'Watchlist' }));
+    await user.click(await screen.findByRole('checkbox', { name: /^Watchlist/ }));
 
     await waitFor(() => {
       expect(apiMocks.addItemToList).toHaveBeenCalledWith('list-1', 'item-1');

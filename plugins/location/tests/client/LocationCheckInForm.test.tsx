@@ -147,8 +147,8 @@ describe('LocationCheckInForm', () => {
       </MemoryRouter>,
     );
 
-    await user.click(await screen.findByRole('button', { name: /Concerts/ }));
-    await user.click(screen.getByRole('button', { name: /Broadway/ }));
+    await user.click(await screen.findByRole('checkbox', { name: /Concerts/ }));
+    await user.click(screen.getByRole('checkbox', { name: /Broadway/ }));
     const notesInput = screen.getByLabelText('Note.md');
     await user.click(notesInput);
     await user.keyboard('{Shift>}{Enter}{/Shift}');
@@ -172,15 +172,15 @@ describe('LocationCheckInForm', () => {
     );
 
     await user.type(screen.getByLabelText('New list name'), 'Concerts');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await user.click(screen.getByRole('button', { name: 'Create list' }));
 
     await waitFor(() => {
       expect(apiMocks.checkinListsCreate).toHaveBeenCalledWith('Concerts');
     });
     // The newly created list is auto-selected (no extra click needed —
-    // clicking the chip would toggle it off).
-    const chip = await screen.findByRole('button', { name: /Concerts/ });
-    expect(chip).toHaveAttribute('aria-pressed', 'true');
+    // clicking the checkbox would toggle it off).
+    const box = await screen.findByRole('checkbox', { name: /Concerts/ });
+    expect(box).toHaveAttribute('aria-checked', 'true');
     const notesInput = screen.getByLabelText('Note.md');
     await user.click(notesInput);
     await user.keyboard('{Shift>}{Enter}{/Shift}');

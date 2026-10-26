@@ -24,6 +24,7 @@ A list's tables need: lists with `id` (UUID), `user_id`, `updated_at`; items wit
 - `ListsIndex` is the index (create, rename, delete).
 - `useRankedList` plus `RankedListDetail` is the detail view: loading, drag-to-rank, remove. `RankableListDetail` adds the "Rank by comparing" button and swaps in `RankByComparing`.
 - `compareByRank` is the shared rank sort. `ListSectionShell` is the card with a spinner. `useLists` loads the index.
+- `ListPicker` is the "which lists is this on" checkbox list with a new-list field. It is only the body: the caller supplies the popover, modal or panel, and what toggling and creating do (add or remove on the server right away, as music, media and venue pages do, or just change the form's selection, as the check-in form does). It is deliberately not a `<form>`, so it can sit inside one.
 - `ranking/engine.ts` is the pure engine behind "Rank by comparing".
 - `client/src/api/lists.ts` `createListsApi(base)` gives the calls every list type serves.
 

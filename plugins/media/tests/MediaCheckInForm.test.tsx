@@ -62,7 +62,7 @@ describe('MediaCheckInForm add to list', () => {
     renderForm();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /add to list/i }));
-    await user.click(await screen.findByRole('button', { name: 'Watchlist' }));
+    await user.click(await screen.findByRole('checkbox', { name: /^Watchlist/ }));
 
     await waitFor(() => {
       expect(apiMocks.addItemToList).toHaveBeenCalledWith('list-1', 'item-1');
