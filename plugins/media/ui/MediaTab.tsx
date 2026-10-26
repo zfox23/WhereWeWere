@@ -4,6 +4,7 @@ import { media } from './api';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
 import { MediaLibrarySection } from './MediaLibrarySection';
+import { MediaListsSection } from './MediaListsSection';
 import {
   PeriodMode,
   getCurrentMonthIso,
@@ -156,6 +157,8 @@ export function MediaTab() {
       </div>
 
       <MediaLibrarySection from={visibleRange.from} to={visibleRange.to} />
+
+      <MediaListsSection />
     </div>
   );
 }

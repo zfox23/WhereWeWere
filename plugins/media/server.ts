@@ -21,6 +21,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { query, pool } from '../../server/src/db';
+import { isUuid } from '../../server/src/services/batching';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { allPlugins } from '../../server/src/plugins/registry';
@@ -32,6 +33,8 @@ import type {
 } from 'wwp-shared';
 import { isValidTimeZone } from 'wwp-shared';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { createListKit, cleanName, nameTakenOrThrow, listError } from '../../server/src/services/lists';
+import { mountRankRoutes } from '../../server/src/services/lists/routes';
 
 import { tmdb } from './services/tmdb';
 import { parsePlexGuids, splitTitleYear, resolvePlexMovie, resolvePlexShow, type PlexExternalIds, type ResolvedTmdbItem } from './services/plexResolve';
@@ -1700,11 +1703,17 @@ router.get('/stats', async (req: Request, res: Response) => {
 // Lists
 // ---------------------------------------------------------------------------
 
+// The shared list kit serves the re-rank and rank-session routes.
+const mediaListKit = createListKit({
+  lists: 'media_lists', items: 'media_list_items', itemId: 'media_item_id', sessions: 'media_rank_sessions',
+});
+mountRankRoutes(router, mediaListKit, USER_ID);
+
 // GET /lists
 router.get('/lists', async (_req: Request, res: Response) => {
   try {
     const listsResult = await query(
-      'SELECT id, name, created_at FROM media_lists WHERE user_id = $1 ORDER BY created_at',
+      'SELECT id, name, created_at, updated_at FROM media_lists WHERE user_id = $1 ORDER BY created_at',
       [USER_ID]
     );
     const itemsResult = await query(
@@ -1712,8 +1721,8 @@ router.get('/lists', async (_req: Request, res: Response) => {
               json_agg(json_build_object(
                 'id', mi.id, 'media_type', mi.media_type, 'title', mi.title,
                 'image_url', mi.image_url, 'author', mi.author,
-                'added_at', mli.added_at
-              ) ORDER BY mli.position, mli.added_at) FILTER (WHERE mi.id IS NOT NULL) AS items
+                'added_at', mli.added_at, 'rank', mli.rank
+              ) ORDER BY mli.rank NULLS LAST, mli.position, mli.added_at) FILTER (WHERE mi.id IS NOT NULL) AS items
        FROM media_lists l
        LEFT JOIN media_list_items mli ON mli.list_id = l.id
        LEFT JOIN media_items mi ON mli.media_item_id = mi.id
@@ -1729,48 +1738,85 @@ router.get('/lists', async (_req: Request, res: Response) => {
   }
 });
 
+// GET /lists/:id/items - one list's items with their rank, rating and check-in history
+router.get('/lists/:id/items', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    if (!(await mediaListKit.ownsList(USER_ID, listId))) return res.status(404).json({ error: 'Media list not found' });
+    const result = await query(
+      `SELECT mi.id, mi.media_type, mi.title, mi.author, mi.release_year, mi.image_url,
+              mli.added_at, mli.rank,
+              COALESCE(mi.rating, st.latest_rating) AS rating,
+              COALESCE(st.checkin_count, 0)::int AS checkin_count,
+              st.last_checkin_at, st.last_checkin_timezone
+       FROM media_list_items mli
+       JOIN media_items mi ON mi.id = mli.media_item_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS checkin_count,
+                MAX(mc.checked_in_at) AS last_checkin_at,
+                (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC, mc.created_at DESC))[1] AS last_checkin_timezone,
+                (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.created_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_rating
+         FROM media_checkins mc WHERE mc.media_item_id = mi.id
+       ) st ON true
+       WHERE mli.list_id = $1
+       ORDER BY mli.rank NULLS LAST, mli.position, mli.added_at, mi.id`,
+      [listId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error loading media list items:', err);
+    res.status(500).json({ error: 'Failed to load media list' });
+  }
+});
+
 // POST /lists
 router.post('/lists', async (req: Request, res: Response) => {
   try {
-    const { name } = req.body;
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      return res.status(400).json({ error: 'name is required' });
+    const name = cleanName(req.body?.name);
+    let result;
+    try {
+      result = await query(
+        'INSERT INTO media_lists (user_id, name) VALUES ($1, $2) RETURNING id, name, created_at',
+        [USER_ID, name]
+      );
+    } catch (err) {
+      return nameTakenOrThrow(err);
     }
-    const result = await query(
-      'INSERT INTO media_lists (user_id, name) VALUES ($1, $2) RETURNING id, name, created_at',
-      [USER_ID, name.trim()]
-    );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error('Error creating media list:', err);
-    res.status(500).json({ error: 'Failed to create media list' });
+    listError(res, err, 'creating the media list');
   }
 });
 
 // PUT /lists/:id - rename
 router.put('/lists/:id', async (req: Request, res: Response) => {
   try {
-    const { name } = req.body;
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      return res.status(400).json({ error: 'name is required' });
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    const name = cleanName(req.body?.name);
+    let result;
+    try {
+      result = await query(
+        'UPDATE media_lists SET name = $2 WHERE id = $1 AND user_id = $3 RETURNING id, name, created_at',
+        [listId, name, USER_ID]
+      );
+    } catch (err) {
+      return nameTakenOrThrow(err);
     }
-    const result = await query(
-      'UPDATE media_lists SET name = $2 WHERE id = $1 AND user_id = $3 RETURNING id, name, created_at',
-      [req.params.id, name.trim(), USER_ID]
-    );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media list not found' });
     }
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('Error renaming media list:', err);
-    res.status(500).json({ error: 'Failed to rename media list' });
+    listError(res, err, 'renaming the media list');
   }
 });
 
 // DELETE /lists/:id
 router.delete('/lists/:id', async (req: Request, res: Response) => {
   try {
+    if (!isUuid(String(req.params.id))) return res.status(400).json({ error: 'Invalid list id' });
     const result = await query(
       'DELETE FROM media_lists WHERE id = $1 AND user_id = $2 RETURNING id',
       [req.params.id, USER_ID]
@@ -1844,6 +1890,7 @@ router.delete('/lists/:id/items/:itemId', async (req: Request, res: Response) =>
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not in list' });
     }
+    await mediaListKit.closeGaps(String(req.params.id));
     res.json({ message: 'Removed from list' });
   } catch (err) {
     console.error('Error removing from media list:', err);
@@ -2443,12 +2490,26 @@ export const server: CheckinTypeServerPlugin = {
                ON CONFLICT (list_id, media_item_id) DO NOTHING`,
       userIdFirst: false,
     },
+    {
+      // Ranks ride in their own step, applied after the memberships exist, so
+      // a backup written before lists were rankable (no such table) still restores.
+      // A rank already taken on the list is left alone rather than colliding.
+      table: 'mediaListRanks',
+      select: `SELECT mli.rank, mli.list_id, mli.media_item_id
+               FROM media_list_items mli
+               JOIN media_lists ml ON ml.id = mli.list_id
+               WHERE ml.user_id = $1 AND mli.rank IS NOT NULL ORDER BY ml.created_at, mli.rank`,
+      insert: `UPDATE media_list_items SET rank = $1
+               WHERE list_id = $2 AND media_item_id = $3 AND rank IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM media_list_items x WHERE x.list_id = $2 AND x.rank = $1)`,
+      userIdFirst: false,
+    },
   ],
 
   // FK order: items (primary) -> check-ins -> lists -> list memberships.
   // (Companion rows are core-owned: they ship in the backup bundle's
   // companions.json, so this plugin no longer carries them.)
-  backupOrder: ['primary', 'mediaCheckins', 'mediaLists', 'mediaListItems'],
+  backupOrder: ['primary', 'mediaCheckins', 'mediaLists', 'mediaListItems', 'mediaListRanks'],
 
   // Old backups (no plugins payload) keep media rows under these top-level
   // keys; when a plugins.media payload is present the core skips these.

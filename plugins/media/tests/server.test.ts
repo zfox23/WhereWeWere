@@ -109,10 +109,10 @@ describe('media plugin — plugin shape', () => {
     }
   });
 
-  it('backs up items first, then check-ins, lists, and list memberships', () => {
-    expect(server.backupOrder).toEqual(['primary', 'mediaCheckins', 'mediaLists', 'mediaListItems']);
+  it('backs up items first, then check-ins, lists, list memberships and their ranks', () => {
+    expect(server.backupOrder).toEqual(['primary', 'mediaCheckins', 'mediaLists', 'mediaListItems', 'mediaListRanks']);
     const tables = (server.extraBackupTables ?? []).map((t) => t.table);
-    expect(tables).toEqual(['mediaCheckins', 'mediaLists', 'mediaListItems']);
+    expect(tables).toEqual(['mediaCheckins', 'mediaLists', 'mediaListItems', 'mediaListRanks']);
   });
 
   it('declares legacy backup keys and settings keys for pre-plugin restores', () => {

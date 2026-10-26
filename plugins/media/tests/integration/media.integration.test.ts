@@ -867,6 +867,54 @@ describe('Media check-in API', () => {
     });
   });
 
+  describe('media list ranking', () => {
+    const makeItems = async (...titles: string[]) =>
+      Promise.all(titles.map(async (title) => (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title })).body.id as string));
+
+    it('keeps list names unique, ignoring case', async () => {
+      expect((await request(app).post('/api/v1/media/lists').send({ name: 'Faves' })).status).toBe(201);
+      expect((await request(app).post('/api/v1/media/lists').send({ name: 'faves' })).status).toBe(409);
+      expect((await request(app).post('/api/v1/media/lists').send({ name: '  ' })).status).toBe(400);
+      const other = await request(app).post('/api/v1/media/lists').send({ name: 'Other' });
+      expect((await request(app).put(`/api/v1/media/lists/${other.body.id}`).send({ name: 'FAVES' })).status).toBe(409);
+      expect((await request(app).put(`/api/v1/media/lists/${other.body.id}`).send({ name: 'Renamed' })).status).toBe(200);
+    });
+
+    it('ranks items in bulk, closes the gap on removal, and serves the detail rows', async () => {
+      const [a, b, c] = await makeItems('Alpha', 'Beta', 'Gamma');
+      const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Top' })).body;
+      for (const id of [a, b, c]) await request(app).post(`/api/v1/media/lists/${list.id}/items`).send({ media_item_id: id });
+      await request(app)
+        .post(`/api/v1/media/items/${b}/checkins`)
+        .send({ checkin_type: 'completed', rating: 3, checked_in_at: '2024-01-02T20:00:00Z', timezone: 'UTC' });
+
+      const base = `/api/v1/media/lists/${list.id}`;
+      expect((await request(app).put(`${base}/ranks`).send({ ranked_ids: [c, a] })).status).toBe(200);
+      let rows = (await request(app).get(`${base}/items`)).body;
+      expect(rows.map((r: any) => [r.title, r.rank])).toEqual([['Gamma', 1], ['Alpha', 2], ['Beta', null]]);
+      expect(rows[2].checkin_count).toBe(1);
+      expect(rows[2].rating).toBe(3);
+
+      expect((await request(app).delete(`${base}/items/${c}`)).status).toBe(200);
+      rows = (await request(app).get(`${base}/items`)).body;
+      expect(rows.map((r: any) => [r.title, r.rank])).toEqual([['Alpha', 1], ['Beta', null]]);
+      expect((await request(app).get('/api/v1/media/lists')).body[0].items[0].rank).toBe(1);
+      expect((await request(app).get('/api/v1/media/lists/not-a-uuid/items')).status).toBe(400);
+    });
+
+    it('saves, reads and discards a paused ranking session, which goes with the list', async () => {
+      const [a, b] = await makeItems('Alpha', 'Beta');
+      const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Duel' })).body;
+      const base = `/api/v1/media/lists/${list.id}`;
+      const state = { mode: 'scratch', initialRanks: { [a]: null, [b]: null }, itemIds: [a, b], answers: [{ a, b, r: 'a' }] };
+      expect((await request(app).get(`${base}/rank-session`)).status).toBe(404);
+      expect((await request(app).put(`${base}/rank-session`).send({ state })).status).toBe(200);
+      expect((await request(app).get(`${base}/rank-session`)).body.state.answers).toHaveLength(1);
+      await request(app).delete(base);
+      expect((await query('SELECT 1 FROM media_rank_sessions')).rowCount).toBe(0);
+    });
+  });
+
   describe('bulk delete', () => {
     async function makeItemWithCheckins(title: string, checkinCount: number) {
       const item = (

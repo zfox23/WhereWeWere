@@ -132,13 +132,32 @@ export interface MediaListItemRef {
   author: string | null;
   /** When the item was added to this list. */
   added_at: string;
+  /** 1..n among the ranked items; null when unranked. */
+  rank: number | null;
 }
 
 export interface MediaList {
   id: string;
   name: string;
   created_at: string;
+  updated_at?: string;
   items: MediaListItemRef[];
+}
+
+/** One row of a list's detail view: the item with its rank and check-in history. */
+export interface MediaListItem {
+  id: string;
+  media_type: MediaSubtype;
+  title: string;
+  author: string | null;
+  release_year: number | null;
+  image_url: string | null;
+  added_at: string;
+  rank: number | null;
+  rating: number | null;
+  checkin_count: number;
+  last_checkin_at: string | null;
+  last_checkin_timezone: string | null;
 }
 
 export interface MediaStats {

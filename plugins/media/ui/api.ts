@@ -8,10 +8,12 @@
  */
 
 import { request } from '../../../client/src/api/client';
+import { createListsApi } from '../../../client/src/api/lists';
 import type {
   MediaCheckIn,
   MediaItem,
   MediaList,
+  MediaListItem,
   MediaLibraryItem,
   MediaSearchHit,
   MediaStats,
@@ -22,6 +24,8 @@ import type {
 import type { MediaSubtype } from '../../../client/src/types';
 
 // Media check-ins
+const lists = createListsApi<MediaList, MediaListItem>('/media');
+
 export const media = {
   search: (type: MediaSubtype, q: string) =>
     request<{ results: MediaSearchHit[]; degraded: boolean }>(
@@ -130,6 +134,11 @@ export const media = {
     return request<MediaLibraryItem[]>(`/media/library${qs ? `?${qs}` : ''}`);
   },
   lists: () => request<MediaList[]>('/media/lists'),
+  listItems: lists.items,
+  rankList: lists.reRank,
+  rankSession: lists.rankSession,
+  saveRankSession: lists.saveRankSession,
+  discardRankSession: lists.discardRankSession,
   createList: (name: string) =>
     request<MediaList>('/media/lists', { method: 'POST', body: JSON.stringify({ name }) }),
   renameList: (id: string, name: string) =>

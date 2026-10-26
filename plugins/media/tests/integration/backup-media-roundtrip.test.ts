@@ -170,6 +170,23 @@ describe('Backup export/import media round-trip', () => {
     return startOver.body.counts;
   }
 
+  it('restores list ranks, and still restores a backup that has none', async () => {
+    const mk = async (title: string) => (await request(app).post('/api/v1/media/items').send({ media_type: 'movie', title })).body.id as string;
+    const [a, b, c] = [await mk('Alpha'), await mk('Beta'), await mk('Gamma')];
+    const list = (await request(app).post('/api/v1/media/lists').send({ name: 'Top' })).body;
+    for (const id of [a, b, c]) await request(app).post(`/api/v1/media/lists/${list.id}/items`).send({ media_item_id: id });
+    await request(app).put(`/api/v1/media/lists/${list.id}/ranks`).send({ ranked_ids: [c, a] });
+
+    const { zip, plugins } = await fetchBackupBundle();
+    expect((plugins.media.extra.mediaListRanks as any[]).map((r) => [r.media_item_id, r.rank])).toEqual([[c, 1], [a, 2]]);
+
+    await startOverMedia();
+    const importRes = await request(app).post('/api/v1/backup/import').attach('file', zip, 'wherewewere-backup.zip').set('Content-Type', 'application/zip');
+    expect(importRes.status).toBe(200);
+    const rows = (await request(app).get(`/api/v1/media/lists/${list.id}/items`)).body;
+    expect(rows.map((r: any) => [r.title, r.rank])).toEqual([['Gamma', 1], ['Alpha', 2], ['Beta', null]]);
+  });
+
   it('survives export -> start-over -> import with all media columns intact', async () => {
     const { game, book, gameCheckin, bookCheckin } = await seed();
 
