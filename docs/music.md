@@ -1,8 +1,9 @@
 # Music
 
-The Music plugin stores your scrobbles in WhereWeWere and shows them in two places:
+The Music plugin stores your scrobbles in WhereWeWere and shows them in three places:
 
 - **Home timeline** — one item per *listening session* (plays less than 30 minutes apart), expandable to the track list. Sessions shorter than the minimum track count (default 3) stay off the timeline.
+- **Other check-in cards** — a footer with the last up to three songs played on or before the check-in, newest first. The oldest fades out when the session has earlier plays. Clicking it jumps to that listening session on the Home timeline, opened and highlighted. It appears only when the most recent play is within the session gap of the check-in and its session meets the timeline's minimum track count (otherwise there is no session card to jump to).
 - **Profile → Music** — totals, top songs/artists/albums and a library table for the period chosen with the usual period selector.
 
 Scrobbles arrive from [multi-scrobbler](https://github.com/FoxxMD/multi-scrobbler) or from a history import. Preferences (session gap, minimum tracks, timezone) live in **Settings → Music**.

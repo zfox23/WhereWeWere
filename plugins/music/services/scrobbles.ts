@@ -547,6 +547,75 @@ export async function getLibrary(
   return result.rows;
 }
 
+export interface ListeningBefore {
+  /** The listening session the plays belong to (a timeline item). */
+  session_id: string;
+  /** Local date (YYYY-MM-DD) of the session's end, as the timeline groups it. */
+  session_date: string;
+  /** Up to three plays, newest first. */
+  tracks: { artists: string[]; title: string; time: number }[];
+  /** True when the session has plays earlier than the oldest one returned. */
+  has_more: boolean;
+}
+
+const LISTENING_PREVIEW_TRACKS = 3;
+
+/**
+ * For each anchor (a check-in's moment): the last few plays on or before it,
+ * from the listening session of the most recent play, provided that play was
+ * within `gapMinutes` of the anchor and the session is shown on the timeline
+ * (`minTracks`). Anchors with nothing to show are absent from the result.
+ */
+export async function getListeningBefore(
+  userId: string,
+  anchors: { id: string; time: Date }[],
+  gapMinutes: number,
+  minTracks: number,
+): Promise<Map<string, ListeningBefore>> {
+  const out = new Map<string, ListeningBefore>();
+  if (anchors.length === 0) return out;
+  const result = await query(
+    `SELECT a.id AS anchor_id, n.session_id, n.session_date,
+            p.played_at, p.title, p.artists,
+            EXISTS (SELECT 1 FROM music_scrobbles e
+                    WHERE e.session_id = n.session_id AND e.played_at < p.played_at) AS older_exists
+     FROM unnest($1::uuid[], $2::timestamptz[]) AS a(id, t)
+     JOIN LATERAL (
+       SELECT s.session_id, ms.track_count,
+              (ms.ended_at AT TIME ZONE ms.timezone)::date::text AS session_date
+       FROM music_scrobbles s JOIN music_sessions ms ON ms.id = s.session_id
+       WHERE s.user_id = $3
+         AND s.played_at <= a.t
+         AND s.played_at >= a.t - make_interval(mins => $4::int)
+       ORDER BY s.played_at DESC, s.id DESC
+       LIMIT 1
+     ) n ON n.track_count >= $5
+     JOIN LATERAL (
+       SELECT played_at, title, artists FROM music_scrobbles
+       WHERE session_id = n.session_id AND played_at <= a.t
+       ORDER BY played_at DESC, id DESC
+       LIMIT $6
+     ) p ON true
+     ORDER BY a.id, p.played_at DESC`,
+    [anchors.map((a) => a.id), anchors.map((a) => a.time), userId, gapMinutes, minTracks, LISTENING_PREVIEW_TRACKS],
+  );
+  for (const row of result.rows) {
+    let entry = out.get(row.anchor_id);
+    if (!entry) {
+      entry = { session_id: row.session_id, session_date: row.session_date, tracks: [], has_more: false };
+      out.set(row.anchor_id, entry);
+    }
+    entry.tracks.push({
+      artists: row.artists,
+      title: row.title,
+      time: Math.floor(new Date(row.played_at).getTime() / 1000),
+    });
+    // Rows arrive newest first, so the last one seen is the oldest shown.
+    entry.has_more = row.older_exists;
+  }
+  return out;
+}
+
 export async function getSessionTracks(userId: string, sessionId: string) {
   const result = await query(
     `SELECT played_at, title, artists, album, track_length, listened_for, timezone

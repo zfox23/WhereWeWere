@@ -1,5 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MusicCard } from '../ui/MusicCard';
 
@@ -22,6 +24,14 @@ const item = {
   },
 } as any;
 
+function renderCard(state: unknown = null) {
+  return render(
+    <MemoryRouter initialEntries={[{ pathname: '/', state }]}>
+      <MusicCard item={item} integrations={{}} />
+    </MemoryRouter>,
+  );
+}
+
 describe('MusicCard', () => {
   afterEach(() => {
     cleanup();
@@ -29,7 +39,7 @@ describe('MusicCard', () => {
   });
 
   it('summarises the session', () => {
-    render(<MusicCard item={item} integrations={{}} />);
+    renderCard();
     expect(screen.getByText(/Listening 12:00 PM – 1:15 PM/)).toBeTruthy();
     expect(screen.getByText('1h 15m')).toBeTruthy();
     expect(screen.getByText('42 tracks · Khruangbin, Men I Trust, Boards of Canada, +1')).toBeTruthy();
@@ -42,7 +52,7 @@ describe('MusicCard', () => {
       { played_at: '2024-05-01T12:00:00Z', title: 'Maria También', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'UTC' },
       { played_at: '2024-05-01T12:30:00Z', title: 'Evidence', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'Pacific/Auckland' },
     ]);
-    render(<MusicCard item={item} integrations={{}} />);
+    renderCard();
     const toggle = screen.getByRole('button');
     await user.click(toggle);
     await waitFor(() => expect(screen.getByText(/Maria También/)).toBeTruthy());
@@ -59,8 +69,41 @@ describe('MusicCard', () => {
   it('shows an error when the tracks fail to load', async () => {
     const user = userEvent.setup();
     sessionTracksMock.mockRejectedValue(new Error('nope'));
-    render(<MusicCard item={item} integrations={{}} />);
+    renderCard();
     await user.click(screen.getByRole('button'));
     await waitFor(() => expect(screen.getByText("Couldn't load tracks.")).toBeTruthy());
+  });
+
+  describe('when another card links to this session', () => {
+    const wrapper = () => document.querySelector('[data-highlighted]');
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('opens itself, loads its tracks and highlights briefly', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      sessionTracksMock.mockResolvedValue([
+        { played_at: '2024-05-01T12:00:00Z', title: 'Maria También', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'UTC' },
+      ]);
+      renderCard({ focusSession: 'session-1' });
+      await waitFor(() => expect(screen.getByText(/Maria También/)).toBeTruthy());
+      expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('true');
+      expect(sessionTracksMock).toHaveBeenCalledWith('session-1');
+      expect(wrapper()).not.toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2600);
+      });
+      expect(wrapper()).toBeNull();
+      // Still open once the highlight is gone.
+      expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('ignores a link to a different session, and stays collapsed without one', () => {
+      renderCard({ focusSession: 'some-other-session' });
+      expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('false');
+      expect(wrapper()).toBeNull();
+      expect(sessionTracksMock).not.toHaveBeenCalled();
+    });
   });
 });

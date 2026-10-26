@@ -349,6 +349,17 @@ export interface ImmichAsset {
   originalFileName: string;
 }
 
+/** The last plays before a check-in, from the listening session they belong to. */
+export interface ListeningBefore {
+  session_id: string;
+  /** Local date (YYYY-MM-DD) the session is grouped under on the timeline. */
+  session_date: string;
+  /** Up to three plays, newest first. */
+  tracks: { artists: string[]; title: string; time: number }[];
+  /** The session has plays earlier than the oldest one listed. */
+  has_more: boolean;
+}
+
 export interface Job {
   id: string;
   type: string;

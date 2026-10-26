@@ -17,7 +17,8 @@ import { query } from '../../server/src/db';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
-import { isUuid } from '../../server/src/services/batching';
+import { pluginTimestampUnion } from '../../server/src/plugins/registry';
+import { parseCheckinIdList, isUuid } from '../../server/src/services/batching';
 import { clampInt } from '../../server/src/services/queryParams';
 import { tokensMatch } from '../../server/src/services/tokens';
 import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
@@ -34,6 +35,7 @@ import { parseScrobbleExport } from './services/importParser';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './services/constants';
 import {
   getCounts,
+  getListeningBefore,
   getLibrary,
   getMusicSettings,
   getSessionTracks,
@@ -240,6 +242,28 @@ musicRouter.get('/library', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error loading music library:', err);
     res.status(500).json({ error: 'Failed to load library' });
+  }
+});
+
+// GET /around?checkin_ids=a,b - what was playing at the end of each check-in
+// (see getListeningBefore). Check-ins with nothing to show are omitted.
+musicRouter.get('/around', async (req: Request, res: Response) => {
+  try {
+    const checkinIds = parseCheckinIdList(req.query.checkin_ids);
+    if (checkinIds.length === 0) return res.json({});
+    // Anchor times come from each check-in type's own plugin hook.
+    const anchors = await query(pluginTimestampUnion('         '), [checkinIds]);
+    const settings = await getMusicSettings(USER_ID);
+    const found = await getListeningBefore(
+      USER_ID,
+      anchors.rows.map((r: { id: string; checked_in_at: string }) => ({ id: r.id, time: new Date(r.checked_in_at) })),
+      settings.session_gap_minutes,
+      settings.min_session_tracks,
+    );
+    res.json(Object.fromEntries(found));
+  } catch (err) {
+    console.error('Error loading listening before check-ins:', err);
+    res.status(500).json({ error: 'Failed to load listening' });
   }
 });
 

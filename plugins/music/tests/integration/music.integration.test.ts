@@ -211,6 +211,80 @@ describe('music plugin', () => {
     });
   });
 
+  describe('listening before a check-in', () => {
+    async function checkin(offsetMinutes: number) {
+      const r = await query(
+        `INSERT INTO sleep_entries (user_id, sleep_as_android_id, sleep_timezone, started_at, ended_at)
+         VALUES ($1, $2, 'UTC', $3, $3) RETURNING id`,
+        [DEFAULT_USER_ID, Math.floor(Math.random() * 1e9), new Date((T0 + offsetMinutes * MIN) * 1000)],
+      );
+      return r.rows[0].id as string;
+    }
+    const around = async (...ids: string[]) =>
+      (await request(app).get('/api/v1/music/around').query({ checkin_ids: ids.join(',') })).body as Record<string, any>;
+
+    it('returns the last three plays on or before the check-in, newest first', async () => {
+      for (const i of [0, 2, 4, 6, 8]) await pushAt(i, `Song ${i}`);
+      const id = await checkin(7);
+      const body = await around(id);
+      expect(body[id].tracks.map((t: any) => t.title)).toEqual(['Song 6', 'Song 4', 'Song 2']);
+      expect(body[id].tracks[0]).toMatchObject({ artists: ['Artist'], time: T0 + 6 * MIN });
+      expect(body[id].has_more).toBe(true);
+      const session = (await query('SELECT id FROM music_sessions')).rows[0].id;
+      expect(body[id]).toMatchObject({ session_id: session, session_date: '2024-05-01' });
+    });
+
+    it('includes a play at the exact moment, excludes later ones, and has no more when all are shown', async () => {
+      for (const i of [0, 2, 4, 6]) await pushAt(i, `Song ${i}`);
+      const id = await checkin(4);
+      const body = await around(id);
+      expect(body[id].tracks.map((t: any) => t.title)).toEqual(['Song 4', 'Song 2', 'Song 0']);
+      expect(body[id].has_more).toBe(false);
+    });
+
+    it('shows fewer than three when the session started recently', async () => {
+      for (const i of [0, 2, 4, 6]) await pushAt(i, `Song ${i}`);
+      const id = await checkin(2);
+      const body = await around(id);
+      expect(body[id].tracks.map((t: any) => t.title)).toEqual(['Song 2', 'Song 0']);
+      expect(body[id].has_more).toBe(false);
+    });
+
+    it('stays within the session of the most recent play', async () => {
+      for (const i of [0, 2, 4]) await pushAt(i, `Old ${i}`);
+      for (const i of [100, 102, 104]) await pushAt(i, `New ${i}`);
+      const id = await checkin(103);
+      const body = await around(id);
+      expect(body[id].tracks.map((t: any) => t.title)).toEqual(['New 102', 'New 100']);
+      expect(body[id].has_more).toBe(false);
+    });
+
+    it('omits check-ins with no recent play, or whose session is not on the timeline', async () => {
+      for (const i of [0, 2, 4]) await pushAt(i, `Song ${i}`);
+      const tooLate = await checkin(4 + 31); // last play was longer ago than the session gap
+      const justInside = await checkin(4 + 30);
+      const tooEarly = await checkin(-5);
+      const body = await around(tooLate, justInside, tooEarly);
+      expect(Object.keys(body)).toEqual([justInside]);
+      // A session below the minimum track count is not a timeline item, so there is nothing to jump to.
+      await request(app).put('/api/v1/music/settings').send({ min_session_tracks: 4 });
+      expect(await around(justInside)).toEqual({});
+    });
+
+    it('handles several check-ins at once and returns nothing for unknown ids or no ids', async () => {
+      for (const i of [0, 2, 4]) await pushAt(i, `A${i}`);
+      for (const i of [200, 202, 204]) await pushAt(i, `B${i}`);
+      const first = await checkin(5);
+      const second = await checkin(205);
+      const body = await around(first, second);
+      expect(body[first].tracks[0].title).toBe('A4');
+      expect(body[second].tracks[0].title).toBe('B204');
+      expect(body[first].session_id).not.toBe(body[second].session_id);
+      expect(await around('11111111-1111-4111-8111-111111111111')).toEqual({});
+      expect((await request(app).get('/api/v1/music/around')).body).toEqual({});
+    });
+  });
+
   describe('profile stats and library', () => {
     beforeEach(async () => {
       await push({ title: 'Hit', artists: ['A', 'B'], album: 'Album One', albumartists: ['A'], time: T0, duration: 100 });

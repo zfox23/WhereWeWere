@@ -1,5 +1,6 @@
 import type {
   CompanionSummary,
+  ListeningBefore,
   TimestampReconciliationScanResult,
 } from '../types';
 
@@ -370,6 +371,13 @@ export const immich = {
     ),
   thumbnailUrl: (assetId: string, size: 'thumbnail' | 'preview' = 'thumbnail') =>
     `${API_BASE}/immich/thumbnail/${assetId}?size=${size}`,
+};
+
+// Music listening shown on other check-ins' timeline cards
+export const musicListening = {
+  /** What was playing at the end of each check-in; check-ins with nothing to show are absent. */
+  around: (checkinIds: string[]) =>
+    request<Record<string, ListeningBefore>>(`/music/around?checkin_ids=${checkinIds.join(',')}`),
 };
 
 // Timeline

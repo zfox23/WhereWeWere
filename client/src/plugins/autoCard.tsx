@@ -6,7 +6,10 @@
 
 import type { CheckinCardProps, PluginField, CheckinTypeClient } from 'wwp-shared';
 import { Link } from 'react-router-dom';
-import { CardShell } from '../components/checkin-card/CardShell';
+import type { ReactNode } from 'react';
+import { CardFooterContext, CardShell } from '../components/checkin-card/CardShell';
+import { MusicPreview } from '../components/MusicPreview';
+import type { ListeningBefore } from '../types';
 import { MarkdownNote } from '../components/checkin-card/MarkdownNote';
 import { timelineDetailPath } from './registry';
 
@@ -20,6 +23,7 @@ export function PluginTimelineCard({
   integrations,
   compact = false,
   photos,
+  listening,
   settings,
 }: {
   item: CheckinCardProps['item'];
@@ -27,18 +31,24 @@ export function PluginTimelineCard({
   integrations: Record<string, string | null>;
   compact?: boolean;
   photos?: CheckinCardProps['photos'];
+  /** What was playing at the end of this check-in, shown as a footer on the card. */
+  listening?: ListeningBefore | null;
   settings?: CheckinCardProps['settings'];
 }) {
   const CardComponent = plugin.client.timelineCard ?? AutoCheckInCard;
+  // Every card type draws its shell with CardShell, which renders this footer.
+  const footer: ReactNode = listening ? <MusicPreview listening={listening} compact={compact} /> : null;
   return (
-    <CardComponent
-      item={item}
-      integrations={integrations}
-      compact={compact}
-      fields={plugin.fields}
-      photos={photos}
-      settings={settings}
-    />
+    <CardFooterContext.Provider value={footer}>
+      <CardComponent
+        item={item}
+        integrations={integrations}
+        compact={compact}
+        fields={plugin.fields}
+        photos={photos}
+        settings={settings}
+      />
+    </CardFooterContext.Provider>
   );
 }
 

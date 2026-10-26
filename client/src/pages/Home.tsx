@@ -1,8 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type ChangeEvent, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, AlignJustify, Rows3 } from 'lucide-react';
-import { timeline as timelineApi, settings, immich as immichApi } from '../api/client';
-import { ImmichAsset, TimelineItem } from '../types';
+import { timeline as timelineApi, settings, immich as immichApi, musicListening } from '../api/client';
+import { ImmichAsset, ListeningBefore, TimelineItem } from '../types';
 import type { PluginTimelineEntry } from 'wwp-shared';
 import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/registry';
 import { PluginTimelineCard } from '../plugins/autoCard';
@@ -31,6 +31,8 @@ interface FeedSnapshot {
 let feedSnapshot: FeedSnapshot | null = null;
 const FEED_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 const FEED_SNAPSHOT_MAX_ITEMS = 500;
+/** How long the router state that drives the jump to a music session lives (outlasts the card's highlight). */
+const FOCUS_STATE_CLEAR_MS = 4000;
 
 /** Check-in plugins that should appear in the expandable FAB, by fabOrder. */
 const FAB_PLUGINS = allClientPlugins().filter((p) => !p.client.noCheckIn).slice().sort((a, b) => (a.client.fabOrder ?? 100) - (b.client.fabOrder ?? 100));
@@ -162,6 +164,9 @@ export default function Home() {
   const location = useLocation();
   const newId = (location.state as { newId?: string } | null)?.newId ?? null;
   const newIdAnimatedRef = useRef<string | null>(null);
+  // Set when a card's music preview links to its listening session: the
+  // session's own card is revealed, expanded and highlighted (see MusicCard).
+  const focusSession = (location.state as { focusSession?: string } | null)?.focusSession ?? null;
   // Take (and clear) the parked feed once, on first render. A just-created
   // check-in (location.state.newId) needs a fresh load, so it skips restore.
   const restoredRef = useRef<FeedSnapshot | null | undefined>(undefined);
@@ -171,6 +176,7 @@ export default function Home() {
     restoredRef.current =
       snap &&
       !newId &&
+      !focusSession &&
       snap.key === `${searchParams.toString()}|` &&
       Date.now() - snap.savedAt < FEED_SNAPSHOT_MAX_AGE_MS
         ? snap
@@ -203,6 +209,7 @@ export default function Home() {
   const [pluginSettings, setPluginSettings] = useState<Record<string, Record<string, unknown>>>({});
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
+  const [listeningMap, setListeningMap] = useState<Record<string, ListeningBefore | null>>({});
 
   // Fetch integration URLs from settings
   useEffect(() => {
@@ -560,6 +567,45 @@ export default function Home() {
     }).catch(() => {});
   }, [timelineItems, immichUrl, photosMap]);
 
+  // Fetch what was playing at each loaded check-in (music sessions themselves
+  // are timeline items, so they get no preview).
+  useEffect(() => {
+    const newIds = timelineItems
+      .filter((c) => c.type !== 'music' && !(c.id in listeningMap))
+      .map((c) => c.id);
+    if (newIds.length === 0) return;
+    musicListening
+      .around(newIds)
+      .then((data) => {
+        setListeningMap((prev) => ({
+          ...prev,
+          ...Object.fromEntries(newIds.map((id) => [id, data[id] ?? null])),
+        }));
+      })
+      .catch(() => {});
+  }, [timelineItems, listeningMap]);
+
+  // A music preview elsewhere linked here: make sure music isn't filtered out.
+  useEffect(() => {
+    if (focusSession) setAllPluginIncludes(true);
+  }, [focusSession, setAllPluginIncludes]);
+
+  // Scroll to the linked session once its card is on screen, paging in more of
+  // the day if needed, then drop the router state so a reload doesn't repeat it.
+  useEffect(() => {
+    if (!focusSession || loading) return;
+    const el = feedContainerRef.current?.querySelector<HTMLElement>(`[data-timeline-id="${focusSession}"]`);
+    if (!el) {
+      if (hasMore && !loadingMore && (fromDate || toDate)) fetchTimeline(offsetRef.current, true);
+      return;
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => {
+      navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
+    }, FOCUS_STATE_CLEAR_MS);
+    return () => clearTimeout(timer);
+  }, [focusSession, loading, loadingMore, hasMore, items, fromDate, toDate, fetchTimeline, navigate, location.pathname, location.search]);
+
   // IntersectionObserver for infinite scroll
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -902,6 +948,7 @@ export default function Home() {
                     return (
                       <div
                         key={item.id}
+                        data-timeline-id={item.id}
                         {...(isNew ? { 'data-new-entry': item.id } : { 'data-home-reveal': '' })}
                         className={isNew ? 'new-entry-highlight' : 'motion-safe-reveal'}
                         style={isNew ? undefined : revealStyle}
@@ -913,6 +960,7 @@ export default function Home() {
                             integrations={{ immich_url: immichUrl, dawarich_url: dawarichUrl }}
                             compact={timelineDensity === 'compact'}
                             photos={photosMap[item.id] ?? null}
+                            listening={listeningMap[item.id] ?? null}
                             settings={pluginSettings[item.type]}
                           />
                         ) : null}
