@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MusicCard } from '../ui/MusicCard';
 
 const sessionTracksMock = vi.fn();
+const deleteMock = vi.fn();
 vi.mock('../ui/api', () => ({
-  music: { sessionTracks: (...args: unknown[]) => sessionTracksMock(...args), lists: () => Promise.resolve([]) },
+  music: { sessionTracks: (...args: unknown[]) => sessionTracksMock(...args), lists: () => Promise.resolve([]), deleteScrobble: (...args: unknown[]) => deleteMock(...args) },
 }));
 
 const item = {
@@ -36,6 +37,7 @@ describe('MusicCard', () => {
   afterEach(() => {
     cleanup();
     sessionTracksMock.mockReset();
+    deleteMock.mockReset();
   });
 
   it('summarises the session', () => {
@@ -44,6 +46,54 @@ describe('MusicCard', () => {
     expect(screen.getByText('1h 15m')).toBeTruthy();
     expect(screen.getByText('42 tracks · Khruangbin, Men I Trust, Boards of Canada, +1')).toBeTruthy();
     expect(sessionTracksMock).not.toHaveBeenCalled();
+  });
+
+  describe('songs written down by hand', () => {
+    const tracks = () => [
+      { id: 'm1', manual: true, played_at: '2024-05-01T12:30:00Z', title: 'Sun & Moon', artists: ['Above & Beyond'], album: null, track_length: null, listened_for: null, timezone: 'UTC',
+        note: 'At the farmers market', companions: ['Sam', 'Riley'], latitude: 41.8781, longitude: -87.6298 },
+      { id: 's1', manual: false, played_at: '2024-05-01T12:00:00Z', title: 'Scrobbled', artists: ['Someone'], album: null, track_length: null, listened_for: null, timezone: 'UTC', note: null, companions: [] },
+    ];
+
+    it('shows the note, companions and place, and only offers delete on hand-entered songs', async () => {
+      const user = userEvent.setup();
+      sessionTracksMock.mockResolvedValue(tracks());
+      renderCard();
+      await user.click(screen.getByRole('button'));
+      await screen.findByText('At the farmers market');
+      expect(screen.getByText(/with Sam, Riley/)).toBeTruthy();
+      expect(screen.getByRole('link', { name: 'Where I heard it' }).getAttribute('href')).toContain('mlat=41.8781&mlon=-87.6298');
+      expect(screen.getByRole('button', { name: 'Delete Sun & Moon' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Delete Scrobbled' })).toBeNull();
+    });
+
+    it('deletes after confirmation and drops the row', async () => {
+      const user = userEvent.setup();
+      sessionTracksMock.mockResolvedValue(tracks());
+      deleteMock.mockResolvedValue({ id: 'm1' });
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+      renderCard();
+      await user.click(screen.getByRole('button'));
+      await user.click(await screen.findByRole('button', { name: 'Delete Sun & Moon' }));
+      expect(deleteMock).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: 'Delete Sun & Moon' }));
+      await waitFor(() => expect(deleteMock).toHaveBeenCalledWith('m1'));
+      await waitFor(() => expect(screen.queryByText('Sun & Moon')).toBeNull());
+      expect(screen.getByText('Scrobbled')).toBeTruthy();
+      confirm.mockRestore();
+    });
+
+    it('says so when deleting fails and keeps the row', async () => {
+      const user = userEvent.setup();
+      sessionTracksMock.mockResolvedValue(tracks());
+      deleteMock.mockRejectedValue(new Error('boom'));
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      renderCard();
+      await user.click(screen.getByRole('button'));
+      await user.click(await screen.findByRole('button', { name: 'Delete Sun & Moon' }));
+      expect(await screen.findByText("Couldn't delete that song.")).toBeTruthy();
+      expect(screen.getByText('Sun & Moon')).toBeTruthy();
+    });
   });
 
   it('loads the tracks once, on first expand', async () => {

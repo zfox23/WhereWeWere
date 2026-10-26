@@ -59,6 +59,13 @@ export interface SessionTrack {
   art_id?: string | null;
   album_ref?: string | null;
   song_key?: string | null;
+  id?: string;
+  /** Written down by hand, not scrobbled. */
+  manual?: boolean;
+  note?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  companions?: string[];
 }
 
 export interface MusicSessionData {
@@ -158,3 +165,43 @@ export type ListTarget =
 
 /** The key a list item has when it holds this target. */
 export const targetItemKey = (t: ListTarget): string => (t.kind === 'album' ? `album:${t.album_ref}` : `song:${t.song_key}`);
+
+/** An autocomplete suggestion for the hand-entry form. */
+export interface SongSuggestion {
+  source: 'library' | 'deezer';
+  title: string;
+  artists: string[];
+  album: string | null;
+  album_artist: string | null;
+  /** Seconds. */
+  length: number | null;
+  cover_url: string | null;
+  /** Your plays of it (library suggestions). */
+  plays: number | null;
+}
+
+export interface ManualScrobbleInput {
+  title: string;
+  artists: string[];
+  album?: string | null;
+  album_artists?: string[];
+  /** Seconds. */
+  track_length?: number | null;
+  played_at: string;
+  timezone?: string;
+  note?: string | null;
+  companions?: string[];
+  latitude?: number | null;
+  longitude?: number | null;
+  location_accuracy?: number | null;
+  /** Add even though a near-identical play is already on file. */
+  force?: boolean;
+}
+
+export interface NearDuplicate {
+  id: string;
+  played_at: string;
+  title: string;
+  artists: string[];
+  source: string | null;
+}

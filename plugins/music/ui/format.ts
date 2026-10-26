@@ -31,3 +31,19 @@ export function joinArtists(artists: string[] | undefined | null): string {
   return (artists ?? []).join(', ');
 }
 export const UNKNOWN_ALBUM = 'Unknown album';
+
+/** "3:21" or "201" (seconds) -> seconds; null when it isn't a length. */
+export function parseLength(text: string): number | null {
+  const t = text.trim();
+  if (!t) return null;
+  const clock = /^(\d{1,3}):([0-5]?\d)$/.exec(t);
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+  const plain = /^\d{1,5}$/.exec(t);
+  return plain && Number(t) > 0 && Number(t) <= 86_400 ? Number(t) : null;
+}
+
+/** Seconds -> "3:21". */
+export function formatLength(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return '';
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}

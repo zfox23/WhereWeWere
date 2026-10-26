@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ChevronDown, ChevronUp, Loader2, Music } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, MapPin, Music, Trash2, Users } from 'lucide-react';
 import type { CheckinCardProps } from 'wwp-shared';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
 import { music } from './api';
@@ -36,6 +36,7 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
   const [tracks, setTracks] = useState<SessionTrack[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
   const [highlighted, setHighlighted] = useState(false);
 
   const loadTracks = () => {
@@ -47,6 +48,17 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
       .then(setTracks)
       .catch(() => setError(true))
       .finally(() => setLoading(false));
+  };
+
+  // Take back a song written down by hand; scrobbler plays have no such button.
+  const removeManual = async (t: SessionTrack) => {
+    if (!t.id || !window.confirm(`Delete “${t.title}” from your listening?`)) return;
+    try {
+      await music.deleteScrobble(t.id);
+      setTracks((prev) => (prev ? prev.filter((x) => x.id !== t.id) : prev));
+    } catch {
+      setDeleteError(true);
+    }
   };
 
   const toggle = () => {
@@ -110,17 +122,53 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
           <div className="mt-2 pl-6">
             {loading && <Loader2 size={14} className="animate-spin text-primary-600" />}
             {error && <p className="text-xs text-red-500">Couldn't load tracks.</p>}
+            {deleteError && <p className="text-xs text-red-500">Couldn't delete that song.</p>}
             {tracks && (
               <ol className="space-y-0.5">
                 {tracks.map((t, i) => (
-                  <li key={i} className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                    <AlbumArt artId={t.art_id} albumRef={t.album_ref} size={24} />
-                    <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
-                    <span>
-                      <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
-                      {' — '}
-                      <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink><ListBadge itemKey={songItemKey(t.song_key)} />
-                    </span>
+                  <li key={t.id ?? i} className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center gap-2">
+                      <AlbumArt artId={t.art_id} albumRef={t.album_ref} size={24} />
+                      <span className="tabular-nums shrink-0">{formatClock(t.played_at, t.timezone || timezone, true)}</span>
+                      <span className="min-w-0">
+                        <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
+                        {' — '}
+                        <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink><ListBadge itemKey={songItemKey(t.song_key)} />
+                      </span>
+                      {t.manual && t.id && (
+                        <button
+                          type="button"
+                          aria-label={`Delete ${t.title}`}
+                          title="Delete this hand-entered song"
+                          onClick={() => void removeManual(t)}
+                          className="ml-auto shrink-0 rounded p-1 text-gray-400 hover:text-red-500"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                    {t.manual && (t.note || (t.companions && t.companions.length > 0) || t.latitude != null) && (
+                      <div className="ml-8 mt-0.5 space-y-0.5 pl-10 text-gray-500 dark:text-gray-400">
+                        {t.note && <p className="whitespace-pre-wrap text-gray-600 dark:text-gray-300">{t.note}</p>}
+                        {t.companions && t.companions.length > 0 && (
+                          <p className="flex items-center gap-1"><Users size={11} aria-hidden="true" />with {t.companions.join(', ')}</p>
+                        )}
+                        {t.latitude != null && t.longitude != null && (
+                          <p className="flex items-center gap-1">
+                            <MapPin size={11} aria-hidden="true" />
+                            <a
+                              href={`https://www.openstreetmap.org/?mlat=${t.latitude}&mlon=${t.longitude}#map=16/${t.latitude}/${t.longitude}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="hover:underline"
+                            >
+                              Where I heard it
+                            </a>
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>

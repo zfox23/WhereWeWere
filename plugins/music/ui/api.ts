@@ -6,6 +6,9 @@ import { request, withAuthHeader } from '../../../client/src/api/client';
 import type { RankSessionState } from './ranking/engine';
 import type {
   AlbumBackfillStatus,
+  ManualScrobbleInput,
+  NearDuplicate,
+  SongSuggestion,
   AlbumView,
   ListItemWithStats,
   ListTarget,
@@ -44,7 +47,31 @@ async function uploadImport(url: string, file: File): Promise<MusicImportResult>
 export const albumArtUrl = (id: string, size: 'thumb' | 'large' = 'thumb') =>
   `/api/v1/music/albums/${id}/art${size === 'large' ? '?size=large' : ''}`;
 
+/** A hand-entered play that a near-identical play on file already covers. */
+export class NearDuplicateError extends Error {
+  constructor(readonly duplicate: NearDuplicate) {
+    super('You already have this song around that time');
+  }
+}
+
 export const music = {
+  suggest: (artist: string, title: string) =>
+    request<{ suggestions: SongSuggestion[]; catalog_unavailable: boolean }>(
+      `/music/suggest?${new URLSearchParams({ artist, title })}`,
+    ),
+  /** Write down a song you heard. Throws NearDuplicateError (not stored) unless `force`. */
+  createScrobble: async (input: ManualScrobbleInput): Promise<{ id: string; session_id: string | null }> => {
+    const res = await fetch('/api/v1/music/scrobbles', {
+      method: 'POST',
+      headers: withAuthHeader({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(input),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 409 && body.duplicate) throw new NearDuplicateError(body.duplicate as NearDuplicate);
+    if (!res.ok) throw new Error(body.error || body.message || `Request failed: ${res.status}`);
+    return body;
+  },
+  deleteScrobble: (id: string) => request<{ id: string }>(`/music/scrobbles/${id}`, { method: 'DELETE' }),
   stats: (from?: string, to?: string, limit = 25) =>
     request<MusicStats>(`/music/stats${rangeQuery(from, to, { limit: String(limit) })}`),
   library: (view: MusicLibraryView, from?: string, to?: string) =>

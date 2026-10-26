@@ -1,10 +1,11 @@
 /**
  * Music plugin — client half.
  *
- * Scrobbles are never created by hand (`noCheckIn`), so there is no check-in
- * form or detail page. The timeline shows listening sessions, the Profile tab
- * shows period stats and a library table, and Settings holds the
- * multi-scrobbler connection and the history import.
+ * Most plays arrive from multi-scrobbler or an import, but a song heard out in
+ * the world can be written down by hand (the check-in form). There is no detail
+ * page: the timeline shows listening sessions, the Profile tab shows period
+ * stats, a library and lists, and Settings holds the multi-scrobbler
+ * connection and the history import.
  */
 
 import type {
@@ -17,14 +18,14 @@ import { manifest } from './manifest';
 import { MusicCard } from './ui/MusicCard';
 import { MusicTab } from './ui/MusicTab';
 import { MusicSettings } from './ui/MusicSettings';
+import MusicCheckInForm from './ui/MusicCheckInForm';
 
 export const client: CheckinTypeClientPlugin = {
   icon: Music,
   iconColor: 'text-pink-500',
   fabOrder: 90,
-  noCheckIn: true,
-  // Unrouted: required by the contract, ignored while `noCheckIn` is set.
   checkInPath: '/music-check-in',
+  checkInForm: MusicCheckInForm,
 
   timelineCard: (props: CheckinCardProps) => <MusicCard {...props} />,
   profileTab: (props: PluginProfileTabProps) => <MusicTab {...props} />,
