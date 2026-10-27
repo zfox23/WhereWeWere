@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type ChangeEvent, type CSSProperties } from 'react';
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, SlidersHorizontal, Plus, Loader2, MapPin, X, AlignJustify, Rows3 } from 'lucide-react';
-import { timeline as timelineApi, settings, immich as immichApi, musicListening } from '../api/client';
+import { timeline as timelineApi, settings, immich as immichApi, musicListening, weather as weatherApi } from '../api/client';
 import { ImmichAsset, ListeningBefore, TimelineItem } from '../types';
 import type { PluginTimelineEntry } from 'wwp-shared';
 import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/registry';
@@ -10,6 +10,9 @@ import { plugins as pluginApi } from '../plugins/api';
 import Filters from '../components/filters/Filters';
 import { CompanionPhoto } from '../components/CompanionName';
 import { usePageTitle } from '../utils/pageTitle';
+import WeatherBadge from '../../../plugins/location/ui/WeatherBadge';
+import WeatherModal from '../../../plugins/location/ui/WeatherModal';
+import type { WeatherSummary } from '../../../plugins/location/ui/weatherFormat';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
@@ -210,12 +213,17 @@ export default function Home() {
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [photosMap, setPhotosMap] = useState<Record<string, ImmichAsset[]>>({});
   const [listeningMap, setListeningMap] = useState<Record<string, ListeningBefore | null>>({});
+  const [weatherMap, setWeatherMap] = useState<Record<string, WeatherSummary>>({});
+  const [distanceUnit, setDistanceUnit] = useState<'metric' | 'imperial'>('metric');
+  const [weatherModalDate, setWeatherModalDate] = useState<string | null>(null);
+  const weatherRequestedRef = useRef<Set<string>>(new Set());
 
   // Fetch integration URLs from settings
   useEffect(() => {
     settings.get().then((s) => {
       if (s.immich_url) setImmichUrl(s.immich_url.replace(/\/+$/, ''));
       if (s.dawarich_url) setDawarichUrl(s.dawarich_url.replace(/\/+$/, ''));
+      if (s.distance_unit === 'imperial') setDistanceUnit('imperial');
       if (s.timeline_density === 'compact' || s.timeline_density === 'comfortable') setTimelineDensity(s.timeline_density);
     }).catch(() => {});
   }, []);
@@ -585,6 +593,19 @@ export default function Home() {
       .catch(() => {});
   }, [timelineItems, listeningMap]);
 
+  // Fetch the weather for each loaded day (empty unless the user enabled it
+  // in Settings > Location). Each day is requested once.
+  useEffect(() => {
+    const fresh = Array.from(new Set(timelineItems.map(getLocalDateKey)))
+      .filter((d) => !weatherRequestedRef.current.has(d));
+    if (fresh.length === 0) return;
+    fresh.forEach((d) => weatherRequestedRef.current.add(d));
+    weatherApi
+      .forDates(fresh)
+      .then(({ days }) => setWeatherMap((prev) => ({ ...prev, ...days })))
+      .catch(() => fresh.forEach((d) => weatherRequestedRef.current.delete(d)));
+  }, [timelineItems]);
+
   // A music preview elsewhere linked here: make sure music isn't filtered out.
   useEffect(() => {
     if (focusSession) setAllPluginIncludes(true);
@@ -935,6 +956,9 @@ export default function Home() {
                     {formatDateHeader(date)}
                   </button>
                 </h2>
+                {weatherMap[date] && (
+                  <WeatherBadge weather={weatherMap[date]} unit={distanceUnit} onClick={() => setWeatherModalDate(date)} />
+                )}
               </div>
               {/* Cards with vertical line */}
               {dateItems.length > 0 ? (
@@ -998,6 +1022,15 @@ export default function Home() {
             Retry
           </button>
         </div>
+      )}
+
+      {weatherModalDate && (
+        <WeatherModal
+          date={weatherModalDate}
+          dateLabel={formatDateHeader(weatherModalDate)}
+          unit={distanceUnit}
+          onClose={() => setWeatherModalDate(null)}
+        />
       )}
 
       {/* FAB */}

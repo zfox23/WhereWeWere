@@ -36,6 +36,13 @@ import {
   pendingBackfillVenueIds,
   runCoasterpediaBackfill,
 } from './services/coasterpediaEnrich';
+import {
+  checkinLocalDate,
+  isWeatherEnabled,
+  pendingWeatherDates,
+  runWeatherBackfill,
+  scheduleWeatherForDate,
+} from './services/weatherEnrich';
 import type {
   CheckinTypeServerPlugin,
   PluginJobContext,
@@ -663,6 +670,10 @@ router.post('/', async (req: Request, res: Response) => {
 
     await client.query('COMMIT');
     res.status(201).json({ ...checkin, parent_checkin, companions, lists });
+    // After the response: fetch that day's weather when enabled (non-fatal).
+    checkinLocalDate(checkin.id)
+      .then((date) => scheduleWeatherForDate(user_id, date))
+      .catch((err) => console.error('Weather scheduling failed (non-fatal):', err));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Error creating check-in:', err);
@@ -740,6 +751,9 @@ router.put('/:id', async (req: Request, res: Response) => {
 
     await client.query('COMMIT');
     res.json({ ...result.rows[0], companions, lists });
+    checkinLocalDate(String(id))
+      .then((date) => scheduleWeatherForDate(USER_ID, date))
+      .catch((err) => console.error('Weather scheduling failed (non-fatal):', err));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Error updating check-in:', err);
@@ -777,6 +791,56 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // Plugin-owned API: /api/v1/location-checkins/stats/*
 // (location endpoints moved from server/src/routes/stats.ts; behavior unchanged)
 // ---------------------------------------------------------------------------
+
+const weatherRouter = Router();
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// GET /weather?dates=YYYY-MM-DD,... - weather summaries for the given days
+// (hourly data left out); `enabled` tells the timeline whether to show any.
+weatherRouter.get('/', async (req: Request, res: Response) => {
+  try {
+    const enabled = await isWeatherEnabled(USER_ID);
+    if (!enabled) return res.json({ enabled, days: {} });
+    const dates = String(req.query.dates ?? '')
+      .split(',')
+      .filter((d) => DATE_RE.test(d))
+      .slice(0, 200);
+    const days: Record<string, unknown> = {};
+    if (dates.length > 0) {
+      const result = await query(
+        `SELECT TO_CHAR(local_date, 'YYYY-MM-DD') AS date, data - 'hourly' AS data
+           FROM daily_weather
+          WHERE user_id = $1 AND status = 'ok' AND local_date = ANY($2::date[])`,
+        [USER_ID, dates],
+      );
+      for (const row of result.rows) days[row.date] = row.data;
+    }
+    res.json({ enabled, days });
+  } catch (err) {
+    console.error('Error getting weather:', err);
+    res.status(500).json({ error: 'Failed to get weather' });
+  }
+});
+
+// GET /weather/:date - full weather record for one day, for the details modal
+weatherRouter.get('/:date', async (req: Request, res: Response) => {
+  try {
+    const date = String(req.params.date);
+    if (!DATE_RE.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    const result = await query(
+      `SELECT latitude, longitude, timezone, data FROM daily_weather
+        WHERE user_id = $1 AND local_date = $2::date AND status = 'ok'`,
+      [USER_ID, date],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'No weather for that day' });
+    const row = result.rows[0];
+    res.json({ date, latitude: Number(row.latitude), longitude: Number(row.longitude), timezone: row.timezone, ...row.data });
+  } catch (err) {
+    console.error('Error getting weather day:', err);
+    res.status(500).json({ error: 'Failed to get weather' });
+  }
+});
 
 const statsRouter = Router();
 
@@ -2815,6 +2879,28 @@ async function coasterpediaBackfillHandler(ctx: PluginJobContext): Promise<void>
 }
 
 /**
+ * Fetch weather for every day with a check-in that has none yet (or a failed
+ * or still-provisional one). Newest days first, paced under Open-Meteo's limit.
+ */
+async function weatherBackfillHandler(ctx: PluginJobContext): Promise<void> {
+  if (!(await isWeatherEnabled(USER_ID))) {
+    throw new Error('Turn on weather in Settings > Location first');
+  }
+  const dates = await pendingWeatherDates(USER_ID);
+  await ctx.updateProgress({ phase: 'weather', message: `Fetching weather for ${dates.length} days...`, updated: 0 });
+  await runWeatherBackfill(dates, USER_ID, {
+    isCancelled: () => ctx.isCancelled(),
+    onProgress: (done, total) =>
+      ctx.updateProgress({
+        phase: 'weather',
+        message: `Fetched weather for ${done} of ${total} days...`,
+        updated: done,
+        remaining: total - done,
+      }),
+  });
+}
+
+/**
  * The "Backfill Venues" job: reverse-geocode venues missing country data,
  * then categorize uncategorized venues using Overpass. Runs in the
  * background; cancellation is observed between batches.
@@ -2896,6 +2982,7 @@ export const server: CheckinTypeServerPlugin = {
   api: [
     { mount: '/location-checkins', router },
     { mount: '/venues', router: venuesRouter },
+    { mount: '/weather', router: weatherRouter },
     { mount: '/search', router: searchRouter },
     { mount: '/import/swarm', router: swarmImportRouter },
   ],
@@ -3333,6 +3420,9 @@ export const server: CheckinTypeServerPlugin = {
     // already cascaded above; deleting the lists cascades any remainder.
     await run('DELETE FROM checkin_lists WHERE user_id = $1', [user_id]);
 
+    // Weather is derived from the check-ins that were just deleted.
+    await run('DELETE FROM daily_weather WHERE user_id = $1', [user_id]);
+
     return result.rowCount ?? 0;
   },
 
@@ -3570,9 +3660,32 @@ export const server: CheckinTypeServerPlugin = {
         await coasterpediaBackfillHandler(ctx);
       },
     },
+    {
+      jobType: 'weather-backfill',
+      handler: async (ctx) => {
+        await weatherBackfillHandler(ctx);
+      },
+    },
   ],
 
   settingsKeys: [
     { name: 'coasterpedia_api_key', type: 'string', label: 'Coasterpedia API key' },
+    { name: 'weather_enabled', type: 'boolean', label: 'Show daily weather (Open-Meteo)', default: false },
+  ],
+
+  // Weather is derived from check-ins but costs API calls to rebuild, so it
+  // ships in backups. The insert runs with user_id first and the select
+  // lists columns in the same order.
+  extraBackupTables: [
+    {
+      table: 'daily_weather',
+      select: `SELECT TO_CHAR(local_date, 'YYYY-MM-DD') AS local_date, status, latitude, longitude,
+                      timezone, data, error, fetched_at
+                 FROM daily_weather WHERE user_id = $1 ORDER BY local_date`,
+      insert: `INSERT INTO daily_weather (user_id, local_date, status, latitude, longitude, timezone, data, error, fetched_at)
+               VALUES ($1, $2::date, $3, $4, $5, $6, $7::jsonb, $8, $9)
+               ON CONFLICT (user_id, local_date) DO NOTHING`,
+      userIdFirst: true,
+    },
   ],
 };

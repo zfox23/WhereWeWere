@@ -50,6 +50,16 @@ export const checkins = {
     request<void>(`/location-checkins/${id}`, { method: 'DELETE' }),
 };
 
+// Daily weather (location plugin, Open-Meteo)
+export const weather = {
+  forDates: (dates: string[]) =>
+    request<{ enabled: boolean; days: Record<string, import('../../../plugins/location/ui/weatherFormat').WeatherSummary> }>(
+      `/weather?dates=${dates.join(',')}`,
+    ),
+  day: (date: string) =>
+    request<import('../../../plugins/location/ui/weatherFormat').WeatherDay>(`/weather/${date}`),
+};
+
 // Companions (core, shared by every check-in type that implements them)
 export const companions = {
   // One row per name: check-in count + most recent check-in (Profile tab).
