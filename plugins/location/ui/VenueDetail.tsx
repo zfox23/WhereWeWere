@@ -11,6 +11,7 @@ import { Venue, CheckIn, VenueCategory, ImmichAsset, VenueList } from '../../../
 import ScorePicker from '../../../client/src/components/ScorePicker';
 import Stars from '../../../client/src/components/Stars';
 import VenueEditMap from './VenueEditMap';
+import CoasterpediaCard from './CoasterpediaCard';
 import CheckInCard from './LocationCard';
 import MapView from './MapView';
 import { buildImmichMapUrl } from '../../../client/src/utils/checkin';
@@ -200,6 +201,27 @@ export default function VenueDetail() {
     }
   };
 
+  // Re-read the venue without the page spinner. Used for Coasterpedia, whose
+  // lookup finishes in the background after a save.
+  const reloadVenueQuietly = async () => {
+    if (!id) return null;
+    const fresh = await venues.get(id);
+    setVenue(fresh);
+    return fresh as Venue;
+  };
+
+  // After a save the Coasterpedia lookup runs server-side; poll briefly so the
+  // card fills in without a manual reload.
+  const pollCoasterpedia = async (before: Venue['coasterpedia'] | undefined) => {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 3000));
+      const fresh = await reloadVenueQuietly().catch(() => null);
+      if (!fresh?.coasterpedia?.has_key) return;
+      const now = fresh.coasterpedia;
+      if (now.status && (now.fetched_at !== before?.fetched_at || now.status !== before?.status)) return;
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [id]);
@@ -252,6 +274,11 @@ export default function VenueDetail() {
       });
       setVenue({ ...venue, ...updated });
       setIsEditing(false);
+      // The save response lacks category_name/coasterpedia; pick them up quietly.
+      const before = venue.coasterpedia;
+      reloadVenueQuietly()
+        .then((fresh) => (fresh?.coasterpedia?.has_key ? pollCoasterpedia(before) : undefined))
+        .catch(() => { /* the saved venue is already shown */ });
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Save failed.');
     } finally {
@@ -703,6 +730,16 @@ export default function VenueDetail() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Coasterpedia data for amusement rides */}
+      {venue.coasterpedia && (
+        <CoasterpediaCard
+          venueId={venue.id}
+          coasterpedia={venue.coasterpedia}
+          distanceUnit={distanceUnit}
+          onChanged={async () => { await reloadVenueQuietly(); }}
+        />
       )}
 
       {/* Check-ins at this venue */}

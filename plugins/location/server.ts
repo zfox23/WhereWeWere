@@ -27,6 +27,13 @@ import { parse } from 'csv-parse/sync';
 import { v4 as uuidv4 } from 'uuid';
 import { find as findTimezone } from 'geo-tz';
 import { getVenueTimezone, normalizeEtcGmt } from './services/geoTimezone';
+import { parseAttractionId } from './services/coasterpedia';
+import {
+  enrichVenueCoasterpedia,
+  getCoasterpediaApiKey,
+  isAmusementRideCategory,
+  needsLookup,
+} from './services/coasterpediaEnrich';
 import type {
   CheckinTypeServerPlugin,
   PluginJobContext,
@@ -1851,6 +1858,19 @@ venuesRouter.get('/:id', async (req: Request, res: Response) => {
     );
     venue.child_venues = childrenResult.rows;
 
+    // Coasterpedia data only applies to amusement rides.
+    if (isAmusementRideCategory(venue.category_name)) {
+      const cp = await query(
+        `SELECT status, attraction_id, data, candidates, error, fetched_at
+           FROM venue_coasterpedia WHERE venue_id = $1`,
+        [id]
+      );
+      venue.coasterpedia = {
+        has_key: (await getCoasterpediaApiKey(USER_ID)) != null,
+        ...(cp.rows[0] ?? { status: null }),
+      };
+    }
+
     res.json(serializeVenue(venue));
   } catch (err) {
     console.error('Error getting venue:', err);
@@ -1914,6 +1934,11 @@ venuesRouter.post('/', async (req: Request, res: Response) => {
       : { ...geocodedVenue, rating: venueRating };
 
     res.status(201).json(serializeVenue(finalVenue));
+
+    // After the response: look the ride up on Coasterpedia (non-fatal).
+    needsLookup(venue.id, USER_ID)
+      .then((due) => (due ? enrichVenueCoasterpedia(venue.id, USER_ID) : undefined))
+      .catch((err) => console.error('Coasterpedia lookup scheduling failed (non-fatal):', err));
   } catch (err) {
     console.error('Error creating venue:', err);
     res.status(500).json({ error: 'Failed to create venue' });
@@ -1971,9 +1996,70 @@ venuesRouter.put('/:id', async (req: Request, res: Response) => {
     }
 
     res.json(serializeVenue(result.rows[0]));
+
+    // After the response: (re-)run the Coasterpedia lookup when due (non-fatal).
+    const venueId = String(id);
+    needsLookup(venueId, USER_ID)
+      .then((due) => (due ? enrichVenueCoasterpedia(venueId, USER_ID) : undefined))
+      .catch((err) => console.error('Coasterpedia lookup scheduling failed (non-fatal):', err));
   } catch (err) {
     console.error('Error updating venue:', err);
     res.status(500).json({ error: 'Failed to update venue' });
+  }
+});
+
+// POST /:id/coasterpedia/refresh - re-run the Coasterpedia lookup for a ride venue
+venuesRouter.post('/:id/coasterpedia/refresh', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const venue = await query(
+      `SELECT vc.name AS category_name FROM venues v
+         LEFT JOIN venue_categories vc ON vc.id = v.category_id WHERE v.id = $1`,
+      [id]
+    );
+    if (venue.rows.length === 0) return res.status(404).json({ error: 'Venue not found' });
+    if (!isAmusementRideCategory(venue.rows[0].category_name)) {
+      return res.status(400).json({ error: 'Venue is not an amusement ride' });
+    }
+    if (!(await getCoasterpediaApiKey(USER_ID))) {
+      return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Integrations first' });
+    }
+    // Keep the matched record on refresh; otherwise search again.
+    const current = await query('SELECT attraction_id FROM venue_coasterpedia WHERE venue_id = $1', [id]);
+    await enrichVenueCoasterpedia(String(id), USER_ID, { attractionId: current.rows[0]?.attraction_id ?? undefined });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error refreshing Coasterpedia data:', err);
+    res.status(500).json({ error: 'Failed to refresh Coasterpedia data' });
+  }
+});
+
+// POST /:id/coasterpedia/select - pick a candidate, or enter a Coasterpedia ID/URL
+venuesRouter.post('/:id/coasterpedia/select', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const raw = req.body?.attractionId ?? req.body?.url;
+    const attractionId = parseAttractionId(String(raw ?? ''));
+    if (attractionId == null) {
+      return res.status(400).json({ error: 'Provide a Coasterpedia attraction ID or URL' });
+    }
+    const venue = await query(
+      `SELECT vc.name AS category_name FROM venues v
+         LEFT JOIN venue_categories vc ON vc.id = v.category_id WHERE v.id = $1`,
+      [id]
+    );
+    if (venue.rows.length === 0) return res.status(404).json({ error: 'Venue not found' });
+    if (!isAmusementRideCategory(venue.rows[0].category_name)) {
+      return res.status(400).json({ error: 'Venue is not an amusement ride' });
+    }
+    if (!(await getCoasterpediaApiKey(USER_ID))) {
+      return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Integrations first' });
+    }
+    await enrichVenueCoasterpedia(String(id), USER_ID, { attractionId });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error selecting Coasterpedia attraction:', err);
+    res.status(500).json({ error: 'Failed to select Coasterpedia attraction' });
   }
 });
 
@@ -2702,6 +2788,37 @@ async function categorizeBatch(jobId: string, attempted: string[]) {
     attemptedIds: result.rows.map((r: { id: string }) => r.id),
     remaining: remaining.rows[0].count as number,
   };
+}
+
+/**
+ * Look up every Amusement Ride venue that has no Coasterpedia result yet.
+ * Sequential, so the API's per-key rate limit is respected; a 429 retries once
+ * inside the client and is otherwise recorded on the venue's row.
+ */
+async function coasterpediaBackfillHandler(ctx: PluginJobContext): Promise<void> {
+  if (!(await getCoasterpediaApiKey(USER_ID))) {
+    throw new Error('Add a Coasterpedia API key in Settings > Integrations first');
+  }
+  const pending = await query(
+    `SELECT v.id FROM venues v
+       JOIN venue_categories vc ON vc.id = v.category_id
+       LEFT JOIN venue_coasterpedia cp ON cp.venue_id = v.id
+      WHERE LOWER(TRIM(vc.name)) = 'amusement ride' AND cp.venue_id IS NULL
+      ORDER BY v.name`
+  );
+  let done = 0;
+  await ctx.updateProgress({ phase: 'coasterpedia', message: `Looking up ${pending.rows.length} rides...`, updated: 0 });
+  for (const row of pending.rows) {
+    if (ctx.isCancelled()) throw new Error('cancelled');
+    await enrichVenueCoasterpedia(row.id, USER_ID);
+    done++;
+    await ctx.updateProgress({
+      phase: 'coasterpedia',
+      message: `Looked up ${done} of ${pending.rows.length} rides...`,
+      updated: done,
+      remaining: pending.rows.length - done,
+    });
+  }
 }
 
 /**
@@ -3454,5 +3571,15 @@ export const server: CheckinTypeServerPlugin = {
         await venueBackfillHandler(ctx);
       },
     },
+    {
+      jobType: 'coasterpedia-backfill',
+      handler: async (ctx) => {
+        await coasterpediaBackfillHandler(ctx);
+      },
+    },
+  ],
+
+  settingsKeys: [
+    { name: 'coasterpedia_api_key', type: 'string', label: 'Coasterpedia API key' },
   ],
 };

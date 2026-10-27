@@ -125,6 +125,13 @@ export const venues = {
     request<{ updated: number; remaining: number }>('/venues/geocode', { method: 'POST' }),
   categorize: () =>
     request<{ updated: number; remaining: number }>('/venues/categorize', { method: 'POST' }),
+  coasterpediaRefresh: (id: string) =>
+    request<{ ok: boolean }>(`/venues/${id}/coasterpedia/refresh`, { method: 'POST' }),
+  coasterpediaSelect: (id: string, attractionIdOrUrl: string | number) =>
+    request<{ ok: boolean }>(`/venues/${id}/coasterpedia/select`, {
+      method: 'POST',
+      body: JSON.stringify({ attractionId: attractionIdOrUrl }),
+    }),
 };
 
 // Checkin lists (location plugin) — named lists of location check-ins.

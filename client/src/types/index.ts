@@ -34,7 +34,21 @@ export interface Venue {
   rating?: number | null;
   /** Names of venue lists this venue belongs to (library view). */
   lists?: string[];
+  /** Coasterpedia lookup state; only present for Amusement Ride venues. */
+  coasterpedia?: VenueCoasterpedia;
   created_at: string;
+}
+
+export interface VenueCoasterpedia {
+  has_key: boolean;
+  /** null when no lookup has run yet. */
+  status: 'matched' | 'ambiguous' | 'no_match' | 'error' | null;
+  attraction_id?: number | null;
+  /** The Coasterpedia attraction record (see plugins/location/services/coasterpedia.ts). */
+  data?: any;
+  candidates?: { id: number; name: string; park?: { name: string }; status?: string | null; country?: { name?: string } | null }[] | null;
+  error?: string | null;
+  fetched_at?: string;
 }
 
 /** A named list of venues (mirrors the media plugin's lists). */

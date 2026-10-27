@@ -21,6 +21,7 @@ import { manifest } from './manifest';
 
 export { manifest };
 import LocationCheckIn from './ui/LocationCheckIn';
+import CoasterpediaSettings from './ui/CoasterpediaSettings';
 import LocationCheckInDetail from './ui/LocationCheckInDetail';
 import LocationCard from './ui/LocationCard';
 import LocationFilter from './ui/LocationFilter';
@@ -161,4 +162,5 @@ export const client: CheckinTypeClientPlugin = {
   profileTab: LocationProfileTab,
   reflectionCard: LocationReflectionCard,
   settings: LocationSettings,
+  integrationsSettings: CoasterpediaSettings,
 };
