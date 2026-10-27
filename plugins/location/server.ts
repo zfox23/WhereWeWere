@@ -2022,7 +2022,7 @@ venuesRouter.post('/:id/coasterpedia/refresh', async (req: Request, res: Respons
       return res.status(400).json({ error: 'Venue is not an amusement ride' });
     }
     if (!(await getCoasterpediaApiKey(USER_ID))) {
-      return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Integrations first' });
+      return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Location first' });
     }
     // Keep the matched record on refresh; otherwise search again.
     const current = await query('SELECT attraction_id FROM venue_coasterpedia WHERE venue_id = $1', [id]);
@@ -2053,7 +2053,7 @@ venuesRouter.post('/:id/coasterpedia/select', async (req: Request, res: Response
       return res.status(400).json({ error: 'Venue is not an amusement ride' });
     }
     if (!(await getCoasterpediaApiKey(USER_ID))) {
-      return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Integrations first' });
+      return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Location first' });
     }
     await enrichVenueCoasterpedia(String(id), USER_ID, { attractionId });
     res.json({ ok: true });
@@ -2797,7 +2797,7 @@ async function categorizeBatch(jobId: string, attempted: string[]) {
  */
 async function coasterpediaBackfillHandler(ctx: PluginJobContext): Promise<void> {
   if (!(await getCoasterpediaApiKey(USER_ID))) {
-    throw new Error('Add a Coasterpedia API key in Settings > Integrations first');
+    throw new Error('Add a Coasterpedia API key in Settings > Location first');
   }
   const pending = await query(
     `SELECT v.id FROM venues v

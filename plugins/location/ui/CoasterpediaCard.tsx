@@ -101,7 +101,7 @@ export default function CoasterpediaCard({ venueId, coasterpedia: cp, distanceUn
       <div className={CARD}>
         {header}
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Add a Coasterpedia API key in <Link to="/settings" className="underline">Settings &rsaquo; Integrations</Link> to
+          Add a Coasterpedia API key in <Link to="/settings" className="underline">Settings &rsaquo; Location</Link> to
           look up this ride.
         </p>
       </div>

@@ -4,7 +4,7 @@ import { plugins } from '../../../client/src/plugins/api';
 import { jobs } from '../../../client/src/api/client';
 
 /**
- * Settings > Integrations section for the Coasterpedia API key. The key lives
+ * Section of Settings > Location for the Coasterpedia API key. The key lives
  * in this plugin's settings store (plugin_settings, plugin_id = 'location').
  * Venues in the "Amusement Ride" category are looked up with it after each save.
  */
