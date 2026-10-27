@@ -7,6 +7,7 @@
 import { query } from '../../../server/src/db';
 import {
   CoasterpediaError,
+  RequestOptions,
   getAttraction,
   pickMatch,
   searchAttractions,
@@ -107,43 +108,118 @@ export async function needsLookup(venueId: string, userId: string): Promise<bool
   return row.looked_up_name !== venue.name || (row.looked_up_parent ?? null) !== (venue.parent_venue_id ?? null);
 }
 
+export interface EnrichResult {
+  /** Why the lookup could not run for any venue (bad or revoked key). */
+  fatal?: string;
+}
+
 /**
  * Run the lookup. With `attractionId` the user has chosen the record, so the
- * search is skipped. Never throws.
+ * search is skipped. `patient` is for batch work and waits out rate limits.
+ * Never throws.
+ *
+ * Coasterpedia's terms make us responsible for dropping records it deletes.
+ * When the stored record itself is gone (404 not-found on its own ID), the
+ * stored data is cleared; a bad ID the user just typed leaves the old match.
  */
 export async function enrichVenueCoasterpedia(
   venueId: string,
   userId: string,
-  opts: { attractionId?: number } = {},
-): Promise<void> {
+  opts: { attractionId?: number } & RequestOptions = {},
+): Promise<EnrichResult> {
   try {
     const venue = await loadVenue(venueId);
-    if (!venue) return;
+    if (!venue) return {};
     const apiKey = await getCoasterpediaApiKey(userId);
-    if (!apiKey) return;
+    if (!apiKey) return {};
+    const request: RequestOptions = { patient: opts.patient };
 
     try {
       let attractionId = opts.attractionId;
       if (attractionId == null) {
-        const outcome = pickMatch(await searchAttractions(venue.name, apiKey), {
+        const outcome = pickMatch(await searchAttractions(venue.name, apiKey, request), {
           name: venue.name,
           parentName: venue.parent_name,
           country: venue.country,
         });
-        if (outcome.status === 'no_match') return await saveRow(venue, userId, { status: 'no_match' });
+        if (outcome.status === 'no_match') {
+          await saveRow(venue, userId, { status: 'no_match' });
+          return {};
+        }
         if (outcome.status === 'ambiguous') {
-          return await saveRow(venue, userId, { status: 'ambiguous', candidates: outcome.candidates });
+          await saveRow(venue, userId, { status: 'ambiguous', candidates: outcome.candidates });
+          return {};
         }
         attractionId = outcome.attractionId;
       }
-      const attraction = await getAttraction(attractionId, apiKey);
+      const attraction = await getAttraction(attractionId, apiKey, request);
       await saveRow(venue, userId, { status: 'matched', attractionId: attraction.id, data: attraction });
+      return {};
     } catch (err) {
-      const message = err instanceof CoasterpediaError || err instanceof Error ? err.message : 'Lookup failed';
+      const failure = err instanceof CoasterpediaError ? err : null;
+      const message = err instanceof Error ? err.message : 'Lookup failed';
+
+      if (failure?.isNotFound && opts.attractionId != null) {
+        const stored = await query('SELECT attraction_id FROM venue_coasterpedia WHERE venue_id = $1', [venueId]);
+        if (stored.rows[0]?.attraction_id === opts.attractionId) {
+          await saveRow(venue, userId, {
+            status: 'no_match',
+            error: 'This record was removed from Coasterpedia. Enter another ID or URL.',
+          });
+          return {};
+        }
+      }
+
       console.error(`Coasterpedia lookup failed for venue ${venueId} (non-fatal):`, err);
       await saveRow(venue, userId, { status: 'error', error: message });
+      return failure?.isAuthFailure ? { fatal: message } : {};
     }
   } catch (err) {
     console.error('Coasterpedia enrichment failed (non-fatal):', err);
+    return {};
+  }
+}
+
+/**
+ * Two requests per ride (search, then fetch) against a 60-requests-a-minute
+ * limit shared by the whole account, so leave about a second per request.
+ */
+export const BACKFILL_DELAY_MS = 2_200;
+
+/** Rides that were never looked up, or whose last lookup failed. */
+export async function pendingBackfillVenueIds(): Promise<string[]> {
+  const pending = await query(
+    `SELECT v.id FROM venues v
+       JOIN venue_categories vc ON vc.id = v.category_id
+       LEFT JOIN venue_coasterpedia cp ON cp.venue_id = v.id
+      WHERE LOWER(TRIM(vc.name)) = $1 AND (cp.venue_id IS NULL OR cp.status = 'error')
+      ORDER BY v.name`,
+    [AMUSEMENT_RIDE_CATEGORY],
+  );
+  return pending.rows.map((r: { id: string }) => r.id);
+}
+
+/**
+ * Look the venues up one at a time, paced to the API limit. Stops on a bad or
+ * revoked key, since every remaining venue would fail the same way.
+ */
+export async function runCoasterpediaBackfill(
+  venueIds: string[],
+  userId: string,
+  hooks: {
+    delayMs?: number;
+    isCancelled?: () => boolean;
+    onProgress?: (done: number, total: number) => Promise<void> | void;
+  } = {},
+): Promise<void> {
+  const delayMs = hooks.delayMs ?? BACKFILL_DELAY_MS;
+  for (let i = 0; i < venueIds.length; i++) {
+    if (hooks.isCancelled?.()) throw new Error('cancelled');
+    const started = Date.now();
+    const result = await enrichVenueCoasterpedia(venueIds[i], userId, { patient: true });
+    if (result.fatal) throw new Error(result.fatal);
+    await hooks.onProgress?.(i + 1, venueIds.length);
+    const wait = delayMs - (Date.now() - started);
+    if (i < venueIds.length - 1 && wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
 }

@@ -34,6 +34,7 @@ services:
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       PHOTON_URL: ${PHOTON_URL:-}
+      COASTERPEDIA_CONTACT: ${COASTERPEDIA_CONTACT:-}
       DATA_DIR: /app/data
     ports:
       - "${SERVER_PORT:-3001}:3001"

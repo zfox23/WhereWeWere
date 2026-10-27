@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runCoasterpediaBackfill, pendingBackfillVenueIds } from '../../services/coasterpediaEnrich';
 import { createApp } from '../../../../server/src/index';
 import { query } from '../../../../server/src/db';
 import {
@@ -181,5 +182,96 @@ describe('Coasterpedia enrichment (integration)', () => {
     const venueId = await createVenue('Some Park', await category('Park'));
     const res = await request(app).post(`/api/v1/venues/${venueId}/coasterpedia/refresh`);
     expect(res.status).toBe(400);
+  });
+
+  it('clears the stored record when Coasterpedia has deleted it', async () => {
+    await setKey('cpk_test');
+    stubCoasterpedia([{ id: 165, name: 'Batman The Ride' }]);
+    const venueId = await createVenue('Batman The Ride', await category('Amusement Ride'));
+    await waitForRow(venueId);
+
+    const gone = new Response(JSON.stringify({ type: 'https://api.coasterpedia.net/problems/not-found', status: 404 }), {
+      status: 404,
+      headers: { 'content-type': 'application/problem+json' },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => gone.clone()));
+    await request(app).post(`/api/v1/venues/${venueId}/coasterpedia/refresh`);
+
+    const row = (await query('SELECT * FROM venue_coasterpedia WHERE venue_id = $1', [venueId])).rows[0];
+    expect(row).toMatchObject({ status: 'no_match', data: null, attraction_id: null });
+    expect(row.error).toMatch(/removed from Coasterpedia/);
+  });
+
+  it('keeps the old match when the ID the user typed does not exist', async () => {
+    await setKey('cpk_test');
+    stubCoasterpedia([{ id: 165, name: 'Batman The Ride' }]);
+    const venueId = await createVenue('Batman The Ride', await category('Amusement Ride'));
+    await waitForRow(venueId);
+
+    const gone = new Response(JSON.stringify({ type: 'https://api.coasterpedia.net/problems/not-found', status: 404 }), {
+      status: 404,
+      headers: { 'content-type': 'application/problem+json' },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => gone.clone()));
+    await request(app).post(`/api/v1/venues/${venueId}/coasterpedia/select`).send({ attractionId: 999999 });
+
+    const row = (await query('SELECT * FROM venue_coasterpedia WHERE venue_id = $1', [venueId])).rows[0];
+    expect(row).toMatchObject({ status: 'error', attraction_id: 165 });
+    expect(row.data.name).toBe('Batman The Ride');
+  });
+
+  it('backfill picks up never-looked-up and failed rides, skipping matched ones', async () => {
+    await setKey('cpk_test');
+    const ride = await category('Amusement Ride');
+    const fetchMock = stubCoasterpedia([{ id: 165, name: 'Alpha' }]);
+    const matched = await createVenue('Alpha', ride);
+    await waitForRow(matched);
+
+    // Created before a key existed: no row yet. Another whose lookup failed.
+    await query(`DELETE FROM plugin_settings WHERE plugin_id = 'location'`);
+    const fresh = await createVenue('Beta', ride);
+    const failed = await createVenue('Gamma', ride);
+    await setKey('cpk_test');
+    await query(
+      `INSERT INTO venue_coasterpedia (venue_id, user_id, status, error) VALUES ($1, $2, 'error', 'boom')`,
+      [failed, DEFAULT_USER_ID],
+    );
+
+    const ids = await pendingBackfillVenueIds();
+    expect(ids.sort()).toEqual([fresh, failed].sort());
+
+    const before = coasterpediaCalls(fetchMock);
+    const progress: number[] = [];
+    await runCoasterpediaBackfill(ids, DEFAULT_USER_ID, { delayMs: 0, onProgress: (done) => { progress.push(done); } });
+    expect(progress).toEqual([1, 2]);
+    expect(coasterpediaCalls(fetchMock) - before).toBeGreaterThanOrEqual(2);
+    expect(await pendingBackfillVenueIds()).toEqual([]);
+  });
+
+  it('backfill paces requests and stops on a revoked key', async () => {
+    await setKey('cpk_test');
+    const ride = await category('Amusement Ride');
+    await query(`DELETE FROM plugin_settings WHERE plugin_id = 'location'`);
+    const a = await createVenue('Alpha', ride);
+    const b = await createVenue('Beta', ride);
+    await setKey('cpk_test');
+
+    const revoked = new Response(JSON.stringify({ type: 'https://api.coasterpedia.net/problems/key-revoked', status: 403 }), {
+      status: 403,
+      headers: { 'content-type': 'application/problem+json' },
+    });
+    const fetchMock = vi.fn(async () => revoked.clone());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCoasterpediaBackfill([a, b], DEFAULT_USER_ID, { delayMs: 0 })).rejects.toThrow(/revoked/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const times: number[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      times.push(Date.now());
+      return jsonResponse({ data: String(input).includes('?q=') ? [] : {} });
+    }));
+    await runCoasterpediaBackfill([a, b], DEFAULT_USER_ID, { delayMs: 200 });
+    expect(times[1] - times[0]).toBeGreaterThanOrEqual(190);
   });
 });

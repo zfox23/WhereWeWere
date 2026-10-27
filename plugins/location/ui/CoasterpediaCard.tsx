@@ -123,7 +123,9 @@ export default function CoasterpediaCard({ venueId, coasterpedia: cp, distanceUn
           <p className="text-sm text-red-600">Lookup failed: {cp.error ?? 'unknown error'}. Press Refresh to retry.</p>
         )}
         {cp.status === 'no_match' && (
-          <p className="text-sm text-gray-600 dark:text-gray-400">No Coasterpedia attraction matched this name. Enter its ID or URL:</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {cp.error ?? 'No Coasterpedia attraction matched this name.'} Enter its ID or URL:
+          </p>
         )}
         {cp.status === 'ambiguous' && (
           <div className="space-y-2">
@@ -288,12 +290,13 @@ export default function CoasterpediaCard({ venueId, coasterpedia: cp, distanceUn
       {errorLine}
 
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Data from{' '}
+        Ride data from{' '}
+        <a href="https://coasterpedia.net" target="_blank" rel="noreferrer noopener" className="underline">Coasterpedia</a>
+        , <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer noopener" className="underline">CC BY-SA 4.0</a>
+        {distanceUnit === 'imperial' && '; units converted'}.{' '}
         <a href={data.url} target="_blank" rel="noreferrer noopener" className="underline inline-flex items-center gap-0.5">
-          Coasterpedia contributors <ExternalLink size={10} />
+          View this ride <ExternalLink size={10} />
         </a>
-        , licensed{' '}
-        <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer noopener" className="underline">CC BY-SA 4.0</a>.
       </p>
     </div>
   );

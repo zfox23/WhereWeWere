@@ -52,14 +52,16 @@ describe('CoasterpediaCard', () => {
     renderCard({ has_key: true, status: 'matched', data: DATA });
     expect(screen.getByText('31.4 m')).toBeTruthy();
     expect(screen.getByText('B&M')).toBeTruthy();
-    const link = screen.getByRole('link', { name: /Coasterpedia contributors/ });
-    expect(link.getAttribute('href')).toBe(DATA.url);
-    expect(screen.getByText('CC BY-SA 4.0')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Coasterpedia' }).getAttribute('href')).toBe('https://coasterpedia.net');
+    expect(screen.getByRole('link', { name: 'CC BY-SA 4.0' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /View this ride/ }).getAttribute('href')).toBe(DATA.url);
+    expect(screen.queryByText(/units converted/)).toBeNull();
   });
 
   it('converts to imperial and reveals details on expand', async () => {
     renderCard({ has_key: true, status: 'matched', data: DATA }, 'imperial');
     expect(screen.getByText('103 ft')).toBeTruthy();
+    expect(screen.getByText(/units converted/)).toBeTruthy();
     expect(screen.queryByText('Rider requirements')).toBeNull();
     await userEvent.click(screen.getByText('More details'));
     expect(screen.getByText('Rider requirements')).toBeTruthy();
@@ -88,6 +90,11 @@ describe('CoasterpediaCard', () => {
     await userEvent.type(screen.getByLabelText('Coasterpedia attraction ID or URL'), '165');
     await userEvent.click(screen.getByText('Use'));
     await waitFor(() => expect(selectMock).toHaveBeenCalledWith('v1', '165'));
+  });
+
+  it('says when the matched record was removed from Coasterpedia', () => {
+    renderCard({ has_key: true, status: 'no_match', error: 'This record was removed from Coasterpedia. Enter another ID or URL.' });
+    expect(screen.getByText(/was removed from Coasterpedia/)).toBeTruthy();
   });
 
   it('offers retry on failure and surfaces request errors', async () => {

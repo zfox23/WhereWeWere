@@ -33,6 +33,8 @@ import {
   getCoasterpediaApiKey,
   isAmusementRideCategory,
   needsLookup,
+  pendingBackfillVenueIds,
+  runCoasterpediaBackfill,
 } from './services/coasterpediaEnrich';
 import type {
   CheckinTypeServerPlugin,
@@ -2791,34 +2793,25 @@ async function categorizeBatch(jobId: string, attempted: string[]) {
 }
 
 /**
- * Look up every Amusement Ride venue that has no Coasterpedia result yet.
- * Sequential, so the API's per-key rate limit is respected; a 429 retries once
- * inside the client and is otherwise recorded on the venue's row.
+ * Look up every Amusement Ride venue that has no Coasterpedia result yet, or
+ * whose last lookup failed. Paced to the API's per-account rate limit.
  */
 async function coasterpediaBackfillHandler(ctx: PluginJobContext): Promise<void> {
   if (!(await getCoasterpediaApiKey(USER_ID))) {
     throw new Error('Add a Coasterpedia API key in Settings > Location first');
   }
-  const pending = await query(
-    `SELECT v.id FROM venues v
-       JOIN venue_categories vc ON vc.id = v.category_id
-       LEFT JOIN venue_coasterpedia cp ON cp.venue_id = v.id
-      WHERE LOWER(TRIM(vc.name)) = 'amusement ride' AND cp.venue_id IS NULL
-      ORDER BY v.name`
-  );
-  let done = 0;
-  await ctx.updateProgress({ phase: 'coasterpedia', message: `Looking up ${pending.rows.length} rides...`, updated: 0 });
-  for (const row of pending.rows) {
-    if (ctx.isCancelled()) throw new Error('cancelled');
-    await enrichVenueCoasterpedia(row.id, USER_ID);
-    done++;
-    await ctx.updateProgress({
-      phase: 'coasterpedia',
-      message: `Looked up ${done} of ${pending.rows.length} rides...`,
-      updated: done,
-      remaining: pending.rows.length - done,
-    });
-  }
+  const ids = await pendingBackfillVenueIds();
+  await ctx.updateProgress({ phase: 'coasterpedia', message: `Looking up ${ids.length} rides...`, updated: 0 });
+  await runCoasterpediaBackfill(ids, USER_ID, {
+    isCancelled: () => ctx.isCancelled(),
+    onProgress: (done, total) =>
+      ctx.updateProgress({
+        phase: 'coasterpedia',
+        message: `Looked up ${done} of ${total} rides...`,
+        updated: done,
+        remaining: total - done,
+      }),
+  });
 }
 
 /**

@@ -12,6 +12,13 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 }
 
+function problem(type: string, status: number, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify({ type: `https://api.coasterpedia.net/problems/${type}`, title: type, status }), {
+    status,
+    headers: { 'content-type': 'application/problem+json', ...headers },
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -54,6 +61,45 @@ describe('Coasterpedia client', () => {
     await expect(getAttraction(1, 'bad')).rejects.toMatchObject({ name: 'CoasterpediaError', status: 401 });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({}, 404)));
     await expect(getAttraction(1, 'k')).rejects.toBeInstanceOf(CoasterpediaError);
+  });
+
+  it('tells a deleted record from one that has not settled yet', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problem('not-found', 404)));
+    const gone = await getAttraction(1, 'k').catch((e) => e);
+    expect(gone).toMatchObject({ status: 404, problemType: 'not-found', isNotFound: true });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problem('not-settled', 404)));
+    const fresh = await getAttraction(1, 'k').catch((e) => e);
+    expect(fresh.isNotFound).toBe(false);
+    expect(fresh.message).toMatch(/not in the settled data yet/);
+  });
+
+  it('explains a revoked key and flags auth failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problem('key-revoked', 403)));
+    const revoked = await getAttraction(1, 'k').catch((e) => e);
+    expect(revoked.message).toMatch(/revoked/);
+    expect(revoked.isAuthFailure).toBe(true);
+
+    // Cloudflare's User-Agent block is an HTML 403, not a problem document.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>blocked</html>', { status: 403, headers: { 'content-type': 'text/html' } })));
+    const blocked = await getAttraction(1, 'k').catch((e) => e);
+    expect(blocked.message).toMatch(/COASTERPEDIA_CONTACT/);
+    expect(blocked.isAuthFailure).toBe(true);
+  });
+
+  it('waits out a long Retry-After and keeps retrying when patient', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => problem('rate-limited', 429, { 'retry-after': '40' }))
+      .mockImplementationOnce(async () => problem('rate-limited', 429, { 'retry-after': '40' }))
+      .mockImplementationOnce(async () => jsonResponse({ data: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = searchAttractions('x y', 'k', { patient: true });
+    await vi.advanceTimersByTimeAsync(80_000);
+    expect(await pending).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('retries once after a 429 honoring Retry-After', async () => {
