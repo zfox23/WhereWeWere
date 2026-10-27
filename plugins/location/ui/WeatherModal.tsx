@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { MapPin, X } from 'lucide-react';
 import { weather as weatherApi } from '../../../client/src/api/client';
 import {
   describeWeather,
@@ -65,6 +65,15 @@ export default function WeatherModal({ date, dateLabel, unit, onClose }: Props) 
               <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-1.5 mt-0.5">
                 <summary.icon size={16} aria-hidden="true" />
                 {summary.label} · High {formatTemp(day.tmax, unit)} / Low {formatTemp(day.tmin, unit)}
+              </p>
+            )}
+            {day && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5">
+                <MapPin size={12} aria-hidden="true" />
+                {day.place
+                  ? [day.place.name, day.place.city, day.place.state].filter(Boolean).join(', ')
+                  : `${day.latitude.toFixed(2)}, ${day.longitude.toFixed(2)}`}
+                {' '}(at noon)
               </p>
             )}
           </div>

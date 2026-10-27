@@ -32,6 +32,8 @@ export interface WeatherDay extends WeatherSummary {
   latitude: number;
   longitude: number;
   timezone: string;
+  /** The venue the weather is for; null when it no longer exists. */
+  place: { name: string; city: string | null; state: string | null; country: string | null } | null;
   hourly: WeatherHour[];
 }
 

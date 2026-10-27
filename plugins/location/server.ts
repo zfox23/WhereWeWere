@@ -835,7 +835,17 @@ weatherRouter.get('/:date', async (req: Request, res: Response) => {
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'No weather for that day' });
     const row = result.rows[0];
-    res.json({ date, latitude: Number(row.latitude), longitude: Number(row.longitude), timezone: row.timezone, ...row.data });
+    // The row stores the venue's exact coordinates, so the place name comes
+    // from the venue at those coordinates (null once that venue is gone).
+    const venue = await query(
+      `SELECT name, city, state, country FROM venues
+        WHERE latitude = $1 AND longitude = $2 ORDER BY created_at LIMIT 1`,
+      [row.latitude, row.longitude],
+    );
+    const place = venue.rows[0]
+      ? { name: venue.rows[0].name, city: venue.rows[0].city, state: venue.rows[0].state, country: venue.rows[0].country }
+      : null;
+    res.json({ date, latitude: Number(row.latitude), longitude: Number(row.longitude), timezone: row.timezone, place, ...row.data });
   } catch (err) {
     console.error('Error getting weather day:', err);
     res.status(500).json({ error: 'Failed to get weather' });

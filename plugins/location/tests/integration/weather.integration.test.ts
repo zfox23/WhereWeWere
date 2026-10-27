@@ -116,6 +116,7 @@ describe('Weather (integration)', () => {
     expect(list.body.days['2020-03-02'].hourly).toBeUndefined();
     const day = await request(app).get('/api/v1/weather/2020-03-02');
     expect(day.body.hourly).toHaveLength(1);
+    expect(day.body.place).toMatchObject({ name: 'NYC' });
   });
 
   it('fetches after a check-in is saved only when enabled', async () => {
