@@ -14,7 +14,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { ZipArchive } from 'archiver';
-import type { Response } from 'express';
 import * as unzipper from 'unzipper';
 import type { PluginBackupPayload, PluginBackupFile } from '../plugins/backup';
 
@@ -45,49 +44,55 @@ export function zipDirectory(dir: string): Promise<Buffer> {
   });
 }
 
+export interface BackupZipProgress {
+  /** Archive entries written so far. */
+  processed: number;
+  /** Total entries that will be written. */
+  total: number;
+}
+
 /**
- * Stream a backup v2 ZIP to the HTTP response. Resolves when the archive is
- * fully written (and the response finished). When `companions` is a
- * (possibly empty) array it is written as `companions.json` — the core
- * companion table dump (every check-in type plus standalone names), so the
- * plugins' own payloads no longer carry companion rows.
+ * Build a backup v2 ZIP into a temp file and resolve with its path. Building
+ * to disk first (rather than streaming to the response) means the download
+ * can carry an exact Content-Length and the caller can report progress. When
+ * `companions` is a (possibly empty) array it is written as `companions.json`
+ * — the core companion table dump (every check-in type plus standalone
+ * names), so the plugins' own payloads no longer carry companion rows.
+ * The caller removes the file.
  */
-export function streamBackupZip(
-  res: Response,
+export function buildBackupZip(
   manifest: BackupManifest,
   pluginsPayload: PluginBackupPayload,
   files: PluginBackupFile[],
   companions?: unknown,
   postcards?: unknown,
-): Promise<void> {
+  onProgress?: (progress: BackupZipProgress) => void,
+): Promise<string> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wwb-export-'));
+  const zipPath = path.join(dir, 'backup.zip');
   return new Promise((resolve, reject) => {
     const archive = new ZipArchive({ zlib: { level: 6 } });
+    const out = fs.createWriteStream(zipPath);
     let settled = false;
     const done = (err?: Error) => {
       if (settled) return;
       settled = true;
-      if (err) reject(err);
-      else resolve();
+      if (err) {
+        removeBackupTempDir(dir);
+        reject(err);
+      } else {
+        resolve(zipPath);
+      }
     };
 
-    archive.on('warning', (err) => {
-      done(err instanceof Error ? err : new Error(String(err)));
+    archive.on('warning', (err) => done(err instanceof Error ? err : new Error(String(err))));
+    archive.on('error', (err) => done(err));
+    out.on('error', (err) => done(err));
+    out.on('close', () => done());
+    archive.on('progress', (p) => {
+      onProgress?.({ processed: p.entries.processed, total: p.entries.total });
     });
-    archive.on('error', (err) => {
-      done(err);
-    });
-    res.on('close', () => {
-      // Client went away mid-transfer: stop the archive. A clean close after
-      // a full transfer is the normal completion; only treat an early close
-      // (before 'end') as an abort.
-      if (!res.writableEnded) {
-        archive.abort();
-        done();
-      }
-    });
-
-    res.setHeader('Content-Type', 'application/zip');
-    archive.pipe(res);
+    archive.pipe(out);
 
     archive.append(JSON.stringify(manifest, null, 2), { name: 'backup.json' });
     if (Array.isArray(companions)) {
@@ -104,7 +109,7 @@ export function streamBackupZip(
       archive.file(file.absPath, { name: `plugins/${file.pluginId}/${file.zipPath}` });
     }
 
-    archive.finalize().then(() => done(), (err) => done(err));
+    archive.finalize().catch((err) => done(err));
   });
 }
 

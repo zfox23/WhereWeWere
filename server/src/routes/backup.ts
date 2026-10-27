@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import os from 'os';
+import path from 'path';
+import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { pool, query } from '../db';
 import {
@@ -18,7 +20,7 @@ import {
   listBackupPluginFiles,
   readBackupJsonFile,
   removeBackupTempDir,
-  streamBackupZip,
+  buildBackupZip,
 } from '../services/backupArchive';
 import { restoreCompanionRows } from '../services/companions';
 import { allPlugins } from '../plugins/registry';
@@ -391,9 +393,24 @@ async function runRestore(
   return counts;
 }
 
-router.get('/export', async (_req: Request, res: Response) => {
+type ExportStage = 'collecting' | 'zipping' | 'ready' | 'error';
+
+interface ExportProgress {
+  stage: ExportStage;
+  processed: number;
+  total: number;
+}
+
+/**
+ * Collect the backup data and build the ZIP in a temp file. `onProgress`
+ * reports the stage and, while zipping, how many entries are done.
+ */
+async function buildExport(
+  onProgress: (progress: ExportProgress) => void,
+): Promise<{ zipPath: string; fileName: string }> {
   let fileTempDirs: string[] = [];
   try {
+    onProgress({ stage: 'collecting', processed: 0, total: 0 });
     const [
       userResult,
       settingsResult,
@@ -454,21 +471,103 @@ router.get('/export', async (_req: Request, res: Response) => {
       settings: settingsResult.rows[0] ?? null,
     };
 
-    const day = new Date().toISOString().slice(0, 10);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="wherewewere-backup-v${LATEST_BACKUP_SCHEMA_VERSION}-${day}.zip"`
+    onProgress({ stage: 'zipping', processed: 0, total: 0 });
+    const zipPath = await buildBackupZip(
+      manifest,
+      pluginsData,
+      pluginFiles,
+      companionsResult.rows,
+      postcardsResult.rows,
+      (p) => onProgress({ stage: 'zipping', ...p }),
     );
-    await streamBackupZip(res, manifest, pluginsData, pluginFiles, companionsResult.rows, postcardsResult.rows);
-  } catch (err) {
-    console.error('Error exporting backup:', err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to export backup' });
-    } else {
-      res.destroy();
-    }
+    const day = new Date().toISOString().slice(0, 10);
+    return { zipPath, fileName: `wherewewere-backup-v${LATEST_BACKUP_SCHEMA_VERSION}-${day}.zip` };
   } finally {
     for (const dir of fileTempDirs) removeBackupTempDir(dir);
+  }
+}
+
+/** Send a built backup ZIP with an exact Content-Length, then delete it. */
+function sendExport(res: Response, zipPath: string, fileName: string): void {
+  const dir = path.dirname(zipPath);
+  const cleanup = () => removeBackupTempDir(dir);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Length', String(fs.statSync(zipPath).size));
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.on('close', cleanup);
+  fs.createReadStream(zipPath)
+    .on('error', (err) => {
+      console.error('Error sending backup:', err);
+      res.destroy();
+    })
+    .pipe(res);
+}
+
+// Export jobs: the build is slow, so the client starts one, polls its
+// progress, then downloads the finished file.
+interface ExportJob extends ExportProgress {
+  zipPath?: string;
+  fileName?: string;
+  error?: string;
+  timer?: NodeJS.Timeout;
+}
+const EXPORT_JOB_TTL_MS = 15 * 60 * 1000;
+const exportJobs = new Map<string, ExportJob>();
+
+function dropExportJob(id: string): void {
+  const job = exportJobs.get(id);
+  if (!job) return;
+  if (job.timer) clearTimeout(job.timer);
+  if (job.zipPath) removeBackupTempDir(path.dirname(job.zipPath));
+  exportJobs.delete(id);
+}
+
+router.post('/export-jobs', (_req: Request, res: Response) => {
+  const id = randomUUID();
+  const job: ExportJob = { stage: 'collecting', processed: 0, total: 0 };
+  exportJobs.set(id, job);
+  job.timer = setTimeout(() => dropExportJob(id), EXPORT_JOB_TTL_MS);
+  buildExport((p) => Object.assign(job, p))
+    .then(({ zipPath, fileName }) => {
+      job.zipPath = zipPath;
+      job.fileName = fileName;
+      job.stage = 'ready';
+    })
+    .catch((err) => {
+      console.error('Error exporting backup:', err);
+      job.stage = 'error';
+      job.error = 'Failed to export backup';
+    });
+  res.status(202).json({ id });
+});
+
+router.get('/export-jobs/:id', (req: Request, res: Response) => {
+  const job = exportJobs.get(String(req.params.id));
+  if (!job) return res.status(404).json({ error: 'Export not found' });
+  const size = job.zipPath ? fs.statSync(job.zipPath).size : undefined;
+  res.json({ stage: job.stage, processed: job.processed, total: job.total, size, error: job.error });
+});
+
+router.get('/export-jobs/:id/download', (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  const job = exportJobs.get(id);
+  if (!job || job.stage !== 'ready' || !job.zipPath || !job.fileName) {
+    return res.status(404).json({ error: 'Export not ready' });
+  }
+  const { zipPath, fileName } = job;
+  // sendExport removes the file once the response closes.
+  job.zipPath = undefined;
+  dropExportJob(id);
+  sendExport(res, zipPath, fileName);
+});
+
+router.get('/export', async (_req: Request, res: Response) => {
+  try {
+    const { zipPath, fileName } = await buildExport(() => {});
+    sendExport(res, zipPath, fileName);
+  } catch (err) {
+    console.error('Error exporting backup:', err);
+    res.status(500).json({ error: 'Failed to export backup' });
   }
 });
 

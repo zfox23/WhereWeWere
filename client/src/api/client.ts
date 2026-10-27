@@ -276,15 +276,63 @@ function clearApiCache(): void {
 }
 
 // Backup / Restore
+export interface BackupExportProgress {
+  stage: 'collecting' | 'zipping' | 'downloading';
+  /** 0-1, or null when the total is not known yet. */
+  fraction: number | null;
+  received?: number;
+  total?: number;
+}
+
 export const backupApi = {
-  export: async () => {
-    const res = await fetch(`${API_BASE}/backup/export`, { headers: withAuthHeader() });
-    if (!res.ok) {
+  /**
+   * Build a backup on the server and download it. `onProgress` gets the
+   * current stage with a 0-1 fraction (null while the total is unknown).
+   */
+  export: async (onProgress?: (progress: BackupExportProgress) => void) => {
+    const fail = async (res: Response, fallback: string) => {
       const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.message || `Backup export failed: ${res.status}`);
+      return new Error(error.error || error.message || `${fallback}: ${res.status}`);
+    };
+
+    const start = await fetch(`${API_BASE}/backup/export-jobs`, { method: 'POST', headers: withAuthHeader() });
+    if (!start.ok) throw await fail(start, 'Backup export failed');
+    const { id } = (await start.json()) as { id: string };
+
+    for (;;) {
+      const res = await fetch(`${API_BASE}/backup/export-jobs/${id}`, { headers: withAuthHeader() });
+      if (!res.ok) throw await fail(res, 'Backup export failed');
+      const job = await res.json() as {
+        stage: 'collecting' | 'zipping' | 'ready' | 'error';
+        processed: number;
+        total: number;
+        error?: string;
+      };
+      if (job.stage === 'error') throw new Error(job.error || 'Backup export failed');
+      if (job.stage === 'ready') break;
+      onProgress?.({
+        stage: job.stage,
+        fraction: job.stage === 'zipping' && job.total > 0 ? job.processed / job.total : null,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
-    const blob = await res.blob();
+    const res = await fetch(`${API_BASE}/backup/export-jobs/${id}/download`, { headers: withAuthHeader() });
+    if (!res.ok || !res.body) throw await fail(res, 'Backup download failed');
+
+    const total = Number(res.headers.get('Content-Length')) || 0;
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      onProgress?.({ stage: 'downloading', fraction: total > 0 ? received / total : null, received, total });
+    }
+    const blob = new Blob(chunks as BlobPart[], { type: 'application/zip' });
+
     const disposition = res.headers.get('Content-Disposition') || res.headers.get('content-disposition');
     const fileNameMatch = disposition?.match(/filename="?([^\"]+)"?/i);
     const fileName = fileNameMatch?.[1] || `wherewewere-backup-v2-${new Date().toISOString().slice(0, 10)}.zip`;

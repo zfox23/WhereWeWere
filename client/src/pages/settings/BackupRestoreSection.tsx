@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react';
 import { Download, Upload, Loader2, Check, AlertCircle, RotateCcw } from 'lucide-react';
-import { backupApi } from '../../api/client';
+import { backupApi, type BackupExportProgress } from '../../api/client';
 import type { BackupImportResult } from '../../types';
 
 export function BackupRestoreSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [progress, setProgress] = useState<BackupExportProgress | null>(null);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [result, setResult] = useState<BackupImportResult | null>(null);
@@ -16,7 +17,7 @@ export function BackupRestoreSection() {
     setExporting(true);
     setMessage(null);
     try {
-      const { blob, fileName } = await backupApi.export();
+      const { blob, fileName } = await backupApi.export(setProgress);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -30,6 +31,7 @@ export function BackupRestoreSection() {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Backup export failed.' });
     } finally {
       setExporting(false);
+      setProgress(null);
     }
   };
 
@@ -68,6 +70,8 @@ export function BackupRestoreSection() {
           Download Backup
         </button>
       </div>
+
+      {exporting && progress && <ExportProgressMeter progress={progress} />}
 
       <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-3">
         <div
@@ -143,6 +147,43 @@ export function BackupRestoreSection() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const STAGE_LABELS: Record<BackupExportProgress['stage'], string> = {
+  collecting: 'Collecting your data…',
+  zipping: 'Packing the archive…',
+  downloading: 'Downloading…',
+};
+
+function formatMB(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ExportProgressMeter({ progress }: { progress: BackupExportProgress }) {
+  const percent = progress.fraction === null ? null : Math.round(progress.fraction * 100);
+  const detail = progress.stage === 'downloading' && progress.total
+    ? ` ${formatMB(progress.received ?? 0)} of ${formatMB(progress.total)}`
+    : '';
+  return (
+    <div className="space-y-1" role="status">
+      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+        <span>{STAGE_LABELS[progress.stage]}{detail}</span>
+        {percent !== null && <span>{percent}%</span>}
+      </div>
+      <div
+        className="h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent ?? undefined}
+      >
+        <div
+          className={`h-full bg-primary-500 transition-all ${percent === null ? 'w-1/3 animate-pulse' : ''}`}
+          style={percent === null ? undefined : { width: `${percent}%` }}
+        />
+      </div>
     </div>
   );
 }
