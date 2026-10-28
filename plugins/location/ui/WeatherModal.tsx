@@ -11,6 +11,7 @@ import {
   type WeatherDay,
 } from './weatherFormat';
 import type { DistanceUnit } from './geo';
+import WeatherChart from './WeatherChart';
 
 interface Props {
   date: string;
@@ -34,15 +35,17 @@ export default function WeatherModal({ date, dateLabel, unit, onClose }: Props) 
   }, [onClose]);
 
   const summary = day ? describeWeather(day.code) : null;
-  const rows: [string, string][] = day
+  const stats: [string, string][] = day
     ? [
-        ['Precipitation', formatPrecip(day.precip, unit)],
-        ...(day.snow ? [['Snowfall', formatSnow(day.snow, unit)] as [string, string]] : []),
+        ['UV', day.uv_max != null ? String(Math.round(day.uv_max * 10) / 10) : '–'],
         ['Wind', `${formatWind(day.wind_max, unit)} (gusts ${formatWind(day.gust_max, unit)})`],
+        ['Precip', formatPrecip(day.precip, unit)],
+        ...(day.snow ? [['Snow', formatSnow(day.snow, unit)] as [string, string]] : []),
         ['Humidity', day.humidity_mean != null ? `${day.humidity_mean}%` : '–'],
-        ['Sunrise', formatClock(day.sunrise)],
-        ['Sunset', formatClock(day.sunset)],
-        ['UV index', day.uv_max != null ? String(Math.round(day.uv_max * 10) / 10) : '–'],
+        // The chart marks sunrise and sunset; without it, list them here.
+        ...(day.hourly.length === 0
+          ? [['Sunrise', formatClock(day.sunrise)], ['Sunset', formatClock(day.sunset)]] as [string, string][]
+          : []),
       ]
     : [];
 
@@ -56,7 +59,7 @@ export default function WeatherModal({ date, dateLabel, unit, onClose }: Props) 
         aria-modal="true"
         aria-label={`Weather for ${dateLabel}`}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-5"
+        className="w-full max-w-md sm:max-w-2xl max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-5"
       >
         <div className="flex items-start justify-between mb-3">
           <div>
@@ -87,45 +90,17 @@ export default function WeatherModal({ date, dateLabel, unit, onClose }: Props) 
 
         {day && (
           <>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-              {rows.map(([k, v]) => (
-                <div key={k} className="contents">
-                  <dt className="text-gray-500 dark:text-gray-400">{k}</dt>
-                  <dd className="text-gray-900 dark:text-gray-100 text-right">{v}</dd>
-                </div>
-              ))}
-            </dl>
-
             {day.hourly.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Hourly</h4>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-left text-gray-500 dark:text-gray-400">
-                      <th className="py-1 font-medium">Time</th>
-                      <th className="py-1 font-medium">Temp</th>
-                      <th className="py-1 font-medium">Sky</th>
-                      <th className="py-1 font-medium text-right">Precip</th>
-                      <th className="py-1 font-medium text-right">Wind</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-gray-800 dark:text-gray-200">
-                    {day.hourly.map((h) => {
-                      const d = describeWeather(h.code);
-                      return (
-                        <tr key={h.time} className="border-t border-gray-100 dark:border-gray-800">
-                          <td className="py-1">{formatClock(h.time)}</td>
-                          <td className="py-1">{formatTemp(h.temp, unit)}</td>
-                          <td className="py-1"><d.icon size={14} aria-label={d.label} /></td>
-                          <td className="py-1 text-right">{formatPrecip(h.precip, unit)}</td>
-                          <td className="py-1 text-right">{formatWind(h.wind, unit)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <WeatherChart hourly={day.hourly} sunrise={day.sunrise} sunset={day.sunset} unit={unit} />
             )}
+            <p className="mt-3 text-sm text-gray-600 dark:text-gray-300 flex flex-wrap gap-x-3 gap-y-1">
+              {stats.map(([k, v]) => (
+                <span key={k}>
+                  <span className="text-gray-500 dark:text-gray-400">{k}</span>{' '}
+                  <span className="text-gray-900 dark:text-gray-100">{v}</span>
+                </span>
+              ))}
+            </p>
             {!day.final && (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">Recent days are provisional and update once final data is available.</p>
             )}
