@@ -150,7 +150,11 @@ export default function FoodCheckIn({ editId = null, dateParam = null, onCreated
     setMode('other');
     ensureLocationOption(prefillLocationId).then((row) => {
       if (!row) return;
-      setDateTime(isoToLocalDatetimeValue(row.checked_in_at));
+      const local = isoToLocalDatetimeValue(row.checked_in_at);
+      setDateTime(local);
+      // Keep the visit's exact instant and zone unless the time is edited, so
+      // the meal lands on the same timeline day as the check-in it's linked to.
+      setLoaded({ dateTime: local, iso: row.checked_in_at, timezone: row.venue_timezone ?? row.timezone ?? null });
       setMealType(mealTypeForHour(new Date(row.checked_in_at).getHours()));
       if (Array.isArray(row.companions)) setCompanions(row.companions);
     });
@@ -338,7 +342,10 @@ export default function FoodCheckIn({ editId = null, dateParam = null, onCreated
               required
             />
             <p className="text-[11px] text-gray-400 mt-1">
-              Time zone: {loaded && loaded.dateTime === dateTime && loaded.timezone ? loaded.timezone : deviceTimezone()}
+              Time zone: {deviceTimezone()}
+              {loaded?.timezone && loaded.dateTime === dateTime && loaded.timezone !== deviceTimezone()
+                ? ` (kept as ${loaded.timezone} unless you change the time)`
+                : ''}
             </p>
           </div>
           <div>
