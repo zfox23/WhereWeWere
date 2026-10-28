@@ -283,7 +283,15 @@ describe('music plugin', () => {
       expect(body[id].tracks[0]).toMatchObject({ artists: ['Artist'], time: T0 + 6 * MIN });
       expect(body[id].has_more).toBe(true);
       const session = (await query('SELECT id FROM music_sessions')).rows[0].id;
-      expect(body[id]).toMatchObject({ session_id: session, session_date: '2024-05-01' });
+      expect(body[id]).toMatchObject({ session_id: session, session_date: '2024-05-01', anchor_time: T0 + 7 * MIN });
+    });
+
+    it('reaches back only ten minutes, not the whole session gap', async () => {
+      for (const i of [0, 5, 10]) await pushAt(i, `Song ${i}`);
+      const id = await checkin(14);
+      const body = await around(id);
+      expect(body[id].tracks.map((t: any) => t.title)).toEqual(['Song 10', 'Song 5']);
+      expect(body[id].has_more).toBe(true);
     });
 
     it('includes a play at the exact moment, excludes later ones, and has no more when all are shown', async () => {
@@ -313,8 +321,8 @@ describe('music plugin', () => {
 
     it('omits check-ins with no recent play, or whose session is not on the timeline', async () => {
       for (const i of [0, 2, 4]) await pushAt(i, `Song ${i}`);
-      const tooLate = await checkin(4 + 31); // last play was longer ago than the session gap
-      const justInside = await checkin(4 + 30);
+      const tooLate = await checkin(4 + 11); // last play was more than ten minutes before
+      const justInside = await checkin(4 + 10);
       const tooEarly = await checkin(-5);
       const body = await around(tooLate, justInside, tooEarly);
       expect(Object.keys(body)).toEqual([justInside]);

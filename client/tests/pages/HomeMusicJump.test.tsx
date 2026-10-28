@@ -55,6 +55,7 @@ const sessionItem = {
 const LISTENING = {
   session_id: SESSION_ID,
   session_date: '2024-05-01',
+  anchor_time: 360,
   tracks: [
     { artists: ['Khruangbin'], title: 'Newest Song', time: 300 },
     { artists: ['Tycho'], title: 'Middle Song', time: 200 },
@@ -119,16 +120,13 @@ describe('Home: jumping from a check-in to its listening session', () => {
     scrollIntoView.mockReset();
   });
 
-  it('shows the last songs on a check-in card, the oldest fading', async () => {
+  it('shows the last song on a check-in card, with a count of the earlier ones', async () => {
     renderHome();
     await waitFor(() => expect(screen.getByText('Newest Song', { exact: false })).toBeTruthy());
     expect(aroundMock).toHaveBeenCalledWith([SLEEP_ID]);
     const lines = screen.getAllByRole('listitem').filter((li) => /Song/.test(li.textContent ?? ''));
-    expect(lines.map((li) => li.textContent)).toEqual([
-      'Khruangbin — Newest Song', 'Tycho — Middle Song', 'Boards of Canada — Oldest Song',
-    ]);
-    expect(lines[2].getAttribute('data-faded')).toBe('true');
-    expect(lines[0].hasAttribute('data-faded')).toBe(false);
+    expect(lines.map((li) => li.textContent)).toEqual(['Khruangbin — Newest Song']);
+    expect(screen.getByRole('button', { name: 'Show 2 earlier songs' }).textContent).toBe('+2');
   });
 
   it('jumps to the session card, expanded and highlighted, then clears the link state', async () => {
@@ -138,7 +136,7 @@ describe('Home: jumping from a check-in to its listening session', () => {
     expect(screen.queryByText(/Listening/)).toBeNull();
 
     // Any part of a line that isn't an artist/title link works.
-    await user.click(screen.getByText('Middle Song', { exact: false }).closest('li')!);
+    await user.click(screen.getByText('Newest Song', { exact: false }).closest('li')!);
 
     // The day is filtered to the session's date...
     await waitFor(() => expect(timelineListMock).toHaveBeenLastCalledWith(
@@ -160,7 +158,7 @@ describe('Home: jumping from a check-in to its listening session', () => {
     const user = userEvent.setup();
     renderHome();
     await waitFor(() => screen.getByText('Newest Song', { exact: false }));
-    await user.click(screen.getByText('Middle Song', { exact: false }).closest('li')!);
+    await user.click(screen.getByText('Newest Song', { exact: false }).closest('li')!);
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toContain(SESSION_ID));
     // Real timers: the clear delay is a few seconds.
     await waitFor(

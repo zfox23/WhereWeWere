@@ -13,6 +13,7 @@ import { usePageTitle } from '../utils/pageTitle';
 import WeatherBadge from '../../../plugins/location/ui/WeatherBadge';
 import WeatherModal from '../../../plugins/location/ui/WeatherModal';
 import type { WeatherSummary } from '../../../plugins/location/ui/weatherFormat';
+import { dedupeListening } from '../utils/listening';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
@@ -592,6 +593,8 @@ export default function Home() {
       })
       .catch(() => {});
   }, [timelineItems, listeningMap]);
+  // Songs shared by check-ins close together show on the earliest one only.
+  const shownListening = useMemo(() => dedupeListening(listeningMap), [listeningMap]);
 
   // Fetch the weather for each loaded day (empty unless the user enabled it
   // in Settings > Location). Each day is requested once.
@@ -984,7 +987,7 @@ export default function Home() {
                             integrations={{ immich_url: immichUrl, dawarich_url: dawarichUrl }}
                             compact={timelineDensity === 'compact'}
                             photos={photosMap[item.id] ?? null}
-                            listening={listeningMap[item.id] ?? null}
+                            listening={shownListening[item.id] ?? null}
                             settings={pluginSettings[item.type]}
                           />
                         ) : null}

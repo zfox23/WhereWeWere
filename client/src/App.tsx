@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import { allClientPlugins, getClientPlugin } from './plugins/registry';
 import { AutoCheckInForm } from './plugins/autoForm';
 import PluginCheckInDetail from './pages/PluginCheckInDetail';
+import { CheckinListening } from './components/CheckinListening';
 import VenueDetail from '../../plugins/location/ui/VenueDetail';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
@@ -51,15 +52,20 @@ function PluginCheckInPage({ pluginId }: { pluginId: string }) {
   );
 }
 
-/** Detail page for a specific plugin: custom detailPage or the generic one. */
+/**
+ * Detail page for a specific plugin: custom detailPage or the generic one,
+ * with what was playing just before the check-in underneath.
+ */
 function PluginDetailPage({ pluginId }: { pluginId: string }) {
   const { id } = useParams<{ id: string }>();
   const plugin = getClientPlugin(pluginId);
   if (!plugin) return <div className="py-16 text-center text-sm text-gray-500">Unknown check-in type.</div>;
-  if (plugin.client.detailPage) {
-    return <plugin.client.detailPage id={id ?? ''} />;
-  }
-  return <PluginCheckInDetail />;
+  return (
+    <>
+      {plugin.client.detailPage ? <plugin.client.detailPage id={id ?? ''} /> : <PluginCheckInDetail />}
+      {pluginId !== 'music' && <CheckinListening checkinId={id ?? ''} />}
+    </>
+  );
 }
 
 /** Routes contributed by check-in plugins. */
@@ -77,7 +83,7 @@ const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
     );
   } else {
     elements.push(
-      <Route key={`detail-${plugin.id}`} path={`/checkins/${plugin.id}/:id`} element={<PluginCheckInDetail />} />,
+      <Route key={`detail-${plugin.id}`} path={`/checkins/${plugin.id}/:id`} element={<PluginDetailPage pluginId={plugin.id} />} />,
     );
   }
   return elements;

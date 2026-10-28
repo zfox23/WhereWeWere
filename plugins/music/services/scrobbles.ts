@@ -897,6 +897,8 @@ export interface ListeningBefore {
   session_id: string;
   /** Local date (YYYY-MM-DD) of the session's end, as the timeline groups it. */
   session_date: string;
+  /** The anchor (check-in) moment the plays lead up to, epoch seconds. */
+  anchor_time: number;
   /** Up to three plays, newest first. */
   tracks: { artists: string[]; title: string; time: number; art_id: string | null; album_ref: string; song_key: string }[];
   /** True when the session has plays earlier than the oldest one returned. */
@@ -906,21 +908,21 @@ export interface ListeningBefore {
 const LISTENING_PREVIEW_TRACKS = 3;
 
 /**
- * For each anchor (a check-in's moment): the last few plays on or before it,
- * from the listening session of the most recent play, provided that play was
- * within `gapMinutes` of the anchor and the session is shown on the timeline
- * (`minTracks`). Anchors with nothing to show are absent from the result.
+ * For each anchor (a check-in's moment): the last few plays in the
+ * `windowMinutes` up to it, from the listening session of the most recent
+ * play, provided the session is shown on the timeline (`minTracks`). Anchors
+ * with nothing to show are absent from the result.
  */
 export async function getListeningBefore(
   userId: string,
   anchors: { id: string; time: Date }[],
-  gapMinutes: number,
+  windowMinutes: number,
   minTracks: number,
 ): Promise<Map<string, ListeningBefore>> {
   const out = new Map<string, ListeningBefore>();
   if (anchors.length === 0) return out;
   const result = await query(
-    `SELECT a.id AS anchor_id, n.session_id, n.session_date,
+    `SELECT a.id AS anchor_id, a.t AS anchor_time, n.session_id, n.session_date,
             p.played_at, p.title, p.artists, p.art_id, p.album_ref, p.song_key,
             EXISTS (SELECT 1 FROM music_scrobbles e
                     WHERE e.session_id = n.session_id AND e.played_at < p.played_at) AS older_exists
@@ -941,16 +943,23 @@ export async function getListeningBefore(
                WHERE al.user_id = s2.user_id AND al.album_key = s2.album_key AND al.thumb_file IS NOT NULL) AS art_id
        FROM music_scrobbles s2
        WHERE s2.session_id = n.session_id AND s2.played_at <= a.t
+         AND s2.played_at >= a.t - make_interval(mins => $4::int)
        ORDER BY s2.played_at DESC, s2.id DESC
        LIMIT $6
      ) p ON true
      ORDER BY a.id, p.played_at DESC`,
-    [anchors.map((a) => a.id), anchors.map((a) => a.time), userId, gapMinutes, minTracks, LISTENING_PREVIEW_TRACKS],
+    [anchors.map((a) => a.id), anchors.map((a) => a.time), userId, windowMinutes, minTracks, LISTENING_PREVIEW_TRACKS],
   );
   for (const row of result.rows) {
     let entry = out.get(row.anchor_id);
     if (!entry) {
-      entry = { session_id: row.session_id, session_date: row.session_date, tracks: [], has_more: false };
+      entry = {
+        session_id: row.session_id,
+        session_date: row.session_date,
+        anchor_time: Math.floor(new Date(row.anchor_time).getTime() / 1000),
+        tracks: [],
+        has_more: false,
+      };
       out.set(row.anchor_id, entry);
     }
     entry.tracks.push({

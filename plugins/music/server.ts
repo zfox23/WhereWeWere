@@ -595,6 +595,13 @@ musicRouter.delete('/scrobbles/:id', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * How far back before a check-in its "what was playing" songs reach. Fixed
+ * rather than the session gap: only songs right before arriving are worth
+ * showing on the check-in.
+ */
+const LISTENING_BEFORE_MINUTES = 10;
+
 // GET /around?checkin_ids=a,b - what was playing at the end of each check-in
 // (see getListeningBefore). Check-ins with nothing to show are omitted.
 musicRouter.get('/around', async (req: Request, res: Response) => {
@@ -607,7 +614,7 @@ musicRouter.get('/around', async (req: Request, res: Response) => {
     const found = await getListeningBefore(
       USER_ID,
       anchors.rows.map((r: { id: string; checked_in_at: string }) => ({ id: r.id, time: new Date(r.checked_in_at) })),
-      settings.session_gap_minutes,
+      LISTENING_BEFORE_MINUTES,
       settings.min_session_tracks,
     );
     res.json(Object.fromEntries(found));

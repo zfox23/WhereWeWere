@@ -9,6 +9,7 @@ import type { ListeningBefore } from '../../src/types';
 const listening = (overrides: Partial<ListeningBefore> = {}): ListeningBefore => ({
   session_id: 'sess-1',
   session_date: '2024-05-01',
+  anchor_time: 360,
   tracks: [
     { artists: ['Khruangbin'], title: 'Newest', time: 300 },
     { artists: ['Men I Trust', 'Guest'], title: 'Middle', time: 200 },
@@ -37,30 +38,37 @@ function renderPreview(l: ListeningBefore, compact = false) {
 describe('MusicPreview', () => {
   afterEach(cleanup);
 
-  it('lists the plays newest first', () => {
+  it('shows only the last song, with a toggle for the earlier ones', async () => {
+    const user = userEvent.setup();
     renderPreview(listening());
-    const items = screen.getAllByRole('listitem').map((li) => li.textContent);
-    expect(items).toEqual(['Khruangbin — Newest', 'Men I Trust, Guest — Middle', 'Tycho — Oldest']);
-  });
-
-  it('fades only the oldest play, and only when the session has more', () => {
-    renderPreview(listening());
-    const items = screen.getAllByRole('listitem');
-    expect(items.map((li) => li.getAttribute('data-faded'))).toEqual([null, null, 'true']);
-    // A vertical gradient mask that ends fully transparent.
-    expect(items[2].style.maskImage).toMatch(/linear-gradient\(.*transparent/);
-    expect(items[0].getAttribute('style')).toBeNull();
-    cleanup();
-    renderPreview(listening({ has_more: false }));
-    expect(screen.getAllByRole('listitem').every((li) => !li.hasAttribute('data-faded'))).toBe(true);
-  });
-
-  it('renders fewer plays without trouble, and nothing for none', () => {
-    renderPreview(listening({ tracks: [{ artists: ['A'], title: 'Only', time: 1 }], has_more: false }));
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Khruangbin — Newest']);
+    const toggle = screen.getByRole('button', { name: 'Show 2 earlier songs' });
+    expect(toggle.textContent).toBe('+2');
+    expect(toggle.getAttribute('title')).toBe('Men I Trust, Guest — Middle\nTycho — Oldest');
+    await user.click(toggle);
+    expect(screen.queryByTestId('probe')).toBeNull(); // toggling does not jump to the session
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Khruangbin — Newest',
+      'Men I Trust, Guest — Middle',
+      'Tycho — Oldest',
+    ]);
+    await user.click(screen.getByRole('button', { name: 'Show only the last song' }));
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('has no toggle for a single song, and renders nothing for none', () => {
+    renderPreview(listening({ tracks: [{ artists: ['A'], title: 'Only', time: 1 }], has_more: true }));
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByRole('button')).toBeNull();
     cleanup();
     const { container } = renderPreview(listening({ tracks: [] }));
     expect(container.querySelector('a')).toBeNull();
+  });
+
+  it('shows no album covers', () => {
+    renderPreview(listening({ tracks: [{ artists: ['A'], title: 'With cover', time: 2, art_id: 'art-1' }] }));
+    expect(screen.queryByRole('link', { name: 'Show album details' })).toBeNull();
+    expect(document.querySelector('img')).toBeNull();
   });
 
   const JUMP = '/?from=2024-05-01&to=2024-05-01|{"focusSession":"sess-1"}';
@@ -71,7 +79,7 @@ describe('MusicPreview', () => {
     const link = screen.getByRole('link', { name: 'Show this listening session on the timeline' });
     expect(link.getAttribute('href')).toBe('/?from=2024-05-01&to=2024-05-01');
     expect(link.querySelector('svg')).not.toBeNull();
-    await user.click(screen.getByText('Middle', { exact: false }).closest('li')!);
+    await user.click(screen.getByText('Newest', { exact: false }).closest('li')!);
     expect(screen.getByTestId('probe').textContent).toBe(JUMP);
     cleanup();
     renderPreview(listening());
@@ -89,23 +97,6 @@ describe('MusicPreview', () => {
     expect([artist.getAttribute('target'), title.getAttribute('target')]).toEqual(['_blank', '_blank']);
     await user.click(title);
     expect(screen.queryByTestId('probe')).toBeNull(); // the preview's own jump did not fire
-  });
-
-  it('shows a cover per play; clicking one opens the album instead of jumping', async () => {
-    const user = userEvent.setup();
-    renderPreview(listening({
-      tracks: [
-        { artists: ['A'], title: 'With cover', time: 2, art_id: 'art-1' },
-        { artists: ['B'], title: 'Without', time: 1, art_id: null },
-      ],
-      has_more: false,
-    }));
-    const covers = screen.getAllByRole('link', { name: 'Show album details' });
-    expect(covers).toHaveLength(1);
-    expect(covers[0].querySelector('img')?.getAttribute('src')).toBe('/api/v1/music/albums/art-1/art');
-    await user.click(covers[0]);
-    expect(screen.queryByTestId('probe')).toBeNull(); // still on the originating route
-    expect(screen.getByRole('dialog')).toBeTruthy();
   });
 });
 

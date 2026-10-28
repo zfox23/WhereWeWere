@@ -368,6 +368,8 @@ export interface ListeningBefore {
   session_id: string;
   /** Local date (YYYY-MM-DD) the session is grouped under on the timeline. */
   session_date: string;
+  /** The check-in moment the plays lead up to, epoch seconds. */
+  anchor_time: number;
   /** Up to three plays, newest first. */
   tracks: { artists: string[]; title: string; time: number; art_id?: string | null; album_ref?: string | null; song_key?: string | null }[];
   /** The session has plays earlier than the oldest one listed. */
