@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, ChevronRight, CalendarDays, Users, List } from 'lucide-react';
+import { MapPin, Clock, Pencil, Trash2, Loader2, AlertCircle, Camera, ChevronRight, CalendarDays, Users, List, UtensilsCrossed } from 'lucide-react';
 import { BackButton } from '../../../client/src/components/BackButton';
 import Stars from '../../../client/src/components/Stars';
 import { MarkdownNote } from '../../../client/src/components/checkin-card/MarkdownNote';
-import { checkins, settings, immich as immichApi, checkinLists } from '../../../client/src/api/client';
+import { checkins, settings, immich as immichApi, checkinLists, request } from '../../../client/src/api/client';
+import { hasClientPlugin } from '../../../client/src/plugins/registry';
 import type { ImmichAsset, CheckinList } from '../../../client/src/types';
 import MapView from './MapView';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
@@ -51,6 +52,10 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
   const [photos, setPhotos] = useState<ImmichAsset[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [lists, setLists] = useState<CheckinList[]>([]);
+  // Meals logged against this check-in (Food plugin, when installed). Read at
+  // render time: the registry imports this module, so it isn't ready at load.
+  const foodEnabled = hasClientPlugin('food');
+  const [meals, setMeals] = useState<{ id: string; recipe_name: string }[]>([]);
 
   usePageTitle(checkin?.venue_name ? `Check-In: ${checkin.venue_name}` : 'Check-In');
 
@@ -69,6 +74,13 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
       setError(err instanceof Error ? err.message : 'Failed to load check-in');
     }).finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !foodEnabled) return;
+    request<{ id: string; recipe_name: string }[]>(`/food/checkins?location_checkin_id=${id}`)
+      .then(setMeals)
+      .catch(() => setMeals([]));
+  }, [id, foodEnabled]);
 
   useEffect(() => {
     if (!id || !immichUrl) return;
@@ -278,6 +290,18 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
           </Link>
         </div>
 
+        {meals.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 dark:text-gray-300">
+            <UtensilsCrossed size={14} className="text-orange-500" />
+            {meals.map((m, i) => (
+              <span key={m.id}>
+                <Link to={`/food-checkins/${m.id}`} className="hover:text-primary-600 hover:underline">{m.recipe_name}</Link>
+                {i < meals.length - 1 ? ',' : ''}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Action buttons */}
         <div className="flex items-center gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
           <Link
@@ -287,6 +311,15 @@ export default function CheckInDetail(props: { id: string } = { id: '' }) {
             <Pencil size={14} />
             Edit
           </Link>
+          {foodEnabled && (
+            <Link
+              to={`/food-check-in?location_checkin_id=${checkin.id}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            >
+              <UtensilsCrossed size={14} />
+              Add what I ate
+            </Link>
+          )}
           <button
             onClick={handleDelete}
             disabled={deleting}
