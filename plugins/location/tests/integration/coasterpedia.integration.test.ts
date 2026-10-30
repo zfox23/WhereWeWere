@@ -254,6 +254,9 @@ describe('Coasterpedia enrichment (integration)', () => {
     await query(`DELETE FROM plugin_settings WHERE plugin_id = 'location'`);
     const a = await createVenue('Alpha', ride);
     const b = await createVenue('Beta', ride);
+    // Let the post-save lookups from createVenue finish (they bail without a key)
+    // so they can't pick the key up below and add their own requests.
+    await new Promise((r) => setTimeout(r, 300));
     await setKey('cpk_test');
 
     const revoked = new Response(JSON.stringify({ type: 'https://api.coasterpedia.net/problems/key-revoked', status: 403 }), {
