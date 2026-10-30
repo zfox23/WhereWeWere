@@ -22,7 +22,6 @@ export const config = {
   sessionSecret: process.env.SESSION_SECRET || 'dev-secret',
   nodeEnv: process.env.NODE_ENV || 'development',
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
-  apiAccessToken: process.env.API_ACCESS_TOKEN || '',
   trustProxy: parseBoolean(process.env.TRUST_PROXY, false),
   // Photon geocoder used for reverse geocoding / place search. Venue
   // coordinates are sent to this host, so self-hosters should point it at their

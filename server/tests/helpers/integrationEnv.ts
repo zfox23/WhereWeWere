@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import path from 'path';
 import dotenv from 'dotenv';
 
@@ -15,3 +16,24 @@ if (!testUrl) {
   );
 }
 process.env.DATABASE_URL = testUrl;
+
+// Every `request(app).<verb>(...)` signs in as the default test user (see
+// helpers/auth.ts). Override with `.set('Cookie', ...)` or `.unset('Cookie')`.
+vi.mock('supertest', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('supertest')>();
+  const { DEFAULT_SESSION_COOKIE } = await import('./auth');
+  const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options']);
+  const signedIn = ((app: Parameters<typeof actual.default>[0]) => {
+    const agent = actual.default(app);
+    return new Proxy(agent, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof prop === 'string' && VERBS.has(prop) && typeof value === 'function') {
+          return (...args: unknown[]) => value.apply(target, args).set('Cookie', DEFAULT_SESSION_COOKIE);
+        }
+        return value;
+      },
+    });
+  }) as typeof actual.default;
+  return { ...actual, default: signedIn };
+});

@@ -4,6 +4,8 @@ import { runMigrations } from '../../src/db/runMigrations';
 import { Pool } from 'pg';
 
 import { DEFAULT_USER_ID } from '../../src/constants';
+import { resetLoginThrottle } from '../../src/auth/rateLimit';
+import { createTestSession, DEFAULT_SESSION_TOKEN } from './auth';
 
 function assertSafeTestDatabase() {
   const dbUrl = config.databaseUrl;
@@ -88,11 +90,14 @@ export async function resetIntegrationDatabase() {
   }
 
   await query(
-    `INSERT INTO users (id, username, email, password_hash, display_name)
-     VALUES ($1, 'default', 'user@wherewewere.local', 'no-auth', 'Default User')
+    `INSERT INTO users (id, username, email, password_hash, display_name, is_admin)
+     VALUES ($1, 'default', 'user@wherewewere.local', 'no-auth', 'Default User', TRUE)
      ON CONFLICT (id) DO NOTHING`,
     [DEFAULT_USER_ID]
   );
+  // Suites send this session's cookie by default (see helpers/auth.ts).
+  await createTestSession(DEFAULT_USER_ID, DEFAULT_SESSION_TOKEN);
+  resetLoginThrottle();
 }
 
 export async function teardownIntegrationDatabase() {

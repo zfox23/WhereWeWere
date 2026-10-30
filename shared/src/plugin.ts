@@ -251,6 +251,13 @@ export interface PluginApiMount {
   mount: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   router: any;
+  /**
+   * Mount before the login guard, for callers that can't sign in (inbound
+   * webhooks). The router must authenticate every route itself, e.g. with the
+   * server's `webhookUser` middleware on a `/:token` path, which also sets the
+   * user context.
+   */
+  public?: boolean;
 }
 
 /** Progress payload for a plugin job (free-form, stored on the jobs row). */
@@ -309,9 +316,9 @@ export interface CheckinTypeServerPlugin {
 
   /**
    * Routes mounted at the server root (`mount` is the full path, e.g.
-   * '/apis/mlj_1'), BEFORE the `API_ACCESS_TOKEN` guard. For protocols that
-   * third-party clients speak with their own credentials; the router must
-   * authenticate requests itself.
+   * '/apis/mlj_1'), outside the login guard. For protocols that third-party
+   * clients speak with their own credentials; the router must authenticate
+   * requests itself and run them as the matching user (`runAsUser`).
    */
   rootApi?: PluginApiMount | PluginApiMount[];
 

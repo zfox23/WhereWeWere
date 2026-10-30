@@ -11,12 +11,18 @@ import { backupRouter } from './routes/backup';
 import { llmRouter } from './routes/llm';
 import { importYamtrackRouter } from './routes/import-yamtrack';
 import { companionsRouter } from './routes/companions';
+import { authRouter } from './routes/auth';
+import { usersRouter } from './routes/users';
+import { requireAuth } from './auth/middleware';
 import { runMigrations } from './db/runMigrations';
 import { isUuid } from './services/batching';
-import { tokensMatch } from './services/tokens';
 import { pluginsRouter } from './plugins/routes';
 import { allPlugins } from './plugins/registry';
+import type { PluginApiMount } from 'wwp-shared';
 
+function pluginMounts(api: PluginApiMount | PluginApiMount[] | undefined): PluginApiMount[] {
+  return api ? (Array.isArray(api) ? api : [api]) : [];
+}
 
 export function createApp() {
   const app = express();
@@ -51,7 +57,8 @@ export function createApp() {
   // Only the legacy JSON backup import needs a huge body; everything else
   // gets a modest limit. body-parser skips already-parsed requests, so the
   // order below matters.
-  app.use('/api/v1/backup/import', express.json({ limit: '500mb' }));
+  // (Authenticate first, so anonymous callers can't make it parse 500 MB.)
+  app.use('/api/v1/backup/import', requireAuth, express.json({ limit: '500mb' }));
   app.use(express.json({ limit: '10mb' }));
 
   // Container health endpoint for compose/orchestrators.
@@ -60,11 +67,8 @@ export function createApp() {
   });
 
   // Plugin routes that third-party clients call with their own credentials
-  // (e.g. multi-scrobbler), so they sit outside the API_ACCESS_TOKEN guard.
-  const rootMounts = allPlugins().flatMap((plugin) => {
-    const api = plugin.server.rootApi;
-    return api ? (Array.isArray(api) ? api : [api]) : [];
-  });
+  // (e.g. multi-scrobbler), so they sit outside the login guard.
+  const rootMounts = allPlugins().flatMap((plugin) => pluginMounts(plugin.server.rootApi));
   if (rootMounts.length > 0) {
     // Clients that join a base URL ending in "/" to an absolute path (e.g.
     // multi-scrobbler: "http://host:3001/" + "/apis/...") send a doubled
@@ -80,16 +84,19 @@ export function createApp() {
     }
   }
 
-  if (config.apiAccessToken) {
-    app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
-      const token = req.header('x-wherewewere-token') ?? '';
-      if (!tokensMatch(token, config.apiAccessToken)) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-      next();
-    });
+  // Sign-in and account routes handle their own authentication.
+  app.use('/api/v1/auth', authRouter);
+
+  // Plugin routes for callers that can't sign in (inbound webhooks): each
+  // authenticates by the secret token in its URL.
+  for (const plugin of allPlugins()) {
+    for (const mount of pluginMounts(plugin.server.api)) {
+      if (mount.public) app.use(`/api/v1${mount.mount}`, mount.router);
+    }
   }
+
+  // Everything else under /api/v1 needs a signed-in user, and runs as them.
+  app.use('/api/v1', requireAuth);
 
   // `user_id` / `venue_id` query params feed uuid columns: a malformed value
   // would surface as a Postgres error (500). Reject it up front with a 400.
@@ -115,16 +122,12 @@ export function createApp() {
   app.use('/api/v1/import/yamtrack', importYamtrackRouter);
   app.use('/api/v1/plugins', pluginsRouter);
   app.use('/api/v1/companions', companionsRouter);
+  app.use('/api/v1/admin/users', usersRouter);
 
   // Plugin-owned API routes (custom-storage plugins mount their own CRUD).
   for (const plugin of allPlugins()) {
-    if (plugin.server.api) {
-      const mounts = Array.isArray(plugin.server.api)
-        ? plugin.server.api
-        : [plugin.server.api];
-      for (const mount of mounts) {
-        app.use(`/api/v1${mount.mount}`, mount.router);
-      }
+    for (const mount of pluginMounts(plugin.server.api)) {
+      if (!mount.public) app.use(`/api/v1${mount.mount}`, mount.router);
     }
   }
 
