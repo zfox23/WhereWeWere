@@ -16,6 +16,7 @@ import CheckInCard from './LocationCard';
 import MapView from './MapView';
 import { buildImmichMapUrl } from '../../../client/src/utils/checkin';
 import { haversineDistance, getBearingDegrees, formatDistance } from './geo';
+import { useDeviceHeading, arrowRotation } from './useDeviceHeading';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 import type { DistanceUnit } from './geo';
 
@@ -83,6 +84,7 @@ export default function VenueDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   // This route isn't wrapped in LocationProvider (which would also prefetch
+  const heading = useDeviceHeading();
   // nearby venues we don't need here), so read the position directly.
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   useEffect(() => {
@@ -433,7 +435,7 @@ export default function VenueDetail() {
                       <Navigation2
                         size={10}
                         className="text-gray-500 dark:text-gray-400"
-                        style={{ transform: `rotate(${venueBearing}deg)` }}
+                        style={{ transform: `rotate(${arrowRotation(venueBearing, heading)}deg)` }}
                       />
                       <span>{formatDistance(venueDistanceMeters, distanceUnit)}</span>
                     </a>
@@ -442,7 +444,7 @@ export default function VenueDetail() {
                       <Navigation2
                         size={10}
                         className="text-gray-500 dark:text-gray-400"
-                        style={{ transform: `rotate(${venueBearing}deg)` }}
+                        style={{ transform: `rotate(${arrowRotation(venueBearing, heading)}deg)` }}
                       />
                       <span>{formatDistance(venueDistanceMeters, distanceUnit)}</span>
                     </span>

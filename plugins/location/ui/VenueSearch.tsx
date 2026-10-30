@@ -3,6 +3,7 @@ import { Search, MapPin, Plus, Loader2, Navigation, LocateFixed, Navigation2 } f
 import { settings, venues } from '../../../client/src/api/client';
 import { useLocation } from './LocationContext';
 import { haversineDistance, getBearingDegrees, formatDistance } from './geo';
+import { useDeviceHeading, arrowRotation } from './useDeviceHeading';
 import VenueEditMap from './VenueEditMap';
 import type { NearbyVenue, VenueCategory } from '../../../client/src/types';
 import type { DistanceUnit } from './geo';
@@ -41,6 +42,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [hasMoreResults, setHasMoreResults] = useState(false);
   const [osmLoading, setOsmLoading] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const heading = useDeviceHeading();
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
@@ -751,7 +753,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
                         <Navigation2
                           size={10}
                           className="text-gray-500 dark:text-gray-400"
-                          style={{ transform: `rotate(${bearing}deg)` }}
+                          style={{ transform: `rotate(${arrowRotation(bearing, heading)}deg)` }}
                         />
                         <span>{formatDistance(distanceMeters, distanceUnit)}</span>
                       </span>
