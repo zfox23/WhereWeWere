@@ -1,5 +1,6 @@
 {
     "chat.tools.terminal.autoApprove": {
         "npx tsc": true
-    }
+    },
+    "python.terminal.useEnvFile": true
 }

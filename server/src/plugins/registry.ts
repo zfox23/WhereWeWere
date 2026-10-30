@@ -33,6 +33,8 @@ import { server as musicServer } from '../../../plugins/music/server';
 import { manifest as musicManifest } from '../../../plugins/music/manifest';
 import { server as foodServer } from '../../../plugins/food/server';
 import { manifest as foodManifest } from '../../../plugins/food/manifest';
+import { server as notesServer } from '../../../plugins/notes/server';
+import { manifest as notesManifest } from '../../../plugins/notes/manifest';
 
 const registrations: CheckinTypeServer[] = [
   { ...moodManifest, server: moodServer },
@@ -43,6 +45,7 @@ const registrations: CheckinTypeServer[] = [
   { ...scubaManifest, server: scubaServer },
   { ...musicManifest, server: musicServer },
   { ...foodManifest, server: foodServer },
+  { ...notesManifest, server: notesServer },
 ];
 
 const byId = new Map<string, CheckinTypeServer>();
