@@ -3,6 +3,31 @@ import { useEffect, useState } from 'react';
 type OrientationEventWithCompass = DeviceOrientationEvent & { webkitCompassHeading?: number };
 type IOSOrientationEvent = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<string> };
 
+const rad = Math.PI / 180;
+
+/**
+ * Compass heading from absolute orientation angles, valid at any tilt. Uses the direction the
+ * back of the device points when it is held upright, or the top edge (plus screen rotation)
+ * when it is lying closer to flat.
+ */
+export function headingFromOrientation(alpha: number, beta: number, gamma: number, screenAngleDeg = 0): number {
+  const cA = Math.cos(alpha * rad), sA = Math.sin(alpha * rad);
+  const cB = Math.cos(beta * rad), sB = Math.sin(beta * rad);
+  const cG = Math.cos(gamma * rad), sG = Math.sin(gamma * rad);
+
+  const backEast = -(cA * sG + sA * sB * cG);
+  const backNorth = -(sA * sG - cA * sB * cG);
+  const topEast = -sA * cB;
+  const topNorth = cA * cB;
+
+  const backMagnitude = Math.hypot(backEast, backNorth);
+  const topMagnitude = Math.hypot(topEast, topNorth);
+  const degrees = backMagnitude >= topMagnitude
+    ? Math.atan2(backEast, backNorth) / rad
+    : Math.atan2(topEast, topNorth) / rad + screenAngleDeg;
+  return (degrees + 360) % 360;
+}
+
 function screenAngle(): number {
   return window.screen?.orientation?.angle ?? 0;
 }
@@ -18,12 +43,15 @@ export function useDeviceHeading(enabled = true): number | null {
       const event = e as OrientationEventWithCompass;
       let value: number | null = null;
       if (typeof event.webkitCompassHeading === 'number') {
-        value = event.webkitCompassHeading; // iOS: already clockwise from north
-      } else if (event.alpha != null && (event.absolute || e.type === 'deviceorientationabsolute')) {
-        value = 360 - event.alpha;
+        value = (event.webkitCompassHeading + screenAngle() + 360) % 360; // iOS: clockwise from north
+      } else if (
+        event.alpha != null && event.beta != null && event.gamma != null
+        && (event.absolute || e.type === 'deviceorientationabsolute')
+      ) {
+        value = headingFromOrientation(event.alpha, event.beta, event.gamma, screenAngle());
       }
       if (value == null || Number.isNaN(value)) return;
-      setHeading((value + screenAngle() + 360) % 360);
+      setHeading(value);
     };
 
     const listen = () => {
