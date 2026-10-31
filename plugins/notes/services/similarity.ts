@@ -3,9 +3,10 @@
  *
  * Vectors are L2-normalized, so cosine similarity is a dot product.
  *   - topKNeighbors: each note's most similar notes (the Similarity Web's edges)
- *   - clusterNotes: spherical k-means, k chosen by (simplified) silhouette;
- *     clustering runs on a random projection when the vectors are wide,
- *     then centroids are recomputed in the full space
+ *   - clusterNotes: spherical k-means, k chosen by (simplified) silhouette
+ *     within a granularity band; clustering runs on mean-centered vectors
+ *     (and a random projection when they are wide), then centroids are
+ *     recomputed in the full space
  *   - assignThemes: a primary theme per note plus a close secondary
  *   - matchPreviousThemes: reuse a theme (and its LLM-given name) when a
  *     new cluster has mostly the same notes
@@ -229,7 +230,7 @@ export function simplifiedSilhouette(vectors: Vector[], result: KMeansResult): n
   return total / vectors.length;
 }
 
-export const MAX_THEMES = 20;
+export const MAX_THEMES = 30;
 export const PROJECTION_DIMS = 128;
 
 export interface Clustering {
@@ -241,17 +242,40 @@ export interface Clustering {
   silhouette: number;
 }
 
-/** The candidate k values for `n` notes: 2..min(20, √n). */
+/**
+ * The candidate k values for `n` notes: round(√n / 2)..min(30, √n), at least 2 (floor clamped to the cap).
+ * Silhouette alone favors a coarse two-way split on text embeddings, so it
+ * only chooses among granularities from the floor up.
+ */
 export function candidateKs(n: number): number[] {
-  const max = Math.min(MAX_THEMES, Math.floor(Math.sqrt(n)));
+  const root = Math.sqrt(n);
+  const max = Math.min(MAX_THEMES, Math.floor(root));
+  if (max < 2) return [];
+  const min = Math.min(max, Math.max(2, Math.round(root / 2)));
   const ks: number[] = [];
-  for (let k = 2; k <= max; k++) ks.push(k);
+  for (let k = min; k <= max; k++) ks.push(k);
   return ks;
 }
 
 /**
+ * Subtract the mean vector and re-normalize. Embeddings share a large common
+ * component that squeezes every cosine into a narrow high band; removing it
+ * spreads the notes out so topics can separate.
+ */
+export function meanCenter(vectors: Vector[]): Vector[] {
+  const dims = vectors[0]?.length ?? 0;
+  const mean = new Float32Array(dims);
+  for (const v of vectors) for (let d = 0; d < dims; d++) mean[d] += v[d] / vectors.length;
+  return vectors.map((v) => {
+    const out = new Float32Array(dims);
+    for (let d = 0; d < dims; d++) out[d] = v[d] - mean[d];
+    return normalize(out);
+  });
+}
+
+/**
  * Cluster notes into themes. Fewer than 4 notes form one theme (or none).
- * Each k runs a few seeded restarts on the projected vectors; the k with the
+ * Each k runs a few seeded restarts on the centered, projected vectors; the k with the
  * best silhouette wins.
  */
 export async function clusterNotes(vectors: Vector[], seed = 42, restarts = 3): Promise<Clustering | null> {
@@ -263,7 +287,7 @@ export async function clusterNotes(vectors: Vector[], seed = 42, restarts = 3): 
     return { k: 1, assignments, centroids: centroidsFor(vectors, assignments, 1), silhouette: 0 };
   }
   const rand = seededRandom(seed);
-  const projected = project(vectors, PROJECTION_DIMS, rand);
+  const projected = project(meanCenter(vectors), PROJECTION_DIMS, rand);
   let best: (KMeansResult & { k: number; silhouette: number }) | null = null;
   for (const k of ks) {
     let bestRun: KMeansResult | null = null;

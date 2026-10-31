@@ -70,10 +70,24 @@ describe('clusterNotes', () => {
     expect(three).toMatchObject({ k: 1, assignments: [0, 0, 0] });
   });
 
-  it('caps k at √n and 20', () => {
+  it('bounds k between half of √n and min(√n, 30)', () => {
     expect(candidateKs(3)).toEqual([]);
     expect(candidateKs(9)).toEqual([2, 3]);
-    expect(candidateKs(10_000).at(-1)).toBe(20);
+    const ks = candidateKs(1300);
+    expect([ks[0], ks.at(-1)]).toEqual([18, 30]);
+    expect(candidateKs(10_000).at(-1)).toBe(30);
+  });
+
+  it('splits a library with a large shared component into many themes', async () => {
+    // Every note leans hard on one common direction, so raw cosines are all high.
+    const { vectors } = blobs(8, 25, 64);
+    const shared = vectors.map((v) => {
+      const out = Float32Array.from(v);
+      out[63] += 6;
+      return normalize(out);
+    });
+    const result = (await clusterNotes(shared))!;
+    expect(result.k).toBeGreaterThan(2);
   });
 });
 
