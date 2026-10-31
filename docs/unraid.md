@@ -23,7 +23,6 @@ Set in `.env`:
 
 Recommended:
 
-- `API_ACCESS_TOKEN`
 - `CORS_ORIGINS` for your Unraid hostname or domain
 
 ## 3. Start containers
@@ -35,6 +34,12 @@ docker compose up -d --build
 Access:
 
 - `http://<unraid-ip>:5173`
+
+Before the first sign-in, set the initial admin account's password (see [Accounts](accounts.md#first-sign-in)). On a new install the account is `default`; on an install upgraded from the single-user version, use your existing username:
+
+```bash
+docker compose exec server node dist/server/src/scripts/set-password.js default --generate
+```
 
 ## 4. Storage options
 
@@ -64,6 +69,10 @@ Ensure Docker has read and write access to your selected appdata path.
 
 Change published ports in `docker-compose.yml`.
 
-### API requests return unauthorized
+### Locked out / forgot the admin password
 
-If `API_ACCESS_TOKEN` is set, rebuild after env changes and ensure clients send `X-WhereWeWere-Token`.
+Reset it from the Unraid terminal (see [Accounts → Recovery](accounts.md#recovery-when-no-admin-can-sign-in)):
+
+```bash
+docker compose exec server node dist/server/src/scripts/set-password.js <username> --generate
+```

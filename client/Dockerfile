@@ -7,8 +7,6 @@ COPY shared ./shared
 COPY plugins ./plugins
 COPY client ./client
 RUN npm install
-ARG VITE_API_ACCESS_TOKEN=
-ENV VITE_API_ACCESS_TOKEN=$VITE_API_ACCESS_TOKEN
 RUN npm run build --workspace=client
 
 FROM nginx:alpine

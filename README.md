@@ -8,6 +8,7 @@ It helps you record where you were, how you felt, and how you slept, then browse
 
 - [Getting Started](docs/getting-started.md)
 - [Configuration](docs/configuration.md)
+- [Accounts & Sign-in](docs/accounts.md)
 - [Deployment](docs/deployment.md)
 - [Unraid Deployment](docs/unraid.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -29,11 +30,11 @@ It helps you record where you were, how you felt, and how you slept, then browse
 
 ## Security Scope
 
-WhereWeWere currently behaves as a single-user app.
+WhereWeWere has password sign-in with separate, private accounts (a household, a few friends). There is no self sign-up or email: an administrator creates accounts and resets passwords.
 
-- It is not a multi-user auth platform yet.
-- If you expose it publicly, configure access controls first.
-- See [Configuration](docs/configuration.md) for `API_ACCESS_TOKEN`, `CORS_ORIGINS`, and proxy settings.
+- Every user's journal is private; administrators manage accounts but can't see anyone else's data. Venues are a shared catalog.
+- Set the initial admin password before first use: see [Accounts & Sign-in](docs/accounts.md).
+- If you expose it publicly, use HTTPS; see [Configuration](docs/configuration.md) for `CORS_ORIGINS` and proxy settings.
 
 ## Motivation
 
@@ -59,6 +60,7 @@ Requires Node.js `^22.22.2 || ^24.15.0 || >=26.0.0` and a local Postgres with Po
 npm install
 cp .env.example .env   # point DATABASE_URL at a PostGIS database
 npm run dev            # builds shared, then runs server and client concurrently
+npm run user:set-password --workspace=server -- default --generate   # first sign-in: prints a temporary password
 ```
 
 - Client: `http://localhost:5173` (Vite dev server; `/api` is proxied to the server)

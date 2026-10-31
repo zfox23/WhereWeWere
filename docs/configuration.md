@@ -27,14 +27,11 @@ cp .env.example .env
   - Comma-separated list of allowed browser origins.
   - Example: `https://journal.example.com,https://www.journal.example.com`
   - When unset, no cross-origin access is granted (same-origin only), which is what the bundled nginx proxy and the Vite dev proxy need. Set it only if a browser app on a different origin calls the API directly.
-- `API_ACCESS_TOKEN`
-  - Optional API token guard.
-  - When set, all `/api/v1/*` requests must include `X-WhereWeWere-Token` with the exact value.
-  - The client is built with this value (via the `VITE_API_ACCESS_TOKEN` build arg), so **rebuild the client and server** whenever you change it.
 - `TRUST_PROXY`
-  - Set to `true` when running behind a reverse proxy (Traefik, Caddy, Nginx, etc.).
+  - Set to `true` when running behind a reverse proxy (Traefik, Caddy, Nginx, etc.), so the server sees the client's real IP (sign-in throttling, the devices list) and HTTPS (the session cookie is then marked `Secure`).
+- Accounts
+  - Every API request requires a signed-in user; there is no shared API token. Accounts, sessions and recovery are described in [Accounts](accounts.md).
 
 ## Notes
 
-- This project is currently a single-user deployment model.
-- Integrations (Immich, Dawarich, LLM) are configured per-user in the app's **Settings → Integrations** page, not via environment variables.
+- Each account's data is private to it. Integrations (Immich, Dawarich, LLM, and the plugins' API keys) are configured per user in the app's **Settings** pages, not via environment variables.

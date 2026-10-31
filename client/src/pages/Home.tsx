@@ -15,7 +15,6 @@ import WeatherModal from '../../../plugins/location/ui/WeatherModal';
 import type { WeatherSummary } from '../../../plugins/location/ui/weatherFormat';
 import { dedupeListening } from '../utils/listening';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
 const PAGE_SIZE = 20;
 
 /**
@@ -471,7 +470,6 @@ export default function Home() {
 
       try {
         const params: Record<string, string> = {
-          user_id: USER_ID,
           limit: String(pageSize),
           offset: String(offset),
         };

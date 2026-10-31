@@ -44,10 +44,12 @@ registerRoute(
 
 // Cache API responses, except anything holding secrets or bulk personal data:
 // settings (Immich/Dawarich API keys), backups, integration proxies (Immich
-// images), LLM/jobs/import endpoints, webhooks and per-plugin settings (e.g.
-// TMDB keys). Those must always hit the network and never land in CacheStorage.
+// images), LLM/jobs/import endpoints, webhooks, per-plugin settings (e.g.
+// TMDB keys), and account endpoints (auth: who is signed in, sessions,
+// webhook secret; admin: user management). Those must always hit the network
+// and never land in CacheStorage. The page deletes 'api-cache' on sign-out.
 const UNCACHED_API_PATHS =
-  /^\/api\/v1\/(?:settings|backup|immich|llm|jobs|import|webhook)(?:\/|$)|^\/api\/v1\/plugins\/[^/]+\/settings(?:\/|$)/;
+  /^\/api\/v1\/(?:settings|backup|immich|llm|jobs|import|webhook|auth|admin)(?:\/|$)|^\/api\/v1\/plugins\/[^/]+\/settings(?:\/|$)/;
 
 // Earlier builds cached every API GET; drop whatever they stored (it may
 // include API keys or a full backup archive).
@@ -59,6 +61,11 @@ registerRoute(
   ({ url }) => url.pathname.startsWith('/api/v1/') && !UNCACHED_API_PATHS.test(url.pathname),
   new NetworkFirst({
     cacheName: 'api-cache',
-    plugins: [new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 5 })],
+    plugins: [
+      // Only successful responses: never a 401/403 (or an opaque response),
+      // which would otherwise be replayed offline or to the next user.
+      { cacheWillUpdate: async ({ response }) => (response.status === 200 ? response : null) },
+      new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 5 }),
+    ],
   })
 );

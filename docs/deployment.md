@@ -4,15 +4,15 @@ This guide covers Docker Compose deployment for persistent, self-hosted operatio
 
 ## Security model reminder
 
-WhereWeWere is currently designed as a single-user application.
+WhereWeWere has its own password sign-in, with separate private accounts managed by an administrator (see [Accounts](accounts.md)).
 
 Before exposing it publicly:
 
-- Use HTTPS
+- Use HTTPS (session cookies are marked `Secure` when the request arrives over HTTPS; set `TRUST_PROXY=true` behind a reverse proxy)
 - Set `NODE_ENV=production`
-- Set `API_ACCESS_TOKEN`
 - Set `CORS_ORIGINS`
-- Place the app behind a reverse proxy auth layer or VPN
+- Set a password for the initial admin account (see below) and give every user a strong password
+- Consider keeping it behind a VPN or your reverse proxy's access controls anyway: a single self-hosted server is a small target, but defense in depth is cheap
 
 ## Services and ports
 
@@ -29,6 +29,16 @@ The client Nginx proxy forwards `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwa
 ```bash
 docker compose up -d --build
 ```
+
+## First sign-in
+
+A new install has one administrator account, `default`, with no usable password (an install upgraded from the single-user version keeps its existing account and username instead). Set one (it prints a temporary password you replace at first sign-in):
+
+```bash
+docker compose exec server node dist/server/src/scripts/set-password.js default --generate
+```
+
+Then sign in, choose your own password, and optionally rename the account under **Settings → Account**. Add other people under **Settings → Users**. See [Accounts](accounts.md).
 
 ## Verify health
 

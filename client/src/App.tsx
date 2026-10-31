@@ -1,5 +1,7 @@
 import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { AuthProvider } from './contexts/AuthContext';
+import { AuthGate } from './components/AuthGate';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import { allClientPlugins, getClientPlugin } from './plugins/registry';
@@ -92,6 +94,8 @@ const pluginRouteElements = allClientPlugins().flatMap((plugin) => {
 export default function App() {
   return (
     <ThemeProvider>
+    <AuthProvider>
+    <AuthGate>
     <Layout>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -126,6 +130,8 @@ export default function App() {
         {pluginRouteElements}
       </Routes>
     </Layout>
+    </AuthGate>
+    </AuthProvider>
     </ThemeProvider>
   );
 }

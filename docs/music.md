@@ -24,7 +24,7 @@ Multi-scrobbler has no plugin mechanism, so WhereWeWere imitates the one client 
    The URL must be reachable *from the multi-scrobbler container*, so `localhost` will not work from inside Docker; use the host's LAN address or a shared Docker network.
 3. Restart multi-scrobbler. Its log should show `Auth test passed!` and, on the next play, `Scrobbled (New) => ... [Maloja - wherewewere]`.
 
-The key is separate from `API_ACCESS_TOKEN`: the `/apis/` routes sit outside that guard because multi-scrobbler cannot send the `X-WhereWeWere-Token` header.
+The `/apis/` routes don't use the sign-in session (multi-scrobbler can't sign in), so the key is what authenticates them. Each user has their own key, and scrobbles land in the account whose key was used; with several users, give each of their multi-scrobbler setups that user's key.
 
 > **Note:** multi-scrobbler reads scrobble history without sending the key (it uses it to skip plays it has already sent), so `GET /apis/mlj_1/scrobbles` is readable by anyone who can reach the server port. Writes need the key. If that port is exposed beyond your network, keep it behind your reverse proxy's access controls.
 

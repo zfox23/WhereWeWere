@@ -5,32 +5,70 @@ import type {
 } from '../types';
 
 import { notifySettingsChanged } from '../utils/settingsEvents';
+import { reportAuthFailure } from '../utils/authEvents';
 import { createListsApi } from './lists';
 
 const API_BASE = '/api/v1';
-const API_ACCESS_TOKEN = (import.meta.env.VITE_API_ACCESS_TOKEN || '').trim();
 
-export function withAuthHeader(headers: HeadersInit = {}): HeadersInit {
-  if (!API_ACCESS_TOKEN) return headers;
-  return { ...headers, 'X-WhereWeWere-Token': API_ACCESS_TOKEN };
+/**
+ * fetch() for callers that need the raw Response (uploads, downloads). Like
+ * request(), it reports an expired session or a pending password change to
+ * the auth gate.
+ */
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status === 401 || res.status === 403) {
+    const body = await res.clone().json().catch(() => null);
+    reportAuthFailure(res.status, body?.code);
+  }
+  return res;
+}
+
+/** A failed API response: the server's message plus status / error code. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    /** Seconds from a Retry-After header (429), when present. */
+    readonly retryAfter?: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/**
+ * Parse a failed response's JSON body (falling back to statusText) and tell
+ * the auth gate about expired sessions / temporary passwords.
+ */
+async function errorBody(res: Response): Promise<{ error?: string; message?: string; code?: string }> {
+  const body = await res.json().catch(() => ({ message: res.statusText }));
+  reportAuthFailure(res.status, body?.code);
+  return body ?? {};
 }
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // Headers are merged explicitly and placed after the spread: the old order
-  // let a caller-supplied `options.headers` replace Content-Type and the auth
-  // header wholesale.
+  // let a caller-supplied `options.headers` replace Content-Type wholesale.
   const { headers: extraHeaders, ...rest } = options ?? {};
   const res = await fetch(`${API_BASE}${path}`, {
     ...rest,
-    headers: withAuthHeader({
+    headers: {
       'Content-Type': 'application/json',
       ...(extraHeaders as Record<string, string> | undefined),
-    }),
+    },
   });
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: res.statusText }));
+    const error = await errorBody(res);
+    const retryAfter = Number(res.headers?.get?.('Retry-After')) || undefined;
     // Server error bodies use { error: "..." }; fall back to `message`, then status.
-    throw new Error(error.error || error.message || `Request failed: ${res.status}`);
+    throw new ApiError(
+      error.error || error.message || `Request failed: ${res.status}`,
+      res.status,
+      error.code,
+      retryAfter,
+    );
   }
   // 204 No Content has no body to parse (res.json() would throw on it).
   if (res.status === 204) return undefined as T;
@@ -170,93 +208,45 @@ export const venueLists = {
     request<{ message: string }>(`/venues/lists/${listId}/items/${venueId}`, { method: 'DELETE' }),
 };
 
-// Stats
+// Stats. Always the signed-in user's own numbers: the server scopes by session.
+/** Query string with optional from/to range. */
+function rangeQuery(from?: string, to?: string, extra: Record<string, string> = {}): string {
+  const qp = new URLSearchParams(extra);
+  if (from && to) {
+    qp.set('from', from);
+    qp.set('to', to);
+  }
+  const qs = qp.toString();
+  return qs ? `?${qs}` : '';
+}
+
 export const stats = {
-  summary: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any>(`/location-checkins/stats/summary?${qp.toString()}`);
-  },
-  topVenues: (userId: string, limit = 10, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId, limit: String(limit) });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/top-venues?${qp.toString()}`);
-  },
-  categoryBreakdown: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/category-breakdown?${qp.toString()}`);
-  },
-  heatmap: (userId: string, year: number) =>
-    request<any[]>(`/location-checkins/stats/heatmap?user_id=${userId}&year=${year}`),
-  countries: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/countries?${qp.toString()}`);
-  },
-  mapData: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/map-data?${qp.toString()}`);
-  },
-  dayOfWeek: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/day-of-week?${qp.toString()}`);
-  },
-  timeOfDay: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/time-of-day?${qp.toString()}`);
-  },
-  busiestDays: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/busiest-days?${qp.toString()}`);
-  },
-  topCities: (userId: string, from?: string, to?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (from && to) {
-      qp.set('from', from);
-      qp.set('to', to);
-    }
-    return request<any[]>(`/location-checkins/stats/top-cities?${qp.toString()}`);
-  },
-  reflections: (userId: string, targetDate?: string) => {
-    const qp = new URLSearchParams({ user_id: userId });
-    if (targetDate) {
-      qp.set('target_date', targetDate);
-    }
-    return request<any[]>(`/stats/reflections?${qp.toString()}`);
-  },
-  additionalStats: (userId: string) =>
-    request<any>(`/location-checkins/stats/additional-stats?user_id=${userId}`),
-  earliestDates: (userId: string) =>
-    request<{ checkins: string | null; tracks: string | null; [typeId: string]: string | null }>(`/stats/earliest-dates?user_id=${userId}`),
+  summary: (from?: string, to?: string) =>
+    request<any>(`/location-checkins/stats/summary${rangeQuery(from, to)}`),
+  topVenues: (limit = 10, from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/top-venues${rangeQuery(from, to, { limit: String(limit) })}`),
+  categoryBreakdown: (from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/category-breakdown${rangeQuery(from, to)}`),
+  heatmap: (year: number) =>
+    request<any[]>(`/location-checkins/stats/heatmap?year=${year}`),
+  countries: (from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/countries${rangeQuery(from, to)}`),
+  mapData: (from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/map-data${rangeQuery(from, to)}`),
+  dayOfWeek: (from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/day-of-week${rangeQuery(from, to)}`),
+  timeOfDay: (from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/time-of-day${rangeQuery(from, to)}`),
+  busiestDays: (from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/busiest-days${rangeQuery(from, to)}`),
+  topCities: (from?: string, to?: string) =>
+    request<any[]>(`/location-checkins/stats/top-cities${rangeQuery(from, to)}`),
+  reflections: (targetDate?: string) =>
+    request<any[]>(`/stats/reflections${targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : ''}`),
+  additionalStats: () =>
+    request<any>('/location-checkins/stats/additional-stats'),
+  earliestDates: () =>
+    request<{ checkins: string | null; tracks: string | null; [typeId: string]: string | null }>('/stats/earliest-dates'),
 };
 
 // Search
@@ -272,11 +262,10 @@ export const importApi = {
     files.forEach((f) => form.append('files', f));
     const res = await fetch(`${API_BASE}/import/swarm`, {
       method: 'POST',
-      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
+      const error = await errorBody(res);
       throw new Error(error.message || `Import failed: ${res.status}`);
     }
     return res.json();
@@ -308,16 +297,16 @@ export const backupApi = {
    */
   export: async (onProgress?: (progress: BackupExportProgress) => void) => {
     const fail = async (res: Response, fallback: string) => {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
+      const error = await errorBody(res);
       return new Error(error.error || error.message || `${fallback}: ${res.status}`);
     };
 
-    const start = await fetch(`${API_BASE}/backup/export-jobs`, { method: 'POST', headers: withAuthHeader() });
+    const start = await fetch(`${API_BASE}/backup/export-jobs`, { method: 'POST' });
     if (!start.ok) throw await fail(start, 'Backup export failed');
     const { id } = (await start.json()) as { id: string };
 
     for (;;) {
-      const res = await fetch(`${API_BASE}/backup/export-jobs/${id}`, { headers: withAuthHeader() });
+      const res = await fetch(`${API_BASE}/backup/export-jobs/${id}`);
       if (!res.ok) throw await fail(res, 'Backup export failed');
       const job = await res.json() as {
         stage: 'collecting' | 'zipping' | 'ready' | 'error';
@@ -334,7 +323,7 @@ export const backupApi = {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
-    const res = await fetch(`${API_BASE}/backup/export-jobs/${id}/download`, { headers: withAuthHeader() });
+    const res = await fetch(`${API_BASE}/backup/export-jobs/${id}/download`);
     if (!res.ok || !res.body) throw await fail(res, 'Backup download failed');
 
     const total = Number(res.headers.get('Content-Length')) || 0;
@@ -360,11 +349,10 @@ export const backupApi = {
     form.append('file', file);
     const res = await fetch(`${API_BASE}/backup/import`, {
       method: 'POST',
-      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
+      const error = await errorBody(res);
       throw new Error(error.error || error.message || `Backup import failed: ${res.status}`);
     }
     clearApiCache();
@@ -432,6 +420,76 @@ export const timeline = {
     request<any[]>(`/timeline?${new URLSearchParams(params)}`),
 };
 
+// Accounts & sign-in
+/** The signed-in account (GET /auth/me, and returned by login / profile / password). */
+export interface Account {
+  id: string;
+  username: string;
+  display_name: string | null;
+  is_admin: boolean;
+  must_change_password: boolean;
+  created_at: string;
+}
+
+/** One signed-in device of the current account. */
+export interface AccountSession {
+  id: string;
+  remember: boolean;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  /** This browser's own session. */
+  current: boolean;
+}
+
+export const auth = {
+  me: () => request<Account>('/auth/me'),
+  login: (username: string, password: string, remember: boolean) =>
+    request<Account>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password, remember }) }),
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<Account>('/auth/password', {
+      method: 'PUT',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+  updateProfile: (data: { username?: string; display_name?: string | null }) =>
+    request<Account>('/auth/profile', { method: 'PUT', body: JSON.stringify(data) }),
+  sessions: () => request<AccountSession[]>('/auth/sessions'),
+  revokeSession: (id: string) => request<void>(`/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  signOutEverywhere: () => request<void>('/auth/sessions/sign-out-everywhere', { method: 'POST' }),
+  webhookToken: () => request<{ token: string }>('/auth/webhook-token'),
+  regenerateWebhookToken: () => request<{ token: string }>('/auth/webhook-token/regenerate', { method: 'POST' }),
+};
+
+/** An account as listed for admins (no data, just account state). */
+export interface ManagedUser {
+  id: string;
+  username: string;
+  display_name: string | null;
+  is_admin: boolean;
+  disabled_at: string | null;
+  must_change_password: boolean;
+  created_at: string;
+  last_seen_at: string | null;
+}
+
+// Admin-only account management.
+export const adminUsers = {
+  list: () => request<ManagedUser[]>('/admin/users'),
+  create: (data: { username: string; password: string; display_name?: string; is_admin: boolean }) =>
+    request<ManagedUser>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
+  resetPassword: (id: string, password: string) =>
+    request<ManagedUser>(`/admin/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  setAdmin: (id: string, isAdmin: boolean) =>
+    request<ManagedUser>(`/admin/users/${id}/admin`, { method: 'PUT', body: JSON.stringify({ is_admin: isAdmin }) }),
+  disable: (id: string) => request<ManagedUser>(`/admin/users/${id}/disable`, { method: 'POST' }),
+  enable: (id: string) => request<ManagedUser>(`/admin/users/${id}/enable`, { method: 'POST' }),
+  delete: (id: string, confirmUsername: string) =>
+    request<void>(`/admin/users/${id}`, { method: 'DELETE', body: JSON.stringify({ confirm_username: confirmUsername }) }),
+};
+
 // Settings
 export const settings = {
   get: () => request<any>('/settings'),
@@ -441,8 +499,6 @@ export const settings = {
     notifySettingsChanged();
     return result;
   },
-  updateProfile: (data: any) =>
-    request<any>('/settings/profile', { method: 'PUT', body: JSON.stringify(data) }),
   timestampReconciliationPreview: () =>
     request<TimestampReconciliationScanResult>('/settings/timestamp-reconciliation'),
   applyTimestampReconciliation: (updates: any[]) =>

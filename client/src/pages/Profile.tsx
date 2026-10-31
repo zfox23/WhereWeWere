@@ -5,6 +5,7 @@ import { AutoProfileTab } from '../plugins/autoProfileTab';
 import { ReflectTab } from '../components/ReflectTab';
 import { CompanionsTab } from '../components/CompanionsTab';
 import { usePageTitle } from '../utils/pageTitle';
+import { useAuth } from '../contexts/AuthContext';
 import type { CheckinTypeClient } from 'wwp-shared';
 
 /**
@@ -20,6 +21,9 @@ function renderPluginTab(plugin: CheckinTypeClient, userId: string) {
 }
 
 export default function Profile() {
+  // Plugin profile tabs still take a userId prop (PluginProfileTabProps); the
+  // server scopes everything to the session regardless.
+  const { user } = useAuth();
   type ProfileTab = 'reflect' | 'companions' | `plugin:${string}`;
 
   const isProfileTab = (value: string | null): value is ProfileTab => {
@@ -106,7 +110,7 @@ export default function Profile() {
     if (activeTab === 'reflect') return <ReflectTab />;
     if (activeTab === 'companions') return <CompanionsTab />;
     const plugin = PROFILE_PLUGINS.find((p) => `plugin:${p.id}` === activeTab);
-    if (plugin) return renderPluginTab(plugin, '00000000-0000-0000-0000-000000000001');
+    if (plugin) return renderPluginTab(plugin, user?.id ?? '');
     return null;
   };
 

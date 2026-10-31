@@ -31,7 +31,6 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-      API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       PHOTON_URL: ${PHOTON_URL:-}
       COASTERPEDIA_CONTACT: ${COASTERPEDIA_CONTACT:-}
@@ -51,8 +50,6 @@ services:
     build:
       context: .
       dockerfile: client/Dockerfile
-      args:
-        VITE_API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
     restart: unless-stopped
     depends_on:
       server:

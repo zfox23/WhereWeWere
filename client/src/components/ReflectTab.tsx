@@ -20,7 +20,6 @@ import { normalizeTimezoneForDisplay } from '../utils/checkin';
 import { zonedDayBounds } from '../utils/dayRange';
 import type { HeatmapDay, ImmichAsset } from '../types';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
 const IMMICH_CHECKIN_BATCH_SIZE = 30;
 
 type ReflectionItem = {
@@ -330,7 +329,7 @@ export function ReflectTab() {
     let cancelled = false;
     setReflectionsLoading(true);
 
-    Promise.all([stats.reflections(USER_ID, getLocalDateIso()), settings.get()])
+    Promise.all([stats.reflections(getLocalDateIso()), settings.get()])
       .then(([data, userSettings]) => {
         if (cancelled) return;
         setReflections(data);
@@ -438,7 +437,7 @@ export function ReflectTab() {
     let cancelled = false;
     setLocationLoading(true);
 
-    stats.heatmap(USER_ID, selectedYear)
+    stats.heatmap(selectedYear)
       .then((data) => {
         if (!cancelled) {
           setLocationHeatmap(data);
@@ -466,7 +465,7 @@ export function ReflectTab() {
     let cancelled = false;
     setMoodLoading(true);
 
-    moodStats.heatmap(USER_ID, selectedYear)
+    moodStats.heatmap(selectedYear)
       .then((data) => {
         if (!cancelled) {
           setMoodHeatmap(data);
@@ -497,7 +496,7 @@ export function ReflectTab() {
     const from = `${selectedYear}-01-01`;
     const to = `${selectedYear}-12-31`;
 
-    sleepStats.daily(USER_ID, from, to)
+    sleepStats.daily(from, to)
       .then((data) => {
         if (!cancelled) {
           setSleepHeatmap(data);

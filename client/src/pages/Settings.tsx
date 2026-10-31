@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Loader2, User, Link2, Download, Ruler } from 'lucide-react';
+import { Loader2, User, Link2, Download, Ruler, Users } from 'lucide-react';
 import { settings } from '../api/client';
 import { usePageTitle } from '../utils/pageTitle';
 import { allClientPlugins } from '../plugins/registry';
 import { AccountTab } from './settings/AccountTab';
+import { UsersTab } from './settings/UsersTab';
+import { useAuth } from '../contexts/AuthContext';
 import { DisplayTab } from './settings/DisplayTab';
 import { IntegrationsTab } from './settings/IntegrationsTab';
 import { DataTab } from './settings/DataTab';
@@ -18,10 +20,12 @@ import type { CheckinTypeClient } from 'wwp-shared';
  */
 const SETTINGS_PLUGINS = allClientPlugins().filter((p) => p.client.settings);
 
-type SettingsTab = 'account' | 'display' | 'integrations' | 'data' | `plugin:${string}`;
+type SettingsTab = 'account' | 'users' | 'display' | 'integrations' | 'data' | `plugin:${string}`;
 
-const isSettingsTab = (value: string | null): value is SettingsTab => {
+// `users` (account management) only exists for admins.
+const isSettingsTab = (value: string | null, isAdmin: boolean): value is SettingsTab => {
   if (!value) return false;
+  if (value === 'users') return isAdmin;
   if (value === 'account' || value === 'display' || value === 'integrations' || value === 'data') {
     return true;
   }
@@ -31,23 +35,25 @@ const isSettingsTab = (value: string | null): value is SettingsTab => {
   return false;
 };
 
-const getTabFromLocation = (): SettingsTab => {
+const getTabFromLocation = (isAdmin: boolean): SettingsTab => {
   // Deep link to the mood plugin's activities section.
   if (window.location.hash === '#mood-activities' && SETTINGS_PLUGINS.some((p) => p.id === 'mood')) {
     return 'plugin:mood';
   }
   const tabParam = new URLSearchParams(window.location.search).get('tab');
-  return isSettingsTab(tabParam) ? tabParam : 'account';
+  return isSettingsTab(tabParam, isAdmin) ? tabParam : 'account';
 };
 
 export default function Settings() {
   usePageTitle('Settings');
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin === true;
 
   const [data, setData] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [jobRefreshKey, setJobRefreshKey] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<SettingsTab>(getTabFromLocation);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => getTabFromLocation(isAdmin));
 
   // The tabs copy their initial values into local state on mount; keep the
   // cached settings in sync with what they save so re-opening a tab shows the
@@ -71,7 +77,7 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    const syncTabFromLocation = () => setActiveTab(getTabFromLocation());
+    const syncTabFromLocation = () => setActiveTab(getTabFromLocation(isAdmin));
     syncTabFromLocation();
     window.addEventListener('popstate', syncTabFromLocation);
     window.addEventListener('hashchange', syncTabFromLocation);
@@ -79,7 +85,7 @@ export default function Settings() {
       window.removeEventListener('popstate', syncTabFromLocation);
       window.removeEventListener('hashchange', syncTabFromLocation);
     };
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -106,17 +112,15 @@ export default function Settings() {
     { value: 'display' as const, label: 'Display', icon: Ruler },
     { value: 'integrations' as const, label: 'Integrations', icon: Link2 },
     { value: 'data' as const, label: 'Data', icon: Download },
+    ...(isAdmin ? [{ value: 'users' as const, label: 'Users', icon: Users }] : []),
   ];
 
   const renderBody = () => {
     if (activeTab === 'account') {
-      return data && (
-        <AccountTab
-          initialUsername={data.username || ''}
-          initialDisplayName={data.display_name || ''}
-          onSaved={patchSettings}
-        />
-      );
+      return <AccountTab />;
+    }
+    if (activeTab === 'users') {
+      return isAdmin ? <UsersTab /> : null;
     }
     if (activeTab === 'display') {
       return data && (
@@ -177,7 +181,7 @@ export default function Settings() {
         </div>
       </div>
 
-      {loadError && ['account', 'display', 'integrations'].includes(activeTab) && (
+      {loadError && ['display', 'integrations'].includes(activeTab) && (
         <div className="text-sm text-red-600">
           Could not load your settings ({loadError}). Reload the page to edit them.
         </div>
