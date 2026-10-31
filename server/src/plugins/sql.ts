@@ -8,6 +8,7 @@
  */
 
 import type { PluginTimelineContext } from 'wwp-shared';
+import { currentUserId } from '../auth/context';
 
 /**
  * Accumulates SQL conditions with positional `$n` placeholders. Write
@@ -68,9 +69,9 @@ export function timelineWhereConditions(
   const tz = timezoneColumn
     ? `COALESCE(${alias}.${timezoneColumn}, 'UTC')`
     : `'UTC'`;
-  if (ctx.user_id) {
-    conds.push(`${alias}.user_id = ?`, ctx.user_id);
-  }
+  // Always scoped to a user: a context without one falls back to the
+  // request's user (and throws outside one) rather than matching everyone.
+  conds.push(`${alias}.user_id = ?`, ctx.user_id ?? currentUserId());
   if (ctx.from) {
     conds.push(
       `(${alias}.${timestampColumn} AT TIME ZONE ${tz})::date >= ?::date`,

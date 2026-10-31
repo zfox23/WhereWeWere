@@ -33,7 +33,7 @@ import { query, pool } from '../../server/src/db';
 import { isUuid } from '../../server/src/services/batching';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId } from '../../server/src/auth/context';
 import {
   companionNamesSql,
   deleteCompanionsForCheckins,
@@ -257,7 +257,18 @@ export async function syncMealie(
 }
 
 async function storeEventId(id: string, eventId: string | null): Promise<void> {
-  await query('UPDATE food_checkins SET mealie_event_id = $2 WHERE id = $1', [id, eventId]);
+  await query('UPDATE food_checkins SET mealie_event_id = $2 WHERE id = $1 AND user_id = $3', [id, eventId, currentUserId()]);
+}
+
+/**
+ * A meal may only point at the user's own location check-in; anyone else's
+ * is treated as missing. `keep` is the value already stored, which stays
+ * allowed even if that check-in has since been deleted.
+ */
+async function checkLocationLink(id: string | null, keep: string | null = null): Promise<void> {
+  if (!id || id === keep) return;
+  const owned = await query('SELECT 1 FROM checkins WHERE id = $1 AND user_id = $2', [id, currentUserId()]);
+  if ((owned.rowCount ?? 0) === 0) throw new InputError('location_checkin_id is not one of your check-ins');
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +282,7 @@ function sendError(res: Response, err: unknown, fallback: string) {
 }
 
 async function loadRow(id: string): Promise<FoodRow | null> {
-  const result = await query(`SELECT ${FOOD_COLUMNS} FROM food_checkins WHERE id = $1 AND user_id = $2`, [id, USER_ID]);
+  const result = await query(`SELECT ${FOOD_COLUMNS} FROM food_checkins WHERE id = $1 AND user_id = $2`, [id, currentUserId()]);
   return (result.rows[0] as FoodRow | undefined) ?? null;
 }
 
@@ -279,7 +290,7 @@ router.get('/checkins', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 500);
     const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
-    const params: unknown[] = [USER_ID];
+    const params: unknown[] = [currentUserId()];
     let where = 'user_id = $1';
     if (req.query.location_checkin_id) {
       if (!isUuid(req.query.location_checkin_id)) return res.status(400).json({ error: 'location_checkin_id must be a uuid' });
@@ -314,6 +325,7 @@ router.get('/checkins/:id', async (req: Request, res: Response) => {
 router.post('/checkins', async (req: Request, res: Response) => {
   try {
     const input = parseFoodInput(req.body ?? {});
+    await checkLocationLink(input.location_checkin_id);
     const client = await pool.connect();
     let row: FoodRow;
     let companions: string[];
@@ -324,7 +336,7 @@ router.post('/checkins', async (req: Request, res: Response) => {
            rating, notes, location_checkin_id, checked_in_at, checkin_timezone)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING ${FOOD_COLUMNS}`,
-        [USER_ID, input.meal_type, input.recipe_name, input.mealie_recipe_id, input.mealie_recipe_slug,
+        [currentUserId(), input.meal_type, input.recipe_name, input.mealie_recipe_id, input.mealie_recipe_slug,
           input.rating, input.notes, input.location_checkin_id, input.checked_in_at, input.checkin_timezone],
       );
       row = result.rows[0] as FoodRow;
@@ -338,7 +350,7 @@ router.post('/checkins', async (req: Request, res: Response) => {
       client.release();
     }
 
-    const { eventId, sync } = await syncMealie(await getMealieConfig(USER_ID), null, row);
+    const { eventId, sync } = await syncMealie(await getMealieConfig(currentUserId()), null, row);
     if (eventId) {
       await storeEventId(row.id, eventId);
       row.mealie_event_id = eventId;
@@ -356,6 +368,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
     const input = parseFoodInput(req.body ?? {});
     const prev = await loadRow(id);
     if (!prev) return res.status(404).json({ error: 'Check-in not found' });
+    await checkLocationLink(input.location_checkin_id, prev.location_checkin_id);
 
     const client = await pool.connect();
     let row: FoodRow;
@@ -368,7 +381,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
              rating = $7, notes = $8, location_checkin_id = $9, checked_in_at = $10, checkin_timezone = $11
          WHERE id = $1 AND user_id = $2
          RETURNING ${FOOD_COLUMNS}`,
-        [id, USER_ID, input.meal_type, input.recipe_name, input.mealie_recipe_id, input.mealie_recipe_slug,
+        [id, currentUserId(), input.meal_type, input.recipe_name, input.mealie_recipe_id, input.mealie_recipe_slug,
           input.rating, input.notes, input.location_checkin_id, input.checked_in_at, input.checkin_timezone],
       );
       row = result.rows[0] as FoodRow;
@@ -381,7 +394,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
       client.release();
     }
 
-    const { eventId, sync } = await syncMealie(await getMealieConfig(USER_ID), prev, row);
+    const { eventId, sync } = await syncMealie(await getMealieConfig(currentUserId()), prev, row);
     if (eventId !== row.mealie_event_id) {
       await storeEventId(id, eventId);
       row.mealie_event_id = eventId;
@@ -402,7 +415,7 @@ router.delete('/checkins/:id', async (req: Request, res: Response) => {
     try {
       await client.query('BEGIN');
       await deleteCompanionsForCheckins('food', [id], client);
-      await client.query('DELETE FROM food_checkins WHERE id = $1 AND user_id = $2', [id, USER_ID]);
+      await client.query('DELETE FROM food_checkins WHERE id = $1 AND user_id = $2', [id, currentUserId()]);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -410,7 +423,7 @@ router.delete('/checkins/:id', async (req: Request, res: Response) => {
     } finally {
       client.release();
     }
-    const { sync } = await syncMealie(await getMealieConfig(USER_ID), prev, null);
+    const { sync } = await syncMealie(await getMealieConfig(currentUserId()), prev, null);
     res.json({ message: 'Check-in deleted', id, mealie_sync: sync });
   } catch (err) {
     sendError(res, err, 'Failed to delete food check-in');
@@ -431,11 +444,11 @@ router.get('/stats', async (_req: Request, res: Response) => {
                 COUNT(*) FILTER (WHERE checked_in_at >= NOW() - INTERVAL '30 days')::int AS last_30_days,
                 COUNT(DISTINCT mealie_recipe_id)::int AS distinct_recipes
          FROM food_checkins WHERE user_id = $1`,
-        [USER_ID],
+        [currentUserId()],
       ),
       query(
         `SELECT meal_type, COUNT(*)::int AS count FROM food_checkins WHERE user_id = $1 GROUP BY meal_type`,
-        [USER_ID],
+        [currentUserId()],
       ),
       query(
         `SELECT MAX(recipe_name) AS recipe_name, MAX(mealie_recipe_slug) AS mealie_recipe_slug,
@@ -445,7 +458,7 @@ router.get('/stats', async (_req: Request, res: Response) => {
          GROUP BY COALESCE(mealie_recipe_id, lower(recipe_name))
          ORDER BY count DESC, last_eaten_at DESC
          LIMIT 10`,
-        [USER_ID],
+        [currentUserId()],
       ),
     ]);
     const byMealType = Object.fromEntries(MEAL_TYPES.map((t) => [t, 0])) as Record<MealType, number>;
@@ -466,7 +479,7 @@ function mealieErrorStatus(err: unknown): number {
 
 router.get('/mealie/status', async (_req: Request, res: Response) => {
   try {
-    const config = await getMealieConfig(USER_ID);
+    const config = await getMealieConfig(currentUserId());
     if (!config) return res.json({ configured: false });
     try {
       const groupSlug = await getGroupSlug(config);
@@ -494,7 +507,7 @@ router.get('/mealie/status', async (_req: Request, res: Response) => {
 
 router.get('/mealie/recipes', async (req: Request, res: Response) => {
   try {
-    const config = await getMealieConfig(USER_ID);
+    const config = await getMealieConfig(currentUserId());
     if (!config) return res.status(400).json({ error: 'Add your Mealie URL and API token in Settings > Food first.' });
     const recipes = await getRecipesCached(config, { refresh: req.query.refresh === '1' });
     res.json({ recipes });
@@ -506,7 +519,7 @@ router.get('/mealie/recipes', async (req: Request, res: Response) => {
 
 router.post('/mealie/mealplan', async (req: Request, res: Response) => {
   try {
-    const config = await getMealieConfig(USER_ID);
+    const config = await getMealieConfig(currentUserId());
     if (!config) return res.status(400).json({ error: 'Add your Mealie URL and API token in Settings > Food first.' });
     const entries = asRecordArray(req.body?.entries);
     if (entries.length === 0 || entries.length > 100) return res.status(400).json({ error: 'entries must hold 1-100 items' });
@@ -546,6 +559,8 @@ router.post('/mealie/mealplan', async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 interface SuggestionTask {
+  /** Only the user who asked can poll it. */
+  userId: string;
   state: 'running' | 'done' | 'error';
   result?: ParsedSuggestions & { weather: boolean; library_size: number };
   error?: string;
@@ -610,7 +625,7 @@ async function loadHistory(fromDate: string): Promise<HistoryMeal[]> {
      WHERE user_id = $1
        AND (checked_in_at AT TIME ZONE COALESCE(checkin_timezone, 'UTC'))::date >= $2::date
      ORDER BY checked_in_at DESC`,
-    [USER_ID, fromDate],
+    [currentUserId(), fromDate],
   );
   return result.rows as HistoryMeal[];
 }
@@ -625,7 +640,7 @@ async function loadRecipeHistory(): Promise<Map<string, { last_made: string; tim
      FROM food_checkins
      WHERE user_id = $1 AND mealie_recipe_id IS NOT NULL
      GROUP BY mealie_recipe_id`,
-    [USER_ID],
+    [currentUserId()],
   );
   return new Map(result.rows.map((r) => [r.mealie_recipe_id as string, {
     last_made: r.last_made as string,
@@ -635,9 +650,9 @@ async function loadRecipeHistory(): Promise<Map<string, { last_made: string; tim
 }
 
 async function runSuggestions(req: SuggestRequest): Promise<NonNullable<SuggestionTask['result']>> {
-  const llm = await getLlmSettings(USER_ID);
+  const llm = await getLlmSettings(currentUserId());
   if (!llm) throw new InputError('Set up the LLM integration in Settings > Integrations first.');
-  const config = await getMealieConfig(USER_ID);
+  const config = await getMealieConfig(currentUserId());
 
   const endDate = addDays(req.start_date, req.days - 1);
   const [recipes, history, recipeHistory, forecast] = await Promise.all([
@@ -682,7 +697,7 @@ router.post('/suggestions', async (req: Request, res: Response) => {
   }
   pruneSuggestionTasks();
   const id = randomUUID();
-  const task: SuggestionTask = { state: 'running' };
+  const task: SuggestionTask = { userId: currentUserId(), state: 'running' };
   suggestionTasks.set(id, task);
   runSuggestions(input)
     .then((result) => {
@@ -701,7 +716,8 @@ router.post('/suggestions', async (req: Request, res: Response) => {
 });
 
 router.get('/suggestions/:id', (req: Request, res: Response) => {
-  const task = suggestionTasks.get(String(req.params.id));
+  const found = suggestionTasks.get(String(req.params.id));
+  const task = found?.userId === currentUserId() ? found : undefined;
   if (!task) return res.status(404).json({ error: 'Suggestion task not found (the server may have restarted). Please try again.' });
   if (task.state === 'running') return res.json({ status: 'running' });
   if (task.state === 'error') return res.json({ status: 'error', error: task.error });
@@ -793,12 +809,18 @@ export const server: CheckinTypeServerPlugin = {
           continue;
         }
         const rating = row.rating == null ? null : Number(row.rating);
+        // Never link to someone else's location check-in.
+        let locationId = isUuid(row.location_checkin_id) ? row.location_checkin_id : null;
+        if (locationId) {
+          const foreign = await client.query('SELECT 1 FROM checkins WHERE id = $1 AND user_id <> $2', [locationId, user_id]);
+          if ((foreign.rowCount ?? 0) > 0) locationId = null;
+        }
         const result = await client.query(FOOD_INSERT_SQL, [
           row.id, user_id, row.meal_type, row.recipe_name,
           row.mealie_recipe_id ?? null, row.mealie_recipe_slug ?? null,
           rating != null && rating >= 1 && rating <= 4 ? rating : null,
           row.notes ?? null,
-          isUuid(row.location_checkin_id) ? row.location_checkin_id : null,
+          locationId,
           row.mealie_event_id ?? null,
           row.checked_in_at ?? new Date().toISOString(),
           typeof row.checkin_timezone === 'string' && isValidTimeZone(row.checkin_timezone) ? row.checkin_timezone : null,
@@ -949,8 +971,8 @@ export const server: CheckinTypeServerPlugin = {
     apply: async (id, suggested_timezone, executor) => {
       if (!isValidTimeZone(suggested_timezone)) return false;
       const result = await (executor ?? { query }).query(
-        'UPDATE food_checkins SET checkin_timezone = $2 WHERE id = $1 RETURNING id',
-        [id, suggested_timezone],
+        'UPDATE food_checkins SET checkin_timezone = $2 WHERE id = $1 AND user_id = $3 RETURNING id',
+        [id, suggested_timezone, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },

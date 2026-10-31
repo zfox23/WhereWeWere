@@ -67,7 +67,7 @@ import {
   deleteCompanionsForCheckins,
   companionNamesSql,
 } from '../../server/src/services/companions';
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, preserveUserContext } from '../../server/src/auth/context';
 import { reverseGeocode, searchPlacesByName } from './services/nominatim';
 import { searchNearbyVenues, findEnclosingVenue } from './services/overpass';
 import { findOrReuseVenue } from './services/venueMerge';
@@ -114,6 +114,28 @@ function normalizeRating(value: unknown): number | null {
   const n = toNumberOrNull(value);
   if (n == null) return null;
   return n >= 1 && n <= 4 ? Math.trunc(n) : null;
+}
+
+/**
+ * Set (1-4) or clear (null) a user's own star rating for a shared venue.
+ * Ratings live in venue_ratings; venues.rating is no longer read or written.
+ */
+async function setVenueRating(
+  userId: string,
+  venueId: string,
+  rating: number | null,
+  executor: QueryExecutor = { query } as unknown as QueryExecutor,
+): Promise<void> {
+  if (rating == null) {
+    await executor.query('DELETE FROM venue_ratings WHERE user_id = $1 AND venue_id = $2', [userId, venueId]);
+    return;
+  }
+  await executor.query(
+    `INSERT INTO venue_ratings (user_id, venue_id, rating)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, venue_id) DO UPDATE SET rating = EXCLUDED.rating, updated_at = NOW()`,
+    [userId, venueId, rating]
+  );
 }
 
 function serializeVenue<T extends { latitude?: unknown; longitude?: unknown }>(venue: T): T {
@@ -229,12 +251,13 @@ async function attachCheckinLists(
   listIds: string[],
   client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }> }
 ): Promise<string[]> {
+  const userId = currentUserId();
   await client.query(
     `INSERT INTO checkin_list_items (list_id, checkin_id)
      SELECT l.id, $1 FROM checkin_lists l
      WHERE l.id = ANY($2::uuid[]) AND l.user_id = $3
      ON CONFLICT (list_id, checkin_id) DO NOTHING`,
-    [checkinId, listIds, USER_ID]
+    [checkinId, listIds, userId]
   );
   await client.query(
     `DELETE FROM checkin_list_items cli
@@ -243,20 +266,18 @@ async function attachCheckinLists(
        AND cl.user_id = $2
        AND cli.checkin_id = $3
        AND NOT (cl.id = ANY($1::uuid[]))`,
-    [listIds, USER_ID, checkinId]
+    [listIds, userId, checkinId]
   );
-  const result = await client.query(
-    `SELECT list_id FROM checkin_list_items WHERE checkin_id = $1 ORDER BY list_id`,
-    [checkinId]
-  );
-  return result.rows.map((r: any) => r.list_id as string);
+  return getCheckinListIds(checkinId, client);
 }
 
-/** List ids a check-in currently belongs to (for GET /:id). */
-async function getCheckinListIds(checkinId: string): Promise<string[]> {
-  const result = await query(
-    `SELECT list_id FROM checkin_list_items WHERE checkin_id = $1 ORDER BY list_id`,
-    [checkinId]
+/** The current user's list ids a check-in belongs to (for GET /:id and saves). */
+async function getCheckinListIds(checkinId: string, executor: QueryExecutor = { query } as unknown as QueryExecutor): Promise<string[]> {
+  const result = await executor.query(
+    `SELECT cli.list_id FROM checkin_list_items cli
+     JOIN checkin_lists cl ON cl.id = cli.list_id AND cl.user_id = $2
+     WHERE cli.checkin_id = $1 ORDER BY cli.list_id`,
+    [checkinId, currentUserId()]
   );
   return result.rows.map((r: any) => r.list_id as string);
 }
@@ -266,14 +287,14 @@ router.get('/lists', async (_req: Request, res: Response) => {
   try {
     const listsResult = await query(
       'SELECT id, name, created_at, updated_at FROM checkin_lists WHERE user_id = $1 ORDER BY name ASC',
-      [USER_ID]
+      [currentUserId()]
     );
     const countsResult = await query(
       `SELECT list_id, COUNT(*)::int AS count
        FROM checkin_list_items
        WHERE list_id IN (SELECT id FROM checkin_lists WHERE user_id = $1)
        GROUP BY list_id`,
-      [USER_ID]
+      [currentUserId()]
     );
     const countById = new Map(countsResult.rows.map((r: any) => [r.list_id as string, r.count as number]));
     res.json(
@@ -297,7 +318,7 @@ router.post('/lists', async (req: Request, res: Response) => {
     }
     const result = await query(
       'INSERT INTO checkin_lists (user_id, name) VALUES ($1, $2) RETURNING id, name, created_at, updated_at',
-      [USER_ID, name.trim()]
+      [currentUserId(), name.trim()]
     );
     res.status(201).json(result.rows[0]);
   } catch (err: any) {
@@ -318,7 +339,7 @@ router.put('/lists/:id', async (req: Request, res: Response) => {
     }
     const result = await query(
       'UPDATE checkin_lists SET name = $2 WHERE id = $1 AND user_id = $3 RETURNING id, name, created_at, updated_at',
-      [req.params.id, name.trim(), USER_ID]
+      [req.params.id, name.trim(), currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Checkin list not found' });
@@ -338,7 +359,7 @@ router.delete('/lists/:id', async (req: Request, res: Response) => {
   try {
     const result = await query(
       'DELETE FROM checkin_lists WHERE id = $1 AND user_id = $2 RETURNING id',
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Checkin list not found' });
@@ -353,9 +374,10 @@ router.delete('/lists/:id', async (req: Request, res: Response) => {
 // GET /lists/:id/items - the check-ins in a list, with display fields
 router.get('/lists/:id/items', async (req: Request, res: Response) => {
   try {
+    const userId = currentUserId();
     const listResult = await query(
       'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
-      [req.params.id, USER_ID]
+      [req.params.id, userId]
     );
     if (listResult.rows.length === 0) {
       return res.status(404).json({ error: 'Checkin list not found' });
@@ -373,12 +395,12 @@ router.get('/lists/:id/items', async (req: Request, res: Response) => {
               pv.id AS parent_venue_id,
               pv.name AS parent_venue_name
        FROM checkin_list_items cli
-       JOIN checkins c ON cli.checkin_id = c.id
+       JOIN checkins c ON cli.checkin_id = c.id AND c.user_id = $2
        JOIN venues v ON c.venue_id = v.id
        LEFT JOIN venues pv ON v.parent_venue_id = pv.id
        WHERE cli.list_id = $1
        ORDER BY (cli.rank IS NULL) ASC, cli.rank ASC, c.checked_in_at DESC, cli.added_at ASC`,
-      [req.params.id]
+      [req.params.id, userId]
     );
     const items = itemsResult.rows.map((row: any) => addTimezone(row));
     const checkinIds = items.map((i: any) => i.checkin_id as string);
@@ -386,9 +408,9 @@ router.get('/lists/:id/items', async (req: Request, res: Response) => {
     if (checkinIds.length > 0) {
       const compResult = await query(
         `SELECT checkin_id, name FROM companions
-         WHERE checkin_type = 'location' AND checkin_id = ANY($1::uuid[])
+         WHERE checkin_type = 'location' AND checkin_id = ANY($1::uuid[]) AND user_id = $2
          ORDER BY name ASC`,
-        [checkinIds]
+        [checkinIds, userId]
       );
       for (const row of compResult.rows) {
         const list = companionsByCheckin.get(row.checkin_id) ?? [];
@@ -411,19 +433,21 @@ router.post('/lists/:id/items', async (req: Request, res: Response) => {
     const rankValue =
       rank == null ? null : typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 ? rank : null;
 
+    const userId = currentUserId();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const listResult = await client.query(
         'SELECT id FROM checkin_lists WHERE id = $1 AND user_id = $2',
-        [req.params.id, USER_ID]
+        [req.params.id, userId]
       );
       if (listResult.rows.length === 0) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Checkin list not found' });
       }
-      const checkinResult = await client.query('SELECT id FROM checkins WHERE id = $1', [
+      const checkinResult = await client.query('SELECT id FROM checkins WHERE id = $1 AND user_id = $2', [
         checkin_id,
+        userId,
       ]);
       if (checkinResult.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -467,7 +491,7 @@ router.delete('/lists/:id/items/:checkinId', async (req: Request, res: Response)
          AND cl.id = $1 AND cl.user_id = $2
          AND cli.checkin_id = $3
        RETURNING cli.checkin_id`,
-      [req.params.id, USER_ID, req.params.checkinId]
+      [req.params.id, currentUserId(), req.params.checkinId]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Check-in is not in this list' });
@@ -481,25 +505,20 @@ router.delete('/lists/:id/items/:checkinId', async (req: Request, res: Response)
 
 // PUT /lists/:id/ranks (bulk re-rank), PUT /lists/:id/items/:itemId/rank (one rank) and
 // /lists/:id/rank-session come from the shared list kit.
-mountRankRoutes(router, checkinListKit, USER_ID);
+mountRankRoutes(router, checkinListKit);
 
 // GET / - list check-ins with venue info
 router.get('/', async (req: Request, res: Response) => {
   try {
+    // A client-supplied user_id is ignored: the list is always the caller's.
     const {
-      user_id, venue_id, from, to,
+      venue_id, from, to,
       limit = '50', offset = '0',
     } = req.query;
 
-    const params: unknown[] = [];
-    const conditions: string[] = [];
-    let paramIndex = 1;
-
-    if (user_id) {
-      conditions.push(`c.user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
-    }
+    const params: unknown[] = [currentUserId()];
+    const conditions: string[] = ['c.user_id = $1'];
+    let paramIndex = 2;
 
     if (venue_id) {
       conditions.push(`c.venue_id = $${paramIndex}`);
@@ -541,7 +560,7 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     // Clamp: NaN/negative values would 500 in Postgres, and no cap loads everything.
     params.push(Math.min(Math.max(parseInt(limit as string, 10) || 50, 1), 500));
@@ -592,8 +611,8 @@ router.get('/:id', async (req: Request, res: Response) => {
        JOIN venues v ON c.venue_id = v.id
        LEFT JOIN venue_categories vc ON v.category_id = vc.id
        LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-       WHERE c.id = $1`,
-      [id]
+       WHERE c.id = $1 AND c.user_id = $2`,
+      [id, currentUserId()]
     );
 
     if (checkinResult.rows.length === 0) {
@@ -615,14 +634,16 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
-    const { user_id, venue_id, notes, checked_in_at, also_checkin_parent, rating } = req.body;
+    // Ownership comes from the session; a user_id in the body is ignored.
+    const userId = currentUserId();
+    const { venue_id, notes, checked_in_at, also_checkin_parent, rating } = req.body;
     const companions = normalizeCompanions(req.body.companions);
     const checkinRating = normalizeRating(rating);
     const hasListIds = 'list_ids' in req.body;
     const listIds = hasListIds ? normalizeListIds(req.body.list_ids) ?? [] : null;
 
-    if (!user_id || !venue_id) {
-      return res.status(400).json({ error: 'user_id and venue_id are required' });
+    if (!venue_id) {
+      return res.status(400).json({ error: 'venue_id is required' });
     }
 
     await client.query('BEGIN');
@@ -633,7 +654,7 @@ router.post('/', async (req: Request, res: Response) => {
       `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, rating)
        VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6)
        RETURNING *`,
-      [user_id, venue_id, notes || null, checked_in_at || null, checkinTimezone, checkinRating]
+      [userId, venue_id, notes || null, checked_in_at || null, checkinTimezone, checkinRating]
     );
 
     const checkin = result.rows[0];
@@ -656,7 +677,7 @@ router.post('/', async (req: Request, res: Response) => {
           `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, rating)
            VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6)
            RETURNING *`,
-          [user_id, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId, client), checkinRating]
+          [userId, parentVenueId, notes || null, checked_in_at || null, await inferVenueTimezone(parentVenueId, client), checkinRating]
         );
         parent_checkin = parentResult.rows[0];
       }
@@ -672,7 +693,7 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(201).json({ ...checkin, parent_checkin, companions, lists });
     // After the response: fetch that day's weather when enabled (non-fatal).
     checkinLocalDate(checkin.id)
-      .then((date) => scheduleWeatherForDate(user_id, date))
+      .then((date) => scheduleWeatherForDate(userId, date))
       .catch((err) => console.error('Weather scheduling failed (non-fatal):', err));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -691,6 +712,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   const hasCompanions = 'companions' in req.body;
   const hasListIds = 'list_ids' in req.body;
   const listIds = hasListIds ? normalizeListIds(req.body.list_ids) ?? [] : null;
+  const userId = currentUserId();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -699,8 +721,8 @@ router.put('/:id', async (req: Request, res: Response) => {
     // change" behavior; notes and rating use explicit key presence so the
     // client can clear them (null / blank).
     const setClauses: string[] = [];
-    const params: unknown[] = [id];
-    let paramIndex = 1;
+    const params: unknown[] = [id, userId];
+    let paramIndex = 2;
 
     if (notes !== undefined) {
       setClauses.push(`notes = $${++paramIndex}`);
@@ -719,7 +741,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     const result = await client.query(
       `UPDATE checkins
        SET ${setClauses.join(', ')}
-       WHERE id = $1
+       WHERE id = $1 AND user_id = $2
        RETURNING *`,
       params
     );
@@ -742,17 +764,13 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (listIds) {
       lists = await attachCheckinLists(String(id), listIds, client);
     } else {
-      const listsResult = await client.query(
-        `SELECT list_id FROM checkin_list_items WHERE checkin_id = $1 ORDER BY list_id`,
-        [String(id)]
-      );
-      lists = listsResult.rows.map((r: any) => r.list_id as string);
+      lists = await getCheckinListIds(String(id), client);
     }
 
     await client.query('COMMIT');
     res.json({ ...result.rows[0], companions, lists });
     checkinLocalDate(String(id))
-      .then((date) => scheduleWeatherForDate(USER_ID, date))
+      .then((date) => scheduleWeatherForDate(userId, date))
       .catch((err) => console.error('Weather scheduling failed (non-fatal):', err));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -769,8 +787,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const result = await query(
-      'DELETE FROM checkins WHERE id = $1 RETURNING id',
-      [id]
+      'DELETE FROM checkins WHERE id = $1 AND user_id = $2 RETURNING id',
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -800,7 +818,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // (hourly data left out); `enabled` tells the timeline whether to show any.
 weatherRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const enabled = await isWeatherEnabled(USER_ID);
+    const enabled = await isWeatherEnabled(currentUserId());
     if (!enabled) return res.json({ enabled, days: {} });
     const dates = String(req.query.dates ?? '')
       .split(',')
@@ -812,7 +830,7 @@ weatherRouter.get('/', async (req: Request, res: Response) => {
         `SELECT TO_CHAR(local_date, 'YYYY-MM-DD') AS date, data - 'hourly' AS data
            FROM daily_weather
           WHERE user_id = $1 AND status = 'ok' AND local_date = ANY($2::date[])`,
-        [USER_ID, dates],
+        [currentUserId(), dates],
       );
       for (const row of result.rows) days[row.date] = row.data;
     }
@@ -831,7 +849,7 @@ weatherRouter.get('/:date', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT latitude, longitude, timezone, data FROM daily_weather
         WHERE user_id = $1 AND local_date = $2::date AND status = 'ok'`,
-      [USER_ID, date],
+      [currentUserId(), date],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'No weather for that day' });
     const row = result.rows[0];
@@ -868,14 +886,11 @@ function buildDateRangeClause(from: unknown, to: unknown, column: string, timezo
   };
 }
 
-// GET /stats/summary?user_id= - overall stats summary
+// GET /stats/summary - overall stats summary
 statsRouter.get('/summary', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
@@ -917,14 +932,11 @@ statsRouter.get('/summary', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/top-venues?user_id=&limit=10 - most visited venues
+// GET /stats/top-venues?limit=10 - most visited venues
 statsRouter.get('/top-venues', async (req: Request, res: Response) => {
   try {
-    const { user_id, limit = '10', from, to } = req.query;
-
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
+    const { limit = '10', from, to } = req.query;
+    const user_id = currentUserId();
 
     const { hasRange, whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
     const limitParamIndex = hasRange ? 4 : 2;
@@ -952,14 +964,11 @@ statsRouter.get('/top-venues', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/category-breakdown?user_id= - check-ins by category
+// GET /stats/category-breakdown - check-ins by category
 statsRouter.get('/category-breakdown', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
@@ -984,13 +993,14 @@ statsRouter.get('/category-breakdown', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/heatmap?user_id=&year= - check-ins per day for a year
+// GET /stats/heatmap?year= - check-ins per day for a year
 statsRouter.get('/heatmap', async (req: Request, res: Response) => {
   try {
-    const { user_id, year } = req.query;
+    const { year } = req.query;
+    const user_id = currentUserId();
 
-    if (!user_id || !year) {
-      return res.status(400).json({ error: 'user_id and year are required' });
+    if (!year) {
+      return res.status(400).json({ error: 'year is required' });
     }
 
     const yearNum = parseYear(year);
@@ -1015,13 +1025,14 @@ statsRouter.get('/heatmap', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/monthly?user_id=&year=&month= - check-ins per day for a month
+// GET /stats/monthly?year=&month= - check-ins per day for a month
 statsRouter.get('/monthly', async (req: Request, res: Response) => {
   try {
-    const { user_id, year, month } = req.query;
+    const { year, month } = req.query;
+    const user_id = currentUserId();
 
-    if (!user_id || !year || !month) {
-      return res.status(400).json({ error: 'user_id, year, and month are required' });
+    if (!year || !month) {
+      return res.status(400).json({ error: 'year and month are required' });
     }
 
     const yearNum = parseYear(year);
@@ -1054,14 +1065,11 @@ statsRouter.get('/monthly', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/countries?user_id= - check-ins grouped by country
+// GET /stats/countries - check-ins grouped by country
 statsRouter.get('/countries', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
@@ -1085,14 +1093,11 @@ statsRouter.get('/countries', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/map-data?user_id=&from=&to= - venue locations with check-in counts for a date range
+// GET /stats/map-data?from=&to= - venue locations with check-in counts for a date range
 statsRouter.get('/map-data', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = typeof from === 'string' && typeof to === 'string' && from && to;
     const whereRange = hasRange
@@ -1125,11 +1130,11 @@ statsRouter.get('/map-data', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/day-of-week?user_id= - check-ins by day of week
+// GET /stats/day-of-week - check-ins by day of week
 statsRouter.get('/day-of-week', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at', 'checkin_timezone');
 
@@ -1156,11 +1161,11 @@ statsRouter.get('/day-of-week', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/time-of-day?user_id= - check-ins by time bucket
+// GET /stats/time-of-day - check-ins by time bucket
 statsRouter.get('/time-of-day', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at', 'checkin_timezone');
 
@@ -1191,11 +1196,11 @@ statsRouter.get('/time-of-day', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/busiest-days?user_id= - top 10 calendar days by check-in count
+// GET /stats/busiest-days - top 10 calendar days by check-in count
 statsRouter.get('/busiest-days', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'checked_in_at', 'checkin_timezone');
 
@@ -1218,11 +1223,11 @@ statsRouter.get('/busiest-days', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/top-cities?user_id= - cities ranked by check-in count
+// GET /stats/top-cities - cities ranked by check-in count
 statsRouter.get('/top-cities', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const { whereClause, params: rangeParams } = buildDateRangeClause(from, to, 'c.checked_in_at', 'c.checkin_timezone');
 
@@ -1248,11 +1253,10 @@ statsRouter.get('/top-cities', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats/additional-stats?user_id= - extra fun stats
+// GET /stats/additional-stats - extra fun stats
 statsRouter.get('/additional-stats', async (req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const user_id = currentUserId();
 
     // Most common category
     const topCategory = await query(
@@ -1360,14 +1364,20 @@ venuesRouter.get('/', async (req: Request, res: Response) => {
 
     params.push(Math.max(parseInt(offset as string, 10) || 0, 0));
     const offsetParam = `$${paramIndex}`;
+    paramIndex++;
+
+    // The rating is the caller's own (venue_ratings), not a venue attribute.
+    params.push(currentUserId());
+    const userParam = `$${paramIndex}`;
 
     const sql = `
       SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
-             v.latitude, v.longitude, v.osm_id, v.rating, v.created_at, v.updated_at,
+             v.latitude, v.longitude, v.osm_id, vr.rating, v.created_at, v.updated_at,
              vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon
              ${rankSelect}
       FROM venues v
       LEFT JOIN venue_categories vc ON v.category_id = vc.id
+      LEFT JOIN venue_ratings vr ON vr.venue_id = v.id AND vr.user_id = ${userParam}
       ${whereClause}
       ${orderBy}
       LIMIT ${limitParam} OFFSET ${offsetParam}
@@ -1603,7 +1613,7 @@ venuesRouter.get('/lists', async (_req: Request, res: Response) => {
   try {
     const listsResult = await query(
       'SELECT id, name, created_at, updated_at FROM venue_lists WHERE user_id = $1 ORDER BY created_at',
-      [USER_ID]
+      [currentUserId()]
     );
     const itemsResult = await query(
       `SELECT l.id AS list_id,
@@ -1615,7 +1625,7 @@ venuesRouter.get('/lists', async (_req: Request, res: Response) => {
        LEFT JOIN venues v ON vli.venue_id = v.id
        WHERE l.user_id = $1
        GROUP BY l.id`,
-      [USER_ID]
+      [currentUserId()]
     );
     const itemsById = new Map(itemsResult.rows.map((r: any) => [r.list_id as string, r.items]));
     res.json(listsResult.rows.map((l: any) => ({ ...l, items: itemsById.get(l.id) || [] })));
@@ -1634,7 +1644,7 @@ venuesRouter.post('/lists', async (req: Request, res: Response) => {
     }
     const result = await query(
       'INSERT INTO venue_lists (user_id, name) VALUES ($1, $2) RETURNING id, name, created_at',
-      [USER_ID, name.trim()]
+      [currentUserId(), name.trim()]
     );
     res.status(201).json(result.rows[0]);
   } catch (err: any) {
@@ -1655,7 +1665,7 @@ venuesRouter.put('/lists/:id', async (req: Request, res: Response) => {
     }
     const result = await query(
       'UPDATE venue_lists SET name = $2 WHERE id = $1 AND user_id = $3 RETURNING id, name, created_at',
-      [req.params.id, name.trim(), USER_ID]
+      [req.params.id, name.trim(), currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Venue list not found' });
@@ -1675,7 +1685,7 @@ venuesRouter.delete('/lists/:id', async (req: Request, res: Response) => {
   try {
     const result = await query(
       'DELETE FROM venue_lists WHERE id = $1 AND user_id = $2 RETURNING id',
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Venue list not found' });
@@ -1692,14 +1702,14 @@ venuesRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
   try {
     const listResult = await query(
       'SELECT id FROM venue_lists WHERE id = $1 AND user_id = $2',
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (listResult.rows.length === 0) {
       return res.status(404).json({ error: 'Venue list not found' });
     }
     const result = await query(
       `SELECT vli.venue_id, vli.rank, vli.added_at,
-              v.name AS venue_name, v.city, v.state, v.country, v.rating,
+              v.name AS venue_name, v.city, v.state, v.country, vr.rating,
               vc.name AS category_name, vc.icon AS category_icon,
               (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC, c.id DESC)
                  FILTER (WHERE c.id IS NOT NULL))[1] AS last_checkin_at,
@@ -1709,11 +1719,12 @@ venuesRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
        FROM venue_list_items vli
        JOIN venues v ON v.id = vli.venue_id
        LEFT JOIN venue_categories vc ON vc.id = v.category_id
+       LEFT JOIN venue_ratings vr ON vr.venue_id = v.id AND vr.user_id = $2
        LEFT JOIN checkins c ON c.venue_id = v.id AND c.user_id = $2
        WHERE vli.list_id = $1
-       GROUP BY vli.list_id, vli.venue_id, vli.rank, vli.added_at, v.id, vc.id
+       GROUP BY vli.list_id, vli.venue_id, vli.rank, vli.added_at, v.id, vc.id, vr.rating
        ORDER BY vli.rank ASC NULLS LAST, vli.added_at`,
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     res.json(result.rows);
   } catch (err) {
@@ -1723,7 +1734,7 @@ venuesRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
 });
 
 // PUT /lists/:id/ranks (bulk re-rank) and /lists/:id/rank-session come from the shared list kit.
-mountRankRoutes(venuesRouter, venueListKit, USER_ID);
+mountRankRoutes(venuesRouter, venueListKit);
 
 // POST /lists/:id/items - add a venue to a list (idempotent)
 venuesRouter.post('/lists/:id/items', async (req: Request, res: Response) => {
@@ -1735,7 +1746,7 @@ venuesRouter.post('/lists/:id/items', async (req: Request, res: Response) => {
       await client.query('BEGIN');
       const listResult = await client.query(
         'SELECT id FROM venue_lists WHERE id = $1 AND user_id = $2',
-        [req.params.id, USER_ID]
+        [req.params.id, currentUserId()]
       );
       if (listResult.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -1781,7 +1792,7 @@ venuesRouter.delete('/lists/:id/items/:venueId', async (req: Request, res: Respo
        USING venue_lists l
        WHERE vli.list_id = l.id AND l.id = $1 AND l.user_id = $2 AND vli.venue_id = $3
        RETURNING vli.list_id`,
-      [req.params.id, USER_ID, req.params.venueId]
+      [req.params.id, currentUserId(), req.params.venueId]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Venue not in list' });
@@ -1818,7 +1829,7 @@ venuesRouter.get('/library', async (req: Request, res: Response) => {
     const category = typeof req.query.category === 'string' ? req.query.category.trim().slice(0, 200) : '';
     const listId = typeof req.query.list === 'string' && isUuid(req.query.list) ? req.query.list : null;
 
-    const params: unknown[] = [USER_ID];
+    const params: unknown[] = [currentUserId()];
     const conditions: string[] = [];
     if (from) {
       conditions.push(`(c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date >= $${params.length + 1}::date`);
@@ -1850,7 +1861,7 @@ venuesRouter.get('/library', async (req: Request, res: Response) => {
     const paged = pageResult((await query(
       `SELECT g.*, COUNT(*) OVER()::int AS total
        FROM (
-         SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.rating,
+         SELECT v.id, v.name, v.address, v.city, v.state, v.country, vr.rating,
                 vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
                 (ARRAY_AGG(c.checked_in_at ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_at,
                 (ARRAY_AGG(c.checkin_timezone ORDER BY c.checked_in_at DESC, c.id DESC))[1] AS last_checkin_timezone,
@@ -1858,8 +1869,9 @@ venuesRouter.get('/library', async (req: Request, res: Response) => {
          FROM venues v
          ${join}
          LEFT JOIN venue_categories vc ON v.category_id = vc.id
+         LEFT JOIN venue_ratings vr ON vr.venue_id = v.id AND vr.user_id = $1
          ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
-         GROUP BY v.id, vc.id, vc.name, vc.icon
+         GROUP BY v.id, vc.id, vc.name, vc.icon, vr.rating
          HAVING COUNT(c.id) > 0
        ) g
        ORDER BY ${orderBy(VENUE_LIBRARY_SORTS, p.sort, p.dir, 'g.last_checkin_at DESC NULLS LAST, lower(g.name)')}
@@ -1878,7 +1890,7 @@ venuesRouter.get('/library', async (req: Request, res: Response) => {
          JOIN venue_lists vl ON vl.id = vli.list_id
          WHERE vl.user_id = $1 AND vli.venue_id = ANY($2::uuid[])
          ORDER BY vl.created_at`,
-        [USER_ID, venueIds]
+        [currentUserId(), venueIds]
       );
       for (const row of listResult.rows) {
         const arr = listNamesByVenue.get(row.venue_id) || [];
@@ -1900,14 +1912,17 @@ venuesRouter.get('/library', async (req: Request, res: Response) => {
   }
 });
 
-// GET /:id - get single venue with check-in count
+// GET /:id - get single venue with the caller's check-in count. The venue is
+// shared catalog data; the count and Coasterpedia record are the caller's own.
 venuesRouter.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = currentUserId();
 
     const result = await query(
       `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
-              v.latitude, v.longitude, v.osm_id, v.parent_venue_id, v.rating,
+              v.latitude, v.longitude, v.osm_id, v.parent_venue_id,
+              (SELECT vr.rating FROM venue_ratings vr WHERE vr.venue_id = v.id AND vr.user_id = $2) AS rating,
               v.created_at, v.updated_at,
               vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon,
               pv.name AS parent_venue_name,
@@ -1915,10 +1930,10 @@ venuesRouter.get('/:id', async (req: Request, res: Response) => {
        FROM venues v
        LEFT JOIN venue_categories vc ON v.category_id = vc.id
        LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-       LEFT JOIN checkins c ON c.venue_id = v.id
+       LEFT JOIN checkins c ON c.venue_id = v.id AND c.user_id = $2
        WHERE v.id = $1
        GROUP BY v.id, vc.id, pv.name`,
-      [id]
+      [id, userId]
     );
 
     if (result.rows.length === 0) {
@@ -1938,11 +1953,11 @@ venuesRouter.get('/:id', async (req: Request, res: Response) => {
     if (isAmusementRideCategory(venue.category_name)) {
       const cp = await query(
         `SELECT status, attraction_id, data, candidates, error, fetched_at
-           FROM venue_coasterpedia WHERE venue_id = $1`,
-        [id]
+           FROM venue_coasterpedia WHERE venue_id = $1 AND user_id = $2`,
+        [id, userId]
       );
       venue.coasterpedia = {
-        has_key: (await getCoasterpediaApiKey(USER_ID)) != null,
+        has_key: (await getCoasterpediaApiKey(userId)) != null,
         ...(cp.rows[0] ?? { status: null }),
       };
     }
@@ -1985,25 +2000,24 @@ venuesRouter.post('/', async (req: Request, res: Response) => {
 
     const geocodedVenue = await geocodeVenueLocationIfMissing(venue);
 
-    // Rating is set after find/reuse so a reused venue keeps its existing
-    // rating unless the caller explicitly provides one.
+    // The rating is the caller's own, set after find/reuse so a reused venue
+    // keeps the caller's existing rating unless they explicitly provide one.
+    const userId = currentUserId();
     const venueRating = normalizeRating(rating);
     if (venueRating != null) {
-      await query(
-        'UPDATE venues SET rating = $2, updated_at = NOW() WHERE id = $1',
-        [venue.id, venueRating]
-      );
+      await setVenueRating(userId, venue.id, venueRating);
     }
 
-    // Re-fetch to return a canonical row that includes the rating column.
+    // Re-fetch to return a canonical row that includes the caller's rating.
     const finalResult = await query(
       `SELECT v.id, v.name, v.address, v.city, v.state, v.country, v.postal_code,
-              v.latitude, v.longitude, v.osm_id, v.rating, v.created_at, v.updated_at,
+              v.latitude, v.longitude, v.osm_id, vr.rating, v.created_at, v.updated_at,
               vc.id AS category_id, vc.name AS category_name, vc.icon AS category_icon
        FROM venues v
        LEFT JOIN venue_categories vc ON v.category_id = vc.id
+       LEFT JOIN venue_ratings vr ON vr.venue_id = v.id AND vr.user_id = $2
        WHERE v.id = $1`,
-      [venue.id]
+      [venue.id, userId]
     );
     const finalVenue = finalResult.rows.length > 0
       ? finalResult.rows[0]
@@ -2012,8 +2026,8 @@ venuesRouter.post('/', async (req: Request, res: Response) => {
     res.status(201).json(serializeVenue(finalVenue));
 
     // After the response: look the ride up on Coasterpedia (non-fatal).
-    needsLookup(venue.id, USER_ID)
-      .then((due) => (due ? enrichVenueCoasterpedia(venue.id, USER_ID) : undefined))
+    needsLookup(venue.id, userId)
+      .then((due) => (due ? enrichVenueCoasterpedia(venue.id, userId) : undefined))
       .catch((err) => console.error('Coasterpedia lookup scheduling failed (non-fatal):', err));
   } catch (err) {
     console.error('Error creating venue:', err);
@@ -2055,28 +2069,43 @@ venuesRouter.put('/:id', async (req: Request, res: Response) => {
       push('longitude = $n', parseFloat(String(body.longitude)));
     }
     if (body.osm_id !== undefined) push('osm_id = COALESCE($n, osm_id)', body.osm_id || null);
-    // Rating uses explicit key presence so the client can clear it to unrated.
-    if (hasRating) push('rating = $n', normalizeRating(body.rating));
-    setClauses.push('updated_at = NOW()');
 
-    const result = await query(
-      `UPDATE venues
-       SET ${setClauses.join(', ')}
-       WHERE id = $1
-       RETURNING *`,
-      params
-    );
+    // Explicit columns: created_by (who added the shared venue) stays private.
+    // A rating-only save leaves the shared venue row untouched.
+    const columns = `id, name, category_id, address, city, state, country, postal_code,
+                 latitude, longitude, osm_id, swarm_venue_id, parent_venue_id,
+                 created_at, updated_at`;
+    const result = setClauses.length > 0
+      ? await query(
+          `UPDATE venues
+           SET ${[...setClauses, 'updated_at = NOW()'].join(', ')}
+           WHERE id = $1
+           RETURNING ${columns}`,
+          params
+        )
+      : await query(`SELECT ${columns} FROM venues WHERE id = $1`, [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Venue not found' });
     }
 
-    res.json(serializeVenue(result.rows[0]));
+    // The rating is the caller's own. Explicit key presence lets the client
+    // clear it to unrated.
+    const venueId = String(id);
+    const userId = currentUserId();
+    if (hasRating) {
+      await setVenueRating(userId, venueId, normalizeRating(body.rating));
+    }
+    const ratingResult = await query(
+      'SELECT rating FROM venue_ratings WHERE user_id = $1 AND venue_id = $2',
+      [userId, venueId]
+    );
+
+    res.json(serializeVenue({ ...result.rows[0], rating: ratingResult.rows[0]?.rating ?? null }));
 
     // After the response: (re-)run the Coasterpedia lookup when due (non-fatal).
-    const venueId = String(id);
-    needsLookup(venueId, USER_ID)
-      .then((due) => (due ? enrichVenueCoasterpedia(venueId, USER_ID) : undefined))
+    needsLookup(venueId, userId)
+      .then((due) => (due ? enrichVenueCoasterpedia(venueId, userId) : undefined))
       .catch((err) => console.error('Coasterpedia lookup scheduling failed (non-fatal):', err));
   } catch (err) {
     console.error('Error updating venue:', err);
@@ -2097,12 +2126,16 @@ venuesRouter.post('/:id/coasterpedia/refresh', async (req: Request, res: Respons
     if (!isAmusementRideCategory(venue.rows[0].category_name)) {
       return res.status(400).json({ error: 'Venue is not an amusement ride' });
     }
-    if (!(await getCoasterpediaApiKey(USER_ID))) {
+    const userId = currentUserId();
+    if (!(await getCoasterpediaApiKey(userId))) {
       return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Location first' });
     }
     // Keep the matched record on refresh; otherwise search again.
-    const current = await query('SELECT attraction_id FROM venue_coasterpedia WHERE venue_id = $1', [id]);
-    await enrichVenueCoasterpedia(String(id), USER_ID, { attractionId: current.rows[0]?.attraction_id ?? undefined });
+    const current = await query(
+      'SELECT attraction_id FROM venue_coasterpedia WHERE venue_id = $1 AND user_id = $2',
+      [id, userId]
+    );
+    await enrichVenueCoasterpedia(String(id), userId, { attractionId: current.rows[0]?.attraction_id ?? undefined });
     res.json({ ok: true });
   } catch (err) {
     console.error('Error refreshing Coasterpedia data:', err);
@@ -2128,10 +2161,11 @@ venuesRouter.post('/:id/coasterpedia/select', async (req: Request, res: Response
     if (!isAmusementRideCategory(venue.rows[0].category_name)) {
       return res.status(400).json({ error: 'Venue is not an amusement ride' });
     }
-    if (!(await getCoasterpediaApiKey(USER_ID))) {
+    const userId = currentUserId();
+    if (!(await getCoasterpediaApiKey(userId))) {
       return res.status(400).json({ error: 'Add a Coasterpedia API key in Settings > Location first' });
     }
-    await enrichVenueCoasterpedia(String(id), USER_ID, { attractionId });
+    await enrichVenueCoasterpedia(String(id), userId, { attractionId });
     res.json({ ok: true });
   } catch (err) {
     console.error('Error selecting Coasterpedia attraction:', err);
@@ -2139,21 +2173,23 @@ venuesRouter.post('/:id/coasterpedia/select', async (req: Request, res: Response
   }
 });
 
-// DELETE /:id - delete venue when it has no check-ins
+// DELETE /:id - delete a venue nobody uses. Venues are a shared catalog, so
+// the check is across ALL users: a check-in or list entry of anyone's keeps
+// it (the delete would cascade their list items away). The 409 for someone
+// else's references doesn't say what they are.
 venuesRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
     const venueResult = await query(
       `SELECT v.id,
-              COUNT(c.id)::int AS checkin_count,
-              COUNT(child.id)::int AS child_count
+              (SELECT COUNT(*) FROM checkins c WHERE c.venue_id = v.id AND c.user_id = $2)::int AS own_checkin_count,
+              (SELECT COUNT(*) FROM checkins c WHERE c.venue_id = v.id)::int AS checkin_count,
+              (SELECT COUNT(*) FROM venue_list_items vli WHERE vli.venue_id = v.id)::int AS list_item_count,
+              (SELECT COUNT(*) FROM venues child WHERE child.parent_venue_id = v.id)::int AS child_count
        FROM venues v
-       LEFT JOIN checkins c ON c.venue_id = v.id
-       LEFT JOIN venues child ON child.parent_venue_id = v.id
-       WHERE v.id = $1
-       GROUP BY v.id`,
-      [id]
+       WHERE v.id = $1`,
+      [id, currentUserId()]
     );
 
     if (venueResult.rows.length === 0) {
@@ -2161,18 +2197,31 @@ venuesRouter.delete('/:id', async (req: Request, res: Response) => {
     }
 
     const venue = venueResult.rows[0];
-    const checkinCount = Number(venue.checkin_count) || 0;
-    const childCount = Number(venue.child_count) || 0;
 
-    if (checkinCount > 0) {
+    if (Number(venue.own_checkin_count) > 0) {
       return res.status(409).json({ error: 'Cannot delete a venue with check-ins' });
     }
 
-    if (childCount > 0) {
+    if (Number(venue.checkin_count) > 0 || Number(venue.list_item_count) > 0) {
+      return res.status(409).json({ error: 'Cannot delete a venue that is in use' });
+    }
+
+    if (Number(venue.child_count) > 0) {
       return res.status(409).json({ error: 'Cannot delete a venue that has child venues' });
     }
 
-    await query('DELETE FROM venues WHERE id = $1', [id]);
+    // The NOT EXISTS guards close the race with a check-in or list entry
+    // added since the check above.
+    const deleted = await query(
+      `DELETE FROM venues v WHERE v.id = $1
+         AND NOT EXISTS (SELECT 1 FROM checkins c WHERE c.venue_id = v.id)
+         AND NOT EXISTS (SELECT 1 FROM venue_list_items vli WHERE vli.venue_id = v.id)
+       RETURNING v.id`,
+      [id]
+    );
+    if (deleted.rows.length === 0) {
+      return res.status(409).json({ error: 'Cannot delete a venue that is in use' });
+    }
 
     return res.json({ message: 'Venue deleted', id });
   } catch (err) {
@@ -2181,7 +2230,10 @@ venuesRouter.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// POST /:id/merge-into - merge this venue into another, moving all check-ins to the target
+// POST /:id/merge-into - merge this venue into another, moving all check-ins to the target.
+// Venues are a shared catalog, so EVERY user's check-ins and list memberships
+// move (none may be orphaned or cascade-deleted); the response's check-in
+// count is the caller's own.
 venuesRouter.post('/:id/merge-into', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -2215,6 +2267,22 @@ venuesRouter.post('/:id/merge-into', async (req: Request, res: Response) => {
          SET venue_id = $1
          WHERE venue_id = $2
            AND list_id NOT IN (SELECT list_id FROM venue_list_items WHERE venue_id = $1)`,
+        [target_id, id]
+      );
+
+      // Per user, carry the source's rating and Coasterpedia record over when
+      // that user has none for the target (they'd cascade away with the
+      // source otherwise); a user's existing target values win.
+      await client.query(
+        `UPDATE venue_ratings s SET venue_id = $1, updated_at = NOW()
+         WHERE s.venue_id = $2
+           AND NOT EXISTS (SELECT 1 FROM venue_ratings t WHERE t.venue_id = $1 AND t.user_id = s.user_id)`,
+        [target_id, id]
+      );
+      await client.query(
+        `UPDATE venue_coasterpedia s SET venue_id = $1
+         WHERE s.venue_id = $2
+           AND NOT EXISTS (SELECT 1 FROM venue_coasterpedia t WHERE t.venue_id = $1 AND t.user_id = s.user_id)`,
         [target_id, id]
       );
 
@@ -2255,10 +2323,10 @@ venuesRouter.post('/:id/merge-into', async (req: Request, res: Response) => {
        FROM venues v
        LEFT JOIN venue_categories vc ON v.category_id = vc.id
        LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-       LEFT JOIN checkins c ON c.venue_id = v.id
+       LEFT JOIN checkins c ON c.venue_id = v.id AND c.user_id = $2
        WHERE v.id = $1
        GROUP BY v.id, vc.id, pv.name`,
-      [target_id]
+      [target_id, currentUserId()]
     );
 
     res.json(serializeVenue(result.rows[0]));
@@ -2503,7 +2571,8 @@ venuesRouter.post('/categorize', async (_req: Request, res: Response) => {
 
 const searchRouter = Router();
 
-// GET /?q=&type=&limit=&offset= - unified search
+// GET /?q=&type=&limit=&offset= - unified search: the shared venue catalog
+// plus the caller's own check-ins.
 searchRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { q, type = 'all', limit = '20', offset = '0' } = req.query;
@@ -2553,12 +2622,13 @@ searchRouter.get('/', async (req: Request, res: Response) => {
          JOIN venues v ON c.venue_id = v.id
          LEFT JOIN venue_categories vc ON v.category_id = vc.id
          LEFT JOIN venues pv ON v.parent_venue_id = pv.id
-         WHERE c.search_vector @@ plainto_tsquery('english', $1)
-            OR v.search_vector @@ plainto_tsquery('english', $1)
-            OR pv.search_vector @@ plainto_tsquery('english', $1)
+         WHERE c.user_id = $4
+           AND (c.search_vector @@ plainto_tsquery('english', $1)
+             OR v.search_vector @@ plainto_tsquery('english', $1)
+             OR pv.search_vector @@ plainto_tsquery('english', $1))
          ORDER BY rank DESC
          LIMIT $2 OFFSET $3`,
-        [searchQuery, limitNum, offsetNum]
+        [searchQuery, limitNum, offsetNum, currentUserId()]
       );
       result.checkins = checkinsResult.rows;
     }
@@ -2628,11 +2698,12 @@ async function findOrCreateVenue(
 }
 
 // POST / - import Swarm CSV files
-swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, res: Response) => {
+swarmImportRouter.post('/', preserveUserContext(csvUpload.array('files', 100)), async (req: Request, res: Response) => {
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) {
     return res.status(400).json({ error: 'No CSV files provided' });
   }
+  const userId = currentUserId();
 
   let imported = 0;
   let skipped = 0;
@@ -2697,10 +2768,10 @@ swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, 
             continue;
           }
 
-          // Check for duplicate by swarm_id
+          // Check for duplicate by swarm_id (this user's own import)
           const existing = await query(
-            'SELECT id FROM checkins WHERE swarm_id = $1',
-            [swarmId]
+            'SELECT id FROM checkins WHERE swarm_id = $1 AND user_id = $2',
+            [swarmId, userId]
           );
           if (existing.rows.length > 0) {
             skipped++;
@@ -2712,11 +2783,18 @@ swarmImportRouter.post('/', csvUpload.array('files', 100), async (req: Request, 
           // Without a timezone the check-in reads as UTC in stats and date
           // filters until the separate backfill script runs.
           const checkinTimezone = await inferVenueTimezone(venueId);
-          await query(
+          // swarm_id is unique per user; DO NOTHING covers a concurrent
+          // import of the same file racing past the check above.
+          const inserted = await query(
             `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone, swarm_id)
-             VALUES ($1, $2, $3, $4::timestamptz, $5, $6)`,
-            [USER_ID, venueId, shout, createdAt, checkinTimezone, swarmId]
+             VALUES ($1, $2, $3, $4::timestamptz, $5, $6)
+             ON CONFLICT DO NOTHING`,
+            [userId, venueId, shout, createdAt, checkinTimezone, swarmId]
           );
+          if ((inserted.rowCount ?? 0) === 0) {
+            skipped++;
+            continue;
+          }
 
           imported++;
         } catch (rowErr: any) {
@@ -2871,12 +2949,14 @@ async function categorizeBatch(jobId: string, attempted: string[]) {
  * whose last lookup failed. Paced to the API's per-account rate limit.
  */
 async function coasterpediaBackfillHandler(ctx: PluginJobContext): Promise<void> {
-  if (!(await getCoasterpediaApiKey(USER_ID))) {
+  // Jobs start from the user's request and run in its user context.
+  const userId = currentUserId();
+  if (!(await getCoasterpediaApiKey(userId))) {
     throw new Error('Add a Coasterpedia API key in Settings > Location first');
   }
-  const ids = await pendingBackfillVenueIds();
+  const ids = await pendingBackfillVenueIds(userId);
   await ctx.updateProgress({ phase: 'coasterpedia', message: `Looking up ${ids.length} rides...`, updated: 0 });
-  await runCoasterpediaBackfill(ids, USER_ID, {
+  await runCoasterpediaBackfill(ids, userId, {
     isCancelled: () => ctx.isCancelled(),
     onProgress: (done, total) =>
       ctx.updateProgress({
@@ -2893,12 +2973,13 @@ async function coasterpediaBackfillHandler(ctx: PluginJobContext): Promise<void>
  * or still-provisional one). Newest days first, paced under Open-Meteo's limit.
  */
 async function weatherBackfillHandler(ctx: PluginJobContext): Promise<void> {
-  if (!(await isWeatherEnabled(USER_ID))) {
+  const userId = currentUserId();
+  if (!(await isWeatherEnabled(userId))) {
     throw new Error('Turn on weather in Settings > Location first');
   }
-  const dates = await pendingWeatherDates(USER_ID);
+  const dates = await pendingWeatherDates(userId);
   await ctx.updateProgress({ phase: 'weather', message: `Fetching weather for ${dates.length} days...`, updated: 0 });
-  await runWeatherBackfill(dates, USER_ID, {
+  await runWeatherBackfill(dates, userId, {
     isCancelled: () => ctx.isCancelled(),
     onProgress: (done, total) =>
       ctx.updateProgress({
@@ -2985,6 +3066,24 @@ async function venueBackfillHandler(ctx: PluginJobContext): Promise<void> {
 // ---------------------------------------------------------------------------
 // Plugin server half
 // ---------------------------------------------------------------------------
+
+/**
+ * `WITH RECURSIVE user_venues(id)`: the venues user $1 references through a
+ * check-in, a rating or one of their venue lists, plus those venues' parent
+ * chains.
+ */
+const USER_VENUES_CTE = `WITH RECURSIVE user_venues(id) AS (
+           SELECT venue_id FROM checkins WHERE user_id = $1
+           UNION
+           SELECT venue_id FROM venue_ratings WHERE user_id = $1
+           UNION
+           SELECT vli.venue_id FROM venue_list_items vli
+             JOIN venue_lists vl ON vl.id = vli.list_id AND vl.user_id = $1
+           UNION
+           SELECT v.parent_venue_id FROM venues v
+             JOIN user_venues uv ON uv.id = v.id
+            WHERE v.parent_venue_id IS NOT NULL
+         )`;
 
 export const server: CheckinTypeServerPlugin = {
   storage: 'custom',
@@ -3079,8 +3178,9 @@ export const server: CheckinTypeServerPlugin = {
 
   /**
    * Serialize this user's location data for backup. The payload carries
-   * check-ins plus the venue + category tables they depend on (with the
-   * parent FKs handled on import).
+   * check-ins plus the venues they reference (by check-in or list entry, with
+   * those venues' parent chains) and those venues' categories (with their
+   * parent chains). The rest of the shared catalog is not the user's data.
    */
   backupExport: async ({ user_id }) => {
     // Companions are core-owned: they ship in the backup bundle's
@@ -3097,22 +3197,33 @@ export const server: CheckinTypeServerPlugin = {
         [user_id],
       ),
       query(
-        `SELECT DISTINCT v.id, v.name, v.category_id, v.rating,
+        `${USER_VENUES_CTE}
+         SELECT v.id, v.name, v.category_id,
+                -- the user's own rating, carried on the venue row as before
+                (SELECT vr.rating FROM venue_ratings vr WHERE vr.venue_id = v.id AND vr.user_id = $1) AS rating,
                 v.address, v.city, v.state, v.country, v.postal_code,
                 v.latitude, v.longitude,
                 v.osm_id, v.swarm_venue_id,
-                v.parent_venue_id, v.created_by,
+                v.parent_venue_id,
                 v.created_at, v.updated_at
          FROM venues v
+         WHERE v.id IN (SELECT id FROM user_venues)
          ORDER BY v.created_at ASC`,
-        [],
+        [user_id],
       ),
       query(
-        `SELECT DISTINCT vc.id, vc.name, vc.icon, vc.parent_id, vc.created_at
+        `${USER_VENUES_CTE},
+         user_categories AS (
+           SELECT vc.id, vc.parent_id FROM venue_categories vc
+           WHERE vc.id IN (SELECT v.category_id FROM venues v WHERE v.id IN (SELECT id FROM user_venues))
+           UNION
+           SELECT p.id, p.parent_id FROM venue_categories p JOIN user_categories uc ON uc.parent_id = p.id
+         )
+         SELECT vc.id, vc.name, vc.icon, vc.parent_id, vc.created_at
          FROM venue_categories vc
-         JOIN venues v ON v.category_id = vc.id
+         WHERE vc.id IN (SELECT id FROM user_categories)
          ORDER BY vc.name ASC`,
-        [],
+        [user_id],
       ),
       query(
         `SELECT id, name, created_at, updated_at
@@ -3154,8 +3265,15 @@ export const server: CheckinTypeServerPlugin = {
 
   /**
    * Restore location data from backupExport (or restoreLegacyBackup's
-   * normalized shape). FK order: categories (parent later) -> venues
-   * (parent later) -> check-ins.
+   * normalized shape) into the CURRENT user's account (`user_id` from the
+   * hook context; any user_id in the payload is ignored). FK order:
+   * categories (parent later) -> venues (parent later) -> check-ins -> lists.
+   *
+   * Venues and categories are a shared catalog: rows that already exist are
+   * reused as they are, never overwritten, and only rows this restore
+   * inserted get their parent links filled in. Check-in, list and companion
+   * rows whose id belongs to another user are skipped, and nothing is ever
+   * attached to a check-in or list the current user doesn't own.
    */
   backupImport: async ({ user_id, client: txClient }, payload) => {
     const data = (payload ?? {}) as {
@@ -3181,38 +3299,69 @@ export const server: CheckinTypeServerPlugin = {
     // atomic; open our own connection only when running standalone.
     const ownsClient = txClient == null;
     const client = txClient ?? (await pool.connect());
+    // Of the given ids, the ones that exist in `table` owned by this user.
+    const ownedIds = async (table: 'checkins' | 'venue_lists' | 'checkin_lists', ids: unknown[]): Promise<Set<string>> => {
+      const wanted = [...new Set(ids.map((id) => String(id ?? '')).filter(isUuid))];
+      if (wanted.length === 0) return new Set();
+      const result = await client.query(
+        `SELECT id::text AS id FROM ${table} WHERE id = ANY($1::uuid[]) AND user_id = $2`,
+        [wanted, user_id]
+      );
+      return new Set(result.rows.map((r: { id: string }) => r.id));
+    };
     try {
-      // 1. Categories (parent_id deferred; ON CONFLICT (name) keeps a stable
-      //    id map so venue category_id references can be remapped).
+      // 1. Categories (parent_id deferred). An existing category with the
+      //    same name (or id) is reused untouched; the id map lets venue
+      //    category_id references be remapped.
       const categoryIdMap = new Map<string, string>();
+      const insertedCategoryIds = new Set<string>();
       for (const category of categories) {
         if (!category?.name) continue;
-        const result = await client.query(
+        const backupId = isUuid(String(category.id ?? '')) ? String(category.id) : null;
+        let result = await client.query(
           `INSERT INTO venue_categories (id, name, icon, parent_id, created_at)
-           VALUES ($1, $2, $3, NULL, COALESCE($4::timestamptz, NOW()))
-           ON CONFLICT (name) DO UPDATE SET
-             icon = COALESCE(EXCLUDED.icon, venue_categories.icon)
+           VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, NULL, COALESCE($4::timestamptz, NOW()))
+           ON CONFLICT DO NOTHING
            RETURNING id`,
-          [category.id, category.name, category.icon || null, category.created_at || null]
+          [backupId, category.name, category.icon || null, category.created_at || null]
         );
+        if (result.rows.length > 0) {
+          insertedCategoryIds.add(result.rows[0].id);
+        } else {
+          result = await client.query('SELECT id FROM venue_categories WHERE name = $1', [category.name]);
+          if (result.rows.length === 0) {
+            // The id is taken by a differently named category: insert under a new id.
+            result = await client.query(
+              `INSERT INTO venue_categories (name, icon, created_at)
+               VALUES ($1, $2, COALESCE($3::timestamptz, NOW()))
+               ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+               RETURNING id`,
+              [category.name, category.icon || null, category.created_at || null]
+            );
+            insertedCategoryIds.add(result.rows[0].id);
+          }
+        }
         categoryIdMap.set(String(category.id), result.rows[0].id);
       }
       for (const category of categories) {
         const localCategoryId = categoryIdMap.get(String(category.id));
         const localParentId = category.parent_id ? categoryIdMap.get(String(category.parent_id)) : null;
         if (!localCategoryId || !localParentId || localCategoryId === localParentId) continue;
+        if (!insertedCategoryIds.has(localCategoryId)) continue;
         await client.query(
-          `UPDATE venue_categories SET parent_id = $2 WHERE id = $1`,
+          `UPDATE venue_categories SET parent_id = $2 WHERE id = $1 AND parent_id IS NULL`,
           [localCategoryId, localParentId]
         );
       }
 
-      // 2. Venues (category_id remapped, parent_venue_id deferred).
+      // 2. Venues (category_id remapped, parent_venue_id deferred). A venue
+      //    whose id already exists is the same shared venue: keep it as is.
+      const insertedVenueIds = new Set<string>();
       for (const venue of venues) {
-        if (!venue?.id || !venue.name) continue;
-        await client.query(
+        if (!venue?.id || !venue.name || !isUuid(String(venue.id))) continue;
+        const result = await client.query(
           `INSERT INTO venues (
-             id, name, category_id, rating,
+             id, name, category_id,
              address, city, state, country, postal_code,
              latitude, longitude,
              osm_id, swarm_venue_id,
@@ -3220,19 +3369,19 @@ export const server: CheckinTypeServerPlugin = {
              created_at, updated_at
            )
            VALUES (
-             $1, $2, $3, $4,
-             $5, $6, $7, $8, $9,
-             $10, $11,
-             $12, $13,
-             NULL, $14,
-             COALESCE($15::timestamptz, NOW()), COALESCE($16::timestamptz, NOW())
+             $1, $2, $3,
+             $4, $5, $6, $7, $8,
+             $9, $10,
+             $11, $12,
+             NULL, $13,
+             COALESCE($14::timestamptz, NOW()), COALESCE($15::timestamptz, NOW())
            )
-           ON CONFLICT (id) DO NOTHING`,
+           ON CONFLICT (id) DO NOTHING
+           RETURNING id`,
           [
             venue.id,
             venue.name,
             venue.category_id ? (categoryIdMap.get(String(venue.category_id)) ?? null) : null,
-            normalizeRating(venue.rating),
             venue.address || null,
             venue.city || null,
             venue.state || null,
@@ -3247,21 +3396,41 @@ export const server: CheckinTypeServerPlugin = {
             venue.updated_at || null,
           ]
         );
+        if (result.rows.length > 0) insertedVenueIds.add(String(result.rows[0].id));
+
+        // A rating on the venue row (current and older backups alike) is the
+        // restoring user's own; an existing rating of theirs is kept.
+        const rating = normalizeRating(venue.rating);
+        if (rating != null) {
+          await client.query(
+            `INSERT INTO venue_ratings (user_id, venue_id, rating)
+             SELECT $1::uuid, $2::uuid, $3::smallint
+             WHERE EXISTS (SELECT 1 FROM venues WHERE id = $2::uuid)
+             ON CONFLICT (user_id, venue_id) DO NOTHING`,
+            [user_id, venue.id, rating]
+          );
+        }
       }
       for (const venue of venues) {
         if (!venue.parent_venue_id || venue.parent_venue_id === venue.id) continue;
-        // Only fill in missing parents: an already-existing local venue keeps
-        // the hierarchy the user has set up since.
+        // Only venues this restore created get a parent: an existing (shared)
+        // venue keeps the hierarchy it has.
+        if (!insertedVenueIds.has(String(venue.id)) || !isUuid(String(venue.parent_venue_id))) continue;
         await client.query(
-          `UPDATE venues SET parent_venue_id = $2 WHERE id = $1 AND parent_venue_id IS NULL`,
+          `UPDATE venues SET parent_venue_id = $2
+           WHERE id = $1 AND parent_venue_id IS NULL
+             AND EXISTS (SELECT 1 FROM venues WHERE id = $2)`,
           [venue.id, venue.parent_venue_id]
         );
       }
 
-      // 3. Check-ins.
+      // 3. Check-ins. An id already taken (by this user: already restored;
+      //    by another user: not ours to touch) is skipped. A Swarm id the
+      //    user already holds on another check-in is dropped rather than
+      //    losing the check-in.
       let inserted = 0;
       for (const row of checkins) {
-        if (!row?.id || !row.venue_id) continue;
+        if (!row?.id || !row.venue_id || !isUuid(String(row.id)) || !isUuid(String(row.venue_id))) continue;
         const result = await client.query(
           `INSERT INTO checkins (
              id, user_id, venue_id,
@@ -3269,14 +3438,14 @@ export const server: CheckinTypeServerPlugin = {
              checked_in_at, checkin_timezone, created_at, updated_at,
              swarm_id
            )
-           VALUES (
-             $1, $2, $3,
-             $4, $5,
-             COALESCE($6::timestamptz, NOW()), $7,
+           SELECT
+             $1::uuid, $2::uuid, $3::uuid,
+             $4::text, $5::smallint,
+             COALESCE($6::timestamptz, NOW()), $7::text,
              COALESCE($8::timestamptz, NOW()),
              COALESCE($9::timestamptz, NOW()),
-             $10
-           )
+             CASE WHEN EXISTS (SELECT 1 FROM checkins WHERE swarm_id = $10::varchar AND user_id = $2::uuid) THEN NULL ELSE $10::varchar END
+           WHERE EXISTS (SELECT 1 FROM venues WHERE id = $3::uuid)
            ON CONFLICT (id) DO NOTHING`,
           [
             row.id,
@@ -3293,77 +3462,83 @@ export const server: CheckinTypeServerPlugin = {
         );
         if ((result.rowCount ?? 0) > 0) inserted++;
       }
+      // Child rows only ever attach to check-ins this user owns.
+      const ownedCheckinIds = await ownedIds('checkins', checkins.map((r) => r?.id));
 
       // 4. Companions — legacy backups only (old bundles carried
       //    checkinCompanions here; new bundles ship companions.json in the
       //    core bundle, so fresh exports never set this key).
-      const checkinIds = new Set(checkins.map((r) => String(r?.id)).filter(Boolean));
       for (const cc of checkinCompanions) {
         if (!cc?.checkin_id || !cc?.name) continue;
-        if (!checkinIds.has(String(cc.checkin_id))) continue;
+        if (!ownedCheckinIds.has(String(cc.checkin_id))) continue;
         await client.query(
-          `INSERT INTO companions (checkin_type, checkin_id, name)
-           VALUES ('location', $1, $2)
-           ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING`,
-          [cc.checkin_id, String(cc.name)]
+          `INSERT INTO companions (checkin_type, checkin_id, name, user_id)
+           VALUES ('location', $1, $2, $3)
+           ON CONFLICT DO NOTHING`,
+          [cc.checkin_id, String(cc.name), user_id]
         );
       }
 
       // 5. Venue lists (payload ids are preserved by the insert, so list-item
-      //    references use them directly).
+      //    references use them directly). An id or name already taken is
+      //    skipped; items only go into lists this user owns.
       for (const list of venueLists) {
-        if (!list?.id || !list?.name) continue;
+        if (!list?.id || !list?.name || !isUuid(String(list.id))) continue;
         await client.query(
           `INSERT INTO venue_lists (id, user_id, name, created_at, updated_at)
            VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
-           ON CONFLICT (id) DO NOTHING`,
+           ON CONFLICT DO NOTHING`,
           [list.id, user_id, list.name, list.created_at || null, list.updated_at || null]
         );
       }
+      const ownedVenueListIds = await ownedIds('venue_lists', venueListItems.map((li) => li?.list_id));
       for (const li of venueListItems) {
-        if (!li?.list_id || !li?.venue_id) continue;
+        if (!li?.list_id || !li?.venue_id || !isUuid(String(li.venue_id))) continue;
+        if (!ownedVenueListIds.has(String(li.list_id))) continue;
         await client.query(
           `INSERT INTO venue_list_items (list_id, venue_id, position, rank, added_at)
-           VALUES ($1, $2, COALESCE($3::int, 0), $4::int, COALESCE($5::timestamptz, NOW()))
+           SELECT $1::uuid, $2::uuid, COALESCE($3::int, 0), $4::int, COALESCE($5::timestamptz, NOW())
+           WHERE EXISTS (SELECT 1 FROM venues WHERE id = $2::uuid)
            ON CONFLICT DO NOTHING`,
           [li.list_id, li.venue_id, li.position ?? 0, li.rank ?? null, li.added_at || null]
-       );
-     }
+        );
+      }
 
-     // 6. Checkin lists (after check-ins, since items reference them).
-     for (const list of checkinLists) {
-       if (!list?.id || !list?.name) continue;
-       await client.query(
-         `INSERT INTO checkin_lists (id, user_id, name, created_at, updated_at)
-          VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
-          ON CONFLICT (id) DO NOTHING`,
-         [list.id, user_id, list.name, list.created_at || null, list.updated_at || null]
-       );
-     }
-     const restoredCheckinIds = new Set(checkins.map((r) => String(r?.id)).filter(Boolean));
-     for (const li of checkinListItems) {
-       if (!li?.list_id || !li?.checkin_id) continue;
-       if (!restoredCheckinIds.has(String(li.checkin_id))) continue;
-       const rank =
-         typeof li.rank === 'number' && Number.isInteger(li.rank) && li.rank >= 1 ? li.rank : null;
-       // A re-run of the same restore must be idempotent even when the
-       // local row already carries a (different) rank.
-       await client.query(
-         // A rank already held by another item in this list (non-deferrable
-         // unique index) would abort the whole restore: import it unranked.
-         `INSERT INTO checkin_list_items (list_id, checkin_id, rank, added_at)
-          VALUES ($1, $2,
-            CASE WHEN EXISTS (
-              SELECT 1 FROM checkin_list_items WHERE list_id = $1 AND rank = $3::int AND checkin_id <> $2
-            ) THEN NULL ELSE $3::int END,
-            COALESCE($4::timestamptz, NOW()))
-          ON CONFLICT (list_id, checkin_id) DO UPDATE SET
-            rank = COALESCE(EXCLUDED.rank, checkin_list_items.rank)`,
-         [li.list_id, li.checkin_id, rank, li.added_at || null]
-       );
-     }
+      // 6. Checkin lists (after check-ins, since items reference them).
+      for (const list of checkinLists) {
+        if (!list?.id || !list?.name || !isUuid(String(list.id))) continue;
+        await client.query(
+          `INSERT INTO checkin_lists (id, user_id, name, created_at, updated_at)
+           VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
+           ON CONFLICT DO NOTHING`,
+          [list.id, user_id, list.name, list.created_at || null, list.updated_at || null]
+        );
+      }
+      const ownedCheckinListIds = await ownedIds('checkin_lists', checkinListItems.map((li) => li?.list_id));
+      for (const li of checkinListItems) {
+        if (!li?.list_id || !li?.checkin_id) continue;
+        if (!ownedCheckinListIds.has(String(li.list_id))) continue;
+        if (!ownedCheckinIds.has(String(li.checkin_id))) continue;
+        const rank =
+          typeof li.rank === 'number' && Number.isInteger(li.rank) && li.rank >= 1 ? li.rank : null;
+        // A re-run of the same restore must be idempotent even when the
+        // local row already carries a (different) rank.
+        await client.query(
+          // A rank already held by another item in this list (non-deferrable
+          // unique index) would abort the whole restore: import it unranked.
+          `INSERT INTO checkin_list_items (list_id, checkin_id, rank, added_at)
+           VALUES ($1, $2,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM checkin_list_items WHERE list_id = $1 AND rank = $3::int AND checkin_id <> $2
+             ) THEN NULL ELSE $3::int END,
+             COALESCE($4::timestamptz, NOW()))
+           ON CONFLICT (list_id, checkin_id) DO UPDATE SET
+             rank = COALESCE(EXCLUDED.rank, checkin_list_items.rank)`,
+          [li.list_id, li.checkin_id, rank, li.added_at || null]
+        );
+      }
 
-     return inserted;
+      return inserted;
     } finally {
       if (ownsClient) client.release();
     }
@@ -3433,16 +3608,19 @@ export const server: CheckinTypeServerPlugin = {
     // Weather is derived from the check-ins that were just deleted.
     await run('DELETE FROM daily_weather WHERE user_id = $1', [user_id]);
 
+    // The user's Coasterpedia lookups (the venues they describe are kept).
+    await run('DELETE FROM venue_coasterpedia WHERE user_id = $1', [user_id]);
+
     return result.rowCount ?? 0;
   },
 
   /**
-   * Start-over: delete the entire venues catalog. The start-over route only
-   * invokes this after the user's location check-ins have been deleted (the
-   * all-data option always implies the check-in deletion), so no check-in
-   * FKs remain. venue_list_items cascade from their lists/venues; the user's
-   * own lists are already gone via deleteUserData, but any other
-   * memberships are cleaned up explicitly.
+   * Start-over "all venue data": everything location-related the user owns,
+   * including their venue ratings.
+   * The start-over route only invokes this after the user's location
+   * check-ins have been deleted (the all-data option always implies the
+   * check-in deletion). Venues, venue_categories and merge suggestions are a
+   * catalog shared by every user and are never deleted here.
    */
   deleteAllData: async ({ user_id, client: txClient }) => {
     const client = txClient ?? null;
@@ -3453,17 +3631,12 @@ export const server: CheckinTypeServerPlugin = {
     for (const sql of [
       'DELETE FROM venue_list_items WHERE list_id IN (SELECT id FROM venue_lists WHERE user_id = $1)',
       'DELETE FROM venue_lists WHERE user_id = $1',
+      'DELETE FROM checkin_lists WHERE user_id = $1',
+      'DELETE FROM venue_coasterpedia WHERE user_id = $1',
+      'DELETE FROM venue_ratings WHERE user_id = $1',
+      'DELETE FROM daily_weather WHERE user_id = $1',
     ]) {
       const result = await run(sql, [user_id]);
-      deleted += result.rowCount ?? 0;
-    }
-
-    for (const sql of [
-      'DELETE FROM venue_merge_suggestions',
-      'DELETE FROM venues',
-      'DELETE FROM venue_categories',
-    ]) {
-      const result = await run(sql, []);
       deleted += result.rowCount ?? 0;
     }
 
@@ -3647,9 +3820,9 @@ export const server: CheckinTypeServerPlugin = {
       const result = await (executor ?? { query }).query(
         `UPDATE checkins
          SET checkin_timezone = $2, updated_at = NOW()
-         WHERE id = $1
+         WHERE id = $1 AND user_id = $3
          RETURNING id`,
-        [id, suggested_timezone],
+        [id, suggested_timezone, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },

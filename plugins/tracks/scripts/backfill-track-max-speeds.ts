@@ -1,4 +1,6 @@
 import { pool } from '../../../server/src/db';
+import { currentUserId, runAsUser } from '../../../server/src/auth/context';
+import { requireScriptUser } from '../../../server/src/scripts/scriptUser';
 import { computeMaxSpeedMps } from '../services/gpx';
 
 /**
@@ -8,6 +10,8 @@ import { computeMaxSpeedMps } from '../services/gpx';
  * Older tracks were stored with the max of raw per-segment speeds, which GPS
  * position jitter inflated to implausible values (e.g. 400+ m/s on walks).
  * The stored path geometry and per-point timestamps are used to recompute.
+ *
+ * Works on one account's tracks: `--user <username>` (case-insensitive).
  */
 
 type TrackRow = {
@@ -18,12 +22,15 @@ type TrackRow = {
 };
 
 async function backfillTrackMaxSpeeds() {
+  const userId = currentUserId();
   const client = await pool.connect();
 
   try {
     const { rows: tracks } = await client.query<TrackRow>(
       `SELECT id, max_speed_mps, ST_AsGeoJSON(path) AS geojson, points
-       FROM tracks`
+       FROM tracks
+       WHERE user_id = $1`,
+      [userId]
     );
 
     if (tracks.length === 0) {
@@ -71,8 +78,8 @@ async function backfillTrackMaxSpeeds() {
       if (Math.abs(newMaxSpeedMps - oldMaxSpeedMps) < 0.005) continue;
 
       const result = await client.query(
-        'UPDATE tracks SET max_speed_mps = $1 WHERE id = $2',
-        [newMaxSpeedMps, track.id]
+        'UPDATE tracks SET max_speed_mps = $1 WHERE id = $2 AND user_id = $3',
+        [newMaxSpeedMps, track.id, userId]
       );
       updatedRows += result.rowCount || 0;
       if (updatedRows <= 10) {
@@ -90,11 +97,22 @@ async function backfillTrackMaxSpeeds() {
     }
   } finally {
     client.release();
+  }
+}
+
+async function main() {
+  const { user } = await requireScriptUser(
+    process.argv.slice(2),
+    'Usage: backfill-track-max-speeds --user <username>'
+  );
+  try {
+    await runAsUser(user.id, backfillTrackMaxSpeeds);
+  } finally {
     await pool.end();
   }
 }
 
-backfillTrackMaxSpeeds().catch((err) => {
+main().catch((err) => {
   console.error('Track max-speed backfill failed:', err);
   process.exit(1);
 });

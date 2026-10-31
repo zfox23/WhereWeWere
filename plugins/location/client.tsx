@@ -31,8 +31,6 @@ import { LocationReflectionCard } from './ui/LocationReflectionCard';
 import { stats } from '../../client/src/api/client';
 import type { CheckIn, ImmichAsset } from '../../client/src/types';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
-
 /**
  * The location timeline branch emits legacy typed columns
  * (venue_name, venue_timezone, ...) alongside the standard envelope. The
@@ -93,7 +91,7 @@ function LocationFilterSection(props: PluginFilterSectionProps) {
   // fetched these in Home for the hard-coded location filter panel).
   useEffect(() => {
     stats
-      .categoryBreakdown(USER_ID)
+      .categoryBreakdown()
       .then((categories) => {
         setCategoryOptions(
           Array.from(
@@ -107,7 +105,7 @@ function LocationFilterSection(props: PluginFilterSectionProps) {
       })
       .catch(() => setCategoryOptions([]));
     stats
-      .countries(USER_ID)
+      .countries()
       .then((countries) => {
         setCountryOptions(
           Array.from(

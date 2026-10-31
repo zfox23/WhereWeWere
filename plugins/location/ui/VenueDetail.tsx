@@ -20,8 +20,6 @@ import { useDeviceHeading, arrowRotation } from './useDeviceHeading';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 import type { DistanceUnit } from './geo';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
-
 function normalizeCoordinate(value: unknown, fallback = 0): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -182,7 +180,6 @@ export default function VenueDetail() {
         for (let offset = 0; ; offset += PAGE_SIZE) {
           const page: CheckIn[] = await checkins.list({
             venue_id: id,
-            user_id: USER_ID,
             limit: String(PAGE_SIZE),
             offset: String(offset),
           });

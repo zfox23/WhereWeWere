@@ -7,22 +7,25 @@
 // the companions from "Rode With", adds the comment where appropriate, and
 // categorizes the venue as "Amusement Ride".
 //
-// Usage (from server/):
-//   npm run import:ride-log -- --dry-run           # preview: read-only, no writes
-//   npm run import:ride-log                        # apply, using the default CSV
-//   npm run import:ride-log -- --dry-run /path     # preview a different CSV
-//   npm run import:ride-log -- /path/to.csv        # apply, with a different CSV
+// Usage (from server/; --user names the account whose history is updated):
+//   npm run import:ride-log -- --user zach --dry-run         # preview: read-only, no writes
+//   npm run import:ride-log -- --user zach                   # apply, using the default CSV
+//   npm run import:ride-log -- --user zach --dry-run /path   # preview a different CSV
+//   npm run import:ride-log -- --user zach /path/to.csv      # apply, with a different CSV
 //
 // Docker / production:
 //   The compiled script ships inside the server image and is meant to be run
 //   from the host via the wrapper:
-//     ./scripts/run-import-ride-log.sh --dry-run /app/data/rides.csv
-//     ./scripts/run-import-ride-log.sh /app/data/rides.csv
+//     ./scripts/run-import-ride-log.sh --user zach --dry-run /app/data/rides.csv
+//     ./scripts/run-import-ride-log.sh --user zach /app/data/rides.csv
 //   The CSV path is resolved INSIDE the container, so it must be reachable
 //   there. The server container mounts ./data/server -> /app/data, so drop
 //   the CSV in ./data/server/ on the host and pass its in-container path.
 //
 // Behavior:
+//   - Only the --user account's check-ins are read or changed. Venues are a
+//     catalog shared by every user: matching, categorizing and creating ride
+//     venues works on that shared catalog.
 //   - A "checkin match" for a row = an existing check-in on that date
 //     (venue-local date: checked_in_at AT TIME ZONE COALESCE(checkin_timezone,
 //     'UTC')) at a venue whose name matches the Ride Name.
@@ -77,7 +80,8 @@ import {
 } from '../../../server/src/services/companions';
 import { getVenueTimezone } from '../services/geoTimezone';
 import { searchPlacesByName } from '../services/nominatim';
-import { DEFAULT_USER_ID as USER_ID } from '../../../server/src/constants';
+import { currentUserId, runAsUser } from '../../../server/src/auth/context';
+import { requireScriptUser } from '../../../server/src/scripts/scriptUser';
 
 const DEFAULT_CSV = path.join(
   os.homedir(),
@@ -213,7 +217,8 @@ async function loadVenues(): Promise<VenueIndex> {
       'SELECT id, name, city, country, latitude, longitude, category_id FROM venues'
     ),
     pool.query<{ venue_id: string; n: string }>(
-      'SELECT venue_id, COUNT(*)::text AS n FROM checkins GROUP BY venue_id'
+      'SELECT venue_id, COUNT(*)::text AS n FROM checkins WHERE user_id = $1 GROUP BY venue_id',
+      [currentUserId()]
     ),
   ]);
 
@@ -236,7 +241,7 @@ async function loadVenues(): Promise<VenueIndex> {
   return { byExact, byLoose };
 }
 
-/** Load every check-in on any of the given venue-local dates, oldest first. */
+/** Load the user's check-ins on any of the given venue-local dates, oldest first. */
 async function loadCheckinsForDates(dates: string[]): Promise<Map<string, LocalCheckin[]>> {
   if (dates.length === 0) return new Map();
   const res = await pool.query<LocalCheckin>(
@@ -244,9 +249,10 @@ async function loadCheckinsForDates(dates: string[]): Promise<Map<string, LocalC
             (c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date::text AS local_date
      FROM checkins c
      JOIN venues v ON v.id = c.venue_id
-     WHERE (c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date = ANY($1::date[])
+     WHERE c.user_id = $2
+       AND (c.checked_in_at AT TIME ZONE COALESCE(c.checkin_timezone, 'UTC'))::date = ANY($1::date[])
      ORDER BY c.checked_in_at, c.id`,
-    [dates]
+    [dates, currentUserId()]
   );
 
   const byDate = new Map<string, LocalCheckin[]>();
@@ -760,6 +766,7 @@ async function runDryRun(rows: RideLogRow[]): Promise<Stats> {
 // ============================================================================
 
 async function runImport(rows: RideLogRow[]): Promise<Stats> {
+  const userId = currentUserId();
   const dates = [...new Set(rows.map((r) => r.date).filter((d): d is string => d != null))].sort();
   const [index, checkinsByDate] = await Promise.all([
     loadVenues(),
@@ -861,8 +868,8 @@ async function runImport(rows: RideLogRow[]): Promise<Stats> {
         const res = await client.query(
           `UPDATE checkins
            SET notes = $2, updated_at = NOW()
-           WHERE id = $1 AND (notes IS NULL OR TRIM(notes) = '')`,
-          [plan.commentCheckinId, plan.commentText]
+           WHERE id = $1 AND user_id = $3 AND (notes IS NULL OR TRIM(notes) = '')`,
+          [plan.commentCheckinId, plan.commentText, userId]
         );
         if ((res.rowCount ?? 0) > 0) stats.commentsAdded += 1;
       }
@@ -886,13 +893,13 @@ async function runImport(rows: RideLogRow[]): Promise<Stats> {
                          TO_TIMESTAMP($4 || ' 12:00:00', 'YYYY-MM-DD HH24:MI:SS') AT TIME ZONE $5,
                          $5)
                  RETURNING id, checked_in_at`,
-                [USER_ID, canonicalVenueId, comment, row.date, tz]
+                [userId, canonicalVenueId, comment, row.date, tz]
               )
             : await client.query(
                 `INSERT INTO checkins (user_id, venue_id, notes, checked_in_at, checkin_timezone)
                  VALUES ($1, $2, $3, $4::timestamptz, $5)
                  RETURNING id, checked_in_at`,
-                [USER_ID, canonicalVenueId, comment, nc.time.iso, tz]
+                [userId, canonicalVenueId, comment, nc.time.iso, tz]
               );
         const newCheckinId = checkinRes.rows[0].id as string;
         const newCheckedInAt = checkinRes.rows[0].checked_in_at as string;
@@ -935,8 +942,10 @@ async function runImport(rows: RideLogRow[]): Promise<Stats> {
 // Main
 // ============================================================================
 
+const USAGE = 'Usage: import-ride-log --user <username> [--dry-run] [path/to.csv]';
+
 async function main() {
-  const args = process.argv.slice(2);
+  const { user, rest: args } = await requireScriptUser(process.argv.slice(2), USAGE);
   const dryRun = args.includes('--dry-run');
   const csvPath = args.find((a) => !a.startsWith('--')) ?? DEFAULT_CSV;
 
@@ -955,16 +964,18 @@ async function main() {
     console.error(`Failed to parse CSV: ${message}`);
     process.exit(1);
   }
-  console.log(`Parsed ${rows.length} ride log rows from ${resolved}`);
+  console.log(`Parsed ${rows.length} ride log rows from ${resolved} (user ${user.username})`);
 
-  if (dryRun) {
-    await runDryRun(rows);
-  } else {
-    console.log(`Importing ride log (category "${RIDE_CATEGORY}")…`);
-    console.log('');
-    const stats = await runImport(rows);
-    summarizeStats(stats, 'IMPORT COMPLETE');
-  }
+  await runAsUser(user.id, async () => {
+    if (dryRun) {
+      await runDryRun(rows);
+    } else {
+      console.log(`Importing ride log (category "${RIDE_CATEGORY}")…`);
+      console.log('');
+      const stats = await runImport(rows);
+      summarizeStats(stats, 'IMPORT COMPLETE');
+    }
+  });
 
   await pool.end();
 }

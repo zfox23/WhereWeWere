@@ -184,15 +184,28 @@ function apicalypseQuote(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Token cache (in-process; the server is single-user).
+// Token cache (in-process). Each user brings their own Twitch app, so tokens
+// are cached per credential pair: one user's token must never be sent with
+// another user's Client-ID.
 // ---------------------------------------------------------------------------
 
-let tokenCache: { token: string; expiresAt: number } | null = null;
-let tokenInFlight: Promise<string> | null = null;
+const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+const tokenInFlight = new Map<string, Promise<string>>();
 
-export function clearIgdbToken(): void {
-  tokenCache = null;
-  tokenInFlight = null;
+function tokenKey(clientId: string, clientSecret: string): string {
+  return `${clientId}\u0000${clientSecret}`;
+}
+
+/** Drop cached tokens: one credential pair's, or every pair's when called without arguments. */
+export function clearIgdbToken(clientId?: string, clientSecret?: string): void {
+  if (clientId !== undefined && clientSecret !== undefined) {
+    const key = tokenKey(clientId, clientSecret);
+    tokenCache.delete(key);
+    tokenInFlight.delete(key);
+    return;
+  }
+  tokenCache.clear();
+  tokenInFlight.clear();
 }
 
 function fetchNewToken(clientId: string, clientSecret: string): Promise<string> {
@@ -211,10 +224,10 @@ function fetchNewToken(clientId: string, clientSecret: string): Promise<string> 
       if (!data.access_token) throw new Error('IGDB token response missing access_token');
       // Refresh a full hour before the stated expiry as a safety margin.
       const expiresInSec = typeof data.expires_in === 'number' ? data.expires_in : 60 * 24 * 3600;
-      tokenCache = {
+      tokenCache.set(tokenKey(clientId, clientSecret), {
         token: data.access_token,
         expiresAt: Date.now() + Math.max((expiresInSec - 3600) * 1000, 60_000),
-      };
+      });
       return data.access_token;
     } finally {
       clearTimeout(timeout);
@@ -224,15 +237,19 @@ function fetchNewToken(clientId: string, clientSecret: string): Promise<string> 
 
 /** Return a valid bearer token, refreshing it if missing or near expiry. */
 export function getIgdbToken(clientId: string, clientSecret: string): Promise<string> {
-  if (tokenCache && tokenCache.expiresAt > Date.now()) {
-    return Promise.resolve(tokenCache.token);
+  const key = tokenKey(clientId, clientSecret);
+  const cached = tokenCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.token);
   }
-  if (!tokenInFlight) {
-    tokenInFlight = fetchNewToken(clientId, clientSecret).finally(() => {
-      tokenInFlight = null;
+  let inFlight = tokenInFlight.get(key);
+  if (!inFlight) {
+    inFlight = fetchNewToken(clientId, clientSecret).finally(() => {
+      tokenInFlight.delete(key);
     });
+    tokenInFlight.set(key, inFlight);
   }
-  return tokenInFlight;
+  return inFlight;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +276,7 @@ async function igdbQuery(clientId: string, clientSecret: string, apicalypse: str
     // A 401 means the (possibly stale) token was rejected: drop it once and retry.
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('401')) {
-      clearIgdbToken();
+      clearIgdbToken(clientId, clientSecret);
       token = await getIgdbToken(clientId, clientSecret);
       const rows = await doFetch(token);
       return rows ?? [];

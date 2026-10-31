@@ -2,6 +2,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../../../server/src/index';
 import { pool, query } from '../../../../server/src/db';
+import { runAsUser } from '../../../../server/src/auth/context';
 import { deletePluginData, exportPluginData, importPluginData } from '../../../../server/src/plugins/backup';
 import {
   DEFAULT_USER_ID,
@@ -142,10 +143,10 @@ describe('Notes plugin (integration)', () => {
     expect(await ids('q=dream%20jour')).toEqual(['Flying']); // tag name
     expect(await ids('note_tag=dream%20journal')).toEqual(['Flying']);
 
-    const reflections = await request(app).get(`/api/v1/stats/reflections?user_id=${DEFAULT_USER_ID}&target_date=2026-10-15`);
+    const reflections = await request(app).get(`/api/v1/stats/reflections?target_date=2026-10-15`);
     expect(JSON.stringify(reflections.body)).toContain('Night with Jason');
 
-    const earliest = await request(app).get(`/api/v1/stats/earliest-dates?user_id=${DEFAULT_USER_ID}`);
+    const earliest = await request(app).get(`/api/v1/stats/earliest-dates`);
     expect(earliest.body.notes).toBe('2017-10-15');
   });
 
@@ -333,7 +334,7 @@ describe('Notes plugin (integration)', () => {
 
   it('reconciles a note timezone', async () => {
     const note = await createNote({ body: 'x', checkin_timezone: 'UTC' });
-    expect(await server.reconcile!.apply(note.id, 'Europe/Paris')).toBe(true);
+    expect(await runAsUser(DEFAULT_USER_ID, () => server.reconcile!.apply(note.id, 'Europe/Paris'))).toBe(true);
     expect((await request(app).get(`/api/v1/notes/checkins/${note.id}`)).body.checkin_timezone).toBe('Europe/Paris');
   });
 });

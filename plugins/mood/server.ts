@@ -26,8 +26,40 @@ import { escapeLike, pagination, parseYear } from '../../server/src/services/que
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
+import { currentUserId, maybeCurrentUserId, preserveUserContext } from '../../server/src/auth/context';
 
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+/**
+ * Of `activityIds`, the ones that belong to one of `userId`'s activity
+ * groups (activities have no user_id of their own: they are owned via their
+ * group). Check-ins may only link the user's own activities.
+ */
+async function ownedActivityIds(
+  executor: { query: (sql: string, values: unknown[]) => Promise<{ rows: any[] }> },
+  userId: string,
+  activityIds: unknown[],
+): Promise<Set<string>> {
+  const ids = activityIds.filter((id): id is string => typeof id === 'string');
+  if (ids.length === 0) return new Set();
+  const result = await executor.query(
+    `SELECT a.id
+     FROM mood_activities a
+     JOIN mood_activity_groups g ON g.id = a.group_id
+     WHERE g.user_id = $1
+       AND a.id::text = ANY($2::text[])`,
+    [userId, ids]
+  );
+  return new Set(result.rows.map((r: { id: string }) => String(r.id)));
+}
+
+/** True when `groupId` is one of `userId`'s activity groups. */
+async function ownsActivityGroup(userId: string, groupId: unknown): Promise<boolean> {
+  if (typeof groupId !== 'string' || !groupId) return false;
+  const result = await query(
+    'SELECT 1 FROM mood_activity_groups WHERE id::text = $1 AND user_id = $2',
+    [groupId, userId]
+  );
+  return result.rows.length > 0;
+}
 
 // ---------------------------------------------------------------------------
 // Shared SQL fragments
@@ -61,19 +93,13 @@ const router = Router();
 router.get('/', async (req: Request, res: Response) => {
   try {
     const {
-      user_id, from, to,
+      from, to,
       limit = '50', offset = '0',
     } = req.query;
 
-    const params: unknown[] = [];
-    const conditions: string[] = [];
-    let paramIndex = 1;
-
-    if (user_id) {
-      conditions.push(`mc.user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
-    }
+    const params: unknown[] = [currentUserId()];
+    const conditions: string[] = ['mc.user_id = $1'];
+    let paramIndex = 2;
 
     if (from) {
       conditions.push(`mc.checked_in_at >= $${paramIndex}`);
@@ -87,7 +113,7 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     const page = pagination(limit, offset);
     params.push(page.limit);
@@ -125,8 +151,8 @@ router.get('/:id', async (req: Request, res: Response) => {
               mc.checked_in_at, mc.created_at, mc.updated_at, mc.mood_timezone,
               ${ACTIVITIES_JSON} AS activities
        FROM mood_checkins mc
-       WHERE mc.id = $1`,
-      [id]
+       WHERE mc.id = $1 AND mc.user_id = $2`,
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -154,13 +180,21 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'mood must be between 1 and 5' });
     }
 
+    const userId = currentUserId();
+    if (activity_ids && activity_ids.length > 0) {
+      const owned = await ownedActivityIds(client, userId, activity_ids);
+      if (activity_ids.some((aid: unknown) => !owned.has(String(aid)))) {
+        return res.status(400).json({ error: 'Unknown activity id' });
+      }
+    }
+
     await client.query('BEGIN');
 
     const result = await client.query(
       `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone)
        VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5)
        RETURNING *`,
-      [USER_ID, mood, note || null, checked_in_at || null, validTimeZoneOrNull(mood_timezone)]
+      [userId, mood, note || null, checked_in_at || null, validTimeZoneOrNull(mood_timezone)]
     );
 
     const moodCheckin = result.rows[0];
@@ -199,6 +233,14 @@ router.put('/:id', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'mood must be between 1 and 5' });
     }
 
+    const userId = currentUserId();
+    if (Array.isArray(activity_ids) && activity_ids.length > 0) {
+      const owned = await ownedActivityIds(client, userId, activity_ids);
+      if (activity_ids.some((aid: unknown) => !owned.has(String(aid)))) {
+        return res.status(400).json({ error: 'Unknown activity id' });
+      }
+    }
+
     await client.query('BEGIN');
 
     const result = await client.query(
@@ -207,7 +249,7 @@ router.put('/:id', async (req: Request, res: Response) => {
            note = CASE WHEN $6::boolean THEN $3 ELSE note END,
            checked_in_at = COALESCE($4::timestamptz, checked_in_at),
            mood_timezone = COALESCE($5, mood_timezone)
-       WHERE id = $1
+       WHERE id = $1 AND user_id = $7
        RETURNING *`,
       [
         id,
@@ -216,6 +258,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         checked_in_at || null,
         validTimeZoneOrNull(mood_timezone),
         'note' in req.body,
+        userId,
       ]
     );
 
@@ -259,8 +302,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const result = await query(
-      'DELETE FROM mood_checkins WHERE id = $1 RETURNING id',
-      [id]
+      'DELETE FROM mood_checkins WHERE id = $1 AND user_id = $2 RETURNING id',
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -304,7 +347,7 @@ router.get('/activities/groups', async (_req: Request, res: Response) => {
        FROM mood_activity_groups g
        WHERE g.user_id = $1
        ORDER BY g.display_order`,
-      [USER_ID]
+      [currentUserId()]
     );
 
     res.json(groupsResult.rows);
@@ -322,16 +365,17 @@ router.post('/activities/groups', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'name is required' });
     }
 
+    const userId = currentUserId();
     const maxOrder = await query(
       'SELECT COALESCE(MAX(display_order), -1) + 1 AS next_order FROM mood_activity_groups WHERE user_id = $1',
-      [USER_ID]
+      [userId]
     );
 
     const result = await query(
       `INSERT INTO mood_activity_groups (user_id, name, display_order)
        VALUES ($1, $2, $3)
        RETURNING *`,
-      [USER_ID, name, maxOrder.rows[0].next_order]
+      [userId, name, maxOrder.rows[0].next_order]
     );
 
     res.status(201).json(result.rows[0]);
@@ -353,7 +397,7 @@ router.put('/activities/groups/:id', async (req: Request, res: Response) => {
            display_order = COALESCE($3, display_order)
        WHERE id = $1 AND user_id = $4
        RETURNING *`,
-      [id, name ?? null, display_order ?? null, USER_ID]
+      [id, name ?? null, display_order ?? null, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -374,7 +418,7 @@ router.delete('/activities/groups/:id', async (req: Request, res: Response) => {
 
     const result = await query(
       'DELETE FROM mood_activity_groups WHERE id = $1 AND user_id = $2 RETURNING id',
-      [id, USER_ID]
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -394,6 +438,9 @@ router.post('/activities/activities', async (req: Request, res: Response) => {
     const { group_id, name, icon } = req.body;
     if (!group_id || !name) {
       return res.status(400).json({ error: 'group_id and name are required' });
+    }
+    if (!(await ownsActivityGroup(currentUserId(), group_id))) {
+      return res.status(404).json({ error: 'Activity group not found' });
     }
 
     const maxOrder = await query(
@@ -425,6 +472,9 @@ router.put('/activities/activities/reorder', async (req: Request, res: Response)
 
     if (!group_id || !Array.isArray(activity_ids) || activity_ids.length === 0) {
       return res.status(400).json({ error: 'group_id and non-empty activity_ids are required' });
+    }
+    if (!(await ownsActivityGroup(currentUserId(), group_id))) {
+      return res.status(404).json({ error: 'Activity group not found' });
     }
 
     const existingActivities = await query(
@@ -479,6 +529,12 @@ router.put('/activities/activities/:id', async (req: Request, res: Response) => 
   try {
     const { id } = req.params;
     const { name, group_id, display_order, icon } = req.body;
+    const userId = currentUserId();
+
+    // Moving the activity: the target group must be the user's own too.
+    if (group_id != null && !(await ownsActivityGroup(userId, group_id))) {
+      return res.status(404).json({ error: 'Activity group not found' });
+    }
 
     const result = await query(
       `UPDATE mood_activities
@@ -487,8 +543,9 @@ router.put('/activities/activities/:id', async (req: Request, res: Response) => 
            display_order = COALESCE($4, display_order),
            icon = CASE WHEN $5::varchar IS NOT NULL THEN $5 ELSE icon END
        WHERE id = $1
+         AND group_id IN (SELECT id FROM mood_activity_groups WHERE user_id = $6)
        RETURNING *`,
-      [id, name ?? null, group_id ?? null, display_order ?? null, icon ?? null]
+      [id, name ?? null, group_id ?? null, display_order ?? null, icon ?? null, userId]
     );
 
     if (result.rows.length === 0) {
@@ -508,8 +565,11 @@ router.delete('/activities/activities/:id', async (req: Request, res: Response) 
     const { id } = req.params;
 
     const result = await query(
-      'DELETE FROM mood_activities WHERE id = $1 RETURNING id',
-      [id]
+      `DELETE FROM mood_activities
+       WHERE id = $1
+         AND group_id IN (SELECT id FROM mood_activity_groups WHERE user_id = $2)
+       RETURNING id`,
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -539,8 +599,8 @@ const DATE_RANGE_PARAMS = (user_id: unknown, from: unknown, to: unknown) =>
 // GET /stats/daily - avg/min/max mood per day for line/span chart
 router.get('/stats/daily', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -568,8 +628,9 @@ router.get('/stats/daily', async (req: Request, res: Response) => {
 // GET /stats/monthly - count of each mood per month
 router.get('/stats/monthly', async (req: Request, res: Response) => {
   try {
-    const { user_id, year } = req.query;
-    if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
+    const { year } = req.query;
+    if (!year) return res.status(400).json({ error: 'year is required' });
+    const user_id = currentUserId();
 
     const yearNum = parseYear(year);
     if (yearNum === null) return res.status(400).json({ error: 'year must be a valid year' });
@@ -597,8 +658,8 @@ router.get('/stats/monthly', async (req: Request, res: Response) => {
 // GET /stats/by-day-of-week - avg mood per day of week
 router.get('/stats/by-day-of-week', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -632,8 +693,8 @@ router.get('/stats/by-day-of-week', async (req: Request, res: Response) => {
 // GET /stats/activity-correlations - avg mood and impact per activity (min 2 checkins)
 router.get('/stats/activity-correlations', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -674,8 +735,8 @@ router.get('/stats/activity-correlations', async (req: Request, res: Response) =
 // GET /stats/activity-combinations - repeated multi-activity combinations (min 2 checkins)
 router.get('/stats/activity-combinations', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -726,8 +787,8 @@ router.get('/stats/activity-combinations', async (req: Request, res: Response) =
 // GET /stats/count-range - count of each mood level in date range
 router.get('/stats/count-range', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -753,8 +814,9 @@ router.get('/stats/count-range', async (req: Request, res: Response) => {
 // GET /stats/heatmap - avg mood per day for year-in-pixels
 router.get('/stats/heatmap', async (req: Request, res: Response) => {
   try {
-    const { user_id, year } = req.query;
-    if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
+    const { year } = req.query;
+    if (!year) return res.status(400).json({ error: 'year is required' });
+    const user_id = currentUserId();
 
     const yearNum = parseYear(year);
     if (yearNum === null) return res.status(400).json({ error: 'year must be a valid year' });
@@ -776,6 +838,21 @@ router.get('/stats/heatmap', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error getting mood-heatmap:', err);
     res.status(500).json({ error: 'Failed to get mood heatmap' });
+  }
+});
+
+// GET /stats/earliest - earliest mood check-in date (profile period selector)
+router.get('/stats/earliest', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT MIN(DATE(checked_in_at AT TIME ZONE COALESCE(mood_timezone, 'UTC')))::text AS date
+       FROM mood_checkins WHERE user_id = $1`,
+      [currentUserId()]
+    );
+    res.json({ date: result.rows[0]?.date ?? null });
+  } catch (err) {
+    console.error('Error getting mood earliest date:', err);
+    res.status(500).json({ error: 'Failed to get mood earliest date' });
   }
 });
 
@@ -1010,6 +1087,7 @@ function guessActivityIcon(activityName: string): string {
 }
 
 async function findOrCreateActivityGroup(
+  userId: string,
   name: string,
   cache: Map<string, string>
 ): Promise<string> {
@@ -1018,7 +1096,7 @@ async function findOrCreateActivityGroup(
 
   const existing = await query(
     'SELECT id FROM mood_activity_groups WHERE user_id = $1 AND LOWER(name) = $2',
-    [USER_ID, name.toLowerCase().trim()]
+    [userId, name.toLowerCase().trim()]
   );
   if (existing.rows.length > 0) {
     cache.set(key, existing.rows[0].id);
@@ -1027,7 +1105,7 @@ async function findOrCreateActivityGroup(
 
   const result = await query(
     'INSERT INTO mood_activity_groups (user_id, name) VALUES ($1, $2) RETURNING id',
-    [USER_ID, name.trim()]
+    [userId, name.trim()]
   );
   cache.set(key, result.rows[0].id);
   return result.rows[0].id;
@@ -1099,11 +1177,12 @@ async function extractBackupFromZip(zipPath: string): Promise<DaylioBackup> {
 }
 
 // POST /import/daylio - import Daylio .daylio file
-router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, res: Response) => {
+router.post('/import/daylio', preserveUserContext(daylioUpload.single('file')), async (req: Request, res: Response) => {
   const file = req.file;
   if (!file) {
     return res.status(400).json({ error: 'No .daylio file provided' });
   }
+  const userId = currentUserId();
 
   let imported = 0;
   let skipped = 0;
@@ -1140,7 +1219,10 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
     // One lookup instead of a SELECT per entry; also catches duplicate
     // datetimes inside the same file.
     const importedHashes = new Set<string>(
-      (await query('SELECT daylio_hash FROM mood_checkins WHERE daylio_hash IS NOT NULL')).rows.map(
+      (await query(
+        'SELECT daylio_hash FROM mood_checkins WHERE user_id = $1 AND daylio_hash IS NOT NULL',
+        [userId]
+      )).rows.map(
         (r: { daylio_hash: string }) => r.daylio_hash
       )
     );
@@ -1198,13 +1280,21 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
 
         const checkedInAt = toTimezoneAwareIso(normalizeEpochMillis(datetime), entryIanaTz);
 
-        // Insert mood checkin (with mood_timezone for correct display)
+        // Insert mood checkin (with mood_timezone for correct display).
+        // daylio_hash is still unique across ALL users (migration 010), so
+        // an entry another user already imported conflicts: skip it rather
+        // than fail.
         const insertResult = await query(
           `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, daylio_hash, mood_timezone)
            VALUES ($1, $2, $3, $4::timestamptz, $5, $6)
+           ON CONFLICT DO NOTHING
            RETURNING id`,
-          [USER_ID, invertedMood, note, checkedInAt, daylioHash, entryIanaTz]
+          [userId, invertedMood, note, checkedInAt, daylioHash, entryIanaTz]
         );
+        if (insertResult.rows.length === 0) {
+          skipped++;
+          continue;
+        }
 
         const moodCheckinId = insertResult.rows[0].id;
         importedHashes.add(daylioHash);
@@ -1224,7 +1314,7 @@ router.post('/import/daylio', daylioUpload.single('file'), async (req: Request, 
               if (!groupName) continue;
 
               // Find or create group
-              const actGroupId = await findOrCreateActivityGroup(groupName, cacheGroupId);
+              const actGroupId = await findOrCreateActivityGroup(userId, groupName, cacheGroupId);
 
               // Guess icon for activity
               const icon = guessActivityIcon(tagName);
@@ -1274,7 +1364,7 @@ router.post('/import/daylio/replace-br', async (_req: Request, res: Response) =>
        WHERE user_id = $1
          AND note IS NOT NULL
          AND POSITION('<br>' IN note) > 0`,
-      [USER_ID]
+      [currentUserId()]
     );
 
     return res.json({ updated: result.rowCount ?? 0 });
@@ -1287,6 +1377,22 @@ router.post('/import/daylio/replace-br', async (_req: Request, res: Response) =>
 // ---------------------------------------------------------------------------
 // Plugin server half
 // ---------------------------------------------------------------------------
+
+/**
+ * Restore one check-in <-> activity link ($1 user_id, $2 check-in id, $3
+ * activity id), only when both ends belong to that user — a backup must never
+ * link rows to another user's check-in or activity.
+ */
+const MOOD_LINK_RESTORE_SQL = `
+  INSERT INTO mood_checkin_activities (mood_checkin_id, activity_id)
+  SELECT $2::uuid, $3::uuid
+  WHERE EXISTS (SELECT 1 FROM mood_checkins WHERE id = $2::uuid AND user_id = $1::uuid)
+    AND EXISTS (
+      SELECT 1 FROM mood_activities a
+      JOIN mood_activity_groups g ON g.id = a.group_id
+      WHERE a.id = $3::uuid AND g.user_id = $1::uuid
+    )
+  ON CONFLICT DO NOTHING`;
 
 /** LLM label map for mood levels (used by the llm hook). */
 const MOOD_LABELS: Record<number, string> = {
@@ -1326,7 +1432,8 @@ export const server: CheckinTypeServerPlugin = {
   }),
 
   buildTimelineWhere: (ctx: PluginTimelineContext) => {
-    const conds = timelineWhereConditions(ctx, {
+    // The requesting user always scopes the branch (never a client value).
+    const conds = timelineWhereConditions({ ...ctx, user_id: maybeCurrentUserId() ?? ctx.user_id }, {
       alias: 'mc',
       timestampColumn: 'checked_in_at',
       timezoneColumn: 'mood_timezone',
@@ -1359,6 +1466,7 @@ export const server: CheckinTypeServerPlugin = {
                FROM mood_activity_groups WHERE user_id = $1 ORDER BY display_order`,
       // userIdFirst: the framework prepends user_id as the first parameter,
       // so user_id must be $1 here.
+      // An id already used by another user's group is skipped, never touched.
       insert: `INSERT INTO mood_activity_groups (user_id, id, name, display_order, created_at, updated_at)
                VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW()))
                ON CONFLICT (id) DO NOTHING`,
@@ -1370,10 +1478,13 @@ export const server: CheckinTypeServerPlugin = {
                FROM mood_activities ma
                JOIN mood_activity_groups mag ON mag.id = ma.group_id
                WHERE mag.user_id = $1 ORDER BY mag.display_order, ma.display_order`,
+      // Only attach to a group the restoring user owns ($1 = user_id).
       insert: `INSERT INTO mood_activities (id, group_id, name, display_order, icon, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()))
+               SELECT $2::uuid, $3::uuid, $4::varchar, $5::int, $6::varchar,
+                      COALESCE($7::timestamptz, NOW()), COALESCE($8::timestamptz, NOW())
+               WHERE EXISTS (SELECT 1 FROM mood_activity_groups WHERE id = $3::uuid AND user_id = $1::uuid)
                ON CONFLICT (id) DO NOTHING`,
-      userIdFirst: false,
+      userIdFirst: true,
     },
     {
       table: 'moodCheckinActivities',
@@ -1381,10 +1492,9 @@ export const server: CheckinTypeServerPlugin = {
                FROM mood_checkin_activities mca
                JOIN mood_checkins mc ON mc.id = mca.mood_checkin_id
                WHERE mc.user_id = $1`,
-      insert: `INSERT INTO mood_checkin_activities (mood_checkin_id, activity_id)
-               VALUES ($1, $2)
-               ON CONFLICT DO NOTHING`,
-      userIdFirst: false,
+      // Only link the restoring user's own check-in and activity ($1 = user_id).
+      insert: MOOD_LINK_RESTORE_SQL,
+      userIdFirst: true,
     },
   ],
 
@@ -1421,9 +1531,11 @@ export const server: CheckinTypeServerPlugin = {
         if (!Number.isInteger(rowMood) || rowMood < 1 || rowMood > 5) continue;
         if (!row.checked_in_at || Number.isNaN(new Date(row.checked_in_at).getTime())) continue;
         const result = await client.query(
+          // Target-less DO NOTHING: an id (or a daylio_hash, unique across
+          // all users) already used by another user's row is skipped.
           `INSERT INTO mood_checkins (id, user_id, mood, note, checked_in_at, mood_timezone, created_at, updated_at, daylio_hash)
            VALUES ($1, $2, $3, $4, $5::timestamptz, $6, COALESCE($7::timestamptz, NOW()), COALESCE($8::timestamptz, NOW()), $9)
-           ON CONFLICT (id) DO NOTHING`,
+           ON CONFLICT DO NOTHING`,
           [
             row.id,
             user_id,
@@ -1481,9 +1593,12 @@ export const server: CheckinTypeServerPlugin = {
         counts.moodActivities.skipped += 1;
         continue;
       }
+      // Only attach to a group this user owns.
       const result = await run(
         `INSERT INTO mood_activities (id, group_id, name, display_order, icon, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW()))
+         SELECT $1::uuid, $2::uuid, $3::varchar, $4::int, $5::varchar,
+                COALESCE($6::timestamptz, NOW()), COALESCE($7::timestamptz, NOW())
+         WHERE EXISTS (SELECT 1 FROM mood_activity_groups WHERE id = $2::uuid AND user_id = $8::uuid)
          ON CONFLICT (id) DO NOTHING`,
         [
           activity.id,
@@ -1493,6 +1608,7 @@ export const server: CheckinTypeServerPlugin = {
           typeof activity.icon === 'string' && activity.icon.length > 0 ? activity.icon : null,
           activity.created_at || null,
           activity.updated_at || null,
+          user_id,
         ]
       );
       (result.rowCount ?? 0) === 1 ? counts.moodActivities.inserted += 1 : counts.moodActivities.skipped += 1;
@@ -1521,7 +1637,7 @@ export const server: CheckinTypeServerPlugin = {
            COALESCE($8::timestamptz, NOW()),
            $9
          )
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT DO NOTHING`,
         [
           row.id,
           user_id,
@@ -1542,12 +1658,7 @@ export const server: CheckinTypeServerPlugin = {
         counts.moodCheckinActivities.skipped += 1;
         continue;
       }
-      const result = await run(
-        `INSERT INTO mood_checkin_activities (mood_checkin_id, activity_id)
-         VALUES ($1, $2)
-         ON CONFLICT (mood_checkin_id, activity_id) DO NOTHING`,
-        [link.mood_checkin_id, link.activity_id]
-      );
+      const result = await run(MOOD_LINK_RESTORE_SQL, [user_id, link.mood_checkin_id, link.activity_id]);
       (result.rowCount ?? 0) === 1 ? counts.moodCheckinActivities.inserted += 1 : counts.moodCheckinActivities.skipped += 1;
     }
 
@@ -1678,9 +1789,9 @@ export const server: CheckinTypeServerPlugin = {
       const result = await (executor ?? { query }).query(
         `UPDATE mood_checkins
          SET mood_timezone = $2, updated_at = NOW()
-         WHERE id = $1
+         WHERE id = $1 AND user_id = $3
          RETURNING id`,
-        [id, suggested_timezone],
+        [id, suggested_timezone, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },

@@ -9,14 +9,20 @@ import {
   teardownIntegrationDatabase,
 } from '../../../../server/tests/helpers/testDb';
 import { exportPluginData, importPluginData, deletePluginData } from '../../../../server/src/plugins/backup';
+import { createTestUser } from '../../../../server/tests/helpers/auth';
 
 describe('Sleep plugin API', () => {
   beforeAll(async () => {
     await setupIntegrationDatabase();
   });
 
+  // The default user's personal webhook URL (the token lives on users).
+  let hook = '';
+
   beforeEach(async () => {
     await resetIntegrationDatabase();
+    const token = await query('SELECT webhook_token FROM users WHERE id = $1', [DEFAULT_USER_ID]);
+    hook = `/api/v1/webhook/sleep-as-android/${token.rows[0].webhook_token}`;
   });
 
   afterAll(async () => {
@@ -124,9 +130,9 @@ describe('Sleep plugin API', () => {
   });
 
   describe('stats', () => {
-    it('requires user_id on every stats endpoint', async () => {
-      for (const path of ['/stats/summary', '/stats/daily', '/stats/rating-distribution', '/stats/earliest']) {
-        expect((await request(app).get(`/api/v1/sleep-entries${path}`)).status).toBe(400);
+    it('requires a signed-in user on every stats endpoint', async () => {
+      for (const path of ['/stats/summary', '/stats/daily', '/stats/rating-distribution', '/stats/earliest', '/stats/webhook-events']) {
+        expect((await request(app).get(`/api/v1/sleep-entries${path}`).unset('Cookie')).status).toBe(401);
       }
     });
 
@@ -181,7 +187,7 @@ describe('Sleep plugin API', () => {
 
   describe('Sleep as Android webhook', () => {
     it('rejects payloads without an event', async () => {
-      const res = await request(app).post('/api/v1/webhook/sleep-as-android').send({ value1: '1710000000000' });
+      const res = await request(app).post(hook).send({ value1: '1710000000000' });
       expect(res.status).toBe(400);
     });
 
@@ -190,7 +196,7 @@ describe('Sleep plugin API', () => {
       const endMs = Date.UTC(2026, 2, 11, 6, 0); // 2026-03-11T06:00Z
 
       const start = await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_started', value1: String(startMs) });
       expect(start.status).toBe(200);
       expect(start.body).toEqual({ ok: true });
@@ -205,7 +211,7 @@ describe('Sleep plugin API', () => {
       expect(new Date(pending.rows[0].started_at).getTime()).toBe(startMs);
 
       const stop = await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_stopped', value1: String(startMs), value2: String(endMs) });
       expect(stop.body).toEqual({ ok: true });
 
@@ -216,7 +222,7 @@ describe('Sleep plugin API', () => {
       expect(closed.rows[0].is_pending).toBe(false);
       expect(new Date(closed.rows[0].ended_at).getTime()).toBe(endMs);
 
-      const stats = await request(app).get('/api/v1/webhook/sleep-as-android/stats');
+      const stats = await request(app).get('/api/v1/sleep-entries/stats/webhook-events');
       expect(stats.body.count).toBe(2);
     });
 
@@ -232,7 +238,7 @@ describe('Sleep plugin API', () => {
 
       const startMs = Date.UTC(2026, 2, 10, 23, 30);
       await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_started', value1: String(startMs) });
 
       const row = await query('SELECT sleep_timezone FROM sleep_entries WHERE user_id = $1', [DEFAULT_USER_ID]);
@@ -244,7 +250,7 @@ describe('Sleep plugin API', () => {
       const results = await Promise.all(
         [0, 1, 2, 3].map((i) =>
           request(app)
-            .post('/api/v1/webhook/sleep-as-android')
+            .post(hook)
             .send({ event: 'sleep_tracking_started', value1: String(startMs + i * 60_000) }),
         ),
       );
@@ -256,7 +262,7 @@ describe('Sleep plugin API', () => {
     it('excludes pending sessions from stats, and a PUT with an end time completes one', async () => {
       const startMs = Date.UTC(2026, 2, 10, 23, 30);
       await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_started', value1: String(startMs) });
       const summaryPending = await request(app).get('/api/v1/sleep-entries/stats/summary').query({ user_id: DEFAULT_USER_ID });
       expect(summaryPending.body.total_sleeps).toBe(0);
@@ -279,13 +285,13 @@ describe('Sleep plugin API', () => {
     it('supersedes an abandoned pending session on a new start, and falls back to the newest pending on a mismatched stop', async () => {
       const startMs = Date.UTC(2026, 2, 10, 23, 30);
       await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_started', value1: String(startMs) });
 
       // Watch reconnect: a second start abandons the first session.
       const start2Ms = startMs + 5 * 60 * 1000;
       await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_started', value1: String(start2Ms) });
 
       const afterStart2 = await query('SELECT COUNT(*)::int AS c, COUNT(*) FILTER (WHERE is_pending)::int AS p FROM sleep_entries');
@@ -296,7 +302,7 @@ describe('Sleep plugin API', () => {
       // fallback closes the most recent pending session.
       const endMs = start2Ms + 6 * 3600 * 1000;
       const stop = await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_stopped', value1: String(startMs), value2: String(endMs) });
       expect(stop.body).toEqual({ ok: true });
 
@@ -457,7 +463,7 @@ describe('Sleep plugin API', () => {
     it('start-over deletes entries; resetSettings wipes the webhook event log', async () => {
       await insertEntry({ sleep_as_android_id: 1 });
       await request(app)
-        .post('/api/v1/webhook/sleep-as-android')
+        .post(hook)
         .send({ event: 'sleep_tracking_started', value1: String(Date.UTC(2026, 2, 10, 23, 30)) });
 
       const client = await pool.connect();
@@ -478,6 +484,171 @@ describe('Sleep plugin API', () => {
       // Webhook events are auxiliary: only resetSettings (settings-only reset) clears them.
       const events = await query('SELECT COUNT(*) FROM sleep_webhook_events');
       expect(Number(events.rows[0].count)).toBe(1);
+    });
+  });
+
+  describe('multi-user isolation', () => {
+    async function tokenOf(userId: string) {
+      const r = await query('SELECT webhook_token FROM users WHERE id = $1', [userId]);
+      return r.rows[0].webhook_token as string;
+    }
+
+    it("lands webhook events in the token owner's account only", async () => {
+      const other = await createTestUser('other');
+      const otherHook = `/api/v1/webhook/sleep-as-android/${await tokenOf(other.id)}`;
+      const startMs = Date.UTC(2026, 2, 10, 23, 30);
+
+      // The default user has a pending session; the other user's start must
+      // not supersede (delete) it.
+      await request(app).post(hook).unset('Cookie')
+        .send({ event: 'sleep_tracking_started', value1: String(startMs) });
+      const res = await request(app).post(otherHook).unset('Cookie')
+        .send({ event: 'sleep_tracking_started', value1: String(startMs + 60_000) });
+      expect(res.status).toBe(200);
+
+      const rows = await query('SELECT user_id, is_pending FROM sleep_entries ORDER BY started_at');
+      expect(rows.rows).toEqual([
+        { user_id: DEFAULT_USER_ID, is_pending: true },
+        { user_id: other.id, is_pending: true },
+      ]);
+
+      // A stop for the other user closes only their session.
+      await request(app).post(otherHook).unset('Cookie')
+        .send({ event: 'sleep_tracking_stopped', value1: String(startMs), value2: String(startMs + 8 * 3600_000) });
+      const after = await query('SELECT user_id, is_pending FROM sleep_entries ORDER BY started_at');
+      expect(after.rows).toEqual([
+        { user_id: DEFAULT_USER_ID, is_pending: true },
+        { user_id: other.id, is_pending: false },
+      ]);
+
+      // Each user's event counter only counts their own events.
+      expect((await request(app).get('/api/v1/sleep-entries/stats/webhook-events')).body.count).toBe(1);
+      expect((await request(app).get('/api/v1/sleep-entries/stats/webhook-events').set('Cookie', other.cookie)).body.count).toBe(2);
+    });
+
+    it('404s the old tokenless URL and unknown tokens, signed in or not, and writes nothing', async () => {
+      const body = { event: 'sleep_tracking_started', value1: String(Date.UTC(2026, 2, 10, 23, 30)) };
+      for (const path of [
+        '/api/v1/webhook/sleep-as-android',
+        '/api/v1/webhook/sleep-as-android/not-a-real-token',
+      ]) {
+        expect((await request(app).post(path).unset('Cookie').send(body)).status).toBe(404);
+        expect((await request(app).post(path).send(body)).status).toBe(404);
+      }
+      // The event counter moved behind the login guard; the old public path is gone.
+      expect((await request(app).get('/api/v1/webhook/sleep-as-android/stats').unset('Cookie')).status).toBe(404);
+
+      const counts = await query(
+        'SELECT (SELECT COUNT(*) FROM sleep_entries)::int AS e, (SELECT COUNT(*) FROM sleep_webhook_events)::int AS w',
+      );
+      expect(counts.rows[0]).toEqual({ e: 0, w: 0 });
+    });
+
+    it("a regenerated token retires the old URL", async () => {
+      const oldHook = hook;
+      const regenerated = await request(app).post('/api/v1/auth/webhook-token/regenerate');
+      expect(regenerated.status).toBe(200);
+      const body = { event: 'sleep_tracking_started', value1: String(Date.UTC(2026, 2, 10, 23, 30)) };
+      expect((await request(app).post(oldHook).unset('Cookie').send(body)).status).toBe(404);
+      const newHook = `/api/v1/webhook/sleep-as-android/${regenerated.body.token}`;
+      expect((await request(app).post(newHook).unset('Cookie').send(body)).status).toBe(200);
+    });
+
+    it("can't list, read, edit, delete, or count another user's entries", async () => {
+      const other = await createTestUser('other');
+      const id = await insertEntry({ sleep_as_android_id: 1, comment: 'private dream' });
+      const as = (r: request.Test) => r.set('Cookie', other.cookie);
+
+      const list = await as(request(app).get('/api/v1/sleep-entries').query({ user_id: DEFAULT_USER_ID }));
+      expect(list.status).toBe(200);
+      expect(list.body).toEqual([]);
+      expect((await as(request(app).get(`/api/v1/sleep-entries/${id}`))).status).toBe(404);
+      expect((await as(request(app).put(`/api/v1/sleep-entries/${id}`)).send({ comment: 'hacked' })).status).toBe(404);
+      // An inconsistent edit must look like a missing row too (not a 400).
+      expect(
+        (await as(request(app).put(`/api/v1/sleep-entries/${id}`)).send({ ended_at: '2000-01-01T00:00:00Z' })).status,
+      ).toBe(404);
+      expect((await as(request(app).delete(`/api/v1/sleep-entries/${id}`))).status).toBe(404);
+
+      for (const path of ['/stats/summary', '/stats/daily', '/stats/rating-distribution', '/stats/earliest']) {
+        const res = await as(request(app).get(`/api/v1/sleep-entries${path}`).query({ user_id: DEFAULT_USER_ID }));
+        expect(res.status).toBe(200);
+        if (path === '/stats/summary') expect(res.body.total_sleeps).toBe(0);
+        else if (path === '/stats/earliest') expect(res.body.date).toBeNull();
+        else expect(res.body).toEqual([]);
+      }
+
+      const mine = await request(app).get(`/api/v1/sleep-entries/${id}`);
+      expect(mine.status).toBe(200);
+      expect(mine.body.comment).toBe('private dream');
+    });
+
+    it("a restore of another user's backup never touches the owner's rows", async () => {
+      const other = await createTestUser('other');
+      const id = await insertEntry({ sleep_as_android_id: 5, comment: 'mine' });
+      const payload = await exportPluginData(DEFAULT_USER_ID);
+      (payload.sleep.checkins as any[])[0].comment = 'overwritten?';
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        // Same row id, now owned by someone else: skipped, not an error.
+        const counts = await importPluginData(client, other.id, { sleep: payload.sleep });
+        expect(counts.sleep.inserted).toBe(0);
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+
+      const rows = await query('SELECT id, user_id, comment FROM sleep_entries');
+      expect(rows.rows).toEqual([{ id, user_id: DEFAULT_USER_ID, comment: 'mine' }]);
+    });
+
+    it("imports a CSV into the uploader's account, deduping only against their own entries", async () => {
+      const other = await createTestUser('other');
+      await insertEntry({ sleep_as_android_id: 1, comment: 'mine' });
+      const csv = ['Id,From,To,Rating,Tz,Comment', '1,10.3.2026 23:30,11.3.2026 06:00,4,UTC,theirs', ''].join('\n');
+
+      const res = await request(app)
+        .post('/api/v1/import/sleep-as-android')
+        .set('Cookie', other.cookie)
+        .field('file', Buffer.from(csv), 'export.csv');
+      expect(res.status).toBe(200);
+      expect(res.body.imported).toBe(1);
+
+      const rows = await query('SELECT user_id, comment FROM sleep_entries ORDER BY user_id = $1', [DEFAULT_USER_ID]);
+      expect(rows.rows).toEqual([
+        { user_id: other.id, comment: 'theirs' },
+        { user_id: DEFAULT_USER_ID, comment: 'mine' },
+      ]);
+    });
+
+    it("the timeline (and its search) never shows another user's sleep", async () => {
+      const other = await createTestUser('other');
+      await insertEntry({ sleep_as_android_id: 1, comment: 'secret snooze' });
+      for (const q of [{}, { q: 'secret snooze' }, { user_id: DEFAULT_USER_ID, q: 'snooze' }]) {
+        const res = await request(app).get('/api/v1/timeline').set('Cookie', other.cookie).query(q);
+        expect(res.status).toBe(200);
+        expect(res.body.filter((r: any) => r.type === 'sleep')).toEqual([]);
+      }
+      const mine = await request(app).get('/api/v1/timeline').query({ q: 'secret snooze' });
+      expect(mine.body.filter((r: any) => r.type === 'sleep')).toHaveLength(1);
+    });
+
+    it("start-over for one user leaves another user's sleep data alone", async () => {
+      const other = await createTestUser('other');
+      await insertEntry({ sleep_as_android_id: 1 });
+      await request(app).post(hook).send({ event: 'sleep_tracking_started', value1: String(Date.UTC(2026, 2, 12)) });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await deletePluginData(client, other.id, ['sleep']);
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+      const remaining = await query('SELECT COUNT(*)::int AS c FROM sleep_entries WHERE user_id = $1', [DEFAULT_USER_ID]);
+      expect(remaining.rows[0].c).toBe(2);
     });
   });
 });

@@ -8,13 +8,13 @@ import {
 } from '../services/yamtrack';
 import { upsertMediaItemWithClient } from '../../../plugins/media/server';
 
+import { currentUserId } from '../auth/context';
+
 const router = Router();
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
-
 /**
- * Shared execution of the import plan. Upserts media items and inserts
- * check-ins inside a transaction. Idempotent:
+ * Shared execution of the import plan, into the current user's library.
+ * Upserts media items and inserts check-ins inside a transaction. Idempotent:
  *   - media_items: deduped by (user_id, media_type, external_source, external_id)
  *   - media_checkins: ON CONFLICT (user_id, external_event_id) DO NOTHING
  * Returns per-plan outcomes with the stored ids where applicable.
@@ -25,6 +25,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
   created_media_items: number;
   duplicates_skipped: number;
 }> {
+  const userId = currentUserId();
   const client = await pool.connect();
   let importedCheckins = 0;
   let createdMediaItems = 0;
@@ -84,7 +85,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
                  ELSE time_played_minutes
                END,
                updated_at = NOW()
-           WHERE id = $1`,
+           WHERE id = $1 AND user_id = $7`,
           [
             mediaItemId,
             plan.rating,
@@ -92,6 +93,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
             row.notes || null,
             plan.item_status,
             plan.time_played_minutes,
+            userId,
           ]
         );
         continue;
@@ -109,7 +111,7 @@ export async function executeYamtrackImport(plans: YamtrackPlanItem[]): Promise<
            DO UPDATE SET updated_at = media_checkins.updated_at
            RETURNING id, checked_in_at, (xmax = 0) AS inserted`,
           [
-            USER_ID,
+            userId,
             mediaItemId,
             plan.season_number,
             plan.episode_number,

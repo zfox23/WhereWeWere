@@ -8,7 +8,12 @@ import {
   setupIntegrationDatabase,
   teardownIntegrationDatabase,
 } from '../../../../server/tests/helpers/testDb';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { exportPluginData, importPluginData, deletePluginData } from '../../../../server/src/plugins/backup';
+import { createTestUser, type TestUser } from '../../../../server/tests/helpers/auth';
+import { zipDirectory } from '../../../../server/src/services/backupArchive';
 
 describe('Mood plugin API', () => {
   beforeAll(async () => {
@@ -192,9 +197,10 @@ describe('Mood plugin API', () => {
   });
 
   describe('stats', () => {
-    it('requires user_id', async () => {
-      expect((await request(app).get('/api/v1/mood-checkins/stats/daily')).status).toBe(400);
+    it('requires a signed-in user, and a year for the yearly stats', async () => {
+      expect((await request(app).get('/api/v1/mood-checkins/stats/daily').unset('Cookie')).status).toBe(401);
       expect((await request(app).get('/api/v1/mood-checkins/stats/monthly')).status).toBe(400);
+      expect((await request(app).get('/api/v1/mood-checkins/stats/heatmap')).status).toBe(400);
     });
 
     it('computes daily, day-of-week, and count-range stats', async () => {
@@ -349,6 +355,252 @@ describe('Mood plugin API', () => {
       // Activity groups are auxiliary: only resetSettings (settings-only reset) clears them.
       const groupsLeft = await query('SELECT COUNT(*) FROM mood_activity_groups');
       expect(Number(groupsLeft.rows[0].count)).toBe(1);
+    });
+  });
+
+  describe('multi-user isolation', () => {
+    let other: TestUser;
+    const as = (r: request.Test) => r.set('Cookie', other.cookie);
+
+    beforeEach(async () => {
+      other = await createTestUser('other');
+    });
+
+    /** The default user's group + activity + a check-in linking them. */
+    async function seedDefaultUser() {
+      const groupId = await createActivityGroup('Health');
+      const activityId = await createActivity(groupId, 'Gym');
+      const created = await request(app)
+        .post('/api/v1/mood-checkins')
+        .send({ mood: 5, note: 'private <br> note', checked_in_at: '2026-03-10T12:00:00Z', activity_ids: [activityId] });
+      expect(created.status).toBe(201);
+      return { groupId, activityId, checkinId: created.body.id as string };
+    }
+
+    it("can't list, read, edit, or delete another user's check-ins", async () => {
+      const { checkinId } = await seedDefaultUser();
+
+      const list = await as(request(app).get('/api/v1/mood-checkins').query({ user_id: DEFAULT_USER_ID }));
+      expect(list.status).toBe(200);
+      expect(list.body).toEqual([]);
+      expect((await as(request(app).get(`/api/v1/mood-checkins/${checkinId}`))).status).toBe(404);
+      expect((await as(request(app).put(`/api/v1/mood-checkins/${checkinId}`)).send({ mood: 1, activity_ids: [] })).status).toBe(404);
+      expect((await as(request(app).delete(`/api/v1/mood-checkins/${checkinId}`))).status).toBe(404);
+
+      const mine = await request(app).get(`/api/v1/mood-checkins/${checkinId}`);
+      expect(mine.body.mood).toBe(5);
+      expect(mine.body.activities).toHaveLength(1);
+    });
+
+    it("can't see, use, change, or delete another user's activity groups and activities", async () => {
+      const { groupId, activityId } = await seedDefaultUser();
+
+      const groups = await as(request(app).get('/api/v1/mood-checkins/activities/groups'));
+      expect(groups.body).toEqual([]);
+
+      const base = '/api/v1/mood-checkins/activities';
+      expect((await as(request(app).put(`${base}/groups/${groupId}`)).send({ name: 'x' })).status).toBe(404);
+      expect((await as(request(app).delete(`${base}/groups/${groupId}`))).status).toBe(404);
+      expect((await as(request(app).post(`${base}/activities`)).send({ group_id: groupId, name: 'Sneaky' })).status).toBe(404);
+      expect(
+        (await as(request(app).put(`${base}/activities/reorder`)).send({ group_id: groupId, activity_ids: [activityId] })).status,
+      ).toBe(404);
+      expect((await as(request(app).put(`${base}/activities/${activityId}`)).send({ name: 'Renamed' })).status).toBe(404);
+      expect((await as(request(app).delete(`${base}/activities/${activityId}`))).status).toBe(404);
+
+      // Their own activity can't be moved into the default user's group.
+      const ownGroup = (await as(request(app).post(`${base}/groups`)).send({ name: 'Mine' })).body.id;
+      const ownActivity = (await as(request(app).post(`${base}/activities`)).send({ group_id: ownGroup, name: 'Run' })).body.id;
+      expect((await as(request(app).put(`${base}/activities/${ownActivity}`)).send({ group_id: groupId })).status).toBe(404);
+
+      // Nor can they link the default user's activity to their own check-ins.
+      expect((await as(request(app).post('/api/v1/mood-checkins')).send({ mood: 3, activity_ids: [activityId] })).status).toBe(400);
+      const own = await as(request(app).post('/api/v1/mood-checkins')).send({ mood: 3, activity_ids: [ownActivity] });
+      expect(own.status).toBe(201);
+      expect((await as(request(app).put(`/api/v1/mood-checkins/${own.body.id}`)).send({ activity_ids: [activityId] })).status).toBe(400);
+
+      const mine = await request(app).get('/api/v1/mood-checkins/activities/groups');
+      expect(mine.body).toEqual([
+        expect.objectContaining({
+          id: groupId,
+          name: 'Health',
+          activities: [expect.objectContaining({ id: activityId, name: 'Gym', mood_checkin_count: 1 })],
+        }),
+      ]);
+    });
+
+    it("stats only ever cover the signed-in user's check-ins", async () => {
+      await seedDefaultUser();
+      const q = { user_id: DEFAULT_USER_ID, from: '2026-03-01', to: '2026-03-31' };
+      const stats = '/api/v1/mood-checkins/stats';
+      expect((await as(request(app).get(`${stats}/daily`).query(q))).body).toEqual([]);
+      expect((await as(request(app).get(`${stats}/count-range`).query(q))).body.every((r: any) => r.count === 0)).toBe(true);
+      expect((await as(request(app).get(`${stats}/activity-correlations`).query(q))).body).toEqual([]);
+      expect((await as(request(app).get(`${stats}/heatmap`).query({ ...q, year: 2026 }))).body).toEqual([]);
+      expect((await as(request(app).get(`${stats}/monthly`).query({ ...q, year: 2026 }))).body).toEqual([]);
+      expect((await as(request(app).get(`${stats}/earliest`))).body).toEqual({ date: null });
+
+      expect((await request(app).get(`${stats}/daily`).query(q)).body).toHaveLength(1);
+      expect((await request(app).get(`${stats}/earliest`)).body).toEqual({ date: '2026-03-10' });
+    });
+
+    it("the timeline (search and filters) never shows another user's check-ins", async () => {
+      await seedDefaultUser();
+      for (const q of [{}, { q: 'private' }, { user_id: DEFAULT_USER_ID, activity: 'gym' }, { mood: '5' }]) {
+        const res = await as(request(app).get('/api/v1/timeline').query(q));
+        expect(res.status).toBe(200);
+        expect(res.body.filter((r: any) => r.type === 'mood')).toEqual([]);
+      }
+      const mine = await request(app).get('/api/v1/timeline').query({ q: 'private' });
+      expect(mine.body.filter((r: any) => r.type === 'mood')).toHaveLength(1);
+    });
+
+    it("the <br> cleanup only touches the caller's notes", async () => {
+      const { checkinId } = await seedDefaultUser();
+      const res = await as(request(app).post('/api/v1/mood-checkins/import/daylio/replace-br'));
+      expect(res.body).toEqual({ updated: 0 });
+      expect((await request(app).get(`/api/v1/mood-checkins/${checkinId}`)).body.note).toBe('private <br> note');
+    });
+
+    it("restoring a backup never attaches rows to another user's groups or check-ins", async () => {
+      const { groupId, activityId, checkinId } = await seedDefaultUser();
+      const payload = await exportPluginData(DEFAULT_USER_ID);
+
+      // The other user restores the default user's export (same ids), plus
+      // crafted rows pointing their own new ids at the default user's parents.
+      const mood = payload.mood as any;
+      mood.extra.moodActivities.push({
+        id: '11111111-1111-4111-8111-111111111111', group_id: groupId, name: 'Planted',
+        display_order: 9, icon: null, created_at: null, updated_at: null,
+      });
+      mood.checkins.push({
+        id: '22222222-2222-4222-8222-222222222222', mood: 2, note: 'theirs',
+        checked_in_at: '2026-04-01T10:00:00Z', mood_timezone: 'UTC', created_at: null, updated_at: null, daylio_hash: null,
+      });
+      mood.extra.moodCheckinActivities.push(
+        { mood_checkin_id: checkinId, activity_id: activityId },
+        { mood_checkin_id: '22222222-2222-4222-8222-222222222222', activity_id: activityId },
+      );
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await importPluginData(client, other.id, { mood: payload.mood });
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+
+      // Only the brand-new check-in landed, owned by the other user and with no links.
+      const theirs = await query(
+        `SELECT id, user_id FROM mood_checkins WHERE user_id = $1`, [other.id],
+      );
+      expect(theirs.rows).toEqual([{ id: '22222222-2222-4222-8222-222222222222', user_id: other.id }]);
+      const links = await query('SELECT mood_checkin_id, activity_id FROM mood_checkin_activities');
+      expect(links.rows).toEqual([{ mood_checkin_id: checkinId, activity_id: activityId }]);
+      const activities = await query('SELECT id FROM mood_activities');
+      expect(activities.rows).toEqual([{ id: activityId }]);
+      const groups = await query('SELECT id, user_id FROM mood_activity_groups');
+      expect(groups.rows).toEqual([{ id: groupId, user_id: DEFAULT_USER_ID }]);
+
+      // The legacy restore path is guarded the same way.
+      const legacyClient = await pool.connect();
+      try {
+        await legacyClient.query('BEGIN');
+        const { getPlugin } = await import('../../../../server/src/plugins/registry');
+        await getPlugin('mood')!.server.restoreLegacyBackup!(
+          { user_id: other.id, client: legacyClient },
+          {
+            moodActivities: [{ id: '33333333-3333-4333-8333-333333333333', group_id: groupId, name: 'Legacy plant' }],
+            moodCheckinActivities: [{ mood_checkin_id: '22222222-2222-4222-8222-222222222222', activity_id: activityId }],
+          },
+        );
+        await legacyClient.query('COMMIT');
+      } finally {
+        legacyClient.release();
+      }
+      expect((await query('SELECT COUNT(*)::int AS c FROM mood_activities')).rows[0].c).toBe(1);
+      expect((await query('SELECT COUNT(*)::int AS c FROM mood_checkin_activities')).rows[0].c).toBe(1);
+    });
+
+    it("start-over for one user leaves another user's mood data alone", async () => {
+      await seedDefaultUser();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await deletePluginData(client, other.id, ['mood']);
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+      const left = await query(
+        `SELECT (SELECT COUNT(*) FROM mood_checkins)::int AS c, (SELECT COUNT(*) FROM mood_activity_groups)::int AS g`,
+      );
+      expect(left.rows[0]).toEqual({ c: 1, g: 1 });
+    });
+
+    describe('Daylio import', () => {
+      async function daylioFile(datetimes: number[]): Promise<Buffer> {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daylio-test-'));
+        try {
+          const backup = {
+            dayEntries: datetimes.map((datetime, i) => ({ id: i + 1, datetime, mood: 1, tags: [1], note: `entry ${i}` })),
+            tags: [{ id: 1, name: 'Gym', id_tag_group: 1 }],
+            tag_groups: [{ id: 1, name: 'Health' }],
+            metadata: { timezone: 'UTC' },
+          };
+          fs.writeFileSync(path.join(dir, 'backup.daylio'), Buffer.from(JSON.stringify(backup)).toString('base64'));
+          return await zipDirectory(dir);
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
+
+      it("creates the importer's own groups/activities, never reusing another user's", async () => {
+        const { groupId, activityId } = await seedDefaultUser(); // also 'Health' > 'Gym'
+        const file = await daylioFile([Date.UTC(2025, 0, 1, 12), Date.UTC(2025, 0, 2, 12)]);
+
+        const res = await as(request(app).post('/api/v1/mood-checkins/import/daylio')).attach('file', file, 'backup.daylio');
+        expect(res.status).toBe(200);
+        expect(res.body.imported).toBe(2);
+
+        const theirGroups = await as(request(app).get('/api/v1/mood-checkins/activities/groups'));
+        expect(theirGroups.body).toHaveLength(1);
+        expect(theirGroups.body[0].id).not.toBe(groupId);
+        expect(theirGroups.body[0].activities).toEqual([
+          expect.objectContaining({ name: 'Gym', mood_checkin_count: 2 }),
+        ]);
+        expect(theirGroups.body[0].activities[0].id).not.toBe(activityId);
+
+        const counts = await query(
+          'SELECT user_id, COUNT(*)::int AS c FROM mood_checkins GROUP BY user_id ORDER BY c',
+        );
+        expect(counts.rows).toEqual([
+          { user_id: DEFAULT_USER_ID, c: 1 },
+          { user_id: other.id, c: 2 },
+        ]);
+        // The default user's activity kept exactly its one link.
+        const mine = await request(app).get('/api/v1/mood-checkins/activities/groups');
+        expect(mine.body[0].activities[0].mood_checkin_count).toBe(1);
+      });
+
+      it("re-importing dedupes against the importer's own entries, and an overlapping file never touches the other user's", async () => {
+        const file = await daylioFile([Date.UTC(2025, 0, 1, 12)]);
+        const first = await request(app).post('/api/v1/mood-checkins/import/daylio').attach('file', file, 'backup.daylio');
+        expect(first.body.imported).toBe(1);
+        const again = await request(app).post('/api/v1/mood-checkins/import/daylio').attach('file', file, 'backup.daylio');
+        expect(again.body).toEqual(expect.objectContaining({ imported: 0, skipped: 1 }));
+
+        // The same file imported by another user lands in their own account
+        // (daylio_hash is unique per user) without touching the default user's.
+        const theirs = await as(request(app).post('/api/v1/mood-checkins/import/daylio')).attach('file', file, 'backup.daylio');
+        expect(theirs.body).toEqual(expect.objectContaining({ imported: 1, skipped: 0 }));
+        const rows = await query('SELECT user_id, note FROM mood_checkins ORDER BY user_id = $1 DESC', [DEFAULT_USER_ID]);
+        expect(rows.rows).toEqual([
+          { user_id: DEFAULT_USER_ID, note: 'entry 0' },
+          { user_id: expect.not.stringMatching(DEFAULT_USER_ID), note: 'entry 0' },
+        ]);
+      });
     });
   });
 });

@@ -2,6 +2,9 @@
 // Look up a venue on Coasterpedia and store the outcome in venue_coasterpedia.
 // Intended to run fire-and-forget after a venue save, from a manual refresh,
 // and from the backfill job: it never throws, failures are stored on the row.
+//
+// Venues are shared between users, but a lookup (made with the user's own
+// API key) belongs to that user: every read and write is scoped by userId.
 // ============================================================================
 
 import { query } from '../../../server/src/db';
@@ -68,7 +71,7 @@ async function saveRow(
        (venue_id, user_id, status, attraction_id, data, candidates, error,
         looked_up_name, looked_up_parent, fetched_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-     ON CONFLICT (venue_id) DO UPDATE SET
+     ON CONFLICT (venue_id, user_id) DO UPDATE SET
        status = EXCLUDED.status, error = EXCLUDED.error,
        -- a failed refresh keeps the last good record instead of wiping it
        attraction_id = CASE WHEN EXCLUDED.status = 'error' THEN venue_coasterpedia.attraction_id ELSE EXCLUDED.attraction_id END,
@@ -100,8 +103,8 @@ export async function needsLookup(venueId: string, userId: string): Promise<bool
   if (!venue || !isAmusementRideCategory(venue.category_name)) return false;
   if (!(await getCoasterpediaApiKey(userId))) return false;
   const existing = await query(
-    `SELECT looked_up_name, looked_up_parent FROM venue_coasterpedia WHERE venue_id = $1`,
-    [venueId],
+    `SELECT looked_up_name, looked_up_parent FROM venue_coasterpedia WHERE venue_id = $1 AND user_id = $2`,
+    [venueId, userId],
   );
   const row = existing.rows[0];
   if (!row) return true;
@@ -160,7 +163,10 @@ export async function enrichVenueCoasterpedia(
       const message = err instanceof Error ? err.message : 'Lookup failed';
 
       if (failure?.isNotFound && opts.attractionId != null) {
-        const stored = await query('SELECT attraction_id FROM venue_coasterpedia WHERE venue_id = $1', [venueId]);
+        const stored = await query(
+          'SELECT attraction_id FROM venue_coasterpedia WHERE venue_id = $1 AND user_id = $2',
+          [venueId, userId],
+        );
         if (stored.rows[0]?.attraction_id === opts.attractionId) {
           await saveRow(venue, userId, {
             status: 'no_match',
@@ -186,15 +192,23 @@ export async function enrichVenueCoasterpedia(
  */
 export const BACKFILL_DELAY_MS = 2_200;
 
-/** Rides that were never looked up, or whose last lookup failed. */
-export async function pendingBackfillVenueIds(): Promise<string[]> {
+/**
+ * The user's rides (venues they checked in at, rated, or put on one of their lists)
+ * that they never looked up, or whose last lookup failed.
+ */
+export async function pendingBackfillVenueIds(userId: string): Promise<string[]> {
   const pending = await query(
     `SELECT v.id FROM venues v
        JOIN venue_categories vc ON vc.id = v.category_id
-       LEFT JOIN venue_coasterpedia cp ON cp.venue_id = v.id
+       LEFT JOIN venue_coasterpedia cp ON cp.venue_id = v.id AND cp.user_id = $2
       WHERE LOWER(TRIM(vc.name)) = $1 AND (cp.venue_id IS NULL OR cp.status = 'error')
+        AND (EXISTS (SELECT 1 FROM checkins c WHERE c.venue_id = v.id AND c.user_id = $2)
+          OR EXISTS (SELECT 1 FROM venue_ratings vr WHERE vr.venue_id = v.id AND vr.user_id = $2)
+          OR EXISTS (SELECT 1 FROM venue_list_items vli
+                       JOIN venue_lists vl ON vl.id = vli.list_id AND vl.user_id = $2
+                      WHERE vli.venue_id = v.id))
       ORDER BY v.name`,
-    [AMUSEMENT_RIDE_CATEGORY],
+    [AMUSEMENT_RIDE_CATEGORY, userId],
   );
   return pending.rows.map((r: { id: string }) => r.id);
 }

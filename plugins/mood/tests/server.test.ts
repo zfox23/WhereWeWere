@@ -11,6 +11,7 @@ vi.mock('../../../server/src/db', () => ({
 }));
 
 import { server } from '../server';
+import { runAsUser } from '../../../server/src/auth/context';
 import { TIMELINE_COLUMNS } from '../../../server/src/plugins/timeline';
 import type { PluginTimelineContext } from 'wwp-shared';
 
@@ -145,16 +146,16 @@ describe('mood plugin — reconcile hook', () => {
 
   it('applies a label-only timezone correction', async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 1 });
-    expect(await server.reconcile!.apply('m1', 'Europe/Lisbon')).toBe(true);
+    expect(await runAsUser('u1', () => server.reconcile!.apply('m1', 'Europe/Lisbon'))).toBe(true);
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('UPDATE mood_checkins');
     expect(sql).toContain('SET mood_timezone = $2');
-    expect(values).toEqual(['m1', 'Europe/Lisbon']);
+    expect(values).toEqual(['m1', 'Europe/Lisbon', 'u1']);
   });
 
   it('reports failure when no row was updated', async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 0 });
-    expect(await server.reconcile!.apply('missing', 'Europe/Lisbon')).toBe(false);
+    expect(await runAsUser('u1', () => server.reconcile!.apply('missing', 'Europe/Lisbon'))).toBe(false);
   });
 });
 

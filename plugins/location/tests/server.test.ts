@@ -8,6 +8,7 @@ vi.mock('../../../server/src/db', () => ({
 }));
 
 import { server } from '../server';
+import { runAsUser } from '../../../server/src/auth/context';
 import { getVenueTimezone, normalizeEtcGmt } from '../services/geoTimezone';
 import type { PluginReconciliationRow, PluginTimelineContext } from 'wwp-shared';
 
@@ -255,14 +256,14 @@ describe('location plugin — backup & cleanup hooks', () => {
   });
 
   it('imports in FK order (categories -> venues -> check-ins) via the transaction client', async () => {
-    const clientQuery = vi.fn(async (_sql: string) => ({ rows: [{ id: 'c1' }], rowCount: 1 }));
+    const clientQuery = vi.fn(async (_sql: string, values?: unknown[]) => ({ rows: [{ id: values?.[0] }], rowCount: 1 }));
     const client = { query: clientQuery, release: vi.fn() };
     const inserted = await server.backupImport!(
       { user_id: 'u1', client } as any,
       {
-        venueCategories: [{ id: 'vc1', name: 'Cafe', icon: null, created_at: null }],
-        venues: [{ id: 'v1', name: 'Cafe', category_id: 'vc1' }],
-        checkins: [{ id: 'c1', venue_id: 'v1', checked_in_at: '2026-01-01T12:00:00Z' }],
+        venueCategories: [{ id: '00000000-0000-4000-8000-000000000001', name: 'Cafe', icon: null, created_at: null }],
+        venues: [{ id: '00000000-0000-4000-8000-000000000002', name: 'Cafe', category_id: '00000000-0000-4000-8000-000000000001' }],
+        checkins: [{ id: '00000000-0000-4000-8000-000000000003', venue_id: '00000000-0000-4000-8000-000000000002', checked_in_at: '2026-01-01T12:00:00Z' }],
       },
     );
     expect(inserted).toBe(1);
@@ -296,19 +297,26 @@ describe('location plugin — backup & cleanup hooks', () => {
     expect(queryMock.mock.calls[3][0]).toContain('DELETE FROM checkin_lists WHERE user_id = $1');
   });
 
-  it('deletes the whole venues catalog on start-over (all-data)', async () => {
+  it('deletes only the user\'s own data on start-over (all-data), never the shared venue catalog', async () => {
     queryMock
       .mockResolvedValueOnce({ rowCount: 2 }) // list items (user's lists)
       .mockResolvedValueOnce({ rowCount: 1 }) // venue lists (user's)
-      .mockResolvedValueOnce({ rowCount: 1 }) // merge suggestions
-      .mockResolvedValueOnce({ rowCount: 4 }) // venues
-      .mockResolvedValueOnce({ rowCount: 3 }); // venue categories
-    expect(await server.deleteAllData!({ user_id: 'u1' } as any)).toBe(11);
-    expect(queryMock.mock.calls[0][0]).toContain('DELETE FROM venue_list_items');
-    expect(queryMock.mock.calls[1][0]).toContain('DELETE FROM venue_lists WHERE user_id = $1');
-    expect(queryMock.mock.calls[2][0]).toContain('DELETE FROM venue_merge_suggestions');
-    expect(queryMock.mock.calls[3][0]).toContain('DELETE FROM venues');
-    expect(queryMock.mock.calls[4][0]).toContain('DELETE FROM venue_categories');
+      .mockResolvedValueOnce({ rowCount: 1 }) // checkin lists (user's)
+      .mockResolvedValueOnce({ rowCount: 4 }) // coasterpedia lookups (user's)
+      .mockResolvedValueOnce({ rowCount: 2 }) // venue ratings (user's)
+      .mockResolvedValueOnce({ rowCount: 3 }); // weather (user's)
+    expect(await server.deleteAllData!({ user_id: 'u1' } as any)).toBe(13);
+    const sqls = queryMock.mock.calls.map((c) => c[0] as string);
+    expect(sqls[0]).toContain('DELETE FROM venue_list_items');
+    expect(sqls[1]).toContain('DELETE FROM venue_lists WHERE user_id = $1');
+    expect(sqls[2]).toContain('DELETE FROM checkin_lists WHERE user_id = $1');
+    expect(sqls[3]).toContain('DELETE FROM venue_coasterpedia WHERE user_id = $1');
+    expect(sqls[4]).toContain('DELETE FROM venue_ratings WHERE user_id = $1');
+    expect(sqls[5]).toContain('DELETE FROM daily_weather WHERE user_id = $1');
+    for (const sql of sqls) {
+      expect(sql).not.toMatch(/DELETE FROM (venues|venue_categories|venue_merge_suggestions)\b/);
+    }
+    expect(queryMock.mock.calls.every((c) => (c[1] as unknown[])[0] === 'u1')).toBe(true);
   });
 
   it('runs deleteAllData on the provided transaction client', async () => {
@@ -316,7 +324,7 @@ describe('location plugin — backup & cleanup hooks', () => {
     const client = { query: clientQuery, release: vi.fn() };
     await server.deleteAllData!({ user_id: 'u1', client } as any);
     expect(queryMock).not.toHaveBeenCalled();
-    expect(clientQuery).toHaveBeenCalledTimes(5);
+    expect(clientQuery).toHaveBeenCalledTimes(6);
   });
 });
 
@@ -352,11 +360,13 @@ describe('location plugin — llm hook', () => {
 describe('location plugin — reconcile apply', () => {
   it('persists the suggested timezone and reports success', async () => {
     queryMock.mockResolvedValue({ rowCount: 1 });
-    expect(await server.reconcile!.apply!('c1', 'Europe/Lisbon')).toBe(true);
+    expect(await runAsUser('u1', () => server.reconcile!.apply!('c1', 'Europe/Lisbon'))).toBe(true);
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('UPDATE checkins');
     expect(sql).toContain('SET checkin_timezone = $2');
-    expect(values).toEqual(['c1', 'Europe/Lisbon']);
+    // Only the current user's check-in can be relabeled.
+    expect(sql).toContain('user_id = $3');
+    expect(values).toEqual(['c1', 'Europe/Lisbon', 'u1']);
   });
 
   it('rejects an invalid timezone', async () => {

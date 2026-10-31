@@ -49,8 +49,6 @@ import { VenuesLibrarySection } from './VenuesLibrarySection';
 import { CheckinListsSection } from './CheckinListsSection';
 import { VenueListsSection } from './VenueListsSection';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
-
 type ClusteredVenueItem =
   | {
     kind: 'venue';
@@ -893,7 +891,7 @@ export function PlacesTab() {
   );
 
   useEffect(() => {
-    stats.earliestDates(USER_ID).then((d) => setEarliestCheckinDate(d.checkins)).catch(console.error);
+    stats.earliestDates().then((d) => setEarliestCheckinDate(d.checkins)).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -902,48 +900,39 @@ export function PlacesTab() {
 
     Promise.all([
       stats.summary(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.topVenues(
-        USER_ID,
         10,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.categoryBreakdown(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.countries(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.mapData(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.dayOfWeek(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.timeOfDay(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.busiestDays(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),
       stats.topCities(
-        USER_ID,
         placesVisibleRange.from || undefined,
         placesVisibleRange.to || undefined
       ),

@@ -8,8 +8,6 @@ import VenueSearch from './VenueSearch';
 import ScorePicker from '../../../client/src/components/ScorePicker';
 import CompanionChipInput from '../../../client/src/components/CompanionChipInput';
 
-const HARDCODED_USER_ID = '00000000-0000-0000-0000-000000000001';
-
 function toLocalDatetimeString(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -219,7 +217,6 @@ export default function CheckInForm({
         });
       } else {
         const result = await checkins.create({
-          user_id: HARDCODED_USER_ID,
           venue_id: venueId,
           notes: notes.trim() || null,
           checked_in_at: new Date(checkedInAt).toISOString(),

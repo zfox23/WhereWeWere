@@ -30,6 +30,7 @@ import {
   importPluginData,
   deletePluginData,
 } from '../../../../server/src/plugins/backup';
+import { createTestUser, type TestUser } from '../../../../server/tests/helpers/auth';
 
 const BASE_MS = 1_700_000_000_000;
 const POINT_COUNT = 10;
@@ -770,5 +771,178 @@ describe('Tracks plugin API', () => {
         if (tempRoot) removeBackupTempDir(tempRoot);
       }
     }, 30000);
+  });
+
+  describe('multi-user isolation', () => {
+    let other: TestUser;
+    const as = (r: request.Test) => r.set('Cookie', other.cookie);
+
+    beforeEach(async () => {
+      other = await createTestUser('other');
+    });
+
+    async function uploadAsDefault(name = '2024-01-01_10-00-00_Ride_Cycling.gpx') {
+      const created = await request(app).post('/api/v1/tracks').attach('file', Buffer.from(GPX_FILE), name);
+      expect(created.status).toBe(201);
+      return created.body.id as string;
+    }
+
+    it("can't list, map, read, edit, trim, download, or delete another user's tracks", async () => {
+      const id = await uploadAsDefault();
+      const original = storedTrackPath(DEFAULT_USER_ID, id);
+      expect(original).not.toBeNull();
+
+      const q = { user_id: DEFAULT_USER_ID };
+      expect((await as(request(app).get('/api/v1/tracks').query(q))).body).toEqual([]);
+      expect((await as(request(app).get('/api/v1/tracks/map-data').query(q))).body).toEqual([]);
+      expect((await as(request(app).get('/api/v1/tracks/activity-types').query(q))).body).toEqual([]);
+      expect((await as(request(app).get('/api/v1/tracks/activity-types/summary').query(q))).body).toEqual([]);
+      expect((await as(request(app).get('/api/v1/tracks/stats/earliest'))).body).toEqual({ date: null });
+
+      expect((await as(request(app).get(`/api/v1/tracks/${id}`))).status).toBe(404);
+      expect((await as(request(app).put(`/api/v1/tracks/${id}`)).send({ name: 'Hijacked' })).status).toBe(404);
+      expect((await as(request(app).put(`/api/v1/tracks/${id}`)).send({ companions: ['Mallory'] })).status).toBe(404);
+      expect((await as(request(app).post(`/api/v1/tracks/${id}/trim`)).send({ start_index: 0, end_index: 1 })).status).toBe(404);
+      // The GPX download (the only route serving track files) is scoped too.
+      expect((await as(request(app).get(`/api/v1/tracks/${id}/download`))).status).toBe(404);
+      expect((await as(request(app).delete(`/api/v1/tracks/${id}`))).status).toBe(404);
+
+      const mine = await request(app).get(`/api/v1/tracks/${id}`);
+      expect(mine.status).toBe(200);
+      expect(mine.body.point_count).toBe(3);
+      expect(mine.body.companions).toEqual([]);
+      expect(fs.existsSync(original!)).toBe(true);
+      expect((await request(app).get('/api/v1/tracks/stats/earliest')).body).toEqual({ date: '2024-01-01' });
+    });
+
+    it("stores uploads under the uploader's own directory, deduping per user", async () => {
+      const mineId = await uploadAsDefault();
+      // The very same file is not a duplicate for someone else.
+      const theirs = await as(request(app).post('/api/v1/tracks'))
+        .attach('file', Buffer.from(GPX_FILE), '2024-01-01_10-00-00_Ride_Cycling.gpx');
+      expect(theirs.status).toBe(201);
+      const theirId = theirs.body.id as string;
+
+      expect(storedTrackPath(other.id, theirId)).toBe(path.join(gpsTracksDir(other.id), `${theirId}.gpx`));
+      expect(storedTrackPath(DEFAULT_USER_ID, theirId)).toBeNull();
+      expect(storedTrackPath(other.id, mineId)).toBeNull();
+
+      const owners = await query('SELECT id, user_id FROM tracks ORDER BY user_id = $1', [DEFAULT_USER_ID]);
+      expect(owners.rows).toEqual([
+        { id: theirId, user_id: other.id },
+        { id: mineId, user_id: DEFAULT_USER_ID },
+      ]);
+
+      // Deleting their own track removes only their file.
+      expect((await as(request(app).delete(`/api/v1/tracks/${theirId}`))).status).toBe(200);
+      expect(storedTrackPath(other.id, theirId)).toBeNull();
+      expect(storedTrackPath(DEFAULT_USER_ID, mineId)).not.toBeNull();
+    });
+
+    it("the timeline (search and filters) never shows another user's tracks", async () => {
+      await uploadAsDefault();
+      for (const q of [{}, { q: 'Ride' }, { user_id: DEFAULT_USER_ID, track_activity: 'Cycling' }]) {
+        const res = await as(request(app).get('/api/v1/timeline').query(q));
+        expect(res.status).toBe(200);
+        expect(res.body.filter((r: any) => r.type === 'tracks')).toEqual([]);
+      }
+      const mine = await request(app).get('/api/v1/timeline').query({ q: 'Ride' });
+      expect(mine.body.filter((r: any) => r.type === 'tracks')).toHaveLength(1);
+    });
+
+    it("renaming an activity type only renames the caller's tracks", async () => {
+      await uploadAsDefault(); // activity_type 'Cycling'
+      const theirs = await as(request(app).post('/api/v1/tracks'))
+        .attach('file', Buffer.from(GPX_FILE), '2024-01-01_10-00-00_Ride_Paddleboard.gpx');
+      expect(theirs.status).toBe(201);
+
+      // 'Cycling' exists only for the default user: no clash for the other user.
+      const renamed = await as(request(app).put('/api/v1/tracks/activity-types')).send({ from: 'Paddleboard', to: 'Cycling' });
+      expect(renamed.body).toEqual({ updated: 1, merged: false });
+      const sneaky = await as(request(app).put('/api/v1/tracks/activity-types')).send({ from: 'Cycling', to: 'Pwned', merge: true });
+      expect(sneaky.body.updated).toBe(1); // their own (just-renamed) track only
+
+      const types = await query('SELECT user_id, activity_type FROM tracks ORDER BY user_id = $1', [DEFAULT_USER_ID]);
+      expect(types.rows).toEqual([
+        { user_id: other.id, activity_type: 'Pwned' },
+        { user_id: DEFAULT_USER_ID, activity_type: 'Cycling' },
+      ]);
+    });
+
+    it("a restore of another user's backup skips their ids and never touches their files", async () => {
+      const id = await uploadAsDefault();
+      const original = storedTrackPath(DEFAULT_USER_ID, id)!;
+      const originalContent = fs.readFileSync(original, 'utf-8');
+
+      const payload = await exportPluginData(DEFAULT_USER_ID);
+      const { files, tempDirs } = await exportPluginFiles(DEFAULT_USER_ID);
+      const bundleRoot = fs.mkdtempSync(path.join(config.dataDir, 'tracks-bundle-'));
+      try {
+        for (const f of files.filter((x) => x.pluginId === 'tracks')) {
+          const dest = path.join(bundleRoot, 'plugins', 'tracks', f.zipPath);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, '<gpx>tampered</gpx>');
+        }
+        (payload.tracks.checkins as any[])[0].name = 'Overwritten?';
+
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const counts = await importPluginData(
+            client,
+            other.id,
+            { tracks: payload.tracks },
+            { tracks: path.join(bundleRoot, 'plugins', 'tracks') },
+          );
+          await client.query('COMMIT');
+          expect(counts.tracks.inserted).toBe(0);
+        } finally {
+          client.release();
+        }
+      } finally {
+        fs.rmSync(bundleRoot, { recursive: true, force: true });
+        for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+      }
+
+      const rows = await query('SELECT id, user_id, name FROM tracks');
+      expect(rows.rows).toEqual([{ id, user_id: DEFAULT_USER_ID, name: '10-00-00_Ride' }]);
+      expect(fs.readFileSync(original, 'utf-8')).toBe(originalContent);
+      expect(storedTrackPath(other.id, id)).toBeNull();
+    });
+
+    it("interleaved exports by two users each ship only their own files", async () => {
+      const mineId = await uploadAsDefault();
+      const theirs = await as(request(app).post('/api/v1/tracks'))
+        .attach('file', Buffer.from(GPX_FILE), '2024-01-01_10-00-00_Theirs_Cycling.gpx');
+      const theirId = theirs.body.id as string;
+
+      // Both exports plan their files before either collects them.
+      await exportPluginData(DEFAULT_USER_ID);
+      await exportPluginData(other.id);
+      const mine = await exportPluginFiles(DEFAULT_USER_ID);
+      const their = await exportPluginFiles(other.id);
+      try {
+        const mineTracks = mine.files.filter((f) => f.pluginId === 'tracks');
+        const theirTracks = their.files.filter((f) => f.pluginId === 'tracks');
+        expect(mineTracks.map((f) => f.absPath)).toEqual([storedTrackPath(DEFAULT_USER_ID, mineId)]);
+        expect(theirTracks.map((f) => f.absPath)).toEqual([storedTrackPath(other.id, theirId)]);
+      } finally {
+        for (const dir of [...mine.tempDirs, ...their.tempDirs]) fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("start-over for one user leaves another user's tracks and files alone", async () => {
+      const id = await uploadAsDefault();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await deletePluginData(client, other.id, ['tracks']);
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+      expect((await query('SELECT COUNT(*)::int AS c FROM tracks')).rows[0].c).toBe(1);
+      expect(storedTrackPath(DEFAULT_USER_ID, id)).not.toBeNull();
+    });
   });
 });

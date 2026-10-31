@@ -11,7 +11,8 @@
  * This plugin owns ALL media-specific API surface:
  *   - /media            search, items CRUD/sync, check-in CRUD, lists,
  *                       library, stats, TV season cache (ex-routes/media.ts)
- *   - /webhook/plex     the Plex scrobble webhook (ex-routes/webhook-plex.ts)
+ *   - /webhook/plex     the Plex scrobble webhook, POST /:token per user
+ *                       (ex-routes/webhook-plex.ts), and its event count
  *
  * Its provider API keys (tmdb/igdb/hardcover) and the plex_usernames filter
  * live in the generic plugin_settings table (declared in settingsKeys; the
@@ -32,7 +33,8 @@ import type {
   PluginLlmRow,
 } from 'wwp-shared';
 import { isValidTimeZone } from 'wwp-shared';
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, preserveUserContext } from '../../server/src/auth/context';
+import { webhookUser } from '../../server/src/auth/middleware';
 import { createListKit, cleanName, nameTakenOrThrow, listError } from '../../server/src/services/lists';
 import { likeText, orderBy, pageResult, parseLibraryParams } from '../../server/src/services/libraryQuery';
 import { mountRankRoutes } from '../../server/src/services/lists/routes';
@@ -89,7 +91,7 @@ async function getApiKeys(): Promise<SettingsKeys> {
     `SELECT key, value FROM plugin_settings
       WHERE user_id = $1 AND plugin_id = 'media'
         AND key IN ('tmdb_api_key', 'hardcover_api_key', 'igdb_client_id', 'igdb_client_secret')`,
-    [USER_ID]
+    [currentUserId()]
   );
   const values: Record<string, string | null> = {};
   for (const row of result.rows) {
@@ -109,7 +111,7 @@ async function getPlexUsernames(): Promise<string | null> {
   const result = await query(
     `SELECT value FROM plugin_settings
       WHERE user_id = $1 AND plugin_id = 'media' AND key = 'plex_usernames'`,
-    [USER_ID]
+    [currentUserId()]
   );
   const v = result.rows[0]?.value;
   return typeof v === 'string' && v.length > 0 ? v : null;
@@ -214,7 +216,7 @@ export async function upsertMediaItemWithClient(
     const existing = await client.query(
       `SELECT id FROM media_items
        WHERE user_id = $1 AND media_type = $2 AND external_source = $3 AND external_id = $4`,
-      [USER_ID, input.media_type, input.external_source, input.external_id]
+      [currentUserId(), input.media_type, input.external_source, input.external_id]
     );
     if (existing.rows.length > 0) {
       return { id: existing.rows[0].id as string, created: false };
@@ -229,7 +231,7 @@ export async function upsertMediaItemWithClient(
     const siblings = await client.query(
       `SELECT id, title FROM media_items
        WHERE user_id = $1 AND media_type = $2${localOnly ? ' AND external_source IS NULL' : ''}`,
-      [USER_ID, input.media_type]
+      [currentUserId(), input.media_type]
     );
     const key = normalizeTitle(input.title);
     const match = siblings.rows.find(
@@ -243,7 +245,7 @@ export async function upsertMediaItemWithClient(
     const siblings = await client.query(
       `SELECT id, title FROM media_items
        WHERE user_id = $1 AND media_type = $2 AND external_source IS NULL`,
-      [USER_ID, input.media_type]
+      [currentUserId(), input.media_type]
     );
     const key = normalizeTitle(input.title);
     const match = siblings.rows.find(
@@ -260,7 +262,7 @@ export async function upsertMediaItemWithClient(
      ON CONFLICT (user_id, media_type, external_source, external_id) WHERE external_source IS NOT NULL AND external_id IS NOT NULL
      DO UPDATE SET updated_at = media_items.updated_at
      RETURNING id`,
-    [USER_ID, input.media_type, input.external_source, input.external_id, input.title, input.author, input.release_year, input.image_url, input.external_url]
+    [currentUserId(), input.media_type, input.external_source, input.external_id, input.title, input.author, input.release_year, input.image_url, input.external_url]
   );
   return { id: inserted.rows[0].id as string, created: true };
 }
@@ -307,7 +309,7 @@ export async function upsertMediaItem(input: MediaItemInput): Promise<string> {
     const existing = await query(
       `SELECT id FROM media_items
        WHERE user_id = $1 AND media_type = $2 AND external_source = $3 AND external_id = $4`,
-      [USER_ID, input.media_type, input.external_source, input.external_id]
+      [currentUserId(), input.media_type, input.external_source, input.external_id]
     );
     if (existing.rows.length > 0) {
       // Refresh mutable metadata in case the API returned newer info.
@@ -325,8 +327,8 @@ export async function upsertMediaItem(input: MediaItemInput): Promise<string> {
              series_position = COALESCE($10, series_position),
              series_count = COALESCE($11, series_count),
              updated_at = NOW()
-         WHERE id = $1`,
-        [existing.rows[0].id, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null, input.page_count ?? null, input.series_name || null, input.series_position ?? null, input.series_count ?? null]
+         WHERE id = $1 AND user_id = $12`,
+        [existing.rows[0].id, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null, input.page_count ?? null, input.series_name || null, input.series_position ?? null, input.series_count ?? null, currentUserId()]
       );
       return existing.rows[0].id as string;
     }
@@ -338,7 +340,7 @@ export async function upsertMediaItem(input: MediaItemInput): Promise<string> {
      ON CONFLICT (user_id, media_type, external_source, external_id) WHERE external_source IS NOT NULL AND external_id IS NOT NULL
      DO UPDATE SET updated_at = media_items.updated_at
      RETURNING id`,
-    [USER_ID, input.media_type, input.external_source || null, input.external_id || null, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null, input.page_count ?? null, input.series_name || null, input.series_position ?? null, input.series_count ?? null]
+    [currentUserId(), input.media_type, input.external_source || null, input.external_id || null, input.title, input.author || null, input.release_year || null, input.image_url || null, input.external_url || null, input.platform || null, input.page_count ?? null, input.series_name || null, input.series_position ?? null, input.series_count ?? null]
   );
   return inserted.rows[0].id as string;
 }
@@ -403,8 +405,8 @@ async function backfillBookMetadata(
            series_position = COALESCE($4, series_position),
            series_count = COALESCE($5, series_count),
            updated_at = NOW()
-       WHERE id = $1`,
-      [local.id, page_count, series_name, series_position, series_count]
+       WHERE id = $1 AND user_id = $6`,
+      [local.id, page_count, series_name, series_position, series_count, currentUserId()]
     );
   }
 }
@@ -429,13 +431,13 @@ async function searchMedia(type: string, q: string): Promise<{ results: SearchHi
               (ARRAY_AGG(mc.checkin_type ORDER BY mc.checked_in_at DESC, mc.created_at DESC))[1] AS last_checkin_type,
               (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.created_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_checkin_rating
        FROM media_checkins mc
-       WHERE mc.media_item_id = mi.id
+       WHERE mc.media_item_id = mi.id AND mc.user_id = mi.user_id
      ) mc_latest ON true
      WHERE mi.user_id = $1 AND mi.media_type = $2
        AND (mi.title ILIKE '%' || $3 || '%' OR to_tsvector('english', mi.title) @@ plainto_tsquery('english', $3))
      ORDER BY mi.title
      LIMIT 50`,
-    [USER_ID, type, q]
+    [currentUserId(), type, q]
   );
 
   const knownExternal = new Set<string>(
@@ -604,8 +606,8 @@ router.post('/items', async (req: Request, res: Response) => {
       series_count: toIntOrNull(series_count),
     });
     const item = await query(
-      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, overview, content_rating, players, coop, genres, developers, publishers, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status, created_at FROM media_items WHERE id = $1',
-      [id]
+      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, overview, content_rating, players, coop, genres, developers, publishers, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status, created_at FROM media_items WHERE id = $1 AND user_id = $2',
+      [id, currentUserId()]
     );
     res.status(201).json(item.rows[0]);
   } catch (err) {
@@ -628,7 +630,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
       `SELECT id, media_type FROM media_items WHERE id = $1 AND user_id = $2`,
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (itemResult.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not found' });
@@ -660,7 +662,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
         const conflict = await query(
           `SELECT id FROM media_items
            WHERE user_id = $1 AND media_type = $2 AND external_source = $3 AND external_id = $4 AND id <> $5`,
-          [USER_ID, mediaType, externalSource, extId, req.params.id]
+          [currentUserId(), mediaType, externalSource, extId, req.params.id]
         );
         if (conflict.rows.length > 0) {
           return res.status(409).json({ error: 'Another item already has this external ID' });
@@ -766,7 +768,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
     }
     sets.push('updated_at = NOW()');
 
-    params.push(req.params.id, USER_ID);
+    params.push(req.params.id, currentUserId());
     await query(
       `UPDATE media_items SET ${sets.join(', ')} WHERE id = $${params.length - 1} AND user_id = $${params.length}`,
       params
@@ -779,7 +781,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
               page_count, series_name, series_position, series_count, rating, raw_score, notes,
               time_played_minutes, status, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (item.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not found' });
@@ -789,8 +791,8 @@ router.put('/items/:id', async (req: Request, res: Response) => {
               COUNT(*) AS checkin_count,
               (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS latest_checkin_rating,
               COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count
-       FROM media_checkins WHERE media_item_id = $1`,
-      [req.params.id]
+       FROM media_checkins WHERE media_item_id = $1 AND user_id = $2`,
+      [req.params.id, currentUserId()]
     );
     const s = statsResult.rows[0];
     const it = item.rows[0];
@@ -869,7 +871,7 @@ async function applyGameRekey(
     ['igdb', externalId, externalUrl,
      meta.releaseYear, meta.imageUrl, meta.platform,
      meta.overview, meta.contentRating, meta.players, meta.coop,
-     meta.genres, meta.developers, meta.publishers, itemId, USER_ID]
+     meta.genres, meta.developers, meta.publishers, itemId, currentUserId()]
   );
 }
 
@@ -890,7 +892,7 @@ async function rekeyGameByTitle(itemId: string, title: string, platform?: string
   const owner = await query(
     `SELECT id FROM media_items
      WHERE user_id = $1 AND media_type = 'game' AND external_source = 'igdb' AND external_id = $2 AND id <> $3`,
-    [USER_ID, match.externalId, itemId]
+    [currentUserId(), match.externalId, itemId]
   );
   if (owner.rows.length > 0) return null;
 
@@ -988,7 +990,7 @@ router.post('/items/:id/sync', async (req: Request, res: Response) => {
   try {
     const itemResult = await query(
       `SELECT id, media_type, external_source, external_id, title, platform FROM media_items WHERE id = $1 AND user_id = $2`,
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (itemResult.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not found' });
@@ -1063,7 +1065,7 @@ router.get('/items/:id', async (req: Request, res: Response) => {
               page_count, series_name, series_position, series_count, rating, raw_score, notes,
               time_played_minutes, status, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (itemResult.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not found' });
@@ -1074,8 +1076,8 @@ router.get('/items/:id', async (req: Request, res: Response) => {
               COUNT(*) AS checkin_count,
               (ARRAY_AGG(rating ORDER BY checked_in_at DESC, id DESC) FILTER (WHERE rating IS NOT NULL))[1] AS latest_checkin_rating,
               COUNT(*) FILTER (WHERE checkin_type = 'completed') AS completed_count
-       FROM media_checkins WHERE media_item_id = $1`,
-      [req.params.id]
+       FROM media_checkins WHERE media_item_id = $1 AND user_id = $2`,
+      [req.params.id, currentUserId()]
     );
     const s = statsResult.rows[0];
     const it = itemResult.rows[0];
@@ -1105,7 +1107,7 @@ router.get('/items/:id/checkins', async (req: Request, res: Response) => {
        FROM media_checkins mc
        WHERE mc.media_item_id = $1 AND mc.user_id = $2
        ORDER BY mc.checked_in_at DESC`,
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     const byCheckin = await getCompanionsByCheckin(
       'media',
@@ -1140,7 +1142,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
 
     const itemResult = await query(
       'SELECT id FROM media_items WHERE id = $1 AND user_id = $2',
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (itemResult.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not found' });
@@ -1160,7 +1162,7 @@ router.post('/items/:id/checkins', async (req: Request, res: Response) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), $11, $12)
        RETURNING *`,
       [
-        USER_ID, req.params.id,
+        currentUserId(), req.params.id,
         season_number ?? null, episode_number ?? null, episode_title || null,
         checkin_type,
         rating != null && Number.isInteger(rating) && rating >= 1 && rating <= 4 ? rating : null,
@@ -1250,14 +1252,14 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
     }
 
     if (sets.length === 0) {
-      const existing = await query('SELECT * FROM media_checkins WHERE id = $1 AND user_id = $2', [req.params.id, USER_ID]);
+      const existing = await query('SELECT * FROM media_checkins WHERE id = $1 AND user_id = $2', [req.params.id, currentUserId()]);
       if (existing.rows.length === 0) return res.status(404).json({ error: 'Media check-in not found' });
       return res.json({ ...existing.rows[0], companions: await getCompanions('media', String(req.params.id)) });
     }
 
     const idIdx = params.length + 1;
     const userIdx = idIdx + 1;
-    params.push(req.params.id, USER_ID);
+    params.push(req.params.id, currentUserId());
     const result = await query(
       `UPDATE media_checkins
        SET ${sets.join(', ')}, updated_at = NOW()
@@ -1284,7 +1286,7 @@ router.delete('/checkins/:id', async (req: Request, res: Response) => {
   try {
     const result = await query(
       'DELETE FROM media_checkins WHERE id = $1 AND user_id = $2 RETURNING id',
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media check-in not found' });
@@ -1318,18 +1320,18 @@ router.post('/items/bulk-delete', async (req: Request, res: Response) => {
     if (!dryRun) await client.query('BEGIN');
     const found = await client.query(
       'SELECT COUNT(*)::int AS n FROM media_items WHERE user_id = $1 AND id = ANY($2)',
-      [USER_ID, ids]
+      [currentUserId(), ids]
     );
     const checkins = await client.query(
       'SELECT COUNT(*)::int AS n FROM media_checkins WHERE user_id = $1 AND media_item_id = ANY($2)',
-      [USER_ID, ids]
+      [currentUserId(), ids]
     );
     const memberships = await client.query(
       `SELECT COUNT(*)::int AS n
        FROM media_list_items mli
        JOIN media_items mi ON mi.id = mli.media_item_id
        WHERE mi.user_id = $1 AND mi.id = ANY($2)`,
-      [USER_ID, ids]
+      [currentUserId(), ids]
     );
 
     if (!dryRun) {
@@ -1338,7 +1340,7 @@ router.post('/items/bulk-delete', async (req: Request, res: Response) => {
       await client.query(
         `DELETE FROM media_list_items
          WHERE media_item_id IN (SELECT id FROM media_items WHERE user_id = $1 AND id = ANY($2))`,
-        [USER_ID, ids]
+        [currentUserId(), ids]
       );
       // Companion rows ride on the check-ins; remove them before the check-ins go.
       await client.query(
@@ -1346,11 +1348,11 @@ router.post('/items/bulk-delete', async (req: Request, res: Response) => {
          WHERE checkin_type = 'media'
            AND checkin_id IN (SELECT id FROM media_checkins
                               WHERE user_id = $1 AND media_item_id = ANY($2))`,
-        [USER_ID, ids]
+        [currentUserId(), ids]
       );
       await client.query(
         'DELETE FROM media_items WHERE user_id = $1 AND id = ANY($2)',
-        [USER_ID, ids]
+        [currentUserId(), ids]
       );
       await client.query('COMMIT');
     }
@@ -1381,7 +1383,7 @@ router.get('/tv/:itemId/seasons', async (req: Request, res: Response) => {
        LEFT JOIN media_tv_episodes mte ON mte.media_item_id = mi.id
        WHERE mi.id = $1 AND mi.user_id = $2
        GROUP BY mi.id`,
-      [req.params.itemId, USER_ID]
+      [req.params.itemId, currentUserId()]
     );
     if (itemResult.rows.length === 0) {
       return res.status(404).json({ error: 'TV show not found' });
@@ -1600,7 +1602,7 @@ router.get('/library', async (req: Request, res: Response) => {
     // included too; with a date range only items checked in during it appear.
     const includeUncheckedItems = !from && !to;
 
-    const params: unknown[] = [USER_ID, mediaTypes];
+    const params: unknown[] = [currentUserId(), mediaTypes];
     const dateConditions: string[] = [];
     if (from) {
       dateConditions.push(`(mc.checked_in_at AT TIME ZONE mc.checkin_timezone)::date >= $${params.length + 1}::date`);
@@ -1614,7 +1616,7 @@ router.get('/library', async (req: Request, res: Response) => {
     const where = `WHERE ${userCondition} AND mi.media_type = ANY($2) ${dateConditions.length ? `AND ${dateConditions.join(' AND ')}` : ''}`;
     const join = includeUncheckedItems
       ? `LEFT JOIN media_checkins mc ON mc.media_item_id = mi.id AND mc.user_id = $1`
-      : `JOIN media_checkins mc ON mc.media_item_id = mi.id`;
+      : `JOIN media_checkins mc ON mc.media_item_id = mi.id AND mi.user_id = $1`;
 
     let listJoin = '';
     let listColumn = 'NULL::timestamptz AS list_added_at';
@@ -1697,7 +1699,7 @@ router.get('/stats', async (req: Request, res: Response) => {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
 
-    const params: unknown[] = [USER_ID];
+    const params: unknown[] = [currentUserId()];
     const dateConditions: string[] = [];
     if (from) {
       dateConditions.push(`(mc.checked_in_at AT TIME ZONE mc.checkin_timezone)::date >= $${params.length + 1}::date`);
@@ -1717,7 +1719,7 @@ router.get('/stats', async (req: Request, res: Response) => {
          COUNT(*) FILTER (WHERE mi.media_type = 'game' AND mc.checkin_type = 'completed') AS games_completed,
          COUNT(*) FILTER (WHERE mi.media_type = 'board_game' AND mc.checkin_type = 'completed') AS board_games_completed
        FROM media_checkins mc
-       JOIN media_items mi ON mc.media_item_id = mi.id
+       JOIN media_items mi ON mc.media_item_id = mi.id AND mi.user_id = mc.user_id
        ${where}`,
       params
     );
@@ -1736,10 +1738,10 @@ router.get('/stats', async (req: Request, res: Response) => {
          ${where}
          GROUP BY mc.media_item_id
        ) g
-       JOIN media_items mi ON mi.id = g.media_item_id
+       JOIN media_items mi ON mi.id = g.media_item_id AND mi.user_id = $1
        LEFT JOIN LATERAL (
          SELECT mc2.rating FROM media_checkins mc2
-         WHERE mc2.media_item_id = mi.id AND mc2.rating IS NOT NULL
+         WHERE mc2.media_item_id = mi.id AND mc2.user_id = $1 AND mc2.rating IS NOT NULL
          ORDER BY mc2.checked_in_at DESC, mc2.id DESC LIMIT 1
        ) latest_mc ON true
        WHERE COALESCE(mi.rating, latest_mc.rating) >= 3
@@ -1778,14 +1780,24 @@ router.get('/stats', async (req: Request, res: Response) => {
 const mediaListKit = createListKit({
   lists: 'media_lists', items: 'media_list_items', itemId: 'media_item_id', sessions: 'media_rank_sessions',
 });
-mountRankRoutes(router, mediaListKit, USER_ID);
+// mountRankRoutes binds one user id when it is mounted, so hand it a kit that
+// ignores that id and always acts for the signed-in user instead.
+const currentUserListKit: typeof mediaListKit = {
+  ...mediaListKit,
+  setRanks: (_userId, listId, ids) => mediaListKit.setRanks(currentUserId(), listId, ids),
+  setRank: (_userId, listId, itemId, rank) => mediaListKit.setRank(currentUserId(), listId, itemId, rank),
+  getRankSession: (_userId, listId) => mediaListKit.getRankSession(currentUserId(), listId),
+  saveRankSession: (_userId, listId, state) => mediaListKit.saveRankSession(currentUserId(), listId, state),
+  deleteRankSession: (_userId, listId) => mediaListKit.deleteRankSession(currentUserId(), listId),
+};
+mountRankRoutes(router, currentUserListKit, 'signed-in user');
 
 // GET /lists
 router.get('/lists', async (_req: Request, res: Response) => {
   try {
     const listsResult = await query(
       'SELECT id, name, created_at, updated_at FROM media_lists WHERE user_id = $1 ORDER BY created_at',
-      [USER_ID]
+      [currentUserId()]
     );
     const itemsResult = await query(
       `SELECT l.id AS list_id, l.name,
@@ -1796,10 +1808,10 @@ router.get('/lists', async (_req: Request, res: Response) => {
               ) ORDER BY mli.rank NULLS LAST, mli.position, mli.added_at) FILTER (WHERE mi.id IS NOT NULL) AS items
        FROM media_lists l
        LEFT JOIN media_list_items mli ON mli.list_id = l.id
-       LEFT JOIN media_items mi ON mli.media_item_id = mi.id
+       LEFT JOIN media_items mi ON mli.media_item_id = mi.id AND mi.user_id = l.user_id
        WHERE l.user_id = $1
        GROUP BY l.id, l.name`,
-      [USER_ID]
+      [currentUserId()]
     );
     const itemsById = new Map(itemsResult.rows.map((r) => [r.list_id as string, r.items]));
     res.json(listsResult.rows.map((l) => ({ ...l, items: itemsById.get(l.id) || [] })));
@@ -1814,7 +1826,7 @@ router.get('/lists/:id/items', async (req: Request, res: Response) => {
   try {
     const listId = String(req.params.id);
     if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
-    if (!(await mediaListKit.ownsList(USER_ID, listId))) return res.status(404).json({ error: 'Media list not found' });
+    if (!(await mediaListKit.ownsList(currentUserId(), listId))) return res.status(404).json({ error: 'Media list not found' });
     const result = await query(
       `SELECT mi.id, mi.media_type, mi.title, mi.author, mi.release_year, mi.image_url,
               mli.added_at, mli.rank,
@@ -1828,11 +1840,11 @@ router.get('/lists/:id/items', async (req: Request, res: Response) => {
                 MAX(mc.checked_in_at) AS last_checkin_at,
                 (ARRAY_AGG(mc.checkin_timezone ORDER BY mc.checked_in_at DESC, mc.created_at DESC))[1] AS last_checkin_timezone,
                 (ARRAY_AGG(mc.rating ORDER BY mc.checked_in_at DESC, mc.created_at DESC) FILTER (WHERE mc.rating IS NOT NULL))[1] AS latest_rating
-         FROM media_checkins mc WHERE mc.media_item_id = mi.id
+         FROM media_checkins mc WHERE mc.media_item_id = mi.id AND mc.user_id = mi.user_id
        ) st ON true
-       WHERE mli.list_id = $1
+       WHERE mli.list_id = $1 AND mi.user_id = $2
        ORDER BY mli.rank NULLS LAST, mli.position, mli.added_at, mi.id`,
-      [listId]
+      [listId, currentUserId()]
     );
     res.json(result.rows);
   } catch (err) {
@@ -1849,7 +1861,7 @@ router.post('/lists', async (req: Request, res: Response) => {
     try {
       result = await query(
         'INSERT INTO media_lists (user_id, name) VALUES ($1, $2) RETURNING id, name, created_at',
-        [USER_ID, name]
+        [currentUserId(), name]
       );
     } catch (err) {
       return nameTakenOrThrow(err);
@@ -1870,7 +1882,7 @@ router.put('/lists/:id', async (req: Request, res: Response) => {
     try {
       result = await query(
         'UPDATE media_lists SET name = $2 WHERE id = $1 AND user_id = $3 RETURNING id, name, created_at',
-        [listId, name, USER_ID]
+        [listId, name, currentUserId()]
       );
     } catch (err) {
       return nameTakenOrThrow(err);
@@ -1890,7 +1902,7 @@ router.delete('/lists/:id', async (req: Request, res: Response) => {
     if (!isUuid(String(req.params.id))) return res.status(400).json({ error: 'Invalid list id' });
     const result = await query(
       'DELETE FROM media_lists WHERE id = $1 AND user_id = $2 RETURNING id',
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media list not found' });
@@ -1914,7 +1926,7 @@ router.post('/lists/:id/items', async (req: Request, res: Response) => {
       await client.query('BEGIN');
       const listResult = await client.query(
         'SELECT id FROM media_lists WHERE id = $1 AND user_id = $2',
-        [req.params.id, USER_ID]
+        [req.params.id, currentUserId()]
       );
       if (listResult.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -1922,7 +1934,7 @@ router.post('/lists/:id/items', async (req: Request, res: Response) => {
       }
       const itemResult = await client.query(
         'SELECT id FROM media_items WHERE id = $1 AND user_id = $2',
-        [media_item_id, USER_ID]
+        [media_item_id, currentUserId()]
       );
       if (itemResult.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -1956,7 +1968,7 @@ router.delete('/lists/:id/items/:itemId', async (req: Request, res: Response) =>
        USING media_lists l
        WHERE mli.list_id = l.id AND l.id = $1 AND l.user_id = $2 AND mli.media_item_id = $3
        RETURNING mli.list_id`,
-      [req.params.id, USER_ID, req.params.itemId]
+      [req.params.id, currentUserId(), req.params.itemId]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Media item not in list' });
@@ -1972,11 +1984,14 @@ export const mediaRouter = router;
 
 // ---------------------------------------------------------------------------
 // Plugin-owned API: /api/v1/webhook/plex
-// (moved from server/src/routes/webhook-plex.ts; behavior unchanged — the
-// webhook URL is user-configured in the Plex app and must stay stable)
+// Plex can't sign in, so each user gets a secret URL
+// (/api/v1/webhook/plex/<webhook_token>) and events land in the account the
+// token belongs to. The receiver is mounted outside the login guard; the
+// stats route stays behind it.
 // ---------------------------------------------------------------------------
 
 const plexWebhookRouter = Router();
+const plexStatsRouter = Router();
 
 // Plex posts webhook payloads as multipart/form-data (a JSON part, sometimes
 // with an attached JPEG poster). Memory storage keeps this simple; we only
@@ -1994,7 +2009,7 @@ async function inferPlexTimezone(referenceTime: Date): Promise<string> {
   for (const plugin of allPlugins()) {
     const hook = plugin.server.latestTimezoneAsOf;
     if (!hook) continue;
-    const result = await query(hook().sql, [referenceTime.toISOString(), USER_ID]);
+    const result = await query(hook().sql, [referenceTime.toISOString(), currentUserId()]);
     const timezone = result.rows[0]?.timezone;
     if (timezone) {
       return timezone as string;
@@ -2154,7 +2169,7 @@ async function resolvePlexItem(scrobble: PlexScrobble): Promise<string> {
     const byId = await query(
       `SELECT id FROM media_items
        WHERE user_id = $1 AND media_type = $2 AND external_source = 'tmdb' AND external_id = $3`,
-      [USER_ID, scrobble.mediaType, tmdbId]
+      [currentUserId(), scrobble.mediaType, tmdbId]
     );
     if (byId.rows.length > 0) {
       const id = byId.rows[0].id as string;
@@ -2168,7 +2183,7 @@ async function resolvePlexItem(scrobble: PlexScrobble): Promise<string> {
     `SELECT id, title, external_source FROM media_items
      WHERE user_id = $1 AND media_type = $2${tmdbId ? ' AND external_source IS NULL' : ''}
      ORDER BY (external_source IS NULL), created_at`,
-    [USER_ID, scrobble.mediaType]
+    [currentUserId(), scrobble.mediaType]
   );
   const match = siblings.rows.find((r) => normalizeTitle(splitTitleYear(r.title as string).title) === key);
   if (match) {
@@ -2183,9 +2198,10 @@ async function resolvePlexItem(scrobble: PlexScrobble): Promise<string> {
              image_url = COALESCE(image_url, $5),
              external_url = COALESCE($6, external_url),
              updated_at = NOW()
-         WHERE id = $1`,
+         WHERE id = $1 AND user_id = $7`,
         [id, tmdbId, resolved?.title ?? null, resolved?.releaseYear ?? null, resolved?.imageUrl ?? null,
-         resolved?.externalUrl ?? `https://www.themoviedb.org/${scrobble.mediaType === 'movie' ? 'movie' : 'tv'}/${tmdbId}`]
+         resolved?.externalUrl ?? `https://www.themoviedb.org/${scrobble.mediaType === 'movie' ? 'movie' : 'tv'}/${tmdbId}`,
+         currentUserId()]
       );
     }
     return id;
@@ -2209,13 +2225,19 @@ async function fillItemMetadata(id: string, resolved: ResolvedTmdbItem): Promise
      SET release_year = COALESCE(release_year, $2),
          image_url = COALESCE(image_url, $3),
          external_url = COALESCE(external_url, $4)
-     WHERE id = $1 AND (release_year IS NULL OR image_url IS NULL OR external_url IS NULL)`,
-    [id, resolved.releaseYear, resolved.imageUrl, resolved.externalUrl]
+     WHERE id = $1 AND user_id = $5 AND (release_year IS NULL OR image_url IS NULL OR external_url IS NULL)`,
+    [id, resolved.releaseYear, resolved.imageUrl, resolved.externalUrl, currentUserId()]
   );
 }
 
-// POST / - receive a Plex webhook event
-plexWebhookRouter.post('/', plexUpload.any(), async (req: Request, res: Response) => {
+// The pre-multi-user tokenless URL: answer like any unknown webhook URL.
+plexWebhookRouter.post('/', (_req: Request, res: Response) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// POST /:token - receive a Plex webhook event. The token is checked before
+// the upload is buffered, so a wrong URL costs nothing.
+plexWebhookRouter.post('/:token', webhookUser, preserveUserContext(plexUpload.any()), async (req: Request, res: Response) => {
   try {
     // Plex sends the JSON payload as a multipart part; accept a plain JSON
     // body too so the endpoint is easy to test with curl/supertest.
@@ -2251,7 +2273,7 @@ plexWebhookRouter.post('/', plexUpload.any(), async (req: Request, res: Response
     await query(
       `INSERT INTO plex_webhook_events (user_id, event, plex_username, raw_body)
        VALUES ($1, $2, $3, $4)`,
-      [USER_ID, event, plexUsername, body]
+      [currentUserId(), event, plexUsername, body]
     );
 
     if (event === 'media.scrobble') {
@@ -2279,7 +2301,7 @@ plexWebhookRouter.post('/', plexUpload.any(), async (req: Request, res: Response
             checkin_type, checked_in_at, checkin_timezone)
          VALUES ($1, $2, $3, $4, $5, 'completed', $6, $7)`,
         [
-          USER_ID,
+          currentUserId(),
           itemId,
           scrobble.seasonNumber,
           scrobble.episodeNumber,
@@ -2299,11 +2321,11 @@ plexWebhookRouter.post('/', plexUpload.any(), async (req: Request, res: Response
 });
 
 // GET /stats - count of events received for this user
-plexWebhookRouter.get('/stats', async (_req: Request, res: Response) => {
+plexStatsRouter.get('/stats', async (_req: Request, res: Response) => {
   try {
     const result = await query(
       'SELECT COUNT(*)::int AS count FROM plex_webhook_events WHERE user_id = $1',
-      [USER_ID]
+      [currentUserId()]
     );
     res.json({ count: result.rows[0]?.count ?? 0 });
   } catch (err) {
@@ -2349,6 +2371,16 @@ function asRecordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
 }
 
+/*
+ * Restore SQL for the rows that hang off media items and lists. Every
+ * statement takes the restoring user as $1 (extra tables set userIdFirst)
+ * followed by the backup row's values in its select order. A user_id stored
+ * in the backup is ignored (referenced only so Postgres can type it): rows
+ * always belong to the restoring user, an id another account already uses
+ * is skipped by ON CONFLICT, and a row whose parent item/list the restoring
+ * user doesn't own is skipped by the join.
+ */
+
 /** Shared INSERT for media check-in rows (backup import + legacy restore). */
 const MEDIA_CHECKIN_INSERT_SQL = `
   INSERT INTO media_checkins (
@@ -2359,24 +2391,40 @@ const MEDIA_CHECKIN_INSERT_SQL = `
      checked_in_at, checkin_timezone, external_event_id,
      created_at, updated_at
    )
-   VALUES (
-     $1, $2, $3,
-     $4, $5, $6,
-     $7, $8, $9, $10,
-     $11,
-     COALESCE($12::timestamptz, NOW()), $13, $14,
-     COALESCE($15::timestamptz, NOW()),
-     COALESCE($16::timestamptz, NOW())
-   )
+   SELECT
+     $2::uuid, mi.user_id, mi.id,
+     $5::int, $6::int, $7::text,
+     $8::text, $9::smallint, $10::numeric, $11::text,
+     $12::int,
+     COALESCE($13::timestamptz, NOW()), $14::text, $15::text,
+     COALESCE($16::timestamptz, NOW()),
+     COALESCE($17::timestamptz, NOW())
+   FROM media_items mi
+   WHERE mi.id = $4::uuid AND mi.user_id = $1::uuid AND ($3::text IS NULL OR TRUE)
    ON CONFLICT (id) DO NOTHING`;
+
+const MEDIA_LIST_INSERT_SQL = `
+  INSERT INTO media_lists (id, user_id, name, created_at, updated_at)
+  SELECT $2::uuid, $1::uuid, $4::text, COALESCE($5::timestamptz, NOW()), COALESCE($6::timestamptz, NOW())
+  WHERE $3::text IS NULL OR TRUE
+  ON CONFLICT (id) DO NOTHING`;
+
+const MEDIA_LIST_ITEM_INSERT_SQL = `
+  INSERT INTO media_list_items (list_id, media_item_id, position, added_at)
+  SELECT l.id, mi.id, $4::int, COALESCE($5::timestamptz, NOW())
+  FROM media_lists l
+  JOIN media_items mi ON mi.id = $3::uuid AND mi.user_id = $1::uuid
+  WHERE l.id = $2::uuid AND l.user_id = $1::uuid
+  ON CONFLICT (list_id, media_item_id) DO NOTHING`;
 
 function mediaCheckinInsertParams(
   user_id: string,
   row: Record<string, unknown>,
 ): unknown[] {
   return [
-    row.id,
     user_id,
+    row.id,
+    row.user_id ?? null,
     row.media_item_id,
     row.season_number != null ? Number(row.season_number) : null,
     row.episode_number != null ? Number(row.episode_number) : null,
@@ -2462,7 +2510,8 @@ export const server: CheckinTypeServerPlugin = {
 
   api: [
     { mount: '/media', router },
-    { mount: '/webhook/plex', router: plexWebhookRouter },
+    { mount: '/webhook/plex', router: plexWebhookRouter, public: true },
+    { mount: '/webhook/plex', router: plexStatsRouter },
   ],
 
   // ------------------------------------------------------------------
@@ -2494,7 +2543,7 @@ export const server: CheckinTypeServerPlugin = {
         companions: `(${companionNamesSql('media', 'mmc.id')})`,
       })}
       FROM media_checkins mmc
-      JOIN media_items mi ON mmc.media_item_id = mi.id
+      JOIN media_items mi ON mmc.media_item_id = mi.id AND mi.user_id = mmc.user_id
     `,
   }),
 
@@ -2538,16 +2587,14 @@ export const server: CheckinTypeServerPlugin = {
                 created_at, updated_at
          FROM media_checkins WHERE user_id = $1 ORDER BY checked_in_at ASC`,
       insert: MEDIA_CHECKIN_INSERT_SQL,
-      userIdFirst: false,
+      userIdFirst: true,
     },
     {
       table: 'mediaLists',
       select: `SELECT id, user_id, name, created_at, updated_at
                FROM media_lists WHERE user_id = $1 ORDER BY created_at`,
-      insert: `INSERT INTO media_lists (id, user_id, name, created_at, updated_at)
-               VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
-               ON CONFLICT (id) DO NOTHING`,
-      userIdFirst: false,
+      insert: MEDIA_LIST_INSERT_SQL,
+      userIdFirst: true,
     },
     {
       table: 'mediaListItems',
@@ -2555,10 +2602,8 @@ export const server: CheckinTypeServerPlugin = {
                FROM media_list_items mli
                JOIN media_lists ml ON ml.id = mli.list_id
                WHERE ml.user_id = $1 ORDER BY ml.created_at, mli.position`,
-      insert: `INSERT INTO media_list_items (list_id, media_item_id, position, added_at)
-               VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
-               ON CONFLICT (list_id, media_item_id) DO NOTHING`,
-      userIdFirst: false,
+      insert: MEDIA_LIST_ITEM_INSERT_SQL,
+      userIdFirst: true,
     },
     {
       // Ranks ride in their own step, applied after the memberships exist, so
@@ -2569,10 +2614,11 @@ export const server: CheckinTypeServerPlugin = {
                FROM media_list_items mli
                JOIN media_lists ml ON ml.id = mli.list_id
                WHERE ml.user_id = $1 AND mli.rank IS NOT NULL ORDER BY ml.created_at, mli.rank`,
-      insert: `UPDATE media_list_items SET rank = $1
-               WHERE list_id = $2 AND media_item_id = $3 AND rank IS NULL
-                 AND NOT EXISTS (SELECT 1 FROM media_list_items x WHERE x.list_id = $2 AND x.rank = $1)`,
-      userIdFirst: false,
+      insert: `UPDATE media_list_items SET rank = $2::int
+               WHERE list_id = $3::uuid AND media_item_id = $4::uuid AND rank IS NULL
+                 AND EXISTS (SELECT 1 FROM media_lists l WHERE l.id = $3::uuid AND l.user_id = $1::uuid)
+                 AND NOT EXISTS (SELECT 1 FROM media_list_items x WHERE x.list_id = $3::uuid AND x.rank = $2::int)`,
+      userIdFirst: true,
     },
   ],
 
@@ -2662,10 +2708,8 @@ export const server: CheckinTypeServerPlugin = {
         continue;
       }
       const result = await run(
-        `INSERT INTO media_lists (id, user_id, name, created_at, updated_at)
-         VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), COALESCE($5::timestamptz, NOW()))
-         ON CONFLICT (id) DO NOTHING`,
-        [list.id, user_id, list.name, list.created_at || null, list.updated_at || null],
+        MEDIA_LIST_INSERT_SQL,
+        [user_id, list.id, list.user_id ?? null, list.name, list.created_at || null, list.updated_at || null],
       );
       (result.rowCount ?? 0) === 1 ? counts.mediaLists.inserted += 1 : counts.mediaLists.skipped += 1;
     }
@@ -2676,10 +2720,8 @@ export const server: CheckinTypeServerPlugin = {
         continue;
       }
       const result = await run(
-        `INSERT INTO media_list_items (list_id, media_item_id, position, added_at)
-         VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()))
-         ON CONFLICT (list_id, media_item_id) DO NOTHING`,
-        [listItem.list_id, listItem.media_item_id, Number(listItem.position) || 0, listItem.added_at || null],
+        MEDIA_LIST_ITEM_INSERT_SQL,
+        [user_id, listItem.list_id, listItem.media_item_id, Number(listItem.position) || 0, listItem.added_at || null],
       );
       (result.rowCount ?? 0) === 1 ? counts.mediaListItems.inserted += 1 : counts.mediaListItems.skipped += 1;
     }
@@ -2778,7 +2820,7 @@ export const server: CheckinTypeServerPlugin = {
           'checkin_timezone', mc.checkin_timezone
         )::jsonb AS data
       FROM media_checkins mc
-      JOIN media_items mi ON mc.media_item_id = mi.id
+      JOIN media_items mi ON mc.media_item_id = mi.id AND mi.user_id = mc.user_id
       WHERE mc.user_id = $1
         AND TO_CHAR(mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'), 'MM-DD') = TO_CHAR($2::date, 'MM-DD')
         AND EXTRACT(YEAR FROM mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))
@@ -2805,7 +2847,7 @@ export const server: CheckinTypeServerPlugin = {
                   'note', mc.notes
                 )::jsonb AS data
          FROM media_checkins mc
-         JOIN media_items mi ON mc.media_item_id = mi.id
+         JOIN media_items mi ON mc.media_item_id = mi.id AND mi.user_id = mc.user_id
          WHERE mc.user_id = $1
            AND (mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))::date >= $2::date
            AND (mc.checked_in_at AT TIME ZONE COALESCE(mc.checkin_timezone, 'UTC'))::date <= $3::date
@@ -2881,7 +2923,7 @@ export const server: CheckinTypeServerPlugin = {
         `SELECT mc.id, mc.checked_in_at, mc.checkin_timezone AS original_timezone,
                 mi.media_type, mi.id AS media_item_id, mi.title AS media_title
          FROM media_checkins mc
-         JOIN media_items mi ON mc.media_item_id = mi.id
+         JOIN media_items mi ON mc.media_item_id = mi.id AND mi.user_id = mc.user_id
          WHERE mc.user_id = $1
          ORDER BY mc.checked_in_at ASC`,
         [user_id],
@@ -2904,9 +2946,9 @@ export const server: CheckinTypeServerPlugin = {
       const result = await (executor ?? { query }).query(
         `UPDATE media_checkins
          SET checkin_timezone = $2, updated_at = NOW()
-         WHERE id = $1
+         WHERE id = $1 AND user_id = $3
          RETURNING id`,
-        [id, suggested_timezone],
+        [id, suggested_timezone, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },

@@ -24,8 +24,7 @@ import { createGenericCheckin } from '../../server/src/plugins/genericStore';
 import { getPlugin } from '../../server/src/plugins/registry';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
 import { parseDivingLogBackup, localTimeToIso } from './logbook';
-
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, preserveUserContext } from '../../server/src/auth/context';
 
 const PLUGIN_ID = 'scuba';
 
@@ -60,10 +59,10 @@ function hasDateRange(from: unknown, to: unknown): boolean {
 // GET /stats/summary — headline dive stats for a date range
 statsRouter.get('/stats/summary', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
-    const params = dateRangeParams(String(user_id), from, to);
+    const params = dateRangeParams(user_id, from, to);
     const result = await query(
       `SELECT
          COUNT(*)::int AS total_dives,
@@ -100,10 +99,9 @@ statsRouter.get('/stats/summary', async (req: Request, res: Response) => {
 });
 
 // GET /stats/by-year — dives / bottom time / max depth per year (all time)
-statsRouter.get('/stats/by-year', async (req: Request, res: Response) => {
+statsRouter.get('/stats/by-year', async (_req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const user_id = currentUserId();
 
     const result = await query(
       `SELECT
@@ -127,8 +125,8 @@ statsRouter.get('/stats/by-year', async (req: Request, res: Response) => {
 // GET /stats/by-water — dive counts per water type
 statsRouter.get('/stats/by-water', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const result = await query(
       `SELECT pc.data->>'water_type' AS water_type, COUNT(*)::int AS dives
@@ -138,7 +136,7 @@ statsRouter.get('/stats/by-water', async (req: Request, res: Response) => {
          ${dateRangeWhere(hasDateRange(from, to))}
        GROUP BY pc.data->>'water_type'
        ORDER BY dives DESC, water_type ASC`,
-      dateRangeParams(String(user_id), from, to),
+      dateRangeParams(user_id, from, to),
     );
     res.json(result.rows);
   } catch (err) {
@@ -150,8 +148,8 @@ statsRouter.get('/stats/by-water', async (req: Request, res: Response) => {
 // GET /stats/by-type — dive counts per dive type (comma-separated field)
 statsRouter.get('/stats/by-type', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const result = await query(
       `SELECT TRIM(dive_type) AS dive_type, COUNT(*)::int AS dives
@@ -162,7 +160,7 @@ statsRouter.get('/stats/by-type', async (req: Request, res: Response) => {
          ${dateRangeWhere(hasDateRange(from, to))}
        GROUP BY TRIM(dive_type)
        ORDER BY dives DESC, dive_type ASC`,
-      dateRangeParams(String(user_id), from, to),
+      dateRangeParams(user_id, from, to),
     );
     res.json(result.rows);
   } catch (err) {
@@ -174,8 +172,8 @@ statsRouter.get('/stats/by-type', async (req: Request, res: Response) => {
 // GET /stats/top-sites — most-dived sites
 statsRouter.get('/stats/top-sites', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const result = await query(
       `SELECT
@@ -191,7 +189,7 @@ statsRouter.get('/stats/top-sites', async (req: Request, res: Response) => {
        GROUP BY pc.data->>'place', pc.data->>'city', pc.data->>'country'
        ORDER BY dives DESC, place ASC NULLS LAST
        LIMIT 20`,
-      dateRangeParams(String(user_id), from, to),
+      dateRangeParams(user_id, from, to),
     );
     res.json(result.rows);
   } catch (err) {
@@ -203,8 +201,9 @@ statsRouter.get('/stats/top-sites', async (req: Request, res: Response) => {
 // GET /stats/monthly?year= — per-day dive counts for a year (heatmap)
 statsRouter.get('/stats/monthly', async (req: Request, res: Response) => {
   try {
-    const { user_id, year } = req.query;
-    if (!user_id || !year) return res.status(400).json({ error: 'user_id and year are required' });
+    const { year } = req.query;
+    if (!year) return res.status(400).json({ error: 'year is required' });
+    const user_id = currentUserId();
 
     const yearNum = parseInt(String(year), 10);
     if (!Number.isFinite(yearNum)) return res.status(400).json({ error: 'year must be numeric' });
@@ -231,10 +230,9 @@ statsRouter.get('/stats/monthly', async (req: Request, res: Response) => {
 });
 
 // GET /stats/earliest — earliest dive date (profile period selector)
-statsRouter.get('/stats/earliest', async (req: Request, res: Response) => {
+statsRouter.get('/stats/earliest', async (_req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const user_id = currentUserId();
 
     const result = await query(
       `SELECT MIN(${LOCAL_DATE})::text AS date
@@ -338,11 +336,12 @@ export async function executeScubaLogbookImport(rows: ScubaLogbookRow[]): Promis
   let skipped = 0;
   const errors: string[] = [];
   const importedIds: (string | null)[] = [];
+  const userId = currentUserId();
 
   // One lookup of what already exists (instead of a JSON-path scan per dive).
   const existingRows = await query(
     `SELECT checked_in_at, data FROM plugin_checkins WHERE plugin_id = $1 AND user_id = $2`,
-    [PLUGIN_ID, USER_ID],
+    [PLUGIN_ID, userId],
   );
   const knownUuids = new Set<string>();
   const knownNatural = new Set<string>();
@@ -364,7 +363,7 @@ export async function executeScubaLogbookImport(rows: ScubaLogbookRow[]): Promis
     }
 
     try {
-      const created = await createGenericCheckin(USER_ID, plugin, {
+      const created = await createGenericCheckin(userId, plugin, {
         checked_in_at: row.checked_in_at,
         checkin_timezone: row.checkin_timezone || null,
         data: row.data,
@@ -385,7 +384,7 @@ export async function executeScubaLogbookImport(rows: ScubaLogbookRow[]): Promis
 
 // POST /preview — parse the backup without writing anything; returns one
 // preview row per dive (site, date, resolved timezone + how it was derived).
-importRouter.post('/preview', logbookUpload.single('file'), async (req: Request, res: Response) => {
+importRouter.post('/preview', preserveUserContext(logbookUpload.single('file')), async (req: Request, res: Response) => {
   const file = req.file;
   if (!file) {
     return res.status(400).json({ error: 'No logbook file provided' });
@@ -428,7 +427,7 @@ importRouter.post('/preview', logbookUpload.single('file'), async (req: Request,
 
 // POST / — import a Diving Log .sql backup. Optional `timezones` body maps
 // `source_uuid` → IANA zone for dives the user re-zoned in the preview.
-importRouter.post('/', logbookUpload.single('file'), async (req: Request, res: Response) => {
+importRouter.post('/', preserveUserContext(logbookUpload.single('file')), async (req: Request, res: Response) => {
   const file = req.file;
   if (!file) {
     return res.status(400).json({ error: 'No logbook file provided' });
@@ -598,9 +597,9 @@ export const server: CheckinTypeServerPlugin = {
       const result = await (executor ?? { query }).query(
         `UPDATE plugin_checkins
          SET checkin_timezone = $2, updated_at = NOW()
-         WHERE id = $1 AND plugin_id = $3
+         WHERE id = $1 AND plugin_id = $3 AND user_id = $4
          RETURNING id`,
-        [id, suggested_timezone, PLUGIN_ID],
+        [id, suggested_timezone, PLUGIN_ID, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },

@@ -12,6 +12,7 @@ import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
 import { lookupAlbumSoon } from './albums';
 import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql } from './identity';
 import { likeText, orderBy } from '../../../server/src/services/libraryQuery';
+import { tokensMatch } from '../../../server/src/services/tokens';
 import { companionNamesSql, deleteCompanionsForCheckins, setCompanions } from '../../../server/src/services/companions';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './constants';
 
@@ -141,6 +142,31 @@ export async function regenerateScrobblerKey(userId: string): Promise<string> {
     [userId, PLUGIN_ID, JSON.stringify(key)],
   );
   return key;
+}
+
+/**
+ * The user a presented scrobbler key belongs to, or null. Every stored key is
+ * compared in constant time, without stopping at the first hit, and exactly
+ * one must match: a key two accounts share (a hand-set value, someone else's
+ * restored backup) opens neither. A disabled account's key opens nothing.
+ */
+export async function findScrobblerKeyOwner(presented: string): Promise<string | null> {
+  const result = await query(
+    `SELECT ps.user_id, ps.value #>> '{}' AS key, u.disabled_at IS NOT NULL AS disabled
+     FROM plugin_settings ps JOIN users u ON u.id = ps.user_id
+     WHERE ps.plugin_id = $1 AND ps.key = 'scrobbler_key' AND jsonb_typeof(ps.value) = 'string'`,
+    [PLUGIN_ID],
+  );
+  let owner: { user_id: string; disabled: boolean } | null = null;
+  let matches = 0;
+  for (const row of result.rows as { user_id: string; key: string; disabled: boolean }[]) {
+    if (!row.key) continue;
+    if (tokensMatch(presented, row.key)) {
+      owner = row;
+      matches++;
+    }
+  }
+  return matches === 1 && owner && !owner.disabled ? owner.user_id : null;
 }
 
 /**

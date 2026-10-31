@@ -8,7 +8,7 @@
  * endpoints so the mood type is fully self-contained.
  */
 
-import { request, withAuthHeader } from '../../../client/src/api/client';
+import { apiFetch, request } from '../../../client/src/api/client';
 import type { MoodActivityGroup, MoodCheckIn } from './types';
 
 const BASE = '/mood-checkins';
@@ -50,27 +50,30 @@ export const moodActivities = {
 
 const STATS = `${BASE}/stats`;
 
-function rangeQp(userId: string, from?: string, to?: string) {
-  const qp = new URLSearchParams({ user_id: userId });
+function rangeQp(from?: string, to?: string) {
+  const qp = new URLSearchParams();
   if (from && to) { qp.set('from', from); qp.set('to', to); }
   return qp.toString();
 }
 
+// Stats are always the signed-in user's own (the server scopes by session).
 export const moodStats = {
-  daily: (userId: string, from?: string, to?: string) =>
-    request<any[]>(`${STATS}/daily?${rangeQp(userId, from, to)}`),
-  monthly: (userId: string, year: number) =>
-    request<any[]>(`${STATS}/monthly?user_id=${userId}&year=${year}`),
-  byDayOfWeek: (userId: string, from?: string, to?: string) =>
-    request<any[]>(`${STATS}/by-day-of-week?${rangeQp(userId, from, to)}`),
-  activityCorrelations: (userId: string, from?: string, to?: string) =>
-    request<any[]>(`${STATS}/activity-correlations?${rangeQp(userId, from, to)}`),
-  activityCombinations: (userId: string, from?: string, to?: string) =>
-    request<any[]>(`${STATS}/activity-combinations?${rangeQp(userId, from, to)}`),
-  countRange: (userId: string, from?: string, to?: string) =>
-    request<any[]>(`${STATS}/count-range?${rangeQp(userId, from, to)}`),
-  heatmap: (userId: string, year: number) =>
-    request<any[]>(`${STATS}/heatmap?user_id=${userId}&year=${year}`),
+  daily: (from?: string, to?: string) =>
+    request<any[]>(`${STATS}/daily?${rangeQp(from, to)}`),
+  monthly: (year: number) =>
+    request<any[]>(`${STATS}/monthly?year=${year}`),
+  byDayOfWeek: (from?: string, to?: string) =>
+    request<any[]>(`${STATS}/by-day-of-week?${rangeQp(from, to)}`),
+  activityCorrelations: (from?: string, to?: string) =>
+    request<any[]>(`${STATS}/activity-correlations?${rangeQp(from, to)}`),
+  activityCombinations: (from?: string, to?: string) =>
+    request<any[]>(`${STATS}/activity-combinations?${rangeQp(from, to)}`),
+  countRange: (from?: string, to?: string) =>
+    request<any[]>(`${STATS}/count-range?${rangeQp(from, to)}`),
+  heatmap: (year: number) =>
+    request<any[]>(`${STATS}/heatmap?year=${year}`),
+  earliest: () =>
+    request<{ date: string | null }>(`${STATS}/earliest`),
 };
 
 export const daylioImport = {
@@ -79,9 +82,8 @@ export const daylioImport = {
     const form = new FormData();
     form.append('file', file);
     form.append('source_timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-    const res = await fetch(`/api/v1${BASE}/import/daylio`, {
+    const res = await apiFetch(`/api/v1${BASE}/import/daylio`, {
       method: 'POST',
-      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {
@@ -92,9 +94,8 @@ export const daylioImport = {
   },
   /** Replace literal <br> text in existing mood check-in notes with newlines. */
   async replaceBreaks(): Promise<{ updated: number }> {
-    const res = await fetch(`/api/v1${BASE}/import/daylio/replace-br`, {
+    const res = await apiFetch(`/api/v1${BASE}/import/daylio/replace-br`, {
       method: 'POST',
-      headers: withAuthHeader(),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ message: res.statusText }));

@@ -9,6 +9,16 @@ import {
   setupIntegrationDatabase,
   teardownIntegrationDatabase,
 } from '../../../../server/tests/helpers/testDb';
+import { createTestUser } from '../../../../server/tests/helpers/auth';
+
+/** A user's per-account Plex webhook URL (their secret token is the last segment). */
+async function plexUrlFor(userId: string): Promise<string> {
+  const result = await query('SELECT webhook_token FROM users WHERE id = $1', [userId]);
+  return `/api/v1/webhook/plex/${result.rows[0].webhook_token}`;
+}
+
+// The default user's webhook URL, refreshed after every database reset.
+let plexUrl = '';
 
 function movieScrobblePayload(overrides: Record<string, unknown> = {}) {
   return {
@@ -79,16 +89,105 @@ describe('Plex webhook API', () => {
 
   beforeEach(async () => {
     await resetIntegrationDatabase();
+    plexUrl = await plexUrlFor(DEFAULT_USER_ID);
   });
 
   afterAll(async () => {
     await teardownIntegrationDatabase();
   });
 
-  describe('POST /api/v1/webhook/plex', () => {
+  describe('per-user webhook URL', () => {
+    const counts = async () => (await query(
+      `SELECT (SELECT COUNT(*)::int FROM plex_webhook_events) AS events,
+              (SELECT COUNT(*)::int FROM media_checkins) AS checkins,
+              (SELECT COUNT(*)::int FROM media_items) AS items`,
+      []
+    )).rows[0];
+
+    it('404s the old tokenless URL and writes nothing, signed in or not', async () => {
+      const signedIn = await request(app).post('/api/v1/webhook/plex').send(movieScrobblePayload());
+      expect(signedIn.status).toBe(404);
+      const anonymous = await request(app).post('/api/v1/webhook/plex').unset('Cookie').send(movieScrobblePayload());
+      expect(anonymous.status).toBe(404);
+      expect(await counts()).toEqual({ events: 0, checkins: 0, items: 0 });
+    });
+
+    it('404s a wrong token (including a multipart upload) and writes nothing', async () => {
+      const json = await request(app)
+        .post('/api/v1/webhook/plex/not-a-real-token').unset('Cookie')
+        .send(movieScrobblePayload());
+      expect(json.status).toBe(404);
+      const multipart = await request(app)
+        .post('/api/v1/webhook/plex/not-a-real-token').unset('Cookie')
+        .field('payload', JSON.stringify(movieScrobblePayload()));
+      expect(multipart.status).toBe(404);
+      expect(await counts()).toEqual({ events: 0, checkins: 0, items: 0 });
+    });
+
+    it('404s the token of a disabled account', async () => {
+      await query('UPDATE users SET disabled_at = NOW() WHERE id = $1', [DEFAULT_USER_ID]);
+      const res = await request(app).post(plexUrl).unset('Cookie').send(movieScrobblePayload());
+      expect(res.status).toBe(404);
+      expect(await counts()).toEqual({ events: 0, checkins: 0, items: 0 });
+    });
+
+    it('lands events only in the token owner\'s account, with their own username filter', async () => {
+      const other = await createTestUser('other');
+      const otherUrl = await plexUrlFor(other.id);
+      expect(otherUrl).not.toBe(plexUrl);
+
+      // The default user filters to "steve"; the other user tracks everyone.
+      await setPlexUsernames('steve');
+
+      const res = await request(app).post(otherUrl).unset('Cookie').send(movieScrobblePayload());
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true });
+
+      const items = await query('SELECT user_id, title FROM media_items', []);
+      expect(items.rows).toEqual([{ user_id: other.id, title: 'Dune' }]);
+      const checkins = await query('SELECT user_id FROM media_checkins', []);
+      expect(checkins.rows).toEqual([{ user_id: other.id }]);
+      const events = await query('SELECT user_id FROM plex_webhook_events', []);
+      expect(events.rows).toEqual([{ user_id: other.id }]);
+
+      // The same scrobble on the default user's URL is filtered by THEIR setting.
+      const filtered = await request(app).post(plexUrl).unset('Cookie').send(movieScrobblePayload());
+      expect(filtered.body).toEqual({ ok: true, skipped: 'username_filter' });
+
+      // Each account's stats count only its own events.
+      const mine = await request(app).get('/api/v1/webhook/plex/stats');
+      expect(mine.body.count).toBe(1);
+      const theirs = await request(app).get('/api/v1/webhook/plex/stats').set('Cookie', other.cookie);
+      expect(theirs.body.count).toBe(1);
+
+      // And neither library shows the other's item.
+      const myLibrary = await request(app).get('/api/v1/media/library');
+      expect(myLibrary.body.total).toBe(0);
+      const theirLibrary = await request(app).get('/api/v1/media/library').set('Cookie', other.cookie);
+      expect(theirLibrary.body.rows.map((r: { title: string }) => r.title)).toEqual(['Dune']);
+    });
+
+    it('stops accepting the old URL once the token is regenerated', async () => {
+      const regenerated = await request(app).post('/api/v1/auth/webhook-token/regenerate');
+      expect(regenerated.status).toBe(200);
+      const old = await request(app).post(plexUrl).unset('Cookie').send(movieScrobblePayload());
+      expect(old.status).toBe(404);
+      const fresh = await request(app)
+        .post(`/api/v1/webhook/plex/${regenerated.body.token}`).unset('Cookie')
+        .send(movieScrobblePayload());
+      expect(fresh.status).toBe(200);
+    });
+
+    it('keeps the stats route behind sign-in', async () => {
+      const res = await request(app).get('/api/v1/webhook/plex/stats').unset('Cookie');
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('POST /api/v1/webhook/plex/:token', () => {
     it('rejects payloads without a valid event field', async () => {
       const response = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send({ Account: { title: 'zach' } });
 
       expect(response.status).toBe(400);
@@ -96,7 +195,7 @@ describe('Plex webhook API', () => {
 
     it('creates a movie item and completed check-in from a media.scrobble', async () => {
       const response = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send(movieScrobblePayload());
 
       expect(response.status).toBe(200);
@@ -121,8 +220,8 @@ describe('Plex webhook API', () => {
     });
 
     it('re-scrobbling the same movie creates a new check-in (no dedupe)', async () => {
-      const first = await request(app).post('/api/v1/webhook/plex').send(movieScrobblePayload());
-      const second = await request(app).post('/api/v1/webhook/plex').send(movieScrobblePayload());
+      const first = await request(app).post(plexUrl).unset('Cookie').send(movieScrobblePayload());
+      const second = await request(app).post(plexUrl).unset('Cookie').send(movieScrobblePayload());
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
 
@@ -135,7 +234,7 @@ describe('Plex webhook API', () => {
 
     it('creates a tv_show item with season/episode fields from an episode scrobble', async () => {
       const response = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send(episodeScrobblePayload());
 
       expect(response.status).toBe(200);
@@ -168,9 +267,9 @@ describe('Plex webhook API', () => {
         metadata.title = `Episode ${index}`;
         return payload;
       };
-      await request(app).post('/api/v1/webhook/plex').send(noTmdb(1));
-      await request(app).post('/api/v1/webhook/plex').send(noTmdb(2));
-      await request(app).post('/api/v1/webhook/plex').send(noTmdb(3));
+      await request(app).post(plexUrl).unset('Cookie').send(noTmdb(1));
+      await request(app).post(plexUrl).unset('Cookie').send(noTmdb(2));
+      await request(app).post(plexUrl).unset('Cookie').send(noTmdb(3));
 
       const items = await query(`SELECT id FROM media_items WHERE media_type = 'tv_show'`, []);
       expect(items.rows).toHaveLength(1);
@@ -180,7 +279,7 @@ describe('Plex webhook API', () => {
 
     it('accepts the payload as a multipart text field (as Plex sends it)', async () => {
       const response = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .field('payload', JSON.stringify(movieScrobblePayload()));
       expect(response.status).toBe(200);
       const checkins = await query('SELECT COUNT(*)::int AS n FROM media_checkins', []);
@@ -188,8 +287,8 @@ describe('Plex webhook API', () => {
     });
 
     it('logs every event to plex_webhook_events with the Plex username', async () => {
-      await request(app).post('/api/v1/webhook/plex').send(movieScrobblePayload());
-      await request(app).post('/api/v1/webhook/plex').send(episodeScrobblePayload());
+      await request(app).post(plexUrl).unset('Cookie').send(movieScrobblePayload());
+      await request(app).post(plexUrl).unset('Cookie').send(episodeScrobblePayload());
 
       const events = await query(
         'SELECT event, plex_username FROM plex_webhook_events ORDER BY received_at, id'
@@ -202,13 +301,13 @@ describe('Plex webhook API', () => {
       await setPlexUsernames(' Zach , steve ');
 
       const matching = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send(movieScrobblePayload({ Account: { id: 2, title: 'ZACH' } }));
       expect(matching.status).toBe(200);
       expect(matching.body.skipped).toBeUndefined();
 
       const nonMatching = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send(episodeScrobblePayload({ Account: { id: 3, title: 'mallory' } }));
       expect(nonMatching.status).toBe(200);
       expect(nonMatching.body.skipped).toBe('username_filter');
@@ -224,7 +323,7 @@ describe('Plex webhook API', () => {
       await setPlexUsernames('');
 
       const response = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send(movieScrobblePayload({ Account: { id: 9, title: 'anyone' } }));
       expect(response.status).toBe(200);
 
@@ -234,7 +333,7 @@ describe('Plex webhook API', () => {
 
     it('handles a non-tmdb guid by creating a local (title-only) item', async () => {
       const response = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send(movieScrobblePayload({ Metadata: { type: 'movie', title: 'Local Film', guid: 'plex://movie/1' } }));
       expect(response.status).toBe(200);
 
@@ -249,7 +348,7 @@ describe('Plex webhook API', () => {
 
     it('ignores events other than media.scrobble (but still logs them)', async () => {
       const response = await request(app)
-        .post('/api/v1/webhook/plex')
+        .post(plexUrl).unset('Cookie')
         .send({ event: 'media.play', Account: { title: 'zach' }, Metadata: { type: 'movie', title: 'X' } });
 
       expect(response.status).toBe(200);
@@ -266,7 +365,7 @@ describe('Plex webhook API', () => {
       expect(before.status).toBe(200);
       expect(before.body.count).toBe(0);
 
-      await request(app).post('/api/v1/webhook/plex').send(movieScrobblePayload());
+      await request(app).post(plexUrl).unset('Cookie').send(movieScrobblePayload());
 
       const after = await request(app).get('/api/v1/webhook/plex/stats');
       expect(after.status).toBe(200);
@@ -346,7 +445,7 @@ describe('Plex webhook API', () => {
       vi.spyOn(tmdb, 'getMovieDetails').mockResolvedValue({
         title: 'The Land Before Time XIV: Journey of the Brave', releaseYear: 2016, imageUrl: 'https://image.tmdb.org/t/p/w500/lbt.jpg',
       });
-      await request(app).post('/api/v1/webhook/plex').send(realMovie());
+      await request(app).post(plexUrl).unset('Cookie').send(realMovie());
 
       const item = await query(`SELECT * FROM media_items WHERE media_type = 'movie'`, []);
       expect(item.rows).toHaveLength(1);
@@ -365,7 +464,7 @@ describe('Plex webhook API', () => {
       const find = vi.spyOn(tmdb, 'findShowId').mockResolvedValue('82728');
       vi.spyOn(tmdb, 'getTvShowDetails').mockResolvedValue(showDetails);
 
-      await request(app).post('/api/v1/webhook/plex')
+      await request(app).post(plexUrl).unset('Cookie')
         .send(realEpisode('Bluey (2018)', [{ id: 'imdb://tt12612672' }, { id: 'tmdb://1836008' }, { id: 'tvdb://7116588' }]));
 
       expect(find).toHaveBeenCalledWith('test-key', 'tvdb_id', '7116588');
@@ -384,7 +483,7 @@ describe('Plex webhook API', () => {
         { externalId: '82728', title: 'Bluey', releaseYear: 2018, imageUrl: showDetails.imageUrl, externalUrl: 'https://www.themoviedb.org/tv/82728' },
       ]);
 
-      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Bluey (2018)', [{ id: 'tmdb://1836008' }]));
+      await request(app).post(plexUrl).unset('Cookie').send(realEpisode('Bluey (2018)', [{ id: 'tmdb://1836008' }]));
 
       const items = await query(`SELECT * FROM media_items WHERE media_type = 'tv_show'`, []);
       expect(items.rows).toHaveLength(1);
@@ -401,7 +500,7 @@ describe('Plex webhook API', () => {
       vi.spyOn(tmdb, 'findShowId').mockResolvedValue('82728');
       vi.spyOn(tmdb, 'getTvShowDetails').mockResolvedValue(showDetails);
 
-      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Bluey (2018)', [{ id: 'tvdb://7116588' }]));
+      await request(app).post(plexUrl).unset('Cookie').send(realEpisode('Bluey (2018)', [{ id: 'tvdb://7116588' }]));
 
       const items = await query(`SELECT * FROM media_items WHERE media_type = 'tv_show'`, []);
       expect(items.rows).toHaveLength(1);
@@ -414,8 +513,8 @@ describe('Plex webhook API', () => {
       vi.spyOn(tmdb, 'findShowId').mockResolvedValue(null);
       vi.spyOn(tmdb, 'searchTv').mockResolvedValue([]);
 
-      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Obscure Show', [{ id: 'tvdb://1' }]));
-      await request(app).post('/api/v1/webhook/plex').send(realEpisode('Obscure Show', [{ id: 'tvdb://2' }]));
+      await request(app).post(plexUrl).unset('Cookie').send(realEpisode('Obscure Show', [{ id: 'tvdb://1' }]));
+      await request(app).post(plexUrl).unset('Cookie').send(realEpisode('Obscure Show', [{ id: 'tvdb://2' }]));
 
       const items = await query(`SELECT * FROM media_items WHERE media_type = 'tv_show'`, []);
       expect(items.rows).toHaveLength(1);

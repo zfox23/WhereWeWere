@@ -8,7 +8,7 @@
  * Tracks plugin is fully self-contained.
  */
 
-import { request, withAuthHeader } from '../../../client/src/api/client';
+import { apiFetch, request } from '../../../client/src/api/client';
 import type { TrackEntry, TrackMapEntry } from './types';
 
 const API_BASE = '/api/v1';
@@ -32,11 +32,13 @@ export const tracks = {
       method: 'POST',
       body: JSON.stringify({ start_index, end_index }),
     }),
+  // Earliest track date of the signed-in user (profile period selector).
+  earliest: () => request<{ date: string | null }>(`${BASE}/stats/earliest`),
   activityTypes: () => request<string[]>(`${BASE}/activity-types`),
   // Activity types with per-type track counts (Settings pane).
   activityTypeSummary: () =>
     request<{ name: string; count: number }[]>(`${BASE}/activity-types/summary`),
-  // Rename an activity type across all tracks. `merge` folds the old type's
+  // Rename an activity type across all of the user's tracks. `merge` folds the old type's
   // tracks into an existing type of the same name (server 409s without it).
   renameActivityType: (from: string, to: string, merge = false) =>
     request<{ updated: number; merged: boolean }>(`${BASE}/activity-types`, {
@@ -46,8 +48,7 @@ export const tracks = {
   delete: (id: string) =>
     request<{ message: string; id: string }>(`${BASE}/${id}`, { method: 'DELETE' }),
   download: async (id: string): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch(`${API_BASE}${BASE}/${id}/download`, {
-      headers: withAuthHeader(),
+    const res = await apiFetch(`${API_BASE}${BASE}/${id}/download`, {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({} as Record<string, unknown>));
@@ -76,9 +77,8 @@ export const tracks = {
     const form = new FormData();
     form.append('file', file);
     if (timezone) form.append('timezone', timezone);
-    const res = await fetch(`${API_BASE}${BASE}`, {
+    const res = await apiFetch(`${API_BASE}${BASE}`, {
       method: 'POST',
-      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {

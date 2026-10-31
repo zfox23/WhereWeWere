@@ -29,8 +29,6 @@ import {
 } from '../../../client/src/utils/periodRange';
 import type { PluginProfileTabProps } from 'wwp-shared';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
-
 function formatDuration(minutes: number | null): string {
   if (!minutes || minutes <= 0) return '0m';
   const rounded = Math.round(minutes);
@@ -167,7 +165,7 @@ export function SleepTab(_props: PluginProfileTabProps) {
   const [earliestSleepDate, setEarliestSleepDate] = useState<string | null>(null);
 
   useEffect(() => {
-    sleepStats.earliest(USER_ID).then((d) => setEarliestSleepDate(d.date)).catch(console.error);
+    sleepStats.earliest().then((d) => setEarliestSleepDate(d.date)).catch(console.error);
   }, []);
 
   const visibleRange = useMemo(
@@ -204,9 +202,9 @@ export function SleepTab(_props: PluginProfileTabProps) {
     setLoading(true);
 
     Promise.all([
-      sleepStats.summary(USER_ID, visibleRange.from || undefined, visibleRange.to || undefined),
-      sleepStats.daily(USER_ID, visibleRange.from || undefined, visibleRange.to || undefined),
-      sleepStats.ratingDistribution(USER_ID, visibleRange.from || undefined, visibleRange.to || undefined),
+      sleepStats.summary(visibleRange.from || undefined, visibleRange.to || undefined),
+      sleepStats.daily(visibleRange.from || undefined, visibleRange.to || undefined),
+      sleepStats.ratingDistribution(visibleRange.from || undefined, visibleRange.to || undefined),
     ])
       .then(([summaryData, dailyData, ratingData]) => {
         if (cancelled) return;

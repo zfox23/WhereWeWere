@@ -30,8 +30,6 @@ import {
 } from '../../../client/src/utils/periodRange';
 import type { PluginProfileTabProps } from 'wwp-shared';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
-
 const WATER_LABELS: Record<string, string> = {
   salt: 'Saltwater',
   fresh: 'Freshwater',
@@ -112,7 +110,7 @@ export function ScubaTab(_props: PluginProfileTabProps) {
   const [earliestDiveDate, setEarliestDiveDate] = useState<string | null>(null);
 
   useEffect(() => {
-    scubaStats.earliest(USER_ID).then((d) => setEarliestDiveDate(d.date)).catch(console.error);
+    scubaStats.earliest().then((d) => setEarliestDiveDate(d.date)).catch(console.error);
   }, []);
 
   const visibleRange = useMemo(
@@ -127,13 +125,13 @@ export function ScubaTab(_props: PluginProfileTabProps) {
     const to = visibleRange.to || undefined;
 
     Promise.all([
-      scubaStats.summary(USER_ID, from, to),
-      scubaStats.byWater(USER_ID, from, to),
-      scubaStats.byType(USER_ID, from, to),
-      scubaStats.topSites(USER_ID, from, to),
+      scubaStats.summary(from, to),
+      scubaStats.byWater(from, to),
+      scubaStats.byType(from, to),
+      scubaStats.topSites(from, to),
       // Refreshed with every load (it used to be fetched once on mount, so the
       // by-year chart went stale as dives were added).
-      scubaStats.byYear(USER_ID),
+      scubaStats.byYear(),
     ])
       .then(([summaryData, waterData, typeData, sitesData, yearData]) => {
         if (cancelled) return;

@@ -90,13 +90,14 @@ describe('LocationCheckInForm', () => {
 
     expect(apiMocks.checkinsCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        user_id: '00000000-0000-0000-0000-000000000001',
         venue_id: 'venue-1',
         notes: 'Late night coffee',
         checked_in_at: expect.any(String),
         also_checkin_parent: false,
       }),
     );
+    // Ownership comes from the session, never from the request body.
+    expect(apiMocks.checkinsCreate.mock.calls[0][0]).not.toHaveProperty('user_id');
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 

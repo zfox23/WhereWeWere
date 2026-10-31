@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { stats } from '../../../client/src/api/client';
 import { moodStats } from './api';
 import { sleepStats } from '../../sleep/ui/api';
 import { MoodIcon } from './MoodIcons';
@@ -27,8 +26,6 @@ import {
   resolveMonthForYear,
   shiftMonth,
 } from '../../../client/src/utils/periodRange';
-
-const USER_ID = '00000000-0000-0000-0000-000000000001';
 
 const MOOD_HEX = ['', '#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e'] as const;
 const MOOD_LABELS = ['', 'Awful', 'Bad', 'Meh', 'Good', 'Excellent'] as const;
@@ -1143,14 +1140,14 @@ export function MoodsTab() {
   const [earliestMoodDate, setEarliestMoodDate] = useState<string | null>(null);
 
   useEffect(() => {
-    stats.earliestDates(USER_ID).then((d) => setEarliestMoodDate(d.mood)).catch(console.error);
+    moodStats.earliest().then((d) => setEarliestMoodDate(d.date)).catch(console.error);
   }, []);
 
   // Year-scoped data
   useEffect(() => {
     // Ignore a slow response for a year the user has already moved off.
     let cancelled = false;
-    moodStats.monthly(USER_ID, year)
+    moodStats.monthly(year)
       .then((monthly) => {
         if (!cancelled) setMonthlyData(monthly);
       })
@@ -1246,12 +1243,12 @@ export function MoodsTab() {
     let cancelled = false;
     setMonthLoading(true);
     Promise.all([
-      moodStats.daily(USER_ID, rangeStart, rangeEnd),
-      moodStats.countRange(USER_ID, rangeStart, rangeEnd),
-      moodStats.byDayOfWeek(USER_ID, rangeStart, rangeEnd),
-      moodStats.activityCorrelations(USER_ID, rangeStart, rangeEnd),
-      moodStats.activityCombinations(USER_ID, rangeStart, rangeEnd),
-      sleepStats.daily(USER_ID, rangeStart, rangeEnd),
+      moodStats.daily(rangeStart, rangeEnd),
+      moodStats.countRange(rangeStart, rangeEnd),
+      moodStats.byDayOfWeek(rangeStart, rangeEnd),
+      moodStats.activityCorrelations(rangeStart, rangeEnd),
+      moodStats.activityCombinations(rangeStart, rangeEnd),
+      sleepStats.daily(rangeStart, rangeEnd),
     ])
       .then(([daily, counts, dow, corr, combos, sleepDaily]) => {
         if (cancelled) return;

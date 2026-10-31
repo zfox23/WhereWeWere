@@ -13,6 +13,7 @@ vi.mock('../../../server/src/db', () => ({
 }));
 
 import { server } from '../server';
+import { runAsUser } from '../../../server/src/auth/context';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -26,6 +27,8 @@ function mounts(): Record<string, any> {
 function app() {
   const a = express();
   a.use(express.json());
+  // Stands in for requireAuth: the routes act for the signed-in user.
+  a.use((_req, _res, next) => runAsUser(USER_ID, next));
   const m = mounts();
   a.use('/location-checkins', m['/location-checkins']);
   a.use('/venues', m['/venues']);
@@ -354,7 +357,7 @@ describe('checkin lists (endpoints)', () => {
         if (sql.includes('INSERT INTO checkins')) return { rows: [{ id: 'c1' }] };
         if (sql.includes('SELECT latitude, longitude')) return { rows: [{ latitude: 40.71, longitude: -74.0 }] };
         if (sql.includes('INSERT INTO checkin_list_items')) return { rows: [] };
-        if (sql.includes('SELECT list_id FROM checkin_list_items')) return { rows: [{ list_id: 'cl1' }] };
+        if (sql.includes('list_id FROM checkin_list_items')) return { rows: [{ list_id: 'cl1' }] };
         return { rows: [] };
       }),
       release: vi.fn(),
@@ -363,12 +366,15 @@ describe('checkin lists (endpoints)', () => {
 
     const res = await request(app())
       .post('/location-checkins')
-      .send({ user_id: USER_ID, venue_id: 'v1', list_ids: ['cl1'] });
+      // A user_id in the body is ignored; the session decides ownership.
+      .send({ user_id: 'someone-else', venue_id: 'v1', list_ids: ['cl1'] });
 
     expect(res.status).toBe(201);
     expect(res.body.lists).toEqual(['cl1']);
     const insertCall = client.query.mock.calls.find((c) => c[0].includes('INSERT INTO checkin_list_items')) as unknown[];
     expect(insertCall[1]).toEqual(['c1', ['cl1'], USER_ID]);
+    const checkinInsert = client.query.mock.calls.find((c) => c[0].includes('INSERT INTO checkins')) as unknown[];
+    expect((checkinInsert[1] as unknown[])[0]).toBe(USER_ID);
   });
 
   it('PUT /:id replaces list memberships when list_ids is present', async () => {
@@ -379,7 +385,7 @@ describe('checkin lists (endpoints)', () => {
         if (sql.includes('SELECT list_id FROM companions') || sql.includes('FROM companions')) return { rows: [] };
         if (sql.includes('INSERT INTO checkin_list_items')) return { rows: [] };
         if (sql.includes('DELETE FROM checkin_list_items')) return { rows: [] };
-        if (sql.includes('SELECT list_id FROM checkin_list_items')) return { rows: [{ list_id: 'cl1' }] };
+        if (sql.includes('list_id FROM checkin_list_items')) return { rows: [{ list_id: 'cl1' }] };
         return { rows: [] };
       }),
       release: vi.fn(),
@@ -486,13 +492,32 @@ describe('venue library search, sort and paging (endpoints)', () => {
 });
 
 describe('venue rating (endpoints)', () => {
-  it('PUT /:id persists a venue rating and rejects out-of-range values as null', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Coffee', rating: 4 }] });
+  it('PUT /:id stores the caller\'s own rating in venue_ratings, not on the shared venue', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Coffee' }] }) // venue (rating-only save: no UPDATE)
+      .mockResolvedValueOnce({ rows: [] }) // rating upsert
+      .mockResolvedValueOnce({ rows: [{ rating: 4 }] }) // rating readback
+      .mockResolvedValue({ rows: [] }); // post-response Coasterpedia check
     const res = await request(app()).put('/venues/v1').send({ rating: 4 });
     expect(res.status).toBe(200);
-    const [sql, values] = queryMock.mock.calls[0];
-    expect(sql).toContain('rating = $');
-    expect(values).toContain(4);
+    expect(res.body.rating).toBe(4);
+    const sqls = queryMock.mock.calls.map((c) => c[0] as string);
+    expect(sqls.some((sql) => /UPDATE venues/.test(sql))).toBe(false);
+    const upsert = queryMock.mock.calls.find((c) => (c[0] as string).includes('INSERT INTO venue_ratings'))!;
+    expect(upsert[1]).toEqual([USER_ID, 'v1', 4]);
+  });
+
+  it('PUT /:id clears the caller\'s rating for an out-of-range value', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 'v1', name: 'Coffee' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValue({ rows: [] });
+    const res = await request(app()).put('/venues/v1').send({ rating: 9 });
+    expect(res.status).toBe(200);
+    expect(res.body.rating).toBeNull();
+    const del = queryMock.mock.calls.find((c) => (c[0] as string).includes('DELETE FROM venue_ratings'))!;
+    expect(del[1]).toEqual([USER_ID, 'v1']);
   });
 });
 
@@ -518,55 +543,78 @@ describe('backup round-trip', () => {
     expect(result.checkinListItems).toEqual([{ list_id: 'cl1', checkin_id: 'c1', rank: 1, added_at: null }]);
   });
 
+  // Restore ids are UUIDs (the hooks skip anything else rather than abort the
+  // whole restore on a cast error).
+  const C1 = '00000000-0000-4000-8000-0000000000c1';
+  const V1 = '00000000-0000-4000-8000-0000000000f1';
+  const L1 = '00000000-0000-4000-8000-0000000000a1';
+  const CL1 = '00000000-0000-4000-8000-0000000000b1';
+  const MISSING = '00000000-0000-4000-8000-0000000000ee';
+
+  /** A transaction client that inserts everything and owns what was inserted. */
+  function restoreClient() {
+    return {
+      query: vi.fn(async (sql: string, values?: unknown[]) => {
+        // Ownership lookups: every requested id that this restore inserted.
+        if (sql.includes('SELECT id::text AS id FROM')) {
+          const known = new Set([C1, L1, CL1]);
+          return { rows: (values![0] as string[]).filter((id) => known.has(id)).map((id) => ({ id })), rowCount: 0 };
+        }
+        return { rows: [{ id: values?.[0] }], rowCount: 1 };
+      }),
+      release: vi.fn(),
+    };
+  }
+
   it('backupImport restores companions, venue lists, and list items in FK order', async () => {
-    const clientQuery = vi.fn(async (_sql: string, _values?: unknown[]) => ({ rows: [{ id: 'c1' }], rowCount: 1 }));
-    const client = { query: clientQuery, release: vi.fn() };
+    const client = restoreClient();
+    const clientQuery = client.query;
 
     const inserted = await server.backupImport!(
       { user_id: USER_ID, client } as any,
       {
-        checkins: [{ id: 'c1', venue_id: 'v1', rating: 3, notes: null, checked_in_at: '2026-01-01', checkin_timezone: null, created_at: null, updated_at: null, swarm_id: null }],
-        venues: [{ id: 'v1', name: 'Coffee', rating: 4, category_id: null, address: null, city: null, state: null, country: null, postal_code: null, latitude: 1, longitude: 1, osm_id: null, swarm_venue_id: null, parent_venue_id: null, created_by: null, created_at: null, updated_at: null }],
+        checkins: [{ id: C1, venue_id: V1, rating: 3, notes: null, checked_in_at: '2026-01-01', checkin_timezone: null, created_at: null, updated_at: null, swarm_id: null }],
+        venues: [{ id: V1, name: 'Coffee', rating: 4, category_id: null, address: null, city: null, state: null, country: null, postal_code: null, latitude: 1, longitude: 1, osm_id: null, swarm_venue_id: null, parent_venue_id: null, created_by: null, created_at: null, updated_at: null }],
         venueCategories: [],
-        checkinCompanions: [{ checkin_id: 'c1', name: 'Ada' }],
-        venueLists: [{ id: 'l1', name: 'Favorites', created_at: null, updated_at: null }],
-        venueListItems: [{ list_id: 'l1', venue_id: 'v1', position: 1, added_at: null }],
-        checkinLists: [{ id: 'cl1', name: 'Concerts', created_at: null, updated_at: null }],
+        checkinCompanions: [{ checkin_id: C1, name: 'Ada' }],
+        venueLists: [{ id: L1, name: 'Favorites', created_at: null, updated_at: null }],
+        venueListItems: [{ list_id: L1, venue_id: V1, position: 1, added_at: null }],
+        checkinLists: [{ id: CL1, name: 'Concerts', created_at: null, updated_at: null }],
         checkinListItems: [
-          { list_id: 'cl1', checkin_id: 'c1', rank: 1, added_at: null },
-          // Items pointing at a check-in absent from the payload are skipped.
-          { list_id: 'cl1', checkin_id: 'missing', rank: 2, added_at: null },
+          { list_id: CL1, checkin_id: C1, rank: 1, added_at: null },
+          // Items pointing at a check-in the user doesn't own are skipped.
+          { list_id: CL1, checkin_id: MISSING, rank: 2, added_at: null },
         ],
       },
     );
     expect(inserted).toBe(1);
 
     const sqls = clientQuery.mock.calls.map((c) => c[0]);
-    // A companion row was inserted for the known check-in.
+    // A companion row was inserted for the known check-in, owned by the user.
     expect(sqls.some((s) => s.includes('INSERT INTO companions'))).toBe(true);
     // A venue list and a list item were inserted.
     expect(sqls.some((s) => s.includes('INSERT INTO venue_lists'))).toBe(true);
     expect(sqls.some((s) => s.includes('INSERT INTO venue_list_items'))).toBe(true);
     // The companion insert referenced the real check-in id.
     const companionCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO companions'))!;
-    expect(companionCall[1]).toEqual(['c1', 'Ada']);
+    expect(companionCall[1]).toEqual([C1, 'Ada', USER_ID]);
     // List item references the list id and venue id.
     const listItemCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO venue_list_items'))!;
-    expect(listItemCall[1]).toEqual(['l1', 'v1', 1, null, null]);
+    expect(listItemCall[1]).toEqual([L1, V1, 1, null, null]);
     // Checkin list + item were inserted; the dangling item was skipped.
     expect(sqls.some((s) => s.includes('INSERT INTO checkin_lists'))).toBe(true);
     const checkinListItemCall = clientQuery.mock.calls.find((c) => c[0].includes('INSERT INTO checkin_list_items'))!;
-    expect(checkinListItemCall[1]).toEqual(['cl1', 'c1', 1, null]);
+    expect(checkinListItemCall[1]).toEqual([CL1, C1, 1, null]);
     expect(clientQuery.mock.calls.filter((c) => c[0].includes('INSERT INTO checkin_list_items'))).toHaveLength(1);
     expect(client.release).not.toHaveBeenCalled();
   });
 
   it('restoreLegacyBackup normalizes missing new keys to empty arrays', async () => {
-    const clientQuery = vi.fn(async (_sql: string, _values?: unknown[]) => ({ rows: [{ id: 'c1' }], rowCount: 1 }));
-    const client = { query: clientQuery, release: vi.fn() };
+    const client = restoreClient();
+    const clientQuery = client.query;
     const counts = await server.restoreLegacyBackup!(
       { user_id: USER_ID, client } as any,
-      { checkins: [{ id: 'c1', venue_id: 'v1', rating: 2 }], venues: [] },
+      { checkins: [{ id: C1, venue_id: V1, rating: 2 }], venues: [] },
     );
     expect(counts.checkins).toEqual({ inserted: 1, skipped: 0 });
     // No companion / list inserts since the legacy payload omitted them.

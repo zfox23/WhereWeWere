@@ -31,7 +31,7 @@
 import type { PoolClient } from 'pg';
 import { query } from '../db';
 import { allPlugins } from './registry';
-import { exportGenericCheckins, importGenericCheckins, type PluginCheckinBackupRow } from './genericStore';
+import { exportGenericCheckins, heldByAnotherUser, importGenericCheckins, type PluginCheckinBackupRow } from './genericStore';
 
 export interface PluginBackupEntry {
   checkins: unknown;
@@ -232,7 +232,11 @@ export async function importPluginData(
           throw new Error(`Plugin "${plugin.id}" backupOrder references unknown table "${step}"`);
         }
         const rows = entry.extra?.[table.table] ?? [];
-        for (const row of rows) {
+        for (const raw of rows) {
+          // Rows always restore as the current user: a user_id column carried
+          // in the backup row is overwritten in place (keeping its position in
+          // the insert's parameter order), whatever the plugin declared.
+          const row = raw && typeof raw === 'object' && 'user_id' in raw ? { ...raw, user_id } : raw;
           const values = table.userIdFirst ? [user_id, ...Object.values(row)] : Object.values(row);
           const result = await client.query(table.insert, values);
           if ((result.rowCount ?? 0) > 0) pluginCounts.inserted += 1;
@@ -246,9 +250,16 @@ export async function importPluginData(
     // written (mirrors setPluginSettings, and keeps renamed/stale keys out
     // of the table).
     if (entry.settings && typeof entry.settings === 'object') {
-      const declared = new Set((plugin.server.settingsKeys ?? []).map((k) => k.name));
+      const declaredKeys = new Map((plugin.server.settingsKeys ?? []).map((k) => [k.name, k]));
       for (const [key, value] of Object.entries(entry.settings)) {
-        if (declared.size > 0 && !declared.has(key)) continue;
+        if (declaredKeys.size > 0 && !declaredKeys.has(key)) continue;
+        // An account-identifying value another user holds (e.g. their own
+        // backup restored into a second account) would lock both out.
+        if (declaredKeys.get(key)?.uniquePerUser && (await heldByAnotherUser(client, user_id, plugin.id, key, value))) {
+          errors?.push(`${plugin.id}: skipped setting "${key}" because another account already uses it`);
+          pluginCounts.skipped += 1;
+          continue;
+        }
         const result = await client.query(
           `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
            VALUES ($1, $2, $3, $4::jsonb)

@@ -3,9 +3,9 @@ import type {
   PluginReconciliationHook,
   PluginReconciliationRow,
 } from 'wwp-shared';
-import { allPlugins } from '../plugins/registry';
+import { allPlugins, ownedCheckinTypes } from '../plugins/registry';
+import { currentUserId } from '../auth/context';
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const NEARBY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_WINDOW_MS = 72 * 60 * 60 * 1000;
 
@@ -297,7 +297,7 @@ function needsTimezoneReconciliation(originalTimezone: string | null): boolean {
   return !originalTimezone || originalTimezone === 'UTC';
 }
 
-export async function getTimestampReconciliationSuggestions(userId = USER_ID): Promise<TimestampReconciliationScanResult> {
+export async function getTimestampReconciliationSuggestions(userId: string): Promise<TimestampReconciliationScanResult> {
   interface PluginHookEntry {
     plugin: CheckinTypeServer;
     hook: PluginReconciliationHook;
@@ -408,14 +408,42 @@ export async function getTimestampReconciliationSuggestions(userId = USER_ID): P
   };
 }
 
+type ReconcileExecutor = { query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number | null }> };
+
+/**
+ * Who a batch of reconciliation updates acts for. The plugins' `apply` hook
+ * receives only a check-in id, so the core proves the id is one of this
+ * user's check-ins (of the stated type) before handing it over.
+ */
+export interface ReconciliationOwnership {
+  userId: string;
+  owns: (type: string, id: string, executor?: ReconcileExecutor) => Promise<boolean>;
+}
+
+export function reconciliationOwnership(userId: string): ReconciliationOwnership {
+  return {
+    userId,
+    async owns(type, id, executor) {
+      const owned = await ownedCheckinTypes(
+        userId,
+        [id],
+        executor as Parameters<typeof ownedCheckinTypes>[2] | undefined,
+      );
+      return owned.get(String(id).toLowerCase()) === type;
+    },
+  };
+}
+
 /**
  * Reconciliation is label-only: the stored instant is the true moment the
  * event happened, so applying a suggestion only replaces the stored timezone
- * label. This validates the target timezone and that the row exists.
+ * label. This validates the target timezone and that the row exists and
+ * belongs to the user (another user's check-in is treated as missing).
  */
 export async function computeAppliedReconciliation(
   update: TimestampReconciliationUpdate,
-  executor?: { query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number | null }> },
+  executor?: ReconcileExecutor,
+  ownership: ReconciliationOwnership = reconciliationOwnership(currentUserId()),
 ): Promise<{ timeZone: string } | null> {
   if (!isValidTimeZone(update.suggested_timezone)) {
     return null;
@@ -424,6 +452,7 @@ export async function computeAppliedReconciliation(
   // The plugin's hook validates row existence and applies.
   const plugin = allPlugins().find((p) => p.id === update.type);
   if (plugin?.server.reconcile?.apply) {
+    if (!(await ownership.owns(plugin.id, update.id, executor))) return null;
     const applied = await plugin.server.reconcile.apply(update.id, update.suggested_timezone, executor);
     return applied ? { timeZone: update.suggested_timezone } : null;
   }
@@ -436,8 +465,12 @@ export async function computeAppliedReconciliation(
  * validates row existence and persists the label, so this returns true
  * after the hook succeeds.
  */
-export async function applyReconciliationUpdate(client: { query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number | null }> }, update: TimestampReconciliationUpdate): Promise<boolean> {
-  const applied = await computeAppliedReconciliation(update, client);
+export async function applyReconciliationUpdate(
+  client: ReconcileExecutor,
+  update: TimestampReconciliationUpdate,
+  ownership: ReconciliationOwnership = reconciliationOwnership(currentUserId()),
+): Promise<boolean> {
+  const applied = await computeAppliedReconciliation(update, client, ownership);
   if (!applied) return false;
 
   // Plugin types already persisted their label inside reconcile.apply.

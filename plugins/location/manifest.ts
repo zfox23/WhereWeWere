@@ -43,10 +43,12 @@ export const manifest: CheckinTypeManifest = {
     // The check-in deletion also removes the user's venue lists and
     // checkin lists (their memberships cascade with the check-ins).
     deleteLabel: 'All Location data (check-ins, venue lists & checkin lists)',
+    // Venues are a catalog every user shares, so "all data" is only the
+    // user's own location data; venues and categories are never deleted.
     allData: {
-      label: 'All Venues & Venue Categories (shared reference data)',
+      label: 'All my Location data (check-ins, lists, venue ratings, Coasterpedia lookups & weather)',
       description:
-        'Kept when only check-ins are deleted. Selecting this also deletes Location check-ins, since check-ins must reference a venue.',
+        'Venues and venue categories are shared with every user and are kept.',
     },
   },
 };

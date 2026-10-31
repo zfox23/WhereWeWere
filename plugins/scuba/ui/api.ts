@@ -6,7 +6,7 @@
  * own `/scuba` router; the Diving Log import under `/import/scuba-logbook`.
  */
 
-import { request, withAuthHeader } from '../../../client/src/api/client';
+import { apiFetch, request } from '../../../client/src/api/client';
 
 export interface ScubaSummaryStats {
   total_dives: number;
@@ -82,8 +82,8 @@ export interface ScubaLogbookPreview {
 
 const BASE = '/scuba/stats';
 
-function rangeQp(userId: string, from?: string, to?: string) {
-  const qp = new URLSearchParams({ user_id: userId });
+function rangeQp(from?: string, to?: string) {
+  const qp = new URLSearchParams();
   if (from && to) {
     qp.set('from', from);
     qp.set('to', to);
@@ -91,19 +91,20 @@ function rangeQp(userId: string, from?: string, to?: string) {
   return qp.toString();
 }
 
+// Stats are always the signed-in user's own (the server scopes by session).
 export const scubaStats = {
-  summary: (userId: string, from?: string, to?: string) =>
-    request<ScubaSummaryStats>(`${BASE}/summary?${rangeQp(userId, from, to)}`),
-  byYear: (userId: string) => request<ScubaYearPoint[]>(`${BASE}/by-year?user_id=${userId}`),
-  byWater: (userId: string, from?: string, to?: string) =>
-    request<ScubaGroupCount[]>(`${BASE}/by-water?${rangeQp(userId, from, to)}`),
-  byType: (userId: string, from?: string, to?: string) =>
-    request<ScubaGroupCount[]>(`${BASE}/by-type?${rangeQp(userId, from, to)}`),
-  topSites: (userId: string, from?: string, to?: string) =>
-    request<ScubaTopSite[]>(`${BASE}/top-sites?${rangeQp(userId, from, to)}`),
-  monthly: (userId: string, year: number) =>
-    request<ScubaMonthlyPoint[]>(`${BASE}/monthly?user_id=${userId}&year=${year}`),
-  earliest: (userId: string) => request<{ date: string | null }>(`${BASE}/earliest?user_id=${userId}`),
+  summary: (from?: string, to?: string) =>
+    request<ScubaSummaryStats>(`${BASE}/summary?${rangeQp(from, to)}`),
+  byYear: () => request<ScubaYearPoint[]>(`${BASE}/by-year`),
+  byWater: (from?: string, to?: string) =>
+    request<ScubaGroupCount[]>(`${BASE}/by-water?${rangeQp(from, to)}`),
+  byType: (from?: string, to?: string) =>
+    request<ScubaGroupCount[]>(`${BASE}/by-type?${rangeQp(from, to)}`),
+  topSites: (from?: string, to?: string) =>
+    request<ScubaTopSite[]>(`${BASE}/top-sites?${rangeQp(from, to)}`),
+  monthly: (year: number) =>
+    request<ScubaMonthlyPoint[]>(`${BASE}/monthly?year=${year}`),
+  earliest: () => request<{ date: string | null }>(`${BASE}/earliest`),
 };
 
 async function postLogbookForm(
@@ -116,9 +117,8 @@ async function postLogbookForm(
   for (const [key, value] of Object.entries(extra ?? {})) {
     if (value) form.append(key, value);
   }
-  const res = await fetch(`/api/v1/import/scuba-logbook${path}`, {
+  const res = await apiFetch(`/api/v1/import/scuba-logbook${path}`, {
     method: 'POST',
-    headers: withAuthHeader(),
     body: form,
   });
   if (!res.ok) {

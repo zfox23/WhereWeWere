@@ -2,13 +2,13 @@
  * Sleep check-in type — client API helpers.
  *
  * All endpoints live under the sleep plugin's own API routers (mounted at
- * `/sleep-entries`, `/webhook/sleep-as-android`, and `/import/sleep-as-android`).
+ * `/sleep-entries`, `/webhook/sleep-as-android/:token`, and `/import/sleep-as-android`).
  * Previously these helpers lived in the core client (`client/src/api/client.ts`)
  * and pointed at removed core routes; they now hit the plugin's real endpoints
  * so the sleep type is fully self-contained.
  */
 
-import { request, withAuthHeader } from '../../../client/src/api/client';
+import { apiFetch, request } from '../../../client/src/api/client';
 import type {
   SleepDailyPoint,
   SleepEntry,
@@ -32,27 +32,35 @@ export const sleepEntries = {
 
 const STATS = `${BASE}/stats`;
 
-function rangeQp(userId: string, from?: string, to?: string) {
-  const qp = new URLSearchParams({ user_id: userId });
+function rangeQp(from?: string, to?: string) {
+  const qp = new URLSearchParams();
   if (from && to) { qp.set('from', from); qp.set('to', to); }
   return qp.toString();
 }
 
+// Stats are always the signed-in user's own (the server scopes by session).
 export const sleepStats = {
-  summary: (userId: string, from?: string, to?: string) =>
-    request<SleepSummaryStats>(`${STATS}/summary?${rangeQp(userId, from, to)}`),
-  daily: (userId: string, from?: string, to?: string) =>
-    request<SleepDailyPoint[]>(`${STATS}/daily?${rangeQp(userId, from, to)}`),
-  ratingDistribution: (userId: string, from?: string, to?: string) =>
-    request<SleepRatingBucket[]>(`${STATS}/rating-distribution?${rangeQp(userId, from, to)}`),
-  earliest: (userId: string) =>
-    request<{ date: string | null }>(`${STATS}/earliest?user_id=${userId}`),
+  summary: (from?: string, to?: string) =>
+    request<SleepSummaryStats>(`${STATS}/summary?${rangeQp(from, to)}`),
+  daily: (from?: string, to?: string) =>
+    request<SleepDailyPoint[]>(`${STATS}/daily?${rangeQp(from, to)}`),
+  ratingDistribution: (from?: string, to?: string) =>
+    request<SleepRatingBucket[]>(`${STATS}/rating-distribution?${rangeQp(from, to)}`),
+  earliest: () =>
+    request<{ date: string | null }>(`${STATS}/earliest`),
 };
 
-const WEBHOOK = '/webhook/sleep-as-android';
-
 export const sleepWebhook = {
-  stats: () => request<{ count: number }>(`${WEBHOOK}/stats`),
+  /** Number of webhook events received for the signed-in user. */
+  stats: () => request<{ count: number }>(`${STATS}/webhook-events`),
+  /**
+   * The user's personal webhook URL. The secret token is per user; regenerating
+   * it (Settings > Account) changes the URL.
+   */
+  url: async () => {
+    const { token } = await request<{ token: string }>('/auth/webhook-token');
+    return `${window.location.origin}/api/v1/webhook/sleep-as-android/${token}`;
+  },
 };
 
 export const sleepAsAndroidImport = {
@@ -60,9 +68,8 @@ export const sleepAsAndroidImport = {
   importFile: async (file: File) => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`/api/v1/import/sleep-as-android`, {
+    const res = await apiFetch(`/api/v1/import/sleep-as-android`, {
       method: 'POST',
-      headers: withAuthHeader(),
       body: form,
     });
     if (!res.ok) {

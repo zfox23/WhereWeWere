@@ -8,7 +8,8 @@
 #   2. Ensures db + server are up; the server applies pending migrations
 #      on boot.
 #   3. Runs the import in a one-off server container:
-#         node dist/plugins/location/scripts/import-ride-log.js [--dry-run] [csv-path]
+#         node dist/plugins/location/scripts/import-ride-log.js --user <name> [--dry-run] [csv-path]
+#    --user (required) names the account whose data the import changes.
 #
 # The CSV path is resolved INSIDE the container. The server container mounts
 # ./data/server -> /app/data, so place the CSV in ./data/server/ on the host
@@ -19,10 +20,10 @@
 # so for production, always pass a path under /app/data.
 #
 # Usage:
-#   ./scripts/run-import-ride-log.sh --dry-run /app/data/rides.csv  # plan only
-#   ./scripts/run-import-ride-log.sh /app/data/rides.csv            # apply
-#   ./scripts/run-import-ride-log.sh --dry-run                      # plan (default path)
-#   ./scripts/run-import-ride-log.sh                                # apply (default path)
+#   ./scripts/run-import-ride-log.sh --user <name> --dry-run /app/data/rides.csv  # plan only
+#   ./scripts/run-import-ride-log.sh --user <name> /app/data/rides.csv            # apply
+#   ./scripts/run-import-ride-log.sh --user <name> --dry-run                      # plan (default path)
+#   ./scripts/run-import-ride-log.sh --user <name>                                # apply (default path)
 #
 # A backup is recommended before the first real run (Settings page has a full
 # backup export, or: docker compose exec db pg_dump -U wherewewere wherewewere > backup.sql)
@@ -32,13 +33,20 @@ cd "$(dirname "$0")/.."
 
 DRY_RUN_ARGS=()
 CSV_PATH=""
-for arg in "$@"; do
-  if [[ "$arg" == "--dry-run" ]]; then
-    DRY_RUN_ARGS=("--dry-run")
-  else
-    CSV_PATH="$arg"
-  fi
+USER_NAME=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN_ARGS=("--dry-run") ;;
+    --user) USER_NAME="${2:-}"; shift ;;
+    --user=*) USER_NAME="${1#--user=}" ;;
+    *) CSV_PATH="$1" ;;
+  esac
+  shift
 done
+if [[ -z "$USER_NAME" ]]; then
+  echo "error: --user <username> is required (the account whose data the import changes)" >&2
+  exit 1
+fi
 
 echo "==> Building server image (includes the compiled ride-log import script)"
 docker compose build server
@@ -67,12 +75,15 @@ if [[ "$(docker compose ps --format '{{.Health}}' server 2>/dev/null || true)" !
   exit 1
 fi
 
-RUN_ARGS=("${DRY_RUN_ARGS[@]:+${DRY_RUN_ARGS[@]}}")
+RUN_ARGS=(--user "$USER_NAME")
+if [[ ${#DRY_RUN_ARGS[@]} -gt 0 ]]; then
+  RUN_ARGS+=("--dry-run")
+fi
 if [[ -n "$CSV_PATH" ]]; then
   RUN_ARGS+=("$CSV_PATH")
 fi
 
-echo "==> Running ride-log import${DRY_RUN_ARGS[*]:+ (dry run)}${CSV_PATH:+ using CSV: $CSV_PATH}"
+echo "==> Running ride-log import${DRY_RUN_ARGS[*]:+ (dry run)}${CSV_PATH:+ using CSV: $CSV_PATH} for user $USER_NAME"
 docker compose run --rm server node dist/plugins/location/scripts/import-ride-log.js "${RUN_ARGS[@]:+${RUN_ARGS[@]}}"
 
 echo

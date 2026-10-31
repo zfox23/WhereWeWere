@@ -1,4 +1,6 @@
 import { pool } from '../../../server/src/db';
+import { currentUserId, runAsUser } from '../../../server/src/auth/context';
+import { requireScriptUser } from '../../../server/src/scripts/scriptUser';
 import { computeTrackSegmentTotals, type GpxPoint } from '../services/gpx';
 
 /**
@@ -13,6 +15,8 @@ import { computeTrackSegmentTotals, type GpxPoint } from '../services/gpx';
  * (distance / moving time) exceed the windowed max speed, which is
  * impossible. The stored path geometry and per-point timestamps are used to
  * recompute, mirroring backfill-track-max-speeds.ts.
+ *
+ * Works on one account's tracks: `--user <username>` (case-insensitive).
  */
 
 type TrackRow = {
@@ -27,13 +31,16 @@ type TrackRow = {
 };
 
 async function backfillTrackAvgSpeeds() {
+  const userId = currentUserId();
   const client = await pool.connect();
 
   try {
     const { rows: tracks } = await client.query<TrackRow>(
       `SELECT id, distance_m, moving_time_s, elapsed_time_s,
               avg_speed_mps, max_speed_mps, ST_AsGeoJSON(path) AS geojson, points
-       FROM tracks`
+       FROM tracks
+       WHERE user_id = $1`,
+      [userId]
     );
 
     if (tracks.length === 0) {
@@ -106,8 +113,8 @@ async function backfillTrackAvgSpeeds() {
       const result = await client.query(
         `UPDATE tracks
          SET distance_m = $1, moving_time_s = $2, avg_speed_mps = $3
-         WHERE id = $4`,
-        [newDistanceM, movingTimeS, newAvgSpeedMps, track.id]
+         WHERE id = $4 AND user_id = $5`,
+        [newDistanceM, movingTimeS, newAvgSpeedMps, track.id, userId]
       );
       updatedRows += result.rowCount || 0;
       if (updatedRows <= 10) {
@@ -127,11 +134,22 @@ async function backfillTrackAvgSpeeds() {
     }
   } finally {
     client.release();
+  }
+}
+
+async function main() {
+  const { user } = await requireScriptUser(
+    process.argv.slice(2),
+    'Usage: backfill-track-avg-speeds --user <username>'
+  );
+  try {
+    await runAsUser(user.id, backfillTrackAvgSpeeds);
+  } finally {
     await pool.end();
   }
 }
 
-backfillTrackAvgSpeeds().catch((err) => {
+main().catch((err) => {
   console.error('Track avg-speed backfill failed:', err);
   process.exit(1);
 });

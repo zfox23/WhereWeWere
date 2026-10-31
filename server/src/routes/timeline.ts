@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { allPlugins } from '../plugins/registry';
+import { allPlugins, rebasePlaceholders } from '../plugins/registry';
 import { genericTimelineSelect, genericTimelineWhere } from '../plugins/genericStore';
 import type { PluginTimelineContext } from 'wwp-shared';
+import { currentUserId } from '../auth/context';
 
 const router = Router();
 
@@ -11,11 +12,6 @@ function extractDateString(value: unknown): string | null {
   const raw = String(value);
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : null;
-}
-
-/** Rebase $n placeholders so they start after `offset` parameters. */
-function rebasePlaceholders(sql: string, offset: number): string {
-  return sql.replace(/\$(\d+)/g, (_m, n) => `$${offset + parseInt(n, 10)}`);
 }
 
 /**
@@ -50,12 +46,13 @@ interface TimelineBranch {
 router.get('/', async (req: Request, res: Response) => {
 try {
   const {
-    user_id, from, to,
+    from, to,
     limit = '50', offset = '0',
     types,
   } = req.query;
 
-    const userId = user_id ? String(user_id) : null;
+    // Always the signed-in user; a client-supplied user_id is ignored.
+    const userId = currentUserId();
     const fromDate = extractDateString(from);
     const toDate = extractDateString(to);
     const searchQuery = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : null;
@@ -188,6 +185,11 @@ try {
             )
             .join('\nUNION ALL\n');
 
+    // Every branch already filters on the user; the outer user_id check is a
+    // backstop so a plugin whose WHERE forgot it still can't leak rows.
+    params.push(userId);
+    const userParam = `$${params.length}`;
+
     let sql: string;
     if (companionName) {
       // Wrap the union so the companion filter applies to the aliased
@@ -197,16 +199,21 @@ try {
       sql = `SELECT * FROM (
         ${unionSql}
       ) AS timeline
-      WHERE EXISTS (
+      WHERE timeline.user_id = ${userParam}
+        AND EXISTS (
         SELECT 1 FROM companions comp
         WHERE comp.checkin_type = timeline.type
           AND comp.checkin_id = timeline.id
+          AND comp.user_id = ${userParam}
           AND comp.name = ${companionParam}
       )
       ORDER BY checked_in_at DESC, id DESC
       LIMIT ${limitParam} OFFSET ${offsetParam}`;
     } else {
-      sql = `${unionSql}
+      sql = `SELECT * FROM (
+        ${unionSql}
+      ) AS timeline
+      WHERE timeline.user_id = ${userParam}
       ORDER BY checked_in_at DESC, id DESC
       LIMIT ${limitParam} OFFSET ${offsetParam}`;
     }

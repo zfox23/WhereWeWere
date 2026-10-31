@@ -6,8 +6,14 @@
 import type { Router, Request, Response } from 'express';
 import { isUuid } from '../batching';
 import { listError, validateRankSession, type createListKit } from './index';
+import { currentUserId } from '../../auth/context';
 
-export function mountRankRoutes(router: Router, kit: ReturnType<typeof createListKit>, userId: string): void {
+/**
+ * Every route acts for the signed-in user, read per request. The third
+ * argument is ignored and kept only so existing call sites still compile;
+ * a user id captured at mount time would make every user act as that one.
+ */
+export function mountRankRoutes(router: Router, kit: ReturnType<typeof createListKit>, _legacyUserId?: string): void {
   // Drag-to-rank: the item ids in their new rank order; everyone else on the list becomes unranked.
   router.put('/lists/:id/ranks', async (req: Request, res: Response) => {
     try {
@@ -16,7 +22,7 @@ export function mountRankRoutes(router: Router, kit: ReturnType<typeof createLis
       if (!isUuid(listId) || !Array.isArray(ids) || !ids.every((i) => typeof i === 'string' && isUuid(i))) {
         return res.status(400).json({ error: 'ranked_ids must be a list of item ids' });
       }
-      if (!(await kit.setRanks(userId, listId, ids as string[]))) return res.status(404).json({ error: 'List not found' });
+      if (!(await kit.setRanks(currentUserId(), listId, ids as string[]))) return res.status(404).json({ error: 'List not found' });
       res.json({ ranked_ids: [...new Set(ids as string[])] });
     } catch (err) {
       listError(res, err, 'ranking the list');
@@ -32,7 +38,7 @@ export function mountRankRoutes(router: Router, kit: ReturnType<typeof createLis
       const raw = req.body?.rank;
       const rank = raw == null ? null : typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 ? raw : undefined;
       if (rank === undefined) return res.status(400).json({ error: 'rank must be a whole number from 1, or null' });
-      const result = await kit.setRank(userId, listId, itemId, rank);
+      const result = await kit.setRank(currentUserId(), listId, itemId, rank);
       if (result.status === 'no-list') return res.status(404).json({ error: 'List not found' });
       if (result.status === 'no-item') return res.status(404).json({ error: 'Item is not in this list' });
       res.json({ rank: result.rank });
@@ -46,7 +52,7 @@ export function mountRankRoutes(router: Router, kit: ReturnType<typeof createLis
     try {
       const listId = String(req.params.id);
       if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
-      const session = await kit.getRankSession(userId, listId);
+      const session = await kit.getRankSession(currentUserId(), listId);
       if (!session) return res.status(404).json({ error: 'No paused session' });
       res.json(session);
     } catch (err) {
@@ -60,7 +66,7 @@ export function mountRankRoutes(router: Router, kit: ReturnType<typeof createLis
       if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
       const state = validateRankSession(req.body?.state);
       if (!state) return res.status(400).json({ error: 'Not a ranking session' });
-      if (!(await kit.saveRankSession(userId, listId, state))) return res.status(404).json({ error: 'List not found' });
+      if (!(await kit.saveRankSession(currentUserId(), listId, state))) return res.status(404).json({ error: 'List not found' });
       res.json({ saved: true });
     } catch (err) {
       listError(res, err, 'saving the ranking session');
@@ -71,7 +77,7 @@ export function mountRankRoutes(router: Router, kit: ReturnType<typeof createLis
     try {
       const listId = String(req.params.id);
       if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
-      await kit.deleteRankSession(userId, listId);
+      await kit.deleteRankSession(currentUserId(), listId);
       res.json({ deleted: true });
     } catch (err) {
       listError(res, err, 'discarding the ranking session');

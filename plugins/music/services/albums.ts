@@ -97,6 +97,8 @@ export async function ensureLargeArt(album: { provider: string; external_id: str
   return (await downloadImage(album.large_url, LARGE_PX, 88, 'inside', file)) ? artPath(file) : null;
 }
 
+const ORPHAN_GRACE_MS = 10 * 60 * 1000;
+
 /** Remove art files no album row refers to (after a start-over or a re-match). */
 export async function collectOrphanArt(): Promise<number> {
   if (!fs.existsSync(artDir())) return 0;
@@ -108,9 +110,12 @@ export async function collectOrphanArt(): Promise<number> {
       ],
     ),
   );
+  // The cache is shared by every user, and another user's lookup may have
+  // just written a file whose row isn't committed yet: leave fresh files be.
+  const settled = Date.now() - ORPHAN_GRACE_MS;
   let removed = 0;
   for (const file of fs.readdirSync(artDir())) {
-    if (!used.has(file)) {
+    if (!used.has(file) && fs.statSync(path.join(artDir(), file)).mtimeMs < settled) {
       fs.rmSync(path.join(artDir(), file), { force: true });
       removed++;
     }
@@ -165,7 +170,8 @@ async function lookupOne(userId: string, target: Target): Promise<'matched' | 'n
   if (match) {
     await storeMatch(userId, target, match);
     const filled = await fillTrackLengths(userId, target.album_key);
-    if (status.state === 'running') status.durations_filled += filled;
+    const run = backfills.get(userId);
+    if (run?.status.state === 'running') run.status.durations_filled += filled;
     return 'matched';
   }
   await query(
@@ -303,7 +309,7 @@ export async function repairThumbnails(userId: string): Promise<number> {
   for (const a of missing.rows as { id: string; provider: string; external_id: string; thumb_url: string }[]) {
     const file = artFileName(a.provider, a.external_id, 'thumb');
     if (fs.existsSync(artPath(file)) || (await downloadImage(a.thumb_url, THUMB_PX, 78, 'cover', file))) {
-      await query(`UPDATE music_albums SET thumb_file = $2 WHERE id = $1`, [a.id, file]);
+      await query(`UPDATE music_albums SET thumb_file = $2 WHERE id = $1 AND user_id = $3`, [a.id, file, userId]);
       repaired++;
     }
   }
@@ -366,7 +372,7 @@ export async function fillTrackLengths(userId: string, albumKey?: string): Promi
       `UPDATE music_sessions s SET listened_seconds = t.seconds
        FROM (SELECT session_id, COALESCE(SUM(COALESCE(listened_for, track_length)), 0)::int AS seconds
              FROM music_scrobbles WHERE user_id = $1 AND session_id = ANY($2::uuid[]) GROUP BY session_id) t
-       WHERE s.id = t.session_id`,
+       WHERE s.id = t.session_id AND s.user_id = $1`,
       [userId, [...sessions]],
     );
   }
@@ -394,15 +400,27 @@ export interface BackfillStatus {
 
 const BATCH = 25;
 const MAX_FAILURES_IN_A_ROW = 5;
-let status: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, skipped: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
-let cancelRequested = false;
-let running: Promise<void> | null = null;
 
-export const getBackfillStatus = (): BackfillStatus => ({ ...status });
-export const cancelBackfill = (): void => {
-  if (status.state === 'running') cancelRequested = true;
+/** One user's lookup run. Each user runs (and sees, and cancels) only their own. */
+interface Backfill {
+  status: BackfillStatus;
+  cancelRequested: boolean;
+  running: Promise<void> | null;
+}
+
+const IDLE: BackfillStatus = { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, skipped: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
+const backfills = new Map<string, Backfill>();
+
+export const getBackfillStatus = (userId: string): BackfillStatus => ({ ...(backfills.get(userId)?.status ?? IDLE) });
+export const cancelBackfill = (userId: string): void => {
+  const run = backfills.get(userId);
+  if (run?.status.state === 'running') run.cancelRequested = true;
 };
-export const whenBackfillDone = (): Promise<void> => running ?? Promise.resolve();
+/** Settles when the user's run (or, without a user, every run) has finished. */
+export const whenBackfillDone = async (userId?: string): Promise<void> => {
+  const runs = userId ? [backfills.get(userId)] : [...backfills.values()];
+  await Promise.all(runs.map((r) => r?.running ?? Promise.resolve()));
+};
 
 /**
  * Start looking up every album that hasn't been looked up, most played first.
@@ -410,12 +428,17 @@ export const whenBackfillDone = (): Promise<void> => running ?? Promise.resolve(
  */
 export async function startBackfill(userId: string, opts: { retryMissing?: boolean } = {}): Promise<BackfillStatus> {
   if (!deps) throw new ProviderUnavailableError('Album lookup is disabled');
-  if (status.state === 'running') throw new Error('A lookup is already running');
+  if (backfills.get(userId)?.status.state === 'running') throw new Error('A lookup is already running');
   if (opts.retryMissing) await query(`DELETE FROM music_albums WHERE user_id = $1 AND status = 'not_found'`, [userId]);
   const total = (await query(`SELECT COUNT(*)::int AS n FROM (${UNLOOKED} GROUP BY m.album_key) u`, [userId])).rows[0].n;
-  cancelRequested = false;
-  status = { state: 'running', processed: 0, total, matched: 0, not_found: 0, skipped: 0, durations_filled: 0, thumbnails_restored: 0, error: null };
-  running = (async () => {
+  const run: Backfill = {
+    status: { ...IDLE, state: 'running', total },
+    cancelRequested: false,
+    running: null,
+  };
+  backfills.set(userId, run);
+  const { status } = run;
+  run.running = (async () => {
     try {
       await collectOrphanArt();
       // Albums a catalog couldn't answer for are left for the next run; a few
@@ -430,7 +453,7 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
         )).rows as Target[];
         if (batch.length === 0) break;
         for (const target of batch) {
-          if (cancelRequested) {
+          if (run.cancelRequested) {
             status.state = 'cancelled';
             return;
           }
@@ -457,7 +480,7 @@ export async function startBackfill(userId: string, opts: { retryMissing?: boole
       status.error = err instanceof Error ? err.message : 'Lookup failed';
     }
   })();
-  return getBackfillStatus();
+  return getBackfillStatus(userId);
 }
 
 // ---------------------------------------------------------------------------

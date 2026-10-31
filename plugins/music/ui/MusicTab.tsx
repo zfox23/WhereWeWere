@@ -190,7 +190,7 @@ export function MusicTab(_props: PluginProfileTabProps) {
 
   useEffect(() => {
     statsApi
-      .earliestDates('00000000-0000-0000-0000-000000000001')
+      .earliestDates()
       .then((dates) => setEarliestDate(dates.music ?? null))
       .catch(() => setEarliestDate(null));
   }, []);

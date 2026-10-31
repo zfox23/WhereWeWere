@@ -14,6 +14,7 @@ vi.mock('../../../server/src/db', () => ({
 
 import { server, tracksRouter } from '../server';
 import { NO_ACTIVITY_TYPE } from '../constants';
+import { runAsUser } from '../../../server/src/auth/context';
 import { TIMELINE_COLUMNS } from '../../../server/src/plugins/timeline';
 import type { PluginTimelineContext } from 'wwp-shared';
 
@@ -191,16 +192,16 @@ describe('tracks plugin — reconcile hook', () => {
 
   it('applies a label-only timezone correction', async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 1 });
-    expect(await server.reconcile!.apply('t1', 'Europe/Lisbon')).toBe(true);
+    expect(await runAsUser('u1', () => server.reconcile!.apply('t1', 'Europe/Lisbon'))).toBe(true);
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('UPDATE tracks');
     expect(sql).toContain('SET timezone = $2');
-    expect(values).toEqual(['t1', 'Europe/Lisbon']);
+    expect(values).toEqual(['t1', 'Europe/Lisbon', 'u1']);
   });
 
   it('reports failure when no row was updated', async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 0 });
-    expect(await server.reconcile!.apply('missing', 'Europe/Lisbon')).toBe(false);
+    expect(await runAsUser('u1', () => server.reconcile!.apply('missing', 'Europe/Lisbon'))).toBe(false);
   });
 });
 
@@ -355,6 +356,7 @@ describe('track companions (endpoints)', () => {
   function app() {
     const a = express();
     a.use(express.json());
+    a.use((_req, _res, next) => runAsUser('u1', next));
     a.use('/tracks', tracksRouter);
     return a;
   }
@@ -416,10 +418,10 @@ describe('track companions (endpoints)', () => {
     expect(res.body.companions).toEqual(['Sam']);
     const [delSql, delValues] = queryMock.mock.calls[1];
     expect(delSql).toContain('DELETE FROM companions');
-    expect(delValues).toEqual(['tracks', 't1']);
+    expect(delValues).toEqual(['tracks', 't1', 'u1']);
     const [insSql, insValues] = queryMock.mock.calls[2];
     expect(insSql).toContain('INSERT INTO companions');
-    expect(insValues).toEqual(['tracks', 't1', ['Sam']]);
+    expect(insValues).toEqual(['tracks', 't1', ['Sam'], 'u1']);
   });
 
   it('PUT /:id replaces companions alongside other field updates', async () => {
@@ -475,7 +477,7 @@ describe('track companions (endpoints)', () => {
     const [sql, values] = queryMock.mock.calls[1];
     expect(sql).toContain('DELETE FROM companions');
     expect(sql).toContain('checkin_type = $1');
-    expect(values).toEqual(['tracks', ['t1']]);
+    expect(values).toEqual(['tracks', ['t1'], 'u1']);
   });
 });
 
@@ -483,6 +485,7 @@ describe('activity types (settings pane)', () => {
   function app() {
     const a = express();
     a.use(express.json());
+    a.use((_req, _res, next) => runAsUser('u1', next));
     a.use('/tracks', tracksRouter);
     return a;
   }
@@ -538,7 +541,7 @@ describe('activity types (settings pane)', () => {
     const [updSql, updValues] = queryMock.mock.calls[1];
     expect(String(updSql)).toContain('UPDATE tracks');
     expect(String(updSql)).toContain('WHERE activity_type = $2');
-    expect(updValues).toEqual(['Cycling', 'Bike']);
+    expect(updValues).toEqual(['Cycling', 'Bike', 'u1']);
   });
 
   it('PUT /activity-types 409s on a case-sensitive name clash without merge', async () => {
@@ -565,6 +568,6 @@ describe('activity types (settings pane)', () => {
 
     const [updSql, updValues] = queryMock.mock.calls[1];
     expect(String(updSql)).toContain('UPDATE tracks');
-    expect(updValues).toEqual(['Cycling', 'cycling']);
+    expect(updValues).toEqual(['Cycling', 'cycling', 'u1']);
   });
 });

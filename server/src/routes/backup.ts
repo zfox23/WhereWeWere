@@ -23,11 +23,15 @@ import {
   buildBackupZip,
 } from '../services/backupArchive';
 import { restoreCompanionRows } from '../services/companions';
-import { allPlugins } from '../plugins/registry';
+import { allPlugins, ownedCheckinTypes } from '../plugins/registry';
+import { currentUserId, preserveUserContext } from '../auth/context';
+
+// Backups are per-user: export collects only the signed-in user's data,
+// restore writes only as that user (any user id stored in the backup is
+// ignored), and Start Over deletes only that user's rows.
 
 const router = Router();
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const FIRST_START_OVER_CONFIRMATION = 'DELETE MY DATA';
 const SECOND_START_OVER_CONFIRMATION = 'START OVER';
 
@@ -240,18 +244,22 @@ function readPostcardsFile(tempRoot: string): unknown[] | null {
  */
 async function runRestore(
   client: import('pg').PoolClient,
+  userId: string,
   backup: ParsedBackup,
   errors: string[],
 ): Promise<Record<string, { inserted: number; skipped: number }>> {
   const counts: Record<string, { inserted: number; skipped: number }> = {};
 
+  // Only the display name is restored from the backup's user record: the
+  // username, admin flag, password and webhook token are account settings a
+  // backup must never change.
   if (backup.user?.display_name !== undefined) {
     await client.query(
       `UPDATE users
        SET display_name = COALESCE($2, display_name),
            updated_at = NOW()
        WHERE id = $1`,
-      [USER_ID, backup.user.display_name]
+      [userId, backup.user.display_name]
     );
   }
 
@@ -276,7 +284,7 @@ async function runRestore(
           distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
           updated_at = NOW()`,
       [
-        USER_ID,
+        userId,
         toStringOrNull(s.dawarich_url),
         toStringOrNull(s.dawarich_api_key),
         toStringOrNull(s.immich_url),
@@ -299,7 +307,7 @@ async function runRestore(
           `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
            VALUES ($1, $2, $3, $4::jsonb)
            ON CONFLICT (user_id, plugin_id, key) DO UPDATE SET value = EXCLUDED.value`,
-          [USER_ID, plugin.id, key, JSON.stringify(value)]
+          [userId, plugin.id, key, JSON.stringify(value)]
         );
       }
     }
@@ -310,7 +318,7 @@ async function runRestore(
   // each plugin's restoreLegacyBackup hook, which also claims its legacy
   // keys so no core loop runs for them.
   if (backup.pluginsPayload || allPlugins().some((p) => p.server.restoreLegacyBackup)) {
-    const legacy = await restoreLegacyPluginData(client, USER_ID, backup.raw ?? {}, backup.pluginsPayload, errors);
+    const legacy = await restoreLegacyPluginData(client, userId, backup.raw ?? {}, backup.pluginsPayload, errors);
     for (const [pluginId, pluginCounts] of Object.entries(legacy)) {
       for (const [key, pc] of Object.entries(pluginCounts)) {
         counts[key] = pc;
@@ -328,7 +336,7 @@ async function runRestore(
         filesDirs[pluginId] = `${backup.tempRoot}/plugins/${pluginId}`;
       }
     }
-    const pluginCounts = await importPluginData(client, USER_ID, backup.pluginsPayload, filesDirs, errors);
+    const pluginCounts = await importPluginData(client, userId, backup.pluginsPayload, filesDirs, errors);
     for (const [pluginId, pc] of Object.entries(pluginCounts)) {
       counts[`plugin:${pluginId}`] = pc;
     }
@@ -338,8 +346,29 @@ async function runRestore(
   // companion rows plus standalone names added in the Companions tab.
   // Idempotent — the plugins' payloads may re-restore the same rows and
   // ON CONFLICT keeps those no-ops.
+  //
+  // A companion row may only attach to a check-in the user owns (checked
+  // after the plugin restore above, on the same transaction): a check-in id
+  // that belongs to someone else — e.g. restoring another user's export,
+  // whose check-ins were skipped as conflicts — must not get this user's
+  // companion names attached to it.
   if (Array.isArray(backup.companions) && backup.companions.length > 0) {
-    counts.companions = await restoreCompanionRows(backup.companions, client);
+    const linkedIds = backup.companions
+      .map((raw) => (raw && typeof raw === 'object' ? (raw as Record<string, unknown>).checkin_id : null))
+      .filter((id): id is string => typeof id === 'string' && id !== '');
+    const owned = await ownedCheckinTypes(userId, linkedIds, client);
+    const restorable = backup.companions.filter((raw) => {
+      if (!raw || typeof raw !== 'object') return true; // counted as skipped below
+      const row = raw as Record<string, unknown>;
+      if (row.checkin_id == null || row.checkin_id === '') return true; // standalone name
+      return typeof row.checkin_id === 'string'
+        && owned.get(row.checkin_id.toLowerCase()) === row.checkin_type;
+    });
+    const result = await restoreCompanionRows(restorable, client);
+    counts.companions = {
+      inserted: result.inserted,
+      skipped: result.skipped + (backup.companions.length - restorable.length),
+    };
   }
 
   // Postcard From Your Past history (v2 postcards.json): re-insert rows with
@@ -372,7 +401,7 @@ async function runRestore(
          ON CONFLICT (id) DO NOTHING`,
         [
           p.id,
-          USER_ID,
+          userId,
           periodFrom,
           periodTo,
           typeof p.addressed_to === 'string' ? p.addressed_to : '',
@@ -406,6 +435,7 @@ interface ExportProgress {
  * reports the stage and, while zipping, how many entries are done.
  */
 async function buildExport(
+  userId: string,
   onProgress: (progress: ExportProgress) => void,
 ): Promise<{ zipPath: string; fileName: string }> {
   let fileTempDirs: string[] = [];
@@ -418,11 +448,13 @@ async function buildExport(
       postcardsResult,
       pluginsData,
     ] = await Promise.all([
+        // Profile fields only: never the password hash, webhook token,
+        // admin flag, or session data.
         query(
           `SELECT id, username, email, display_name, created_at, updated_at
            FROM users
            WHERE id = $1`,
-          [USER_ID]
+          [userId]
         ),
         query(
           `SELECT dawarich_url, dawarich_api_key,
@@ -435,14 +467,16 @@ async function buildExport(
                   updated_at
            FROM user_settings
            WHERE user_id = $1`,
-          [USER_ID]
+          [userId]
         ),
         // Core companion table: every check-in type's rows plus standalone
         // names. Row ids are not preserved (they are never referenced).
         query(
           `SELECT checkin_type, checkin_id, name, created_at
            FROM companions
-           ORDER BY name, checkin_id`
+           WHERE user_id = $1
+           ORDER BY name, checkin_id`,
+          [userId]
         ),
         // Postcard From Your Past history. Full rows so the restored
         // postcards keep their generated id, message, and image metadata.
@@ -452,15 +486,15 @@ async function buildExport(
            FROM postcards
            WHERE user_id = $1
            ORDER BY created_at`,
-          [USER_ID]
+          [userId]
         ),
-        exportPluginData(USER_ID),
+        exportPluginData(userId),
       ]);
 
     // File collection runs AFTER the data export: a plugin's backupFiles may
     // stage generated files whose contents depend on its backupExport output
     // (e.g. tracks generates a GPX for rows whose original is missing).
-    const { files: pluginFiles, tempDirs } = await exportPluginFiles(USER_ID);
+    const { files: pluginFiles, tempDirs } = await exportPluginFiles(userId);
     fileTempDirs = tempDirs;
 
     const manifest: import('../services/backupArchive').BackupManifest = {
@@ -504,8 +538,10 @@ function sendExport(res: Response, zipPath: string, fileName: string): void {
 }
 
 // Export jobs: the build is slow, so the client starts one, polls its
-// progress, then downloads the finished file.
+// progress, then downloads the finished file. A job is visible only to the
+// user who started it; anyone else gets the same 404 as an unknown id.
 interface ExportJob extends ExportProgress {
+  userId: string;
   zipPath?: string;
   fileName?: string;
   error?: string;
@@ -522,12 +558,19 @@ function dropExportJob(id: string): void {
   exportJobs.delete(id);
 }
 
+/** The export job with this id, if it belongs to the signed-in user. */
+function ownExportJob(id: string): ExportJob | undefined {
+  const job = exportJobs.get(id);
+  return job && job.userId === currentUserId() ? job : undefined;
+}
+
 router.post('/export-jobs', (_req: Request, res: Response) => {
   const id = randomUUID();
-  const job: ExportJob = { stage: 'collecting', processed: 0, total: 0 };
+  const userId = currentUserId();
+  const job: ExportJob = { userId, stage: 'collecting', processed: 0, total: 0 };
   exportJobs.set(id, job);
   job.timer = setTimeout(() => dropExportJob(id), EXPORT_JOB_TTL_MS);
-  buildExport((p) => Object.assign(job, p))
+  buildExport(userId, (p) => Object.assign(job, p))
     .then(({ zipPath, fileName }) => {
       job.zipPath = zipPath;
       job.fileName = fileName;
@@ -542,7 +585,7 @@ router.post('/export-jobs', (_req: Request, res: Response) => {
 });
 
 router.get('/export-jobs/:id', (req: Request, res: Response) => {
-  const job = exportJobs.get(String(req.params.id));
+  const job = ownExportJob(String(req.params.id));
   if (!job) return res.status(404).json({ error: 'Export not found' });
   const size = job.zipPath ? fs.statSync(job.zipPath).size : undefined;
   res.json({ stage: job.stage, processed: job.processed, total: job.total, size, error: job.error });
@@ -550,7 +593,7 @@ router.get('/export-jobs/:id', (req: Request, res: Response) => {
 
 router.get('/export-jobs/:id/download', (req: Request, res: Response) => {
   const id = String(req.params.id);
-  const job = exportJobs.get(id);
+  const job = ownExportJob(id);
   if (!job || job.stage !== 'ready' || !job.zipPath || !job.fileName) {
     return res.status(404).json({ error: 'Export not ready' });
   }
@@ -563,7 +606,7 @@ router.get('/export-jobs/:id/download', (req: Request, res: Response) => {
 
 router.get('/export', async (_req: Request, res: Response) => {
   try {
-    const { zipPath, fileName } = await buildExport(() => {});
+    const { zipPath, fileName } = await buildExport(currentUserId(), () => {});
     sendExport(res, zipPath, fileName);
   } catch (err) {
     console.error('Error exporting backup:', err);
@@ -571,7 +614,10 @@ router.get('/export', async (_req: Request, res: Response) => {
   }
 });
 
-router.post('/import', upload.single('file'), async (req: Request, res: Response) => {
+// preserveUserContext: multer resumes from stream callbacks, which would
+// otherwise lose the signed-in user before the handler runs.
+router.post('/import', preserveUserContext(upload.single('file')), async (req: Request, res: Response) => {
+  const userId = currentUserId();
   let tempRoot: string | undefined;
   // Checked out only once the archive is extracted and parsed: that part is
   // slow and must not pin a pooled connection.
@@ -601,7 +647,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     client = await pool.connect();
     // withTransaction commits on success and rolls back + rethrows on error.
     const counts = await withTransaction(client, (tx) =>
-      runRestore(tx, { ...backup, tempRoot: tempRoot }, errors)
+      runRestore(tx, userId, { ...backup, tempRoot: tempRoot }, errors)
     );
 
     res.json({
@@ -640,6 +686,7 @@ async function withTransaction<T>(
 }
 
 router.post('/start-over', async (req: Request, res: Response) => {
+  const userId = currentUserId();
   const client = await pool.connect();
   try {
     const first = (req.body?.first_confirmation ?? '').toString().trim();
@@ -678,8 +725,8 @@ router.post('/start-over', async (req: Request, res: Response) => {
       ...new Set([...selectedPluginCheckinIds, ...selectedAllDataIds]),
     ];
     const resetAccountSettings = Boolean(rawOptions.reset_account_settings);
-    // Wipes the entire core companion table: companions on check-ins of
-    // every type plus standalone names from the Companions tab. (Check-in
+    // Wipes the user's rows in the core companion table: companions on
+    // check-ins of every type plus standalone names from the Companions tab. (Check-in
     // companions are also cleaned up by each plugin's deleteUserData hook
     // when its check-ins are deleted; this option covers the rest, e.g.
     // standalone names, when only the companion data is selected.)
@@ -704,7 +751,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
 
     if (pluginCheckinIds.length > 0) {
       // Check-in plugins own their deletion via their deleteUserData hook.
-      const pluginCounts = await deletePluginData(client, USER_ID, pluginCheckinIds);
+      const pluginCounts = await deletePluginData(client, userId, pluginCheckinIds);
       for (const [pluginId, deleted] of Object.entries(pluginCounts)) {
         counts[`plugin_checkins_${pluginId}`] = deleted;
       }
@@ -718,7 +765,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
       // Runs after check-in deletion on purpose: the hook may reference
       // rows owned by check-ins (e.g. check-ins that must reference a venue).
       counts[`plugin_all_data_${plugin.id}`] = await plugin.server.deleteAllData({
-        user_id: USER_ID,
+        user_id: userId,
         client,
       });
     }
@@ -731,23 +778,23 @@ router.post('/start-over', async (req: Request, res: Response) => {
         if (!selectedPluginSettingsIds.includes(plugin.id)) continue;
         const settingsResult = await client.query(
           `DELETE FROM plugin_settings WHERE user_id = $1 AND plugin_id = $2`,
-          [USER_ID, plugin.id]
+          [userId, plugin.id]
         );
         let deleted = settingsResult.rowCount ?? 0;
         if (plugin.server.resetSettings) {
-          deleted += await plugin.server.resetSettings({ user_id: USER_ID, client });
+          deleted += await plugin.server.resetSettings({ user_id: userId, client });
         }
         counts[`plugin_settings_${plugin.id}_reset`] = deleted;
       }
     }
 
     if (deleteCompanions) {
-      const companionResult = await client.query('DELETE FROM companions');
+      const companionResult = await client.query('DELETE FROM companions WHERE user_id = $1', [userId]);
       counts.companions_deleted = companionResult.rowCount ?? 0;
     }
 
     if (deletePostcards) {
-      const postcardsResult = await client.query('DELETE FROM postcards');
+      const postcardsResult = await client.query('DELETE FROM postcards WHERE user_id = $1', [userId]);
       counts.postcards_deleted = postcardsResult.rowCount ?? 0;
     }
 
@@ -761,7 +808,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
            immich_url = NULL,
            immich_api_key = NULL,
            updated_at = NOW()`,
-        [USER_ID]
+        [userId]
       );
       counts.user_settings_integrations_reset = integrationSettingsResult.rowCount ?? 0;
     }
@@ -772,7 +819,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
          SET display_name = NULL,
              updated_at = NOW()
          WHERE id = $1`,
-        [USER_ID]
+        [userId]
       );
       counts.user_profile_reset = profileResult.rowCount ?? 0;
 
@@ -785,7 +832,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
            system_dark_theme = 'midnight',
            distance_unit = 'metric',
            updated_at = NOW()`,
-        [USER_ID]
+        [userId]
       );
       counts.user_settings_account_reset = accountSettingsResult.rowCount ?? 0;
     }

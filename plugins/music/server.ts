@@ -9,7 +9,7 @@
  * file import.
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import type { CheckinTypeServerPlugin, PluginTimelineContext } from 'wwp-shared';
 import { isValidTimeZone } from 'wwp-shared';
@@ -17,13 +17,12 @@ import { query } from '../../server/src/db';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
-import { pluginTimestampUnion } from '../../server/src/plugins/registry';
+import { ownedCheckinTypes, pluginTimestampUnion } from '../../server/src/plugins/registry';
 import { parseCheckinIdList, isUuid } from '../../server/src/services/batching';
 import { clampInt } from '../../server/src/services/queryParams';
 import { parseLibraryParams } from '../../server/src/services/libraryQuery';
 import { normalizeCompanions } from '../../server/src/services/companions';
-import { tokensMatch } from '../../server/src/services/tokens';
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, preserveUserContext, runAsUser } from '../../server/src/auth/context';
 import {
   API_MOUNT,
   SERVER_INFO,
@@ -75,6 +74,7 @@ import {
   getSessionTracks,
   getTotals,
   deleteScrobble,
+  findScrobblerKeyOwner,
   getScrobbleDetail,
   updateScrobble,
   insertManualScrobble,
@@ -97,43 +97,45 @@ function dateParam(raw: unknown): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Scrobbler protocol: mounted at the server root, outside API_ACCESS_TOKEN
+// Scrobbler protocol: mounted at the server root, outside the login guard.
+// The scrobbler key says whose account a request is for.
 // ---------------------------------------------------------------------------
 
 const scrobblerRouter = Router();
 
-async function keyIsValid(presented: unknown): Promise<boolean> {
-  if (typeof presented !== 'string' || !presented) return false;
-  const { scrobbler_key } = await getMusicSettings(USER_ID);
-  return tokensMatch(presented, scrobbler_key);
+/** The user a presented key belongs to, or null (missing, wrong, or ambiguous). */
+async function keyOwner(presented: unknown): Promise<string | null> {
+  if (typeof presented !== 'string' || !presented) return null;
+  return findScrobblerKeyOwner(presented);
+}
+
+/** Run the rest of the request as the key's owner; 403 without a valid key. */
+async function scrobblerUser(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = await keyOwner(req.body?.key ?? req.query.key);
+    if (!userId) return res.status(403).json(failure('authentication_fail', 'Invalid API key'));
+    runAsUser(userId, () => next());
+  } catch (err) {
+    console.error('Scrobbler key check failed:', err);
+    res.status(500).json(failure('server_error', 'Internal error'));
+  }
 }
 
 scrobblerRouter.get('/serverinfo', (_req: Request, res: Response) => {
   res.json(SERVER_INFO);
 });
 
-scrobblerRouter.get('/test', async (req: Request, res: Response) => {
-  try {
-    if (!(await keyIsValid(req.query.key))) {
-      return res.status(403).json(failure('authentication_fail', 'Invalid API key'));
-    }
-    res.json({ status: 'ok' });
-  } catch (err) {
-    console.error('Scrobbler key test failed:', err);
-    res.status(500).json(failure('server_error', 'Internal error'));
-  }
+scrobblerRouter.get('/test', scrobblerUser, (_req: Request, res: Response) => {
+  res.json({ status: 'ok' });
 });
 
-scrobblerRouter.post('/newscrobble', async (req: Request, res: Response) => {
+scrobblerRouter.post('/newscrobble', scrobblerUser, async (req: Request, res: Response) => {
   try {
-    if (!(await keyIsValid(req.body?.key ?? req.query.key))) {
-      return res.status(403).json(failure('authentication_fail', 'Invalid API key'));
-    }
     const parsed = parseNewScrobble(req.body);
     if (!parsed.ok) {
       return res.status(400).json(failure('invalid_scrobble', parsed.reason));
     }
-    await insertScrobble(USER_ID, parsed.scrobble);
+    await insertScrobble(currentUserId(), parsed.scrobble);
     // A repeat of a stored play is still a success: the client's goal (the
     // play exists here) is met, and a failure would only make it retry.
     res.json(newScrobbleSuccess(parsed.scrobble));
@@ -143,8 +145,11 @@ scrobblerRouter.post('/newscrobble', async (req: Request, res: Response) => {
   }
 });
 
-// Unauthenticated by necessity: multi-scrobbler reads history (to skip plays
-// it has already sent) without sending the key.
+// Multi-scrobbler reads history (to skip plays it has already sent) without
+// sending the key, and without a key there is no telling whose history it
+// wants: such a read gets an empty page. That only costs a resend, which is
+// harmless (a repeat of a stored play is a no-op). With `key`, the key's
+// owner's plays are listed.
 scrobblerRouter.get('/scrobbles', async (req: Request, res: Response) => {
   try {
     // Like Maloja, no `perpage` means everything in range on one page.
@@ -175,6 +180,20 @@ scrobblerRouter.get('/scrobbles', async (req: Request, res: Response) => {
       if (!r) return res.status(400).json(failure('invalid_date', 'Unrecognised date'));
       until = r.until;
     }
+    const echoed = new URLSearchParams();
+    for (const key of ['in', 'from', 'until'] as const) {
+      const v = req.query[key];
+      if (typeof v === 'string') echoed.set(key, v);
+    }
+
+    let userId: string | null = null;
+    if (req.query.key !== undefined) {
+      userId = await keyOwner(req.query.key);
+      if (!userId) return res.status(403).json(failure('authentication_fail', 'Invalid API key'));
+      // Pagination links carry the key on, or the next page would come back empty.
+      echoed.set('key', String(req.query.key));
+    }
+    if (!userId) return res.json(scrobbleListResponse([], page, perPage, false, echoed));
 
     // Dates carry no zone and the caller's local day isn't known (multi-scrobbler
     // sends days in its own TZ, so 10:46 PM Eastern is the 25th there but the
@@ -182,12 +201,7 @@ scrobblerRouter.get('/scrobbles', async (req: Request, res: Response) => {
     // harmless to a caller deduplicating by time, missing ones are not.
     if (from) from = new Date(from.getTime() - MAX_UTC_OFFSET_MS);
     if (until) until = new Date(until.getTime() + MAX_UTC_OFFSET_MS);
-    const { rows, hasMore } = await listScrobbles(USER_ID, { from, until, page, perPage });
-    const echoed = new URLSearchParams();
-    for (const key of ['in', 'from', 'until'] as const) {
-      const v = req.query[key];
-      if (typeof v === 'string') echoed.set(key, v);
-    }
+    const { rows, hasMore } = await listScrobbles(userId, { from, until, page, perPage });
     res.json(scrobbleListResponse(rows, page, perPage, hasMore, echoed));
   } catch (err) {
     console.error('Error listing scrobbles:', err);
@@ -203,7 +217,7 @@ const musicRouter = Router();
 
 musicRouter.get('/settings', async (_req: Request, res: Response) => {
   try {
-    const [settings, counts] = await Promise.all([getMusicSettings(USER_ID), getCounts(USER_ID)]);
+    const [settings, counts] = await Promise.all([getMusicSettings(currentUserId()), getCounts(currentUserId())]);
     res.json({ ...settings, ...counts, scrobbler_path: API_MOUNT });
   } catch (err) {
     console.error('Error loading music settings:', err);
@@ -235,7 +249,7 @@ musicRouter.put('/settings', async (req: Request, res: Response) => {
       }
       updates.timezone = b.timezone;
     }
-    res.json(await updateMusicSettings(USER_ID, updates));
+    res.json(await updateMusicSettings(currentUserId(), updates));
   } catch (err) {
     console.error('Error saving music settings:', err);
     res.status(500).json({ error: 'Failed to save settings' });
@@ -246,7 +260,7 @@ musicRouter.put('/settings', async (req: Request, res: Response) => {
 // current check-ins (after adding or fixing check-ins, or an import).
 musicRouter.post('/timezones/refresh', async (_req: Request, res: Response) => {
   try {
-    res.json({ updated: await recomputeTimezones(USER_ID) });
+    res.json({ updated: await recomputeTimezones(currentUserId()) });
   } catch (err) {
     console.error('Error refreshing scrobble timezones:', err);
     res.status(500).json({ error: 'Failed to refresh timezones' });
@@ -255,7 +269,7 @@ musicRouter.post('/timezones/refresh', async (_req: Request, res: Response) => {
 
 musicRouter.post('/settings/regenerate-key', async (_req: Request, res: Response) => {
   try {
-    res.json({ scrobbler_key: await regenerateScrobblerKey(USER_ID) });
+    res.json({ scrobbler_key: await regenerateScrobblerKey(currentUserId()) });
   } catch (err) {
     console.error('Error regenerating scrobbler key:', err);
     res.status(500).json({ error: 'Failed to regenerate key' });
@@ -269,10 +283,10 @@ musicRouter.get('/stats', async (req: Request, res: Response) => {
     const to = dateParam(req.query.to);
     const limit = clampInt(req.query.limit, { fallback: 10, min: 1, max: 25 });
     const [totals, top_songs, top_artists, top_albums] = await Promise.all([
-      getTotals(USER_ID, from, to),
-      getLibrary(USER_ID, 'songs', from, to, { limit }),
-      getLibrary(USER_ID, 'artists', from, to, { limit }),
-      getLibrary(USER_ID, 'albums', from, to, { limit }),
+      getTotals(currentUserId(), from, to),
+      getLibrary(currentUserId(), 'songs', from, to, { limit }),
+      getLibrary(currentUserId(), 'artists', from, to, { limit }),
+      getLibrary(currentUserId(), 'albums', from, to, { limit }),
     ]);
     res.json({ totals, top_songs: top_songs.rows, top_artists: top_artists.rows, top_albums: top_albums.rows });
   } catch (err) {
@@ -290,7 +304,7 @@ musicRouter.get('/library', async (req: Request, res: Response) => {
     const from = dateParam(req.query.from);
     const to = dateParam(req.query.to);
     const params = parseLibraryParams(req.query, { sorts: Object.keys(LIBRARY_SORTS), defaultSort: 'plays' });
-    res.json(await getLibrary(USER_ID, view, from, to, params));
+    res.json(await getLibrary(currentUserId(), view, from, to, params));
   } catch (err) {
     console.error('Error loading music library:', err);
     res.status(500).json({ error: 'Failed to load library' });
@@ -302,7 +316,7 @@ musicRouter.get('/reflect', async (req: Request, res: Response) => {
   try {
     const date = dateParam(req.query.date);
     if (!date) return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
-    res.json(await getReflectionTracks(USER_ID, date));
+    res.json(await getReflectionTracks(currentUserId(), date));
   } catch (err) {
     console.error('Error loading music reflection:', err);
     res.status(500).json({ error: 'Failed to load music reflection' });
@@ -313,7 +327,8 @@ musicRouter.get('/reflect', async (req: Request, res: Response) => {
 
 musicRouter.get('/albums/status', async (_req: Request, res: Response) => {
   try {
-    res.json({ enabled: albumLookupEnabled(), albums: await getAlbumCounts(USER_ID), job: getBackfillStatus() });
+    const userId = currentUserId();
+    res.json({ enabled: albumLookupEnabled(), albums: await getAlbumCounts(userId), job: getBackfillStatus(userId) });
   } catch (err) {
     console.error('Error loading album status:', err);
     res.status(500).json({ error: 'Failed to load album status' });
@@ -323,8 +338,9 @@ musicRouter.get('/albums/status', async (_req: Request, res: Response) => {
 musicRouter.post('/albums/backfill', async (req: Request, res: Response) => {
   try {
     if (!albumLookupEnabled()) return res.status(503).json({ error: 'Album lookup is disabled' });
-    if (getBackfillStatus().state === 'running') return res.status(409).json({ error: 'A lookup is already running' });
-    res.status(202).json(await startBackfill(USER_ID, { retryMissing: req.body?.retry_missing === true }));
+    const userId = currentUserId();
+    if (getBackfillStatus(userId).state === 'running') return res.status(409).json({ error: 'A lookup is already running' });
+    res.status(202).json(await startBackfill(userId, { retryMissing: req.body?.retry_missing === true }));
   } catch (err) {
     console.error('Error starting album lookup:', err);
     res.status(500).json({ error: 'Failed to start album lookup' });
@@ -332,8 +348,9 @@ musicRouter.post('/albums/backfill', async (req: Request, res: Response) => {
 });
 
 musicRouter.post('/albums/backfill/cancel', (_req: Request, res: Response) => {
-  cancelBackfill();
-  res.json(getBackfillStatus());
+  const userId = currentUserId();
+  cancelBackfill(userId);
+  res.json(getBackfillStatus(userId));
 });
 
 // ?ref=<album_ref from a row> or ?art_id=<cover id>
@@ -343,7 +360,7 @@ musicRouter.get('/album-view', async (req: Request, res: Response) => {
     const artId = typeof req.query.art_id === 'string' ? req.query.art_id : undefined;
     if (artId !== undefined && !isUuid(artId)) return res.status(400).json({ error: 'Invalid cover id' });
     if (ref === undefined && artId === undefined) return res.status(400).json({ error: 'ref or art_id is required' });
-    const album = await getAlbumView(USER_ID, { ref, artId });
+    const album = await getAlbumView(currentUserId(), { ref, artId });
     if (!album) return res.status(404).json({ error: 'Album not found' });
     res.json(album);
   } catch (err) {
@@ -358,7 +375,7 @@ musicRouter.get('/albums/:id/art', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     if (!isUuid(id)) return res.status(400).end();
-    const file = await getAlbumArtFile(USER_ID, id, req.query.size === 'large' ? 'large' : 'thumb');
+    const file = await getAlbumArtFile(currentUserId(), id, req.query.size === 'large' ? 'large' : 'thumb');
     if (!file) return res.status(404).end();
     res.set('Cache-Control', 'private, max-age=31536000, immutable');
     res.type('image/jpeg').sendFile(file);
@@ -375,7 +392,7 @@ const ident = (v: unknown): string | null => (typeof v === 'string' && v.length 
 
 musicRouter.get('/lists', async (_req: Request, res: Response) => {
   try {
-    res.json(await getLists(USER_ID));
+    res.json(await getLists(currentUserId()));
   } catch (err) {
     listError(res, err, 'loading lists');
   }
@@ -383,7 +400,7 @@ musicRouter.get('/lists', async (_req: Request, res: Response) => {
 
 musicRouter.post('/lists', async (req: Request, res: Response) => {
   try {
-    res.status(201).json(await createList(USER_ID, req.body?.name));
+    res.status(201).json(await createList(currentUserId(), req.body?.name));
   } catch (err) {
     listError(res, err, 'creating the list');
   }
@@ -407,7 +424,7 @@ musicRouter.post('/lists/from-items', async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Each item needs a kind and its album_ref or song_key' });
       }
     }
-    const created = await createListWithItems(USER_ID, req.body?.name, items);
+    const created = await createListWithItems(currentUserId(), req.body?.name, items);
     if (!created) return res.status(404).json({ error: 'None of those songs or albums were found' });
     res.status(201).json(created);
   } catch (err) {
@@ -418,7 +435,7 @@ musicRouter.post('/lists/from-items', async (req: Request, res: Response) => {
 musicRouter.put('/lists/:id', async (req: Request, res: Response) => {
   try {
     if (!isUuid(String(req.params.id))) return res.status(400).json({ error: 'Invalid list id' });
-    const list = await renameList(USER_ID, String(req.params.id), req.body?.name);
+    const list = await renameList(currentUserId(), String(req.params.id), req.body?.name);
     if (!list) return res.status(404).json({ error: 'List not found' });
     res.json(list);
   } catch (err) {
@@ -429,7 +446,7 @@ musicRouter.put('/lists/:id', async (req: Request, res: Response) => {
 musicRouter.delete('/lists/:id', async (req: Request, res: Response) => {
   try {
     if (!isUuid(String(req.params.id))) return res.status(400).json({ error: 'Invalid list id' });
-    if (!(await deleteList(USER_ID, String(req.params.id)))) return res.status(404).json({ error: 'List not found' });
+    if (!(await deleteList(currentUserId(), String(req.params.id)))) return res.status(404).json({ error: 'List not found' });
     res.json({ id: req.params.id });
   } catch (err) {
     listError(res, err, 'deleting the list');
@@ -445,9 +462,9 @@ musicRouter.post('/lists/:id/items', async (req: Request, res: Response) => {
     const b = req.body ?? {};
     let result = null;
     if (b.kind === 'album' && ident(b.album_ref) !== null) {
-      result = await addItem(USER_ID, listId, { kind: 'album', album_ref: b.album_ref });
+      result = await addItem(currentUserId(), listId, { kind: 'album', album_ref: b.album_ref });
     } else if (b.kind === 'song' && ident(b.song_key)) {
-      result = await addItem(USER_ID, listId, { kind: 'song', song_key: b.song_key, album_ref: ident(b.album_ref) });
+      result = await addItem(currentUserId(), listId, { kind: 'song', song_key: b.song_key, album_ref: ident(b.album_ref) });
     } else {
       return res.status(400).json({ error: 'Say which song or album to add' });
     }
@@ -463,21 +480,21 @@ musicRouter.delete('/lists/:id/items/:itemId', async (req: Request, res: Respons
     const listId = String(req.params.id);
     const itemId = String(req.params.itemId);
     if (!isUuid(listId) || !isUuid(itemId)) return res.status(400).json({ error: 'Invalid id' });
-    if (!(await removeItem(USER_ID, listId, itemId))) return res.status(404).json({ error: 'Item not found' });
+    if (!(await removeItem(currentUserId(), listId, itemId))) return res.status(404).json({ error: 'Item not found' });
     res.json({ id: itemId });
   } catch (err) {
     listError(res, err, 'removing from the list');
   }
 });
 
-mountRankRoutes(musicRouter, listKit, USER_ID);
+mountRankRoutes(musicRouter, listKit);
 
 // One list's items with all-time plays of each.
 musicRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
   try {
     const listId = String(req.params.id);
     if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
-    const items = await getListItems(USER_ID, listId);
+    const items = await getListItems(currentUserId(), listId);
     if (!items) return res.status(404).json({ error: 'List not found' });
     res.json(items);
   } catch (err) {
@@ -491,7 +508,7 @@ musicRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
 musicRouter.get('/suggest', async (req: Request, res: Response) => {
   try {
     const text = (v: unknown) => (typeof v === 'string' ? v.slice(0, 200) : '');
-    res.json(await suggest(USER_ID, { artist: text(req.query.artist), title: text(req.query.title) }));
+    res.json(await suggest(currentUserId(), { artist: text(req.query.artist), title: text(req.query.title) }));
   } catch (err) {
     console.error('Error suggesting songs:', err);
     res.status(500).json({ error: 'Failed to look up songs' });
@@ -539,7 +556,7 @@ musicRouter.post('/scrobbles', async (req: Request, res: Response) => {
     const parsed = parsePlay(req.body ?? {});
     if ('error' in parsed) return res.status(400).json({ error: parsed.error });
     const { companions, ...play } = parsed.play;
-    const outcome = await insertManualScrobble(USER_ID, play, { force: req.body?.force === true, companions });
+    const outcome = await insertManualScrobble(currentUserId(), play, { force: req.body?.force === true, companions });
     if (outcome.duplicate) {
       return res.status(409).json({ error: 'You already have this song around that time', duplicate: outcome.duplicate });
     }
@@ -556,7 +573,7 @@ musicRouter.get('/scrobbles/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     if (!isUuid(id)) return res.status(400).json({ error: 'Invalid id' });
-    const detail = await getScrobbleDetail(USER_ID, id);
+    const detail = await getScrobbleDetail(currentUserId(), id);
     if (!detail) return res.status(404).json({ error: 'No such play' });
     res.json(detail);
   } catch (err) {
@@ -572,7 +589,7 @@ musicRouter.put('/scrobbles/:id', async (req: Request, res: Response) => {
     if (!isUuid(id)) return res.status(400).json({ error: 'Invalid id' });
     const parsed = parsePlay(req.body ?? {});
     if ('error' in parsed) return res.status(400).json({ error: parsed.error });
-    const result = await updateScrobble(USER_ID, id, parsed.play);
+    const result = await updateScrobble(currentUserId(), id, parsed.play);
     if (result.status === 'updated') return res.json({ id, session_id: result.sessionId });
     if (result.status === 'conflict') return res.status(409).json({ error: 'Another play already has that time and song' });
     res.status(404).json({ error: 'No such play' });
@@ -587,7 +604,7 @@ musicRouter.delete('/scrobbles/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     if (!isUuid(id)) return res.status(400).json({ error: 'Invalid id' });
-    if (!(await deleteScrobble(USER_ID, id))) return res.status(404).json({ error: 'No such play' });
+    if (!(await deleteScrobble(currentUserId(), id))) return res.status(404).json({ error: 'No such play' });
     res.json({ id });
   } catch (err) {
     console.error('Error deleting scrobble:', err);
@@ -608,11 +625,14 @@ musicRouter.get('/around', async (req: Request, res: Response) => {
   try {
     const checkinIds = parseCheckinIdList(req.query.checkin_ids);
     if (checkinIds.length === 0) return res.json({});
+    // Only the caller's own check-ins: another user's would leak its timing.
+    const owned = await ownedCheckinTypes(currentUserId(), checkinIds);
+    if (owned.size === 0) return res.json({});
     // Anchor times come from each check-in type's own plugin hook.
-    const anchors = await query(pluginTimestampUnion('         '), [checkinIds]);
-    const settings = await getMusicSettings(USER_ID);
+    const anchors = await query(pluginTimestampUnion('         '), [[...owned.keys()]]);
+    const settings = await getMusicSettings(currentUserId());
     const found = await getListeningBefore(
-      USER_ID,
+      currentUserId(),
       anchors.rows.map((r: { id: string; checked_in_at: string }) => ({ id: r.id, time: new Date(r.checked_in_at) })),
       LISTENING_BEFORE_MINUTES,
       settings.min_session_tracks,
@@ -628,7 +648,7 @@ musicRouter.get('/sessions/:id/tracks', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     if (!isUuid(id)) return res.status(400).json({ error: 'Invalid session id' });
-    res.json(await getSessionTracks(USER_ID, id));
+    res.json(await getSessionTracks(currentUserId(), id));
   } catch (err) {
     console.error('Error loading session tracks:', err);
     res.status(500).json({ error: 'Failed to load tracks' });
@@ -648,7 +668,7 @@ function importHandler(parse: (text: string) => ReturnType<typeof parseScrobbleE
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
     try {
       const parsed = parse(fs.readFileSync(file.path, 'utf8'));
-      const inserted = await insertScrobblesBulk(USER_ID, parsed.scrobbles);
+      const inserted = await insertScrobblesBulk(currentUserId(), parsed.scrobbles);
       res.json({
         parsed: parsed.scrobbles.length,
         inserted,
@@ -669,14 +689,14 @@ function importHandler(parse: (text: string) => ReturnType<typeof parseScrobbleE
 // POST /import/scrobbles - Maloja-format JSON export
 musicRouter.post(
   '/import/scrobbles',
-  importUpload.single('file'),
+  preserveUserContext(importUpload.single('file')),
   importHandler(parseScrobbleExport, ['File is not valid JSON', 'No scrobbles found in file']),
 );
 
 // POST /import/lastfm - Last.fm CSV history export
 musicRouter.post(
   '/import/lastfm',
-  importUpload.single('file'),
+  preserveUserContext(importUpload.single('file')),
   importHandler(parseLastfmCsv, ['Not a Last.fm CSV export', 'No scrobbles found in file']),
 );
 
@@ -698,7 +718,7 @@ export const server: CheckinTypeServerPlugin = {
   rootApi: { mount: API_MOUNT, router: scrobblerRouter },
 
   settingsKeys: [
-    { name: 'scrobbler_key', type: 'string', label: 'Scrobbler key' },
+    { name: 'scrobbler_key', type: 'string', label: 'Scrobbler key', uniquePerUser: true },
     { name: 'session_gap_minutes', type: 'number', label: 'Session gap (minutes)', default: DEFAULT_SESSION_GAP_MINUTES },
     { name: 'min_session_tracks', type: 'number', label: 'Minimum tracks per timeline session', default: DEFAULT_MIN_SESSION_TRACKS },
     { name: 'timezone', type: 'string', label: 'Fallback timezone for plays before your first check-in', default: 'UTC' },
@@ -818,7 +838,7 @@ export const server: CheckinTypeServerPlugin = {
     await run('DELETE FROM music_sessions WHERE user_id = $1', [user_id]);
     // A rebuildable cache; orphaned image files are collected on the next lookup.
     await run('DELETE FROM music_albums WHERE user_id = $1', [user_id]);
-    await run(`DELETE FROM companions WHERE checkin_type = '${PLUGIN_ID}'`, []);
+    await run(`DELETE FROM companions WHERE checkin_type = '${PLUGIN_ID}' AND user_id = $1`, [user_id]);
     // Lists are the user's own curation, so Start Over removes them too (items cascade).
     await run('DELETE FROM music_lists WHERE user_id = $1', [user_id]);
     return result.rowCount ?? 0;

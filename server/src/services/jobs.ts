@@ -1,13 +1,15 @@
 import { query } from '../db';
 import type { PluginJobContext, PluginJobDefinition, PluginJobProgress } from 'wwp-shared';
 import { allPlugins } from '../plugins/registry';
+import { runAsUser } from '../auth/context';
 
 // In-memory cancellation signals — checked between batches
 const cancelledJobs = new Set<string>();
 
 // Run at startup: any pending/running job in the DB was started by a previous
 // process whose in-memory runner no longer exists — mark them failed so they
-// don't show as stuck "running" and block new jobs of the same type.
+// don't show as stuck "running" and block new jobs of the same type. Covers
+// every user's jobs (this is process housekeeping, not a user action).
 export async function cleanupStaleJobs() {
   try {
     const result = await query(
@@ -97,7 +99,8 @@ export async function runPluginJob(jobId: string, definition: PluginJobDefinitio
     // Only a still-pending job may start: one cancelled while pending must
     // stay cancelled (an unconditional update used to resurrect it).
     const started = await query(
-      `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1 AND status = 'pending'`,
+      `UPDATE jobs SET status = 'running', started_at = NOW() WHERE id = $1 AND status = 'pending'
+       RETURNING user_id`,
       [jobId]
     );
     if ((started.rowCount ?? 0) === 0) {
@@ -107,7 +110,11 @@ export async function runPluginJob(jobId: string, definition: PluginJobDefinitio
     localRunningJobs.add(jobId);
     console.log(`[jobs] ${definition.jobType} ${jobId} started (local runner live)`);
 
-    await definition.handler(ctx);
+    // The handler always acts as the job's owner (from the row, not from
+    // whatever context the caller happens to be in), so a job started
+    // outside a request still reads and writes only that user's data.
+    const ownerId = started.rows[0].user_id as string;
+    await runAsUser(ownerId, () => definition.handler(ctx));
 
     await query(
       `UPDATE jobs SET status = 'completed', completed_at = NOW() WHERE id = $1`,

@@ -15,6 +15,7 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import type { Request } from 'express';
 import type { FileFilterCallback } from 'multer';
+import { preserveUserContext } from '../auth/context';
 
 /** Shared temp directory for user-uploaded import files. */
 const IMPORT_TMP_DIR = path.join(os.tmpdir(), 'wherewewere-import');
@@ -39,7 +40,7 @@ export function createImportUpload({
       cb(null, `${uuidv4()}-${file.originalname}`);
     },
   });
-  return multer({
+  const upload = multer({
     storage,
     fileFilter: (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
       const error = fileFilter(file);
@@ -55,6 +56,17 @@ export function createImportUpload({
     },
     limits: { fileSize },
   });
+  // multer resumes from stream callbacks, which would drop the signed-in
+  // user's context before the plugin's handler runs: every middleware this
+  // factory hands out keeps it.
+  return {
+    ...upload,
+    single: (name: string) => preserveUserContext(upload.single(name)),
+    array: (name: string, maxCount?: number) => preserveUserContext(upload.array(name, maxCount)),
+    fields: (fields: readonly multer.Field[]) => preserveUserContext(upload.fields(fields)),
+    any: () => preserveUserContext(upload.any()),
+    none: () => preserveUserContext(upload.none()),
+  } as multer.Multer;
 }
 
 /** Delete a temp import file, ignoring cleanup failures. */

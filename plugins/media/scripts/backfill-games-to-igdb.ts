@@ -25,14 +25,15 @@
 // A backup is recommended before the first real run (Settings page has a full
 // backup export, or use pg_dump on the database).
 //
-// Usage (from server/):
-//   npm run backfill:games-to-igdb -- --dry-run   # plan only, no writes
-//   npm run backfill:games-to-igdb                # apply
+// Usage (from server/), naming the account whose games to re-key:
+//   npm run backfill:games-to-igdb -- --user zach --dry-run   # plan only, no writes
+//   npm run backfill:games-to-igdb -- --user zach             # apply
 // ============================================================================
 
 import { pool } from '../../../server/src/db';
 import { igdb, pickIgdbCandidate, type IgdbGameResult } from '../services/igdb';
-import { DEFAULT_USER_ID as USER_ID } from '../../../server/src/constants';
+import { currentUserId, runAsUser } from '../../../server/src/auth/context';
+import { requireScriptUser } from '../../../server/src/scripts/scriptUser';
 
 /** Delay between consecutive IGDB API calls (limit: 4 req/s). */
 const IGDB_DELAY_MS = 300;
@@ -64,7 +65,7 @@ async function loadIgdbCredentials(): Promise<{ clientId: string; clientSecret: 
   const res = await pool.query(
     `SELECT key, value FROM plugin_settings
      WHERE user_id = $1 AND plugin_id = 'media' AND key IN ('igdb_client_id', 'igdb_client_secret')`,
-    [USER_ID]
+    [currentUserId()]
   );
   const decode = (v: unknown): string | null => {
     const s = typeof v === 'string' ? v : v != null ? String(v) : '';
@@ -86,7 +87,7 @@ async function loadGameRows(): Promise<GameRow[]> {
      FROM media_items WHERE user_id = $1 AND media_type = 'game'
        AND (external_source IS DISTINCT FROM 'igdb' OR external_id IS NULL)
      ORDER BY created_at, id`,
-    [USER_ID]
+    [currentUserId()]
   );
   return res.rows;
 }
@@ -134,7 +135,7 @@ async function applyRekey(
 ): Promise<void> {
   if (mergeAwayRowId) {
     await mergeChildRows(client, row.id, mergeAwayRowId);
-    await client.query('DELETE FROM media_items WHERE id = $1', [mergeAwayRowId]);
+    await client.query('DELETE FROM media_items WHERE id = $1 AND user_id = $2', [mergeAwayRowId, currentUserId()]);
   }
   // Rows re-keyed from a legacy provider carry provider-derived values from
   // the wrong source, but we cannot know which were ever user-edited; the same
@@ -156,10 +157,10 @@ async function applyRekey(
          developers = COALESCE(developers, $12),
          publishers = COALESCE(publishers, $13),
          updated_at = NOW()
-     WHERE id = $1`,
+     WHERE id = $1 AND user_id = $14`,
     [row.id, adopted.externalId, adopted.externalUrl, adopted.releaseYear, adopted.imageUrl,
      adopted.platform, adopted.overview, adopted.contentRating, adopted.players, adopted.coop,
-     adopted.genres, adopted.developers, adopted.publishers]
+     adopted.genres, adopted.developers, adopted.publishers, currentUserId()]
   );
 }
 
@@ -171,9 +172,15 @@ function sleep(ms: number): Promise<void> {
 // Main
 // ============================================================================
 
+const USAGE = 'Usage: npm run backfill:games-to-igdb -- --user <username> [--dry-run]';
+
 async function main() {
-  const args = process.argv.slice(2);
-  const dryRun = args.includes('--dry-run');
+  const { user, rest } = await requireScriptUser(process.argv.slice(2), USAGE);
+  console.log(`Re-keying games for user ${user.username}.`);
+  await runAsUser(user.id, () => run(rest.includes('--dry-run')));
+}
+
+async function run(dryRun: boolean) {
 
   const creds = await loadIgdbCredentials();
   if (!creds) {
@@ -248,7 +255,7 @@ async function main() {
         if (outcome.verdict === 'merged') {
           const survivorId = ownedIds.get(outcome.adopted!.externalId)!;
           await mergeChildRows(client, survivorId, row.id);
-          await client.query('DELETE FROM media_items WHERE id = $1', [row.id]);
+          await client.query('DELETE FROM media_items WHERE id = $1 AND user_id = $2', [row.id, currentUserId()]);
         } else {
           await applyRekey(client, row, outcome.adopted!, null);
           if (row.external_id) ownedIds.delete(row.external_id);

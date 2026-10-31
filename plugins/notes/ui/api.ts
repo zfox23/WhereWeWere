@@ -3,7 +3,7 @@
  * `/import/notes` routers.
  */
 
-import { request, withAuthHeader } from '../../../client/src/api/client';
+import { apiFetch, request } from '../../../client/src/api/client';
 
 export interface NoteTag {
   id: string;
@@ -197,7 +197,7 @@ async function postImportForm<T>(path: string, files: File[], fields: Record<str
   form.append('meta', JSON.stringify(files.map((f) => ({ name: f.name, lastModified: f.lastModified || null }))));
   for (const [key, value] of Object.entries(fields)) form.append(key, value);
   for (const file of files) form.append('files', file, file.name);
-  const res = await fetch(`/api/v1/import/notes${path}`, { method: 'POST', headers: withAuthHeader(), body: form });
+  const res = await apiFetch(`/api/v1/import/notes${path}`, { method: 'POST', body: form });
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
     throw new Error(error.error || error.message || `Request failed: ${res.status}`);
@@ -219,9 +219,9 @@ export const notes = {
   createTag: (name: string, color?: string) =>
     request<NoteTag>(`${BASE}/tags`, { method: 'POST', body: JSON.stringify({ name, color }) }),
   updateTag: async (id: string, data: { name?: string; color?: string }): Promise<NoteTag> => {
-    const res = await fetch(`/api/v1${BASE}/tags/${id}`, {
+    const res = await apiFetch(`/api/v1${BASE}/tags/${id}`, {
       method: 'PUT',
-      headers: withAuthHeader({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     const body = await res.json().catch(() => ({}));

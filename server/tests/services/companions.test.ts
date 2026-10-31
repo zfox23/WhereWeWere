@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it as baseIt, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { runAsUser } from '../../src/auth/context';
+import { DEFAULT_USER_ID as U } from '../../src/constants';
+
+// The service acts for currentUserId(): run every test as the default user.
+const it = ((name: string, fn: () => unknown) => baseIt(name, () => runAsUser(U, fn))) as typeof baseIt;
 
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
 
@@ -52,7 +57,8 @@ describe('getCompanions', () => {
     expect(sql).toContain('FROM companions');
     expect(sql).toContain('checkin_type = $1');
     expect(sql).toContain('checkin_id = $2');
-    expect(values).toEqual(['location', 'c1']);
+    expect(sql).toContain('user_id = $3');
+    expect(values).toEqual(['location', 'c1', U]);
   });
 });
 
@@ -74,7 +80,7 @@ describe('getCompanionsByCheckin', () => {
     expect(map.has('c3')).toBe(false);
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('ANY($2::uuid[])');
-    expect(values).toEqual(['media', ['c1', 'c2', 'c3']]);
+    expect(values).toEqual(['media', ['c1', 'c2', 'c3'], U]);
   });
 });
 
@@ -90,7 +96,7 @@ describe('insertCompanions', () => {
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('INSERT INTO companions');
     expect(sql).toContain('ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING');
-    expect(values).toEqual(['media', 'c1', ['Ada', 'Sam']]);
+    expect(values).toEqual(['media', 'c1', ['Ada', 'Sam'], U]);
   });
 });
 
@@ -103,9 +109,11 @@ describe('setCompanions', () => {
     expect(names).toEqual(['Ada', 'Grace']);
     const [delSql, delValues] = queryMock.mock.calls[0];
     expect(delSql).toContain('DELETE FROM companions');
-    expect(delValues).toEqual(['location', 'c1']);
-    const [, insValues] = queryMock.mock.calls[1];
-    expect(insValues).toEqual(['location', 'c1', ['Ada', 'Grace']]);
+    expect(delSql).toContain('user_id = $3');
+    expect(delValues).toEqual(['location', 'c1', U]);
+    const [insSql, insValues] = queryMock.mock.calls[1];
+    expect(insSql).toContain('INSERT INTO companions (user_id, checkin_type, checkin_id, name)');
+    expect(insValues).toEqual(['location', 'c1', ['Ada', 'Grace'], U]);
   });
 
   it('clears all companions when given an empty list', async () => {
@@ -134,7 +142,7 @@ describe('deleteCompanionsForCheckins', () => {
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('DELETE FROM companions');
     expect(sql).toContain('ANY($2::uuid[])');
-    expect(values).toEqual(['media', ['c1', 'c2']]);
+    expect(values).toEqual(['media', ['c1', 'c2'], U]);
   });
 });
 
@@ -146,23 +154,24 @@ describe('searchCompanionNames', () => {
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('GROUP BY name');
     expect(sql).toContain('ORDER BY name');
-    expect(values).toEqual([50]);
+    expect(sql).toContain('WHERE user_id = $1');
+    expect(values).toEqual([U, 50]);
   });
 
   it('applies a case-insensitive substring filter when q is present', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ name: 'Ada' }] });
     await searchCompanionNames('ad', '10');
     const [sql, values] = queryMock.mock.calls[0];
-    expect(sql).toContain('WHERE name ILIKE $1');
-    expect(values).toEqual(['%ad%', 10]);
+    expect(sql).toContain('AND name ILIKE $2');
+    expect(values).toEqual([U, '%ad%', 10]);
   });
 
   it('clamps the limit to the 1..200 range', async () => {
     queryMock.mockResolvedValue({ rows: [] });
     await searchCompanionNames(null, 9999);
-    expect(queryMock.mock.calls[0][1]).toEqual([200]);
+    expect(queryMock.mock.calls[0][1]).toEqual([U, 200]);
     await searchCompanionNames(null, '0');
-    expect(queryMock.mock.calls[1][1]).toEqual([50]);
+    expect(queryMock.mock.calls[1][1]).toEqual([U, 50]);
   });
 });
 
@@ -200,13 +209,15 @@ describe('listCompanionSummaries', () => {
     ]);
     const [idsSql, idsValues] = queryMock.mock.calls[0];
     expect(idsSql).toContain('SELECT DISTINCT checkin_id FROM companions');
-    expect(idsValues).toEqual([]);
+    expect(idsSql).toContain('user_id = $1');
+    expect(idsValues).toEqual([U]);
     const [sql, values] = queryMock.mock.calls[1];
     expect(sql).toContain('COUNT(c.checkin_id)');
     expect(sql).toContain('LEFT JOIN');
     expect(sql).toContain(unionSql);
     expect(sql).toContain('GROUP BY c.name');
-    expect(values).toEqual([['c1', 'c2']]);
+    expect(sql).toContain('WHERE c.user_id = $2');
+    expect(values).toEqual([['c1', 'c2'], U]);
   });
 });
 
@@ -221,7 +232,8 @@ describe('addCompanionName', () => {
     await expect(addCompanionName('ada')).rejects.toMatchObject({ status: 409 });
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('lower(name) = lower($1)');
-    expect(values).toEqual(['ada']);
+    expect(sql).toContain('user_id = $2');
+    expect(values).toEqual(['ada', U]);
   });
 
   it('inserts a standalone row (no check-in reference) and returns the trimmed name', async () => {
@@ -231,8 +243,8 @@ describe('addCompanionName', () => {
     const name = await addCompanionName('  Ada  ');
     expect(name).toBe('Ada');
     const [sql, values] = queryMock.mock.calls[1];
-    expect(sql).toBe('INSERT INTO companions (name) VALUES ($1)');
-    expect(values).toEqual(['Ada']);
+    expect(sql).toBe('INSERT INTO companions (user_id, name) VALUES ($2, $1) ON CONFLICT DO NOTHING');
+    expect(values).toEqual(['Ada', U]);
   });
 });
 
@@ -260,11 +272,11 @@ describe('renameCompanionName', () => {
     const updated = await renameCompanionName('ada', 'Ada Lovelace');
     expect(updated).toBe(3);
     const [sql, values] = queryMock.mock.calls[1];
-    expect(sql).toContain('INSERT INTO companions (checkin_type, checkin_id, name)');
+    expect(sql).toContain('INSERT INTO companions (user_id, checkin_type, checkin_id, name)');
     expect(sql).toContain('ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING');
     expect(sql).toContain('UPDATE companions SET name = $2');
-    expect(sql).toContain('DELETE FROM companions WHERE name = $1 AND checkin_id IS NOT NULL');
-    expect(values).toEqual(['ada', 'Ada Lovelace']);
+    expect(sql).toContain('DELETE FROM companions WHERE name = $1 AND checkin_id IS NOT NULL AND user_id = $3');
+    expect(values).toEqual(['ada', 'Ada Lovelace', U]);
   });
 });
 
@@ -279,8 +291,8 @@ describe('deleteCompanionName', () => {
     const deleted = await deleteCompanionName('Ada');
     expect(deleted).toBe(2);
     const [sql, values] = queryMock.mock.calls[0];
-    expect(sql).toBe('DELETE FROM companions WHERE name = $1');
-    expect(values).toEqual(['Ada']);
+    expect(sql).toBe('DELETE FROM companions WHERE name = $1 AND user_id = $2');
+    expect(values).toEqual(['Ada', U]);
   });
 });
 
@@ -295,15 +307,16 @@ describe('restoreCompanionRows', () => {
     expect(counts).toEqual({ inserted: 1, skipped: 0 });
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING');
-    expect(values).toEqual(['location', id, 'Ada', '2024-01-01T00:00:00Z']);
+    expect(values).toEqual(['location', id, 'Ada', '2024-01-01T00:00:00Z', U]);
   });
 
-  it('inserts standalone rows via the partial unique index arbiter', async () => {
+  it("inserts standalone rows unless the user already has the name", async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 1, rows: [] });
     await restoreCompanionRows([{ name: 'Ada' }]);
     const [sql, values] = queryMock.mock.calls[0];
-    expect(sql).toContain('ON CONFLICT (lower(name)) WHERE checkin_id IS NULL DO NOTHING');
-    expect(values).toEqual(['Ada', null]);
+    expect(sql).toContain('WHERE user_id = $3 AND checkin_id IS NULL AND lower(name) = lower($1)');
+    expect(sql).toContain('ON CONFLICT DO NOTHING');
+    expect(values).toEqual(['Ada', null, U]);
   });
 
   it('skips invalid rows without querying them', async () => {
@@ -344,6 +357,7 @@ describe('GET /companions (core route)', () => {
   function app() {
     const a = express();
     a.use(express.json());
+    a.use((_req, _res, next) => runAsUser(U, next));
     a.use('/companions', companionsRouter);
     return a;
   }
@@ -403,6 +417,7 @@ describe('GET /companions/names (core route)', () => {
   function app() {
     const a = express();
     a.use(express.json());
+    a.use((_req, _res, next) => runAsUser(U, next));
     a.use('/companions', companionsRouter);
     return a;
   }
@@ -414,7 +429,7 @@ describe('GET /companions/names (core route)', () => {
     expect(res.body).toEqual(['Ada', 'Adam']);
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('FROM companions');
-    expect(values).toEqual(['%ad%', 10]);
+    expect(values).toEqual([U, '%ad%', 10]);
   });
 
   it('500s with an error body when the query fails', async () => {

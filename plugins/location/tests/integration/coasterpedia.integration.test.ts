@@ -231,21 +231,29 @@ describe('Coasterpedia enrichment (integration)', () => {
     await query(`DELETE FROM plugin_settings WHERE plugin_id = 'location'`);
     const fresh = await createVenue('Beta', ride);
     const failed = await createVenue('Gamma', ride);
+    const unvisited = await createVenue('Delta', ride);
     await setKey('cpk_test');
     await query(
       `INSERT INTO venue_coasterpedia (venue_id, user_id, status, error) VALUES ($1, $2, 'error', 'boom')`,
       [failed, DEFAULT_USER_ID],
     );
 
-    const ids = await pendingBackfillVenueIds();
+    // Only the user's own rides (checked in at, or on one of their lists) are
+    // looked up; a ride in the shared catalog nobody visited is left alone.
+    for (const venueId of [matched, fresh, failed]) {
+      await query(`INSERT INTO checkins (user_id, venue_id) VALUES ($1, $2)`, [DEFAULT_USER_ID, venueId]);
+    }
+
+    const ids = await pendingBackfillVenueIds(DEFAULT_USER_ID);
     expect(ids.sort()).toEqual([fresh, failed].sort());
+    expect(ids).not.toContain(unvisited);
 
     const before = coasterpediaCalls(fetchMock);
     const progress: number[] = [];
     await runCoasterpediaBackfill(ids, DEFAULT_USER_ID, { delayMs: 0, onProgress: (done) => { progress.push(done); } });
     expect(progress).toEqual([1, 2]);
     expect(coasterpediaCalls(fetchMock) - before).toBeGreaterThanOrEqual(2);
-    expect(await pendingBackfillVenueIds()).toEqual([]);
+    expect(await pendingBackfillVenueIds(DEFAULT_USER_ID)).toEqual([]);
   });
 
   it('backfill paces requests and stops on a revoked key', async () => {

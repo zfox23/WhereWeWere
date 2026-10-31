@@ -28,9 +28,12 @@ import {
   updateGenericCheckin,
 } from './genericStore';
 
-const router = Router();
+import { currentUserId } from '../auth/context';
+import { isUuid } from '../services/batching';
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
+// Every check-in and settings route acts for the signed-in user; another
+// user's check-in id behaves exactly like a missing one (404).
+const router = Router();
 
 function publicManifest(pluginId: string) {
   const plugin = getPlugin(pluginId);
@@ -78,7 +81,7 @@ router.get('/:pluginId/checkins', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt(String(req.query.limit ?? '50'), 10) || 50, 200);
     const offset = parseInt(String(req.query.offset ?? '0'), 10) || 0;
-    const rows = await listGenericCheckins(plugin.id, USER_ID, { limit, offset });
+    const rows = await listGenericCheckins(plugin.id, currentUserId(), { limit, offset });
     res.json(rows);
   } catch (err) {
     console.error('Error listing plugin checkins:', err);
@@ -92,7 +95,7 @@ router.post('/:pluginId/checkins', async (req: Request, res: Response) => {
   if (!plugin) return;
   try {
     const { checked_in_at, checkin_timezone, data } = req.body ?? {};
-    const row = await createGenericCheckin(USER_ID, plugin, {
+    const row = await createGenericCheckin(currentUserId(), plugin, {
       checked_in_at: checked_in_at ?? null,
       checkin_timezone: checkin_timezone ?? null,
       data: data ?? {},
@@ -110,7 +113,8 @@ router.get('/:pluginId/checkins/:id', async (req: Request, res: Response) => {
   const plugin = await genericPluginOr404(String(req.params.pluginId), res);
   if (!plugin) return;
   try {
-    const row = await getGenericCheckin(String(req.params.id), plugin.id, USER_ID);
+    if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Check-in not found' });
+    const row = await getGenericCheckin(String(req.params.id), plugin.id, currentUserId());
     if (!row) return res.status(404).json({ error: 'Check-in not found' });
     res.json(row);
   } catch (err) {
@@ -124,8 +128,9 @@ router.put('/:pluginId/checkins/:id', async (req: Request, res: Response) => {
   const plugin = await genericPluginOr404(String(req.params.pluginId), res);
   if (!plugin) return;
   try {
+    if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Check-in not found' });
     const { checked_in_at, checkin_timezone, data } = req.body ?? {};
-    const row = await updateGenericCheckin(String(req.params.id), plugin, USER_ID, {
+    const row = await updateGenericCheckin(String(req.params.id), plugin, currentUserId(), {
       checked_in_at: checked_in_at ?? undefined,
       checkin_timezone: checkin_timezone ?? undefined,
       data: data ?? undefined,
@@ -145,7 +150,8 @@ router.delete('/:pluginId/checkins/:id', async (req: Request, res: Response) => 
   if (!plugin) return;
   try {
     const id = String(req.params.id);
-    const deleted = await deleteGenericCheckin(id, plugin.id, USER_ID);
+    if (!isUuid(id)) return res.status(404).json({ error: 'Check-in not found' });
+    const deleted = await deleteGenericCheckin(id, plugin.id, currentUserId());
     if (!deleted) return res.status(404).json({ error: 'Check-in not found' });
     res.json({ message: 'Check-in deleted', id });
   } catch (err) {
@@ -161,7 +167,7 @@ router.get('/:pluginId/settings', async (req: Request, res: Response) => {
   const plugin = getPlugin(String(req.params.pluginId));
   if (!plugin) return res.status(404).json({ error: 'Unknown plugin' });
   try {
-    const settings = await getPluginSettings(USER_ID, plugin);
+    const settings = await getPluginSettings(currentUserId(), plugin);
     res.json(settings);
   } catch (err) {
     console.error('Error getting plugin settings:', err);
@@ -175,7 +181,7 @@ router.put('/:pluginId/settings', async (req: Request, res: Response) => {
   if (!plugin) return res.status(404).json({ error: 'Unknown plugin' });
   try {
     const updates = (req.body ?? {}) as Record<string, unknown>;
-    const settings = await setPluginSettings(USER_ID, plugin, updates);
+    const settings = await setPluginSettings(currentUserId(), plugin, updates);
     res.json(settings);
   } catch (err) {
     const status = (err as { status?: number })?.status ?? 500;

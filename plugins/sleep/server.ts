@@ -26,8 +26,8 @@ import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
 import { allPlugins } from '../../server/src/plugins/registry';
 import { pagination } from '../../server/src/services/queryParams';
-
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, maybeCurrentUserId, preserveUserContext } from '../../server/src/auth/context';
+import { webhookUser } from '../../server/src/auth/middleware';
 
 // ---------------------------------------------------------------------------
 // Plugin-owned API: /api/v1/sleep-entries
@@ -56,22 +56,15 @@ function normalizeComment(value: unknown): string | null {
 sleepEntriesRouter.get('/', async (req: Request, res: Response) => {
   try {
     const {
-      user_id,
       from,
       to,
       limit = '50',
       offset = '0',
     } = req.query;
 
-    const params: unknown[] = [];
-    const conditions: string[] = [];
-    let paramIndex = 1;
-
-    if (user_id) {
-      conditions.push(`se.user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
-    }
+    const params: unknown[] = [currentUserId()];
+    const conditions: string[] = ['se.user_id = $1'];
+    let paramIndex = 2;
 
     if (from) {
       conditions.push(`(se.started_at AT TIME ZONE COALESCE(se.sleep_timezone, 'UTC'))::date >= $${paramIndex}::date`);
@@ -85,7 +78,7 @@ sleepEntriesRouter.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     const page = pagination(limit, offset);
     params.push(page.limit);
@@ -123,8 +116,8 @@ sleepEntriesRouter.get('/:id', async (req: Request, res: Response) => {
               se.started_at, se.ended_at, se.rating, se.comment,
               se.created_at, se.updated_at
        FROM sleep_entries se
-       WHERE se.id = $1`,
-      [id]
+       WHERE se.id = $1 AND se.user_id = $2`,
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -164,7 +157,7 @@ sleepEntriesRouter.post('/', async (req: Request, res: Response) => {
        VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6, $7)
        RETURNING *`,
       [
-        USER_ID,
+        currentUserId(),
         Number.isFinite(Number(sleep_as_android_id)) ? Number(sleep_as_android_id) : Date.now(),
         sanitizeTimezone(sleep_timezone),
         started_at,
@@ -188,6 +181,7 @@ sleepEntriesRouter.post('/', async (req: Request, res: Response) => {
 sleepEntriesRouter.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = currentUserId();
     const {
       sleep_timezone,
       started_at,
@@ -212,7 +206,7 @@ sleepEntriesRouter.put('/:id', async (req: Request, res: Response) => {
            rating = COALESCE($5, rating),
            comment = CASE WHEN $7::boolean THEN $6 ELSE comment END,
            updated_at = NOW()
-       WHERE id = $1
+       WHERE id = $1 AND user_id = $9
          AND COALESCE($4::timestamptz, ended_at) >= COALESCE($3::timestamptz, started_at)
        RETURNING *`,
       [
@@ -224,12 +218,13 @@ sleepEntriesRouter.put('/:id', async (req: Request, res: Response) => {
         normalizeComment(comment),
         'comment' in req.body,
         ended_at || null,
+        userId,
       ]
     );
 
     if (result.rows.length === 0) {
       // Either the row doesn't exist or the supplied times are inconsistent.
-      const exists = await query('SELECT 1 FROM sleep_entries WHERE id = $1', [id]);
+      const exists = await query('SELECT 1 FROM sleep_entries WHERE id = $1 AND user_id = $2', [id, userId]);
       if (exists.rows.length > 0) {
         return res.status(400).json({ error: 'ended_at must not be before started_at' });
       }
@@ -249,8 +244,8 @@ sleepEntriesRouter.delete('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const result = await query(
-      'DELETE FROM sleep_entries WHERE id = $1 RETURNING id',
-      [id]
+      'DELETE FROM sleep_entries WHERE id = $1 AND user_id = $2 RETURNING id',
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -284,8 +279,8 @@ const SLEEP_DATE_RANGE_PARAMS = (user_id: unknown, from: unknown, to: unknown) =
 // GET /stats/summary - aggregate sleep stats for a date range
 sleepEntriesRouter.get('/stats/summary', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -317,8 +312,8 @@ sleepEntriesRouter.get('/stats/summary', async (req: Request, res: Response) => 
 // GET /stats/daily - nightly sleep duration and rating per day
 sleepEntriesRouter.get('/stats/daily', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -346,8 +341,8 @@ sleepEntriesRouter.get('/stats/daily', async (req: Request, res: Response) => {
 // GET /stats/rating-distribution - rounded-star distribution + unrated
 sleepEntriesRouter.get('/stats/rating-distribution', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { from, to } = req.query;
+    const user_id = currentUserId();
 
     const hasRange = Boolean(typeof from === 'string' && typeof to === 'string' && from && to);
     const result = await query(
@@ -370,15 +365,12 @@ sleepEntriesRouter.get('/stats/rating-distribution', async (req: Request, res: R
 });
 
 // GET /stats/earliest - earliest sleep entry date (profile period selector)
-sleepEntriesRouter.get('/stats/earliest', async (req: Request, res: Response) => {
+sleepEntriesRouter.get('/stats/earliest', async (_req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
     const result = await query(
       `SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(sleep_timezone, 'UTC')))::text AS date
        FROM sleep_entries WHERE user_id = $1`,
-      [user_id]
+      [currentUserId()]
     );
 
     res.json({ date: result.rows[0]?.date ?? null });
@@ -388,11 +380,28 @@ sleepEntriesRouter.get('/stats/earliest', async (req: Request, res: Response) =>
   }
 });
 
+// GET /stats/webhook-events - count of Sleep as Android webhook events
+// received for this user (shown in Settings > Sleep). Lives here, behind the
+// login guard, rather than on the public webhook router.
+sleepEntriesRouter.get('/stats/webhook-events', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      'SELECT COUNT(*)::int AS count FROM sleep_webhook_events WHERE user_id = $1',
+      [currentUserId()]
+    );
+    res.json({ count: result.rows[0]?.count ?? 0 });
+  } catch (err) {
+    console.error('Sleep webhook stats error:', err);
+    res.status(500).json({ error: 'Failed to get webhook stats' });
+  }
+});
+
 // ---------------------------------------------------------------------------
-// Plugin-owned API: /api/v1/webhook/sleep-as-android
+// Plugin-owned API: /api/v1/webhook/sleep-as-android/:token
 // (moved from server/src/routes/webhook-sleep-as-android.ts; behavior
-// unchanged — the webhook URL is user-configured in the Sleep as Android
-// app and must stay stable)
+// The URL carries the user's secret webhook token (GET /api/v1/auth/
+// webhook-token); `webhookUser` resolves it and runs the handler as that
+// user, or 404s. The router is mounted outside the login guard (`public`).
 // ---------------------------------------------------------------------------
 
 const webhookRouter = Router();
@@ -417,13 +426,14 @@ function parseWebhookTimestamp(value: string | undefined): Date | null {
  *   3. 'UTC' as a last resort.
  */
 async function inferSleepTimezone(referenceTime: Date): Promise<string> {
+  const userId = currentUserId();
   // Ask each registered plugin for the timezone of its most recent check-in
   // at or before the reference time (e.g. the location plugin's hook). The
   // first non-null result wins.
   for (const plugin of allPlugins()) {
     const hook = plugin.server.latestTimezoneAsOf;
     if (!hook) continue;
-    const result = await query(hook().sql, [referenceTime.toISOString(), USER_ID]);
+    const result = await query(hook().sql, [referenceTime.toISOString(), userId]);
     const timezone = result.rows[0]?.timezone;
     if (timezone) {
       return timezone as string;
@@ -439,7 +449,7 @@ async function inferSleepTimezone(referenceTime: Date): Promise<string> {
        AND sleep_timezone != 'UTC'
      ORDER BY ended_at DESC
      LIMIT 1`,
-    [USER_ID]
+    [userId]
   );
   if (sleepResult.rows[0]?.sleep_timezone) {
     return sleepResult.rows[0].sleep_timezone as string;
@@ -448,9 +458,10 @@ async function inferSleepTimezone(referenceTime: Date): Promise<string> {
   return 'UTC';
 }
 
-// POST / - receive a Sleep as Android webhook event
-webhookRouter.post('/', async (req: Request, res: Response) => {
+// POST /:token - receive a Sleep as Android webhook event
+webhookRouter.post('/:token', webhookUser, async (req: Request, res: Response) => {
   try {
+    const userId = currentUserId();
     const body = req.body || {};
     const { event, value1, value2, value3 } = body;
 
@@ -462,7 +473,7 @@ webhookRouter.post('/', async (req: Request, res: Response) => {
     await query(
       `INSERT INTO sleep_webhook_events (user_id, event, value1, value2, value3, raw_body)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [USER_ID, event, value1 ?? null, value2 ?? null, value3 ?? null, body]
+      [userId, event, value1 ?? null, value2 ?? null, value3 ?? null, body]
     );
 
     if (event === 'sleep_tracking_started') {
@@ -489,11 +500,11 @@ webhookRouter.post('/', async (req: Request, res: Response) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['sleep-webhook-start']);
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sleep-webhook-start:${userId}`]);
         const abandoned = await client.query(
           `DELETE FROM sleep_entries
            WHERE user_id = $1 AND is_pending = TRUE`,
-          [USER_ID]
+          [userId]
         );
         if (abandoned.rowCount) {
           console.warn(
@@ -513,7 +524,7 @@ webhookRouter.post('/', async (req: Request, res: Response) => {
                  sleep_timezone = EXCLUDED.sleep_timezone,
                  is_pending  = TRUE,
                  updated_at  = NOW()`,
-          [USER_ID, androidId, timezone, startTime.toISOString()]
+          [userId, androidId, timezone, startTime.toISOString()]
         );
         await client.query('COMMIT');
       } catch (txErr) {
@@ -535,7 +546,7 @@ webhookRouter.post('/', async (req: Request, res: Response) => {
              WHERE user_id = $1
                AND sleep_as_android_id = $3
                AND is_pending = TRUE`,
-            [USER_ID, endTime.toISOString(), startTime.getTime()]
+            [userId, endTime.toISOString(), startTime.getTime()]
           )
         : { rowCount: 0 };
 
@@ -561,7 +572,7 @@ webhookRouter.post('/', async (req: Request, res: Response) => {
              ORDER BY started_at DESC
              LIMIT 1
            )`,
-          [USER_ID, endTime.toISOString()]
+          [userId, endTime.toISOString()]
         );
         if (!fallback.rowCount) {
           console.warn('Sleep webhook: no pending session existed to close at all.');
@@ -577,18 +588,11 @@ webhookRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /stats - count of events received for this user
-webhookRouter.get('/stats', async (_req: Request, res: Response) => {
-  try {
-    const result = await query(
-      'SELECT COUNT(*)::int AS count FROM sleep_webhook_events WHERE user_id = $1',
-      [USER_ID]
-    );
-    res.json({ count: result.rows[0]?.count ?? 0 });
-  } catch (err) {
-    console.error('Sleep webhook stats error:', err);
-    res.status(500).json({ error: 'Failed to get webhook stats' });
-  }
+// Anything else (the old tokenless URL, a wrong path) is a plain 404: this
+// router is mounted before the login guard, so nothing may fall through to
+// the authenticated routes.
+webhookRouter.use((_req: Request, res: Response) => {
+  res.status(404).json({ error: 'Not found' });
 });
 
 // ---------------------------------------------------------------------------
@@ -663,12 +667,13 @@ function normalizeImportRating(value: string): number {
 }
 
 // POST / - import Sleep as Android CSV
-importRouter.post('/', csvUpload.single('file'), async (req: Request, res: Response) => {
+importRouter.post('/', preserveUserContext(csvUpload.single('file')), async (req: Request, res: Response) => {
   const file = req.file;
   if (!file) {
     return res.status(400).json({ error: 'No CSV file provided' });
   }
 
+  const userId = currentUserId();
   let imported = 0;
   let skipped = 0;
   const errors: string[] = [];
@@ -739,7 +744,7 @@ importRouter.post('/', csvUpload.single('file'), async (req: Request, res: Respo
            VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6, $7)
            ON CONFLICT (user_id, sleep_as_android_id) DO NOTHING
            RETURNING id`,
-          [USER_ID, sleepAsAndroidId, timezone, fromIso, toIso, rating, comment]
+          [userId, sleepAsAndroidId, timezone, fromIso, toIso, rating, comment]
         );
 
         if (insertResult.rows.length === 0) {
@@ -797,7 +802,8 @@ export const server: CheckinTypeServerPlugin = {
 
   api: [
     { mount: '/sleep-entries', router: sleepEntriesRouter },
-    { mount: '/webhook/sleep-as-android', router: webhookRouter },
+    // Public: authenticated per request by the token in the URL.
+    { mount: '/webhook/sleep-as-android', router: webhookRouter, public: true },
     { mount: '/import/sleep-as-android', router: importRouter },
   ],
 
@@ -835,7 +841,8 @@ export const server: CheckinTypeServerPlugin = {
   }),
 
   buildTimelineWhere: (ctx: PluginTimelineContext) => {
-    const conds = timelineWhereConditions(ctx, {
+    // The requesting user always scopes the branch (never a client value).
+    const conds = timelineWhereConditions({ ...ctx, user_id: maybeCurrentUserId() ?? ctx.user_id }, {
       alias: 'se',
       timestampColumn: 'ended_at',
       timezoneColumn: 'sleep_timezone',
@@ -883,6 +890,9 @@ export const server: CheckinTypeServerPlugin = {
     try {
       for (const row of rows) {
         if (!row || typeof row.id !== 'string' || row.sleep_as_android_id == null) continue;
+        // Target-less DO NOTHING: an id that already belongs to another
+        // user's row is skipped (never touched), as is a duplicate
+        // sleep_as_android_id of this user's.
         const result = await client.query(
           `INSERT INTO sleep_entries (
              id, user_id, sleep_as_android_id, sleep_timezone,
@@ -896,7 +906,7 @@ export const server: CheckinTypeServerPlugin = {
              COALESCE($9, false),
              COALESCE($10::timestamptz, NOW()), COALESCE($11::timestamptz, NOW())
            )
-           ON CONFLICT (user_id, sleep_as_android_id) DO NOTHING`,
+           ON CONFLICT DO NOTHING`,
           [
             row.id,
             user_id,
@@ -949,7 +959,7 @@ export const server: CheckinTypeServerPlugin = {
            COALESCE($9, false),
            COALESCE($10::timestamptz, NOW()), COALESCE($11::timestamptz, NOW())
          )
-         ON CONFLICT (user_id, sleep_as_android_id) DO NOTHING`,
+         ON CONFLICT DO NOTHING`,
         [
           row.id,
           user_id,
@@ -1084,9 +1094,9 @@ export const server: CheckinTypeServerPlugin = {
       const result = await (executor ?? { query }).query(
         `UPDATE sleep_entries
          SET sleep_timezone = $2, updated_at = NOW()
-         WHERE id = $1
+         WHERE id = $1 AND user_id = $3
          RETURNING id`,
-        [id, suggested_timezone],
+        [id, suggested_timezone, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },

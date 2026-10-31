@@ -62,6 +62,12 @@ export interface PluginSettingsKey {
   type: 'string' | 'number' | 'boolean' | 'json';
   label: string;
   default?: unknown;
+  /**
+   * The value identifies the account (e.g. a key third-party clients send),
+   * so no two users may hold the same one: setting it fails with 409 and a
+   * restore skips it when another user already has it.
+   */
+  uniquePerUser?: boolean;
 }
 
 /**

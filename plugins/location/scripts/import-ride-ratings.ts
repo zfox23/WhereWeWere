@@ -2,26 +2,29 @@
 // One-off importer for a hand-maintained ride-ratings CSV (columns:
 //   Ride Name, Park, Rating).
 //
-// Injects the rating into the associated EXISTING venue row(s) and assigns
-// the "Amusement Ride" category to each modified venue.
+// Records the --user account's rating for the associated EXISTING venue
+// row(s) and assigns the "Amusement Ride" category to each modified venue.
 //
-// Usage (from server/):
-//   npm run import:ride-ratings -- --dry-run        # preview: read-only, no writes
-//   npm run import:ride-ratings                     # apply, using the default CSV
-//   npm run import:ride-ratings -- --dry-run /path  # preview a different CSV
-//   npm run import:ride-ratings -- /path/to.csv     # apply, with a different CSV
+// Usage (from server/; --user names the account the ratings are for):
+//   npm run import:ride-ratings -- --user zach --dry-run        # preview: read-only, no writes
+//   npm run import:ride-ratings -- --user zach                  # apply, using the default CSV
+//   npm run import:ride-ratings -- --user zach --dry-run /path  # preview a different CSV
+//   npm run import:ride-ratings -- --user zach /path/to.csv     # apply, with a different CSV
 //
 // Docker / production:
 //   The compiled script ships inside the server image and is meant to be run
 //   from the host via the wrapper:
-//     ./scripts/run-import-ride-ratings.sh --dry-run /app/data/rides.csv
-//     ./scripts/run-import-ride-ratings.sh /app/data/rides.csv
+//     ./scripts/run-import-ride-ratings.sh --user zach --dry-run /app/data/rides.csv
+//     ./scripts/run-import-ride-ratings.sh --user zach /app/data/rides.csv
 //   The CSV path is resolved INSIDE the container, so it must be reachable
 //   there. The server container mounts ./data/server -> /app/data, so drop the
 //   CSV in ./data/server/ on the host and pass its in-container path
 //   (e.g. /app/data/My Amusement Park Rides - Ride Ratings.csv).
 //
 // Behavior:
+//   - Venues are a catalog every user shares; ratings are each user's own
+//     (venue_ratings), so only the --user account's ratings change. The
+//     category is a shared venue attribute.
 //   - Only existing venues are modified. Rides with no matching venue are
 //     reported as "no existing venue" — nothing is created.
 //   - Matching: normalized-name match (NFKC + lowercase + trim + whitespace
@@ -33,7 +36,7 @@
 //     locations is disambiguated using the Park column ("… Sandusky, OH" →
 //     city hint, "… Japan" → country hint); if it cannot be resolved, the
 //     row is reported as ambiguous and skipped.
-//   - Rating: the CSV uses a 0.5-step scale (e.g. 3.5) but venues.rating is
+//   - Rating: the CSV uses a 0.5-step scale (e.g. 3.5) but venue_ratings.rating is
 //     a SMALLINT CHECK (1..4), so values are rounded to whole stars
 //     (3.5 → 4). Non-numeric or out-of-range values skip the row.
 //   - Category: the "Amusement Ride" venue_categories row is looked up
@@ -50,6 +53,8 @@ import os from 'os';
 import path from 'path';
 import { parse } from 'csv-parse/sync';
 import { pool } from '../../../server/src/db';
+import { currentUserId, runAsUser } from '../../../server/src/auth/context';
+import { requireScriptUser } from '../../../server/src/scripts/scriptUser';
 
 const DEFAULT_CSV = path.join(
   'D:',
@@ -160,8 +165,12 @@ async function loadVenues(): Promise<{
   byExact: Map<string, LocalVenue[]>;
   byLoose: Map<string, LocalVenue[]>;
 }> {
+  // rating = the current user's own rating of the venue
   const res = await pool.query<LocalVenue>(
-    'SELECT id, name, city, country, rating, category_id FROM venues'
+    `SELECT v.id, v.name, v.city, v.country, vr.rating, v.category_id
+     FROM venues v
+     LEFT JOIN venue_ratings vr ON vr.venue_id = v.id AND vr.user_id = $1`,
+    [currentUserId()]
   );
 
   const byExact = new Map<string, LocalVenue[]>();
@@ -475,15 +484,21 @@ async function runImport(rows: RideCsvRow[]): Promise<ImportStats> {
 
     // Per-row ratings: a row's rating applies to its own venues only, so run
     // one update per row (id list already filtered to venues that change).
+    const userId = currentUserId();
     for (const item of planned) {
       if (item.changedIds.length === 0) continue;
       await client.query(
         `UPDATE venues
-         SET rating = $1,
-             category_id = $2,
+         SET category_id = $1,
              updated_at = NOW()
-         WHERE id = ANY($3::uuid[])`,
-        [item.row.rating, categoryId, item.changedIds]
+         WHERE id = ANY($2::uuid[]) AND category_id IS DISTINCT FROM $1`,
+        [categoryId, item.changedIds]
+      );
+      await client.query(
+        `INSERT INTO venue_ratings (user_id, venue_id, rating)
+         SELECT $1::uuid, id, $2::smallint FROM venues WHERE id = ANY($3::uuid[])
+         ON CONFLICT (user_id, venue_id) DO UPDATE SET rating = EXCLUDED.rating, updated_at = NOW()`,
+        [userId, item.row.rating, item.changedIds]
       );
     }
 
@@ -502,8 +517,10 @@ async function runImport(rows: RideCsvRow[]): Promise<ImportStats> {
 // Main
 // ============================================================================
 
+const USAGE = 'Usage: import-ride-ratings --user <username> [--dry-run] [path/to.csv]';
+
 async function main() {
-  const args = process.argv.slice(2);
+  const { user, rest: args } = await requireScriptUser(process.argv.slice(2), USAGE);
   const dryRun = args.includes('--dry-run');
   const csvPath = args.find((a) => !a.startsWith('--')) ?? DEFAULT_CSV;
 
@@ -522,23 +539,25 @@ async function main() {
     console.error(`Failed to parse CSV: ${message}`);
     process.exit(1);
   }
-  console.log(`Parsed ${rows.length} ride rows from ${resolved}`);
+  console.log(`Parsed ${rows.length} ride rows from ${resolved} (user ${user.username})`);
 
-  if (dryRun) {
-    await runDryRun(rows);
-  } else {
-    console.log(`Applying ride ratings (category "${RIDE_CATEGORY}")…`);
-    console.log('');
-    const stats = await runImport(rows);
-    console.log('');
-    console.log('=== IMPORT COMPLETE ===');
-    console.log(`  venues updated:            ${stats.venuesUpdated}`);
-    console.log(`  venues already correct:    ${stats.venuesNoChange}`);
-    console.log(`  category created:          ${stats.categoryCreated ? 'yes' : 'no (already existed)'}`);
-    console.log(`  rows, no existing venue:   ${stats.rowsNotFound}`);
-    console.log(`  rows ambiguous:            ${stats.rowsAmbiguous}`);
-    console.log(`  rows skipped (rating):     ${stats.rowsSkipped}`);
-  }
+  await runAsUser(user.id, async () => {
+    if (dryRun) {
+      await runDryRun(rows);
+    } else {
+      console.log(`Applying ride ratings (category "${RIDE_CATEGORY}")…`);
+      console.log('');
+      const stats = await runImport(rows);
+      console.log('');
+      console.log('=== IMPORT COMPLETE ===');
+      console.log(`  venues updated:            ${stats.venuesUpdated}`);
+      console.log(`  venues already correct:    ${stats.venuesNoChange}`);
+      console.log(`  category created:          ${stats.categoryCreated ? 'yes' : 'no (already existed)'}`);
+      console.log(`  rows, no existing venue:   ${stats.rowsNotFound}`);
+      console.log(`  rows ambiguous:            ${stats.rowsAmbiguous}`);
+      console.log(`  rows skipped (rating):     ${stats.rowsSkipped}`);
+    }
+  });
 
   await pool.end();
 }

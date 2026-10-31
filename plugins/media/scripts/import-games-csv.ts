@@ -2,11 +2,11 @@
 // One-off importer for a hand-maintained games CSV (columns:
 //   Title, Genre, Platform, Rating, Notes, Playtime (Hours), Status).
 //
-// Usage (from server/):
-//   npm run import:games -- --dry-run             # offline preview: no IGDB calls, no writes
-//   npm run import:games                          # import the default CSV
-//   npm run import:games -- --dry-run /path/file  # preview a different CSV
-//   npm run import:games -- /path/to/file.csv     # import a different CSV
+// Usage (from server/), always naming the account to import into:
+//   npm run import:games -- --user zach --dry-run             # offline preview: no IGDB calls, no writes
+//   npm run import:games -- --user zach                       # import the default CSV
+//   npm run import:games -- --user zach --dry-run /path/file  # preview a different CSV
+//   npm run import:games -- --user zach /path/to/file.csv     # import a different CSV
 //
 // Behavior:
 //   - Genre is dropped (nothing in the schema stores it).
@@ -41,15 +41,17 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { parse } from 'csv-parse/sync';
-import { pool } from '../../server/src/db';
+import { pool } from '../../../server/src/db';
 import { igdb, pickIgdbCandidate, type IgdbGameResult } from '../services/igdb';
-import { scoreToRating } from '../../server/src/services/yamtrack';
+import { scoreToRating } from '../../../server/src/services/yamtrack';
 import { normalizeTitle, titleRelation } from '../services/titleMatch';
 
 // Re-exported for any external consumers of this module's title helpers.
 export { normalizeTitle, titleRelation };
 
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, runAsUser } from '../../../server/src/auth/context';
+import { requireScriptUser } from '../../../server/src/scripts/scriptUser';
+
 /** Delay between consecutive IGDB API calls (limit: 4 req/s). */
 const IGDB_DELAY_MS = 300;
 /** Abort further IGDB calls after this many consecutive failures. */
@@ -171,7 +173,7 @@ async function loadLocalGames(): Promise<{
     `SELECT id, title, external_source, external_id, time_played_minutes
      FROM media_items
      WHERE user_id = $1 AND media_type = 'game'`,
-    [USER_ID]
+    [currentUserId()]
   );
 
   const all = res.rows;
@@ -212,7 +214,7 @@ async function loadIgdbCredentials(): Promise<{ clientId: string; clientSecret: 
   const res = await pool.query(
     `SELECT key, value FROM plugin_settings
      WHERE user_id = $1 AND plugin_id = 'media' AND key IN ('igdb_client_id', 'igdb_client_secret')`,
-    [USER_ID]
+    [currentUserId()]
   );
   const decode = (v: unknown): string | null => {
     const s = typeof v === 'string' ? v : v != null ? String(v) : '';
@@ -475,7 +477,7 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
                  developers = COALESCE(developers, $12),
                  publishers = COALESCE(publishers, $13),
                  updated_at = NOW()
-             WHERE id = $1`,
+             WHERE id = $1 AND user_id = $14`,
             [
               mediaItemId,
               match.externalId,
@@ -490,6 +492,7 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
               match.genres,
               match.developers,
               match.publishers,
+              currentUserId(),
             ]
           );
           stats.itemsEnriched++;
@@ -504,7 +507,7 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
                   $9, $10, $11, $12, $13, $14, $15)
           RETURNING id`,
           [
-            USER_ID,
+            currentUserId(),
             match ? 'igdb' : null,
             match?.externalId ?? null,
             match?.title ?? row.title,
@@ -567,7 +570,7 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
           row.notes,
           row.status,
           storedTime,
-          USER_ID,
+          currentUserId(),
         ]
       );
       stats.itemsUpdated++;
@@ -614,8 +617,10 @@ async function runImport(rows: GameCsvRow[]): Promise<ImportStats> {
 // Main
 // ============================================================================
 
+const USAGE = 'Usage: npm run import:games -- --user <username> [--dry-run] [/path/to/file.csv]';
+
 async function main() {
-  const args = process.argv.slice(2);
+  const { user, rest: args } = await requireScriptUser(process.argv.slice(2), USAGE);
   const dryRun = args.includes('--dry-run');
   const csvPath = args.find((a) => !a.startsWith('--')) ?? DEFAULT_CSV;
 
@@ -633,8 +638,13 @@ async function main() {
     console.error(`Failed to parse CSV: ${err.message}`);
     process.exit(1);
   }
-  console.log(`Parsed ${rows.length} game rows from ${resolved}`);
+  console.log(`Parsed ${rows.length} game rows from ${resolved} for user ${user.username}`);
 
+  await runAsUser(user.id, () => run(rows, dryRun));
+  await pool.end();
+}
+
+async function run(rows: GameCsvRow[], dryRun: boolean) {
   if (dryRun) {
     await runDryRun(rows);
   } else {
@@ -650,8 +660,6 @@ async function main() {
     console.log(`  IGDB matches:         ${stats.igdbMatches}`);
     console.log(`  IGDB failures:        ${stats.igdbFailed}${stats.igdbFailed ? ' (re-run later to enrich those games)' : ''}`);
   }
-
-  await pool.end();
 }
 
 main().catch((err) => {

@@ -23,6 +23,8 @@ vi.mock('../services/igdb', () => ({
 }));
 
 import { server, buildMediaDetailPath, mediaRouter } from '../server';
+import { runAsUser } from '../../../server/src/auth/context';
+import { DEFAULT_USER_ID } from '../../../server/src/constants';
 import type { PluginTimelineContext } from 'wwp-shared';
 
 const baseCtx: PluginTimelineContext = {
@@ -99,10 +101,14 @@ describe('media plugin — timeline', () => {
 });
 
 describe('media plugin — plugin shape', () => {
-  it('declares custom storage and its two stable API mounts', () => {
+  it('declares custom storage and its API mounts (the Plex receiver public, its stats signed-in)', () => {
     expect(server.storage).toBe('custom');
     const mounts = Array.isArray(server.api) ? server.api : [server.api as any];
-    expect(mounts.map((m: any) => m.mount)).toEqual(['/media', '/webhook/plex']);
+    expect(mounts.map((m: any) => [m.mount, !!m.public])).toEqual([
+      ['/media', false],
+      ['/webhook/plex', true],
+      ['/webhook/plex', false],
+    ]);
     for (const mount of mounts) {
       expect(typeof mount.router).toBe('function');
       expect(Array.isArray(mount.router.stack)).toBe(true);
@@ -293,11 +299,12 @@ describe('media plugin — cross-cutting hooks', () => {
 
   it('persists the suggested timezone label-only and reports success', async () => {
     queryMock.mockResolvedValue({ rowCount: 1 });
-    expect(await server.reconcile!.apply!('c1', 'Europe/Lisbon')).toBe(true);
+    expect(await runAsUser(DEFAULT_USER_ID, () => server.reconcile!.apply!('c1', 'Europe/Lisbon'))).toBe(true);
     const [sql, values] = queryMock.mock.calls[0];
     expect(sql).toContain('UPDATE media_checkins');
     expect(sql).toContain('SET checkin_timezone = $2');
-    expect(values).toEqual(['c1', 'Europe/Lisbon']);
+    expect(sql).toContain('user_id = $3');
+    expect(values).toEqual(['c1', 'Europe/Lisbon', DEFAULT_USER_ID]);
   });
 
   it('participates in scans only for rows missing a stored timezone', () => {
@@ -310,6 +317,7 @@ describe('media check-in companions (endpoints)', () => {
   function app() {
     const a = express();
     a.use(express.json());
+    a.use((_req, _res, next) => runAsUser(DEFAULT_USER_ID, next));
     a.use('/media', mediaRouter);
     return a;
   }
@@ -334,7 +342,7 @@ describe('media check-in companions (endpoints)', () => {
     expect(res.body.companions).toEqual(['Ada', 'Grace']);
     const [sql, values] = queryMock.mock.calls[2];
     expect(sql).toContain('INSERT INTO companions');
-    expect(values).toEqual(['media', 'mc1', ['Ada', 'Grace']]);
+    expect(values).toEqual(['media', 'mc1', ['Ada', 'Grace'], DEFAULT_USER_ID]);
   });
 
   it('PUT /checkins/:id replaces companions when the key is present', async () => {
@@ -350,7 +358,7 @@ describe('media check-in companions (endpoints)', () => {
     expect(res.body.companions).toEqual(['Sam']);
     const [delSql, delValues] = queryMock.mock.calls[1];
     expect(delSql).toContain('DELETE FROM companions');
-    expect(delValues).toEqual(['media', 'mc1']);
+    expect(delValues).toEqual(['media', 'mc1', DEFAULT_USER_ID]);
   });
 
   it('PUT /checkins/:id keeps existing companions when the key is absent', async () => {
@@ -389,7 +397,7 @@ describe('media check-in companions (endpoints)', () => {
     const [sql, values] = queryMock.mock.calls[1];
     expect(sql).toContain('DELETE FROM companions');
     expect(sql).toContain('checkin_type = $1');
-    expect(values).toEqual(['media', ['mc1']]);
+    expect(values).toEqual(['media', ['mc1'], DEFAULT_USER_ID]);
   });
 });
 
@@ -397,6 +405,7 @@ describe('POST /items/:id/sync resolves against draft title/external id', () => 
   function app() {
     const a = express();
     a.use(express.json());
+    a.use((_req, _res, next) => runAsUser(DEFAULT_USER_ID, next));
     a.use('/media', mediaRouter);
     return a;
   }

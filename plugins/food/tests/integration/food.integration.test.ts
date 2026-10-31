@@ -54,6 +54,13 @@ async function configureMealie() {
   expect(res.status).toBe(200);
 }
 
+/** A location check-in owned by `userId`, for meals eaten out to point at. */
+async function locationCheckin(userId: string): Promise<string> {
+  const venue = await query(`INSERT INTO venues (name, latitude, longitude) VALUES ('Thai Place', 13.75, 100.5) RETURNING id`);
+  const checkin = await query('INSERT INTO checkins (user_id, venue_id) VALUES ($1, $2) RETURNING id', [userId, venue.rows[0].id]);
+  return checkin.rows[0].id as string;
+}
+
 const calls = (fetchMock: ReturnType<typeof stubExternal>) =>
   fetchMock.mock.calls.map(([u, init]) => `${init?.method ?? 'GET'} ${String(u).replace(MEALIE, '')}`);
 
@@ -73,7 +80,7 @@ describe('Food plugin (integration)', () => {
   });
 
   it('creates, reads, edits and deletes a free-text meal with companions, without touching Mealie', async () => {
-    const locationId = '11111111-2222-4333-8444-555555555555';
+    const locationId = await locationCheckin(DEFAULT_USER_ID);
     const created = await request(app).post('/api/v1/food/checkins').send({
       meal_type: 'dinner',
       recipe_name: 'Pad thai',

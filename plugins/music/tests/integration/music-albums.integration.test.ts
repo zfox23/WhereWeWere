@@ -13,6 +13,7 @@ import {
   setupIntegrationDatabase,
   teardownIntegrationDatabase,
 } from '../../../../server/tests/helpers/testDb';
+import { createTestUser } from '../../../../server/tests/helpers/auth';
 import { getMusicSettings } from '../../services/scrobbles';
 import { setAlbumDeps, whenBackfillDone, type AlbumDeps } from '../../services/albums';
 import { ProviderUnavailableError } from '../../services/albumProviders';
@@ -77,6 +78,9 @@ describe('music metadata', () => {
   });
   beforeEach(async () => {
     await resetIntegrationDatabase();
+    // A lookup only collects art files that have sat unused a while, so
+    // clear what earlier tests left behind.
+    fs.rmSync(path.join(dataDir, 'music-art'), { recursive: true, force: true });
     key = (await getMusicSettings(DEFAULT_USER_ID)).scrobbler_key;
     finds = [];
     imageHits = [];
@@ -436,6 +440,29 @@ describe('music metadata', () => {
     });
   });
 
+  it("keeps each user's lookup run to themselves", async () => {
+    const other = await createTestUser('other');
+    await push('Sun & Moon', 'Group Therapy');
+    let release!: () => void;
+    useDeps(() => new Promise((resolve) => { release = () => resolve(match()); }));
+    expect((await request(app).post('/api/v1/music/albums/backfill')).status).toBe(202);
+    for (let i = 0; i < 50 && !release; i++) await new Promise((r) => setTimeout(r, 20));
+
+    // The other user sees no run, can't cancel the owner's, and may start their own.
+    const theirs = (await request(app).get('/api/v1/music/albums/status').set('Cookie', other.cookie)).body;
+    expect(theirs.job.state).toBe('idle');
+    expect(theirs.albums.total).toBe(0);
+    await request(app).post('/api/v1/music/albums/backfill/cancel').set('Cookie', other.cookie);
+    expect((await request(app).post('/api/v1/music/albums/backfill').set('Cookie', other.cookie)).status).toBe(202);
+    expect((await status()).job.state).toBe('running');
+
+    release();
+    await whenBackfillDone();
+    expect((await status()).job).toMatchObject({ state: 'done', matched: 1 });
+    expect((await request(app).get('/api/v1/music/albums/status').set('Cookie', other.cookie)).body.job)
+      .toMatchObject({ state: 'done', matched: 0 });
+  });
+
   it('removes albums on start-over and collects their files on the next lookup', async () => {
     await push('Sun & Moon', 'Group Therapy');
     useDeps(async () => match());
@@ -446,6 +473,11 @@ describe('music metadata', () => {
     expect((await query('SELECT 1 FROM music_albums')).rowCount).toBe(0);
     useDeps(async () => null);
     await push('Other', 'Else', ['X'], 1000);
+    // Files only just written are spared (another user's lookup may own them).
+    await backfill();
+    expect(fs.readdirSync(path.join(dataDir, 'music-art'))).toContain('deezer-42-thumb.jpg');
+    const old = new Date(Date.now() - 60 * 60 * 1000);
+    fs.utimesSync(path.join(dataDir, 'music-art', 'deezer-42-thumb.jpg'), old, old);
     await backfill();
     expect(fs.readdirSync(path.join(dataDir, 'music-art'))).toEqual([]);
   });

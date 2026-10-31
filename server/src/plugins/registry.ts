@@ -11,8 +11,11 @@
  * hard-coded branches.
  */
 
-import type { CheckinTypeServer } from 'wwp-shared';
+import type { CheckinTypeServer, PluginTimelineContext } from 'wwp-shared';
 import { isValidPluginId } from 'wwp-shared';
+import { query } from '../db';
+import { genericTimelineSelect, genericTimelineWhere } from './genericStore';
+import { isUuid } from '../services/batching';
 
 // Import plugin server halves here. Convention:
 //   import { server as moodServer } from '../../../plugins/mood/server';
@@ -128,6 +131,10 @@ export function pluginTimestampBranches(): string[] {
  * `SELECT ... WHERE FALSE` when no plugins contribute (so callers can keep
  * a stable (id, checked_in_at) column shape). `indent` is applied to each
  * continuation line.
+ *
+ * NOT user-scoped: the branches resolve any id. Never feed it ids from a
+ * client or a backup without first narrowing them to the user's own
+ * check-ins with {@link ownedCheckinTypes}.
  */
 export function pluginTimestampUnion(indent = ''): string {
   const branches = pluginTimestampBranches();
@@ -149,4 +156,96 @@ export function pluginReflectionBranches(): string[] {
     .map((plugin) => plugin.server.reflectionBranch?.().sql ?? null)
     .filter((sql): sql is string => sql !== null)
     .map((sql) => `(\n        ${sql.trim()}\n        )`);
+}
+
+/** Rebase $n placeholders so they start after `offset` parameters. */
+export function rebasePlaceholders(sql: string, offset: number): string {
+  return sql.replace(/\$(\d+)/g, (_m, n) => `$${offset + parseInt(n, 10)}`);
+}
+
+/**
+ * One user's check-ins of every type as `(type, id)` rows: the union of each
+ * plugin's timeline branch filtered to `userId` (and, defensively, re-checked
+ * on the branch's `user_id` envelope column), plus its resolveTimestamps
+ * rows restricted to `user_id`. Use it whenever a client- or backup-supplied
+ * check-in id must be proven to belong to the user (`resolveTimestamps` alone
+ * resolves anyone's ids).
+ *
+ * Placeholders start after `paramOffset`; append `values` to the caller's
+ * parameter list in that position.
+ */
+export function userCheckinRefsSql(userId: string, paramOffset = 0): { sql: string; values: unknown[] } {
+  const values: unknown[] = [userId];
+  const userParam = `$${paramOffset + 1}`;
+  const branches: string[] = [];
+  for (const plugin of allPlugins()) {
+    const ctx: PluginTimelineContext = { user_id: userId, from: null, to: null, q: null, filterParams: {} };
+    let selectSql: string;
+    let clause: { sql: string | null; values: unknown[] } | null;
+    if (plugin.server.storage === 'custom') {
+      if (!plugin.server.buildTimelineSelect || !plugin.server.buildTimelineWhere) continue;
+      selectSql = plugin.server.buildTimelineSelect().sql;
+      clause = plugin.server.buildTimelineWhere(ctx);
+    } else {
+      selectSql = genericTimelineSelect(plugin.id);
+      clause = genericTimelineWhere(plugin, ctx);
+    }
+    const where = clause?.sql ? rebasePlaceholders(clause.sql, paramOffset + values.length) : null;
+    values.push(...(clause?.values ?? []));
+    branches.push(
+      `SELECT b.type, b.id FROM (\n${selectSql}\n${where ? `WHERE ${where}` : ''}\n) b WHERE b.user_id = ${userParam}`,
+    );
+    // A timeline row isn't always a check-in row (music's timeline lists
+    // listening sessions while companions and anchors key on scrobbles), so
+    // also take the plugin's resolveTimestamps rows, with its id filter
+    // swapped for the user filter.
+    const resolveSql = plugin.server.resolveTimestamps?.().sql;
+    const scoped = resolveSql ? userScopedTimestampBranch(resolveSql, userParam) : null;
+    if (scoped) {
+      branches.push(`SELECT '${plugin.id}'::text AS type, r.id FROM (\n${scoped}\n) r`);
+    }
+  }
+  if (branches.length === 0) {
+    return { sql: 'SELECT NULL::text AS type, NULL::uuid AS id WHERE FALSE', values };
+  }
+  return { sql: branches.map((b) => `(${b})`).join('\nUNION ALL\n'), values };
+}
+
+const RESOLVE_ID_FILTER = /(?<![\w.])id\s*=\s*ANY\(\s*\$1::uuid\[\]\s*\)/i;
+
+/**
+ * A resolveTimestamps branch (single-table `... WHERE id = ANY($1::uuid[])`)
+ * rewritten to list the user's rows instead: the id filter becomes
+ * `user_id = <userParam>`. Null when the branch doesn't have that exact shape
+ * (or uses other placeholders) — the caller then simply skips it, so an
+ * unexpected shape can only hide rows, never widen the result.
+ */
+function userScopedTimestampBranch(sql: string, userParam: string): string | null {
+  if (!RESOLVE_ID_FILTER.test(sql)) return null;
+  const scoped = sql.replace(RESOLVE_ID_FILTER, `user_id = ${userParam}`);
+  if (/\$\d/.test(scoped.split(userParam).join(''))) return null;
+  return scoped;
+}
+
+/**
+ * Which of `ids` are check-ins owned by `userId`, as a map id -> check-in
+ * type (keys are lowercase). Ids belonging to another user (or to nothing)
+ * are simply absent.
+ * Pass the caller's transaction client to see rows it has not committed yet.
+ */
+export async function ownedCheckinTypes(
+  userId: string,
+  ids: string[],
+  executor: { query: (sql: string, values?: unknown[]) => Promise<{ rows: any[] }> } = { query },
+): Promise<Map<string, string>> {
+  const owned = new Map<string, string>();
+  const uuids = [...new Set(ids.filter(isUuid).map((id) => id.toLowerCase()))];
+  if (uuids.length === 0) return owned;
+  const refs = userCheckinRefsSql(userId, 1);
+  const result = await executor.query(
+    `SELECT DISTINCT type, id FROM (\n${refs.sql}\n) refs WHERE refs.id = ANY($1::uuid[])`,
+    [uuids, ...refs.values],
+  );
+  for (const row of result.rows) owned.set(String(row.id), String(row.type));
+  return owned;
 }

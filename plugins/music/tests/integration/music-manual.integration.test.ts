@@ -50,7 +50,7 @@ describe('hand-entered plays', () => {
   it('always shows a session with a hand-entered play on the timeline, however short', async () => {
     await manual({ companions: ['Sam'] });
     await push('Other', 600); // a lone scrobbler play: a one-track session, below the minimum
-    const feed = (await request(app).get('/api/v1/timeline').query({ user_id: DEFAULT_USER_ID })).body.filter((i: any) => i.type === 'music');
+    const feed = (await request(app).get('/api/v1/timeline')).body.filter((i: any) => i.type === 'music');
     expect(feed).toHaveLength(1);
     expect(feed[0].data.track_count).toBe(1);
     expect(feed[0].companions).toEqual(['Sam']);

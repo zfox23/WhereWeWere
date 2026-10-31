@@ -2,7 +2,7 @@
  * Client API helpers for the Media plugin.
  *
  * The plugin owns its own endpoints (`/api/v1/media/*` and
- * `/api/v1/webhook/plex`) plus the core's `/import/yamtrack/*` routes, so the
+ * `/api/v1/webhook/plex/*`) plus the core's `/import/yamtrack/*` routes, so the
  * fetch helpers live here instead of in the core `api/client.ts`. They reuse
  * the core `request` helper for base-URL/auth handling.
  */
@@ -171,6 +171,8 @@ export const media = {
 // Plex webhook
 export const plexWebhook = {
   stats: () => request<{ count: number }>('/webhook/plex/stats'),
+  /** The signed-in user's secret webhook token (the last segment of their Plex webhook URL). */
+  token: () => request<{ token: string }>('/auth/webhook-token'),
 };
 
 // Yamtrack import

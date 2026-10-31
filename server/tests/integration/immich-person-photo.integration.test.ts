@@ -59,6 +59,10 @@ describe('Immich person photos', () => {
     vi.stubGlobal('fetch', fetchMock);
     ({ default: app } = await import('../../src/index'));
     ({ query } = await import('../../src/db'));
+    // The integration setup file loads the config before DATA_DIR above is
+    // set, so point the already-loaded config at the temp dir too (otherwise
+    // the cache lands in, and is read from, the real data dir).
+    (await import('../../src/config')).config.dataDir = tmpDataDir;
     ({
       setupIntegrationDatabase,
       resetIntegrationDatabase,
@@ -171,6 +175,30 @@ describe('Immich person photos', () => {
     expect(Buffer.from(sam2.body).toString()).toBe('p-sam');
     const john2 = await request(app).get('/api/v1/immich/person-photo?name=John');
     expect(Buffer.from(john2.body).toString()).toBe('p-john');
+  });
+
+  it("keeps each user's cache separate (B never gets A's cached photo)", async () => {
+    const { createTestUser } = await import('../helpers/auth');
+    const other = await createTestUser('other');
+    await setImmichConfigured();
+    await query(
+      `INSERT INTO user_settings (user_id, immich_url, immich_api_key) VALUES ($1, $2, 'other-key')`,
+      [other.id, IMMICH_URL]
+    );
+    stubImmich([{ id: 'person-1', name: 'John Doe' }]);
+
+    const a = await request(app).get('/api/v1/immich/person-photo?name=John%20Doe');
+    expect(a.status).toBe(200);
+    expect(a.headers['cache-control']).toContain('private');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // B's Immich has no such person: B must get B's answer, not A's cache.
+    stubImmich([]);
+    const b = await request(app).get('/api/v1/immich/person-photo?name=John%20Doe').set('Cookie', other.cookie);
+    expect(b.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const headers = fetchMock.mock.calls[2][1] as { headers: Record<string, string> };
+    expect(headers.headers['x-api-key']).toBe('other-key');
   });
 
   it('404s when only fuzzy (non-exact) matches exist', async () => {

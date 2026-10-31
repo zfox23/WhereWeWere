@@ -168,7 +168,10 @@ describe('Location plugin API (integration)', () => {
         ['Delta Park', park, 4, '2024-04-01T12:00:00Z'],
       ] as const) {
         const id = await insertVenue(name, 20 + Object.keys(ids).length, 20);
-        await query('UPDATE venues SET category_id = $2, rating = $3 WHERE id = $1', [id, cat, rating]);
+        await query('UPDATE venues SET category_id = $2 WHERE id = $1', [id, cat]);
+        if (rating != null) {
+          await query('INSERT INTO venue_ratings (user_id, venue_id, rating) VALUES ($1, $2, $3)', [DEFAULT_USER_ID, id, rating]);
+        }
         await insertCheckin(id, at);
         ids[name] = id;
       }

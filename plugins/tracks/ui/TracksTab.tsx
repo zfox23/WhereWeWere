@@ -12,7 +12,7 @@ import L from 'leaflet';
 import { Clock, Gauge, Heart, Map as MapIcon, Mountain, Route, TrendingUp } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import type { PluginProfileTabProps } from 'wwp-shared';
-import { settings, stats } from '../../../client/src/api/client';
+import { settings } from '../../../client/src/api/client';
 import { tracks } from './api';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
 import { getThemeDefinition } from '../../../client/src/themes';
@@ -353,11 +353,10 @@ function TracksMap({
   );
 }
 
-async function listTracksInWindow(userId: string, from: string | undefined, to: string | undefined): Promise<TrackEntry[]> {
+async function listTracksInWindow(from: string | undefined, to: string | undefined): Promise<TrackEntry[]> {
   const all: TrackEntry[] = [];
   for (let offset = 0; ; offset += PAGE_SIZE) {
     const page: TrackEntry[] = await tracks.list({
-      user_id: userId,
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
       limit: String(PAGE_SIZE),
@@ -514,7 +513,7 @@ function ActivityBreakdown({
   );
 }
 
-export function TracksTab({ userId }: PluginProfileTabProps) {
+export function TracksTab(_props: PluginProfileTabProps) {
   const getTrackMonthFromLocation = (): string => {
     const monthParam = new URLSearchParams(window.location.search).get('trackMonth');
     return isValidMonthParam(monthParam) ? monthParam : getCurrentMonthIso();
@@ -588,8 +587,8 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
   }, []);
 
   useEffect(() => {
-    stats.earliestDates(userId).then((d) => setEarliestTrackDate(d.tracks)).catch(console.error);
-  }, [userId]);
+    tracks.earliest().then((d) => setEarliestTrackDate(d.date)).catch(console.error);
+  }, []);
 
   const visibleRange = useMemo(
     () => getPeriodDateRange(selectedMonth, periodMode, selectedWeek),
@@ -666,13 +665,12 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
     let cancelled = false;
 
     const rangeParams = {
-      user_id: userId,
       ...(visibleRange.from ? { from: visibleRange.from } : {}),
       ...(visibleRange.to ? { to: visibleRange.to } : {}),
     };
 
     Promise.all([
-      listTracksInWindow(userId, visibleRange.from || undefined, visibleRange.to || undefined),
+      listTracksInWindow(visibleRange.from || undefined, visibleRange.to || undefined),
       tracks.mapData(rangeParams),
     ])
       .then(([listData, mapData]) => {
@@ -693,7 +691,7 @@ export function TracksTab({ userId }: PluginProfileTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [userId, visibleRange.from, visibleRange.to]);
+  }, [visibleRange.from, visibleRange.to]);
 
   useEffect(() => {
     const syncStateFromLocation = () => {

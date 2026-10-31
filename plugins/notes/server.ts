@@ -39,7 +39,7 @@ import { escapeLike } from '../../server/src/services/queryParams';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { createImportUpload, removeImportFile } from '../../server/src/plugins/uploads';
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, preserveUserContext } from '../../server/src/auth/context';
 import { loadTimezoneAnchors } from '../../server/src/services/timezoneAnchors';
 import { getLlmSettings } from '../../server/src/services/llmClient';
 import {
@@ -153,7 +153,7 @@ router.get('/checkins', async (req: Request, res: Response) => {
     const result = await query(
       `SELECT ${NOTE_SELECT} FROM note_checkins n WHERE n.user_id = $1
        ORDER BY n.checked_in_at DESC LIMIT $2 OFFSET $3`,
-      [USER_ID, limit, offset],
+      [currentUserId(), limit, offset],
     );
     const companions = await getCompanionsByCheckin('notes', result.rows.map((r) => r.id as string));
     res.json(result.rows.map((r) => ({ ...r, companions: companions.get(r.id) ?? [] })));
@@ -166,7 +166,7 @@ router.get('/checkins/:id', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   if (!isUuid(id)) return res.status(404).json({ error: 'Note not found' });
   try {
-    const row = await loadNote(USER_ID, id);
+    const row = await loadNote(currentUserId(), id);
     if (!row) return res.status(404).json({ error: 'Note not found' });
     const [companions, themes] = await Promise.all([getCompanions('notes', id), noteThemes(id)]);
     res.json({ ...row, companions, themes });
@@ -182,12 +182,12 @@ router.post('/checkins', async (req: Request, res: Response) => {
       const result = await client.query(
         `INSERT INTO note_checkins (user_id, title, body, checked_in_at, checkin_timezone)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [USER_ID, input.title, input.body, input.checked_in_at, input.checkin_timezone],
+        [currentUserId(), input.title, input.body, input.checked_in_at, input.checkin_timezone],
       );
       const id = result.rows[0].id as string;
-      await setNoteTags(client, id, await resolveTags(client, USER_ID, input.tags));
+      await setNoteTags(client, id, await resolveTags(client, currentUserId(), input.tags));
       await insertCompanions('notes', id, req.body?.companions, client);
-      return { row: (await loadNote(USER_ID, id, client))!, companions: await getCompanions('notes', id, client) };
+      return { row: (await loadNote(currentUserId(), id, client))!, companions: await getCompanions('notes', id, client) };
     });
     res.status(201).json({ ...out.row, companions: out.companions, themes: [] });
   } catch (err) {
@@ -204,12 +204,12 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
       const result = await client.query(
         `UPDATE note_checkins SET title = $3, body = $4, checked_in_at = $5, checkin_timezone = $6
          WHERE id = $1 AND user_id = $2 RETURNING id`,
-        [id, USER_ID, input.title, input.body, input.checked_in_at, input.checkin_timezone],
+        [id, currentUserId(), input.title, input.body, input.checked_in_at, input.checkin_timezone],
       );
       if (result.rowCount === 0) return null;
-      await setNoteTags(client, id, await resolveTags(client, USER_ID, input.tags));
+      await setNoteTags(client, id, await resolveTags(client, currentUserId(), input.tags));
       const companions = await setCompanions('notes', id, req.body?.companions, client);
-      return { row: (await loadNote(USER_ID, id, client))!, companions };
+      return { row: (await loadNote(currentUserId(), id, client))!, companions };
     });
     if (!out) return res.status(404).json({ error: 'Note not found' });
     res.json({ ...out.row, companions: out.companions, themes: await noteThemes(id) });
@@ -223,9 +223,10 @@ router.delete('/checkins/:id', async (req: Request, res: Response) => {
   if (!isUuid(id)) return res.status(404).json({ error: 'Note not found' });
   try {
     const deleted = await withTransaction(async (client) => {
+      const result = await client.query('DELETE FROM note_checkins WHERE id = $1 AND user_id = $2', [id, currentUserId()]);
+      if ((result.rowCount ?? 0) === 0) return false;
       await deleteCompanionsForCheckins('notes', [id], client);
-      const result = await client.query('DELETE FROM note_checkins WHERE id = $1 AND user_id = $2', [id, USER_ID]);
-      return (result.rowCount ?? 0) > 0;
+      return true;
     });
     if (!deleted) return res.status(404).json({ error: 'Note not found' });
     res.json({ message: 'Note deleted', id });
@@ -239,6 +240,7 @@ router.get('/checkins/:id/related', async (req: Request, res: Response) => {
   if (!isUuid(id)) return res.status(404).json({ error: 'Note not found' });
   try {
     const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '6'), 10) || 6, 1), 15);
+    if (!(await loadNote(currentUserId(), id))) return res.status(404).json({ error: 'Note not found' });
     const [related, analyzed] = await Promise.all([
       query(
         `SELECT n.id, n.title, left(n.body, 300) AS excerpt, n.checked_in_at, n.checkin_timezone,
@@ -246,7 +248,7 @@ router.get('/checkins/:id/related', async (req: Request, res: Response) => {
          FROM note_neighbors nb JOIN note_checkins n ON n.id = nb.neighbor_id
          WHERE nb.note_id = $1 AND n.user_id = $2
          ORDER BY nb.similarity DESC LIMIT $3`,
-        [id, USER_ID, limit],
+        [id, currentUserId(), limit],
       ),
       query('SELECT 1 FROM note_embeddings WHERE note_id = $1', [id]),
     ]);
@@ -286,7 +288,7 @@ const TAG_LIST_SQL = `
 
 router.get('/tags', async (_req: Request, res: Response) => {
   try {
-    res.json((await query(TAG_LIST_SQL, [USER_ID])).rows);
+    res.json((await query(TAG_LIST_SQL, [currentUserId()])).rows);
   } catch (err) {
     sendError(res, err, 'Failed to list tags');
   }
@@ -295,11 +297,11 @@ router.get('/tags', async (_req: Request, res: Response) => {
 router.post('/tags', async (req: Request, res: Response) => {
   try {
     const name = parseTagName(req.body?.name);
-    const [id] = await resolveTags(db, USER_ID, [name]);
+    const [id] = await resolveTags(db, currentUserId(), [name]);
     if (req.body?.color != null) {
-      await query('UPDATE note_tags SET color = $3 WHERE id = $1 AND user_id = $2', [id, USER_ID, parseColor(req.body.color)]);
+      await query('UPDATE note_tags SET color = $3 WHERE id = $1 AND user_id = $2', [id, currentUserId(), parseColor(req.body.color)]);
     }
-    const tag = await query('SELECT id, name, color FROM note_tags WHERE id = $1', [id]);
+    const tag = await query('SELECT id, name, color FROM note_tags WHERE id = $1 AND user_id = $2', [id, currentUserId()]);
     res.status(201).json(tag.rows[0]);
   } catch (err) {
     sendError(res, err, 'Failed to create tag');
@@ -311,12 +313,12 @@ router.put('/tags/:id', async (req: Request, res: Response) => {
   if (!isUuid(id)) return res.status(404).json({ error: 'Tag not found' });
   try {
     const sets: string[] = [];
-    const params: unknown[] = [id, USER_ID];
+    const params: unknown[] = [id, currentUserId()];
     if (req.body?.name != null) {
       const name = parseTagName(req.body.name);
       const clash = await query(
         'SELECT id, name FROM note_tags WHERE user_id = $1 AND lower(name) = lower($2) AND id <> $3',
-        [USER_ID, name, id],
+        [currentUserId(), name, id],
       );
       if (clash.rows[0]) {
         return res.status(409).json({
@@ -351,7 +353,7 @@ router.post('/tags/:id/merge', async (req: Request, res: Response) => {
   if (!isUuid(into) || into === id) return res.status(400).json({ error: 'into_id must be another tag' });
   try {
     const moved = await withTransaction(async (client) => {
-      const both = await client.query('SELECT id FROM note_tags WHERE user_id = $1 AND id = ANY($2::uuid[])', [USER_ID, [id, into]]);
+      const both = await client.query('SELECT id FROM note_tags WHERE user_id = $1 AND id = ANY($2::uuid[])', [currentUserId(), [id, into]]);
       if (both.rowCount !== 2) return null;
       const inserted = await client.query(
         `INSERT INTO note_tag_links (note_id, tag_id)
@@ -359,7 +361,7 @@ router.post('/tags/:id/merge', async (req: Request, res: Response) => {
          ON CONFLICT DO NOTHING`,
         [id, into],
       );
-      await client.query('DELETE FROM note_tags WHERE id = $1 AND user_id = $2', [id, USER_ID]);
+      await client.query('DELETE FROM note_tags WHERE id = $1 AND user_id = $2', [id, currentUserId()]);
       return inserted.rowCount ?? 0;
     });
     if (moved == null) return res.status(404).json({ error: 'Tag not found' });
@@ -376,7 +378,7 @@ router.delete('/tags/:id', async (req: Request, res: Response) => {
     const result = await query(
       `WITH counted AS (SELECT COUNT(*)::int AS n FROM note_tag_links WHERE tag_id = $1)
        DELETE FROM note_tags WHERE id = $1 AND user_id = $2 RETURNING (SELECT n FROM counted) AS untagged`,
-      [id, USER_ID],
+      [id, currentUserId()],
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Tag not found' });
     res.json({ deleted: true, notes_untagged: result.rows[0].untagged });
@@ -392,7 +394,7 @@ router.delete('/tags/:id', async (req: Request, res: Response) => {
 async function loadThemes() {
   const result = await query(
     'SELECT id, label, description, color, size FROM note_themes WHERE user_id = $1 ORDER BY size DESC, label',
-    [USER_ID],
+    [currentUserId()],
   );
   return result.rows;
 }
@@ -409,8 +411,8 @@ const LIBRARY_ROW_SQL = `
 router.get('/library', async (_req: Request, res: Response) => {
   try {
     const [notes, tags, themes] = await Promise.all([
-      query(LIBRARY_ROW_SQL, [USER_ID]),
-      query('SELECT id, name, color FROM note_tags WHERE user_id = $1 ORDER BY lower(name)', [USER_ID]),
+      query(LIBRARY_ROW_SQL, [currentUserId()]),
+      query('SELECT id, name, color FROM note_tags WHERE user_id = $1 ORDER BY lower(name)', [currentUserId()]),
       loadThemes(),
     ]);
     res.json({ notes: notes.rows, tags: tags.rows, themes });
@@ -428,7 +430,7 @@ router.get('/graph', async (_req: Request, res: Response) => {
                 (SELECT m.theme_id FROM note_theme_members m WHERE m.note_id = n.id AND m.rank = 1) AS theme_id
          FROM note_checkins n JOIN note_embeddings e ON e.note_id = n.id
          WHERE n.user_id = $1`,
-        [USER_ID],
+        [currentUserId()],
       ),
       // Each pair once: the neighbor lists are symmetric-ish (top-k per note).
       query(
@@ -436,9 +438,9 @@ router.get('/graph', async (_req: Request, res: Response) => {
                 GREATEST(nb.note_id, nb.neighbor_id) AS target, nb.similarity
          FROM note_neighbors nb JOIN note_checkins n ON n.id = nb.note_id
          WHERE n.user_id = $1`,
-        [USER_ID],
+        [currentUserId()],
       ),
-      query('SELECT id, name, color FROM note_tags WHERE user_id = $1 ORDER BY lower(name)', [USER_ID]),
+      query('SELECT id, name, color FROM note_tags WHERE user_id = $1 ORDER BY lower(name)', [currentUserId()]),
       loadThemes(),
     ]);
     res.json({ nodes: notes.rows, edges: edges.rows, tags: tags.rows, themes });
@@ -453,7 +455,7 @@ router.get('/graph', async (_req: Request, res: Response) => {
 
 router.get('/stats', async (req: Request, res: Response) => {
   try {
-    const params: unknown[] = [USER_ID];
+    const params: unknown[] = [currentUserId()];
     const range = dateRange(req, params);
     const base = `FROM note_checkins n WHERE n.user_id = $1${range}`;
     const [totals, byTag, tagMonths, rhythm, themes, themeYears, themeTags] = await Promise.all([
@@ -535,23 +537,24 @@ router.get('/stats', async (req: Request, res: Response) => {
 
 router.get('/analysis/status', async (_req: Request, res: Response) => {
   try {
-    const [config, llm] = await Promise.all([getEmbeddingConfig(USER_ID), getLlmSettings(USER_ID)]);
+    const userId = currentUserId();
+    const [config, llm] = await Promise.all([getEmbeddingConfig(userId), getLlmSettings(userId)]);
     const [counts, themes, lastRun, active] = await Promise.all([
       query(
         `SELECT COUNT(*)::int AS total,
                 COUNT(*) FILTER (WHERE ${PENDING_WHERE.replace('n.user_id = $1 AND ', '')})::int AS pending
          FROM note_checkins n LEFT JOIN note_embeddings e ON e.note_id = n.id
          WHERE n.user_id = $1`,
-        [USER_ID, config?.model ?? ''],
+        [userId, config?.model ?? ''],
       ),
-      query('SELECT COUNT(*)::int AS n FROM note_themes WHERE user_id = $1', [USER_ID]),
+      query('SELECT COUNT(*)::int AS n FROM note_themes WHERE user_id = $1', [userId]),
       query(
-        `SELECT completed_at FROM jobs WHERE type = $1 AND status = 'completed' ORDER BY completed_at DESC LIMIT 1`,
-        [SIMILARITY_JOB],
+        `SELECT completed_at FROM jobs WHERE type = $1 AND user_id = $2 AND status = 'completed' ORDER BY completed_at DESC LIMIT 1`,
+        [SIMILARITY_JOB, userId],
       ),
       query(
-        `SELECT id FROM jobs WHERE type = $1 AND status IN ('pending', 'running') ORDER BY created_at DESC LIMIT 1`,
-        [SIMILARITY_JOB],
+        `SELECT id FROM jobs WHERE type = $1 AND user_id = $2 AND status IN ('pending', 'running') ORDER BY created_at DESC LIMIT 1`,
+        [SIMILARITY_JOB, userId],
       ),
     ]);
     const { total, pending } = counts.rows[0] as { total: number; pending: number };
@@ -590,7 +593,7 @@ async function existingNoteKeys() {
   const result = await query(
     `SELECT ${LOCAL_TS}::date::text AS date, n.title, md5(n.body) AS hash
      FROM note_checkins n WHERE n.user_id = $1`,
-    [USER_ID],
+    [currentUserId()],
   );
   const dateTitles = new Set<string>();
   const bodyHashes = new Set<string>();
@@ -609,7 +612,7 @@ async function planUpload(req: Request): Promise<PlannedNote[]> {
   const fallback = typeof req.body?.fallback_timezone === 'string' && isValidTimeZone(req.body.fallback_timezone)
     ? req.body.fallback_timezone
     : 'UTC';
-  const [anchors, existing] = await Promise.all([loadTimezoneAnchors(USER_ID), existingNoteKeys()]);
+  const [anchors, existing] = await Promise.all([loadTimezoneAnchors(currentUserId()), existingNoteKeys()]);
   const rows = files.map((file, index) => planImportRow({
     index,
     meta: metas[index],
@@ -625,7 +628,7 @@ function previewRow(row: PlannedNote) {
   return { ...rest, word_count: row.body.trim() ? row.body.trim().split(/\s+/).length : 0 };
 }
 
-importRouter.post('/preview', notesUpload.array('files', MAX_IMPORT_FILES), async (req: Request, res: Response) => {
+importRouter.post('/preview', preserveUserContext(notesUpload.array('files', MAX_IMPORT_FILES)), async (req: Request, res: Response) => {
   const files = uploadedFiles(req);
   try {
     if (files.length === 0) return res.status(400).json({ error: 'No files provided' });
@@ -644,7 +647,7 @@ importRouter.post('/preview', notesUpload.array('files', MAX_IMPORT_FILES), asyn
   }
 });
 
-importRouter.post('/', notesUpload.array('files', MAX_IMPORT_FILES), async (req: Request, res: Response) => {
+importRouter.post('/', preserveUserContext(notesUpload.array('files', MAX_IMPORT_FILES)), async (req: Request, res: Response) => {
   const files = uploadedFiles(req);
   try {
     if (files.length === 0) return res.status(400).json({ error: 'No files provided' });
@@ -682,11 +685,11 @@ importRouter.post('/', notesUpload.array('files', MAX_IMPORT_FILES), async (req:
         const result = await client.query(
           `INSERT INTO note_checkins (user_id, title, body, checked_in_at, checkin_timezone, source, source_filename)
            VALUES ($1, $2, $3, $4, $5, 'import', $6) RETURNING id`,
-          [USER_ID, r.title, r.body, r.checked_in_at, r.timezone, r.filename.slice(0, 500)],
+          [currentUserId(), r.title, r.body, r.checked_in_at, r.timezone, r.filename.slice(0, 500)],
         );
         inserted.push(result.rows[0].id as string);
       }
-      await addTagsToNotes(client, inserted, await resolveTags(client, USER_ID, tagNames));
+      await addTagsToNotes(client, inserted, await resolveTags(client, currentUserId(), tagNames));
       return inserted;
     });
 
@@ -854,7 +857,9 @@ export const server: CheckinTypeServerPlugin = {
 
   // Restore runs in one transaction, so every insert below is guarded: a row
   // whose note/tag/theme didn't restore (or a tag name already taken by a
-  // different id) is skipped rather than aborting the whole restore.
+  // different id) is skipped rather than aborting the whole restore. Each
+  // takes the restoring user first and only attaches to that user's notes
+  // and themes, whatever ids the backup names.
   extraBackupTables: [
     {
       table: 'noteTags',
@@ -876,9 +881,10 @@ export const server: CheckinTypeServerPlugin = {
                WHERE n.user_id = $1`,
       insert: `INSERT INTO note_tag_links (note_id, tag_id)
                SELECT n.id, t.id FROM note_checkins n
-               JOIN note_tags t ON t.user_id = n.user_id AND lower(t.name) = lower($2)
-               WHERE n.id = $1
+               JOIN note_tags t ON t.user_id = n.user_id AND lower(t.name) = lower($3)
+               WHERE n.id = $2 AND n.user_id = $1
                ON CONFLICT DO NOTHING`,
+      userIdFirst: true,
     },
     {
       table: 'noteEmbeddings',
@@ -886,9 +892,10 @@ export const server: CheckinTypeServerPlugin = {
                FROM note_embeddings e JOIN note_checkins n ON n.id = e.note_id
                WHERE n.user_id = $1`,
       insert: `INSERT INTO note_embeddings (note_id, model, content_hash, dims, chunk_count, embedding, embedded_at)
-               SELECT $1, $2, $3, $4, $5, $6::real[], COALESCE($7::timestamptz, NOW())
-               WHERE EXISTS (SELECT 1 FROM note_checkins WHERE id = $1)
+               SELECT $2::uuid, $3, $4, $5, $6, $7::real[], COALESCE($8::timestamptz, NOW())
+               WHERE EXISTS (SELECT 1 FROM note_checkins WHERE id = $2::uuid AND user_id = $1)
                ON CONFLICT (note_id) DO NOTHING`,
+      userIdFirst: true,
     },
     {
       table: 'noteThemes',
@@ -905,10 +912,11 @@ export const server: CheckinTypeServerPlugin = {
                FROM note_theme_members m JOIN note_themes t ON t.id = m.theme_id
                WHERE t.user_id = $1`,
       insert: `INSERT INTO note_theme_members (note_id, theme_id, rank, score)
-               SELECT $1, $2, $3, $4
-               WHERE EXISTS (SELECT 1 FROM note_checkins WHERE id = $1)
-                 AND EXISTS (SELECT 1 FROM note_themes WHERE id = $2)
+               SELECT $2::uuid, $3::uuid, $4, $5
+               WHERE EXISTS (SELECT 1 FROM note_checkins WHERE id = $2::uuid AND user_id = $1)
+                 AND EXISTS (SELECT 1 FROM note_themes WHERE id = $3::uuid AND user_id = $1)
                ON CONFLICT DO NOTHING`,
+      userIdFirst: true,
     },
     {
       table: 'noteNeighbors',
@@ -916,10 +924,11 @@ export const server: CheckinTypeServerPlugin = {
                FROM note_neighbors nb JOIN note_checkins n ON n.id = nb.note_id
                WHERE n.user_id = $1`,
       insert: `INSERT INTO note_neighbors (note_id, neighbor_id, similarity)
-               SELECT $1, $2, $3
-               WHERE EXISTS (SELECT 1 FROM note_checkins WHERE id = $1)
-                 AND EXISTS (SELECT 1 FROM note_checkins WHERE id = $2)
+               SELECT $2::uuid, $3::uuid, $4
+               WHERE EXISTS (SELECT 1 FROM note_checkins WHERE id = $2::uuid AND user_id = $1)
+                 AND EXISTS (SELECT 1 FROM note_checkins WHERE id = $3::uuid AND user_id = $1)
                ON CONFLICT DO NOTHING`,
+      userIdFirst: true,
     },
   ],
 
@@ -959,7 +968,8 @@ export const server: CheckinTypeServerPlugin = {
     {
       jobType: SIMILARITY_JOB,
       handler: async ({ isCancelled, updateProgress }) => {
-        await runSimilarityAnalysis(USER_ID, { isCancelled, updateProgress });
+        // Started from the user's request, so it runs as them.
+        await runSimilarityAnalysis(currentUserId(), { isCancelled, updateProgress });
       },
     },
   ],
@@ -1058,8 +1068,8 @@ export const server: CheckinTypeServerPlugin = {
     apply: async (id, suggested_timezone, executor) => {
       if (!isValidTimeZone(suggested_timezone)) return false;
       const result = await (executor ?? db).query(
-        'UPDATE note_checkins SET checkin_timezone = $2 WHERE id = $1 RETURNING id',
-        [id, suggested_timezone],
+        'UPDATE note_checkins SET checkin_timezone = $2 WHERE id = $1 AND user_id = $3 RETURNING id',
+        [id, suggested_timezone, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },

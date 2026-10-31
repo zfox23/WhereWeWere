@@ -1,4 +1,5 @@
 import { query } from '../../../server/src/db';
+import { maybeCurrentUserId } from '../../../server/src/auth/context';
 
 interface Queryable {
   query: (text: string, params?: any[]) => Promise<any>;
@@ -247,16 +248,18 @@ function mapVenueRow(row: any): VenueRecord {
   };
 }
 
+// The returned record goes back to the client (e.g. POST /venues/import-osm),
+// so its check-in count is the current user's own (0 outside a user context).
 async function loadVenueById(client: Queryable, venueId: string): Promise<VenueRecord | null> {
   const result = await client.query(
     `SELECT v.id, v.name, v.category_id, v.address, v.city, v.state, v.country,
             v.postal_code, v.latitude, v.longitude, v.osm_id, v.swarm_venue_id,
             v.parent_venue_id, v.created_at, COUNT(c.id)::int AS checkin_count
      FROM venues v
-     LEFT JOIN checkins c ON c.venue_id = v.id
+     LEFT JOIN checkins c ON c.venue_id = v.id AND c.user_id = $2
      WHERE v.id = $1
      GROUP BY v.id`,
-    [venueId]
+    [venueId, maybeCurrentUserId()]
   );
 
   return result.rows.length > 0 ? mapVenueRow(result.rows[0]) : null;
@@ -371,6 +374,9 @@ export async function findBestVenueMatch(
          AND v.latitude BETWEEN $6::float8 AND $7::float8
          AND ($8::float8 IS NULL OR v.longitude BETWEEN $8::float8 AND $9::float8)
      )
+     -- Venues are shared: among near-duplicates, prefer the one with the most
+     -- check-ins across all users. The count only ranks; it isn't returned
+     -- to clients (findOrReuseVenue reloads the match via loadVenueById).
      SELECT n.*,
             (SELECT COUNT(*)::int FROM checkins c WHERE c.venue_id = n.id) AS checkin_count
      FROM candidates n

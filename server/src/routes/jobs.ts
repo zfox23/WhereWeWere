@@ -8,17 +8,23 @@ import {
   isJobRunningLocally,
 } from '../services/jobs';
 import { isUuid } from '../services/batching';
+import { currentUserId } from '../auth/context';
 
 const router = Router();
 
-// GET / - list recent jobs
+// Jobs are per-user: every lookup is scoped to the signed-in user, and
+// another user's job behaves exactly like a missing one (404).
+
+// GET / - list the user's recent jobs
 router.get('/', async (_req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT id, type, status, progress, error, started_at, completed_at, created_at
        FROM jobs
+       WHERE user_id = $1
        ORDER BY created_at DESC
-       LIMIT 20`
+       LIMIT 20`,
+      [currentUserId()]
     );
     res.json(result.rows);
   } catch (err) {
@@ -33,8 +39,8 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Job not found' });
     const result = await query(
       `SELECT id, type, status, progress, error, started_at, completed_at, created_at
-       FROM jobs WHERE id = $1`,
-      [req.params.id]
+       FROM jobs WHERE id = $1 AND user_id = $2`,
+      [req.params.id, currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Job not found' });
@@ -57,10 +63,12 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown job type. Supported: ${supportedJobTypes().join(', ')}` });
     }
 
-    // Check if there's already a running job of this type
+    const userId = currentUserId();
+
+    // Check if this user already has a running job of this type
     const running = await query(
-      `SELECT id FROM jobs WHERE type = $1 AND status IN ('pending', 'running')`,
-      [type]
+      `SELECT id FROM jobs WHERE user_id = $1 AND type = $2 AND status IN ('pending', 'running')`,
+      [userId, type]
     );
     if (running.rows.length > 0) {
       return res.status(409).json({
@@ -69,20 +77,21 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    // The partial unique index (one pending/running job per type) makes this
-    // insert the real guard; the check above is just the friendly fast path.
+    // The partial unique index idx_jobs_one_active_per_user_type (one
+    // pending/running job per user and type) makes this insert the real
+    // guard; the check above is just the friendly fast path.
     let job;
     try {
       const result = await query(
-        `INSERT INTO jobs (type, status) VALUES ($1, 'pending') RETURNING *`,
-        [type]
+        `INSERT INTO jobs (user_id, type, status) VALUES ($1, $2, 'pending') RETURNING *`,
+        [userId, type]
       );
       job = result.rows[0];
     } catch (insertErr: any) {
       if (insertErr?.code === '23505') {
         const active = await query(
-          `SELECT id FROM jobs WHERE type = $1 AND status IN ('pending', 'running') LIMIT 1`,
-          [type]
+          `SELECT id FROM jobs WHERE user_id = $1 AND type = $2 AND status IN ('pending', 'running') LIMIT 1`,
+          [userId, type]
         );
         return res.status(409).json({
           error: 'A job of this type is already running',
@@ -109,8 +118,8 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   try {
     if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Job not found' });
     const result = await query(
-      `SELECT id, status FROM jobs WHERE id = $1`,
-      [req.params.id]
+      `SELECT id, status FROM jobs WHERE id = $1 AND user_id = $2`,
+      [req.params.id, currentUserId()]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Job not found' });

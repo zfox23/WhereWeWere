@@ -34,7 +34,12 @@ export function MediaSettings() {
 
   const [plexEventCount, setPlexEventCount] = useState<number | null>(null);
   const [plexCopied, setPlexCopied] = useState(false);
-  const plexWebhookUrl = `${window.location.origin}/api/v1/webhook/plex`;
+  // The URL carries this user's secret webhook token, so it is only shown once the token loads.
+  const [webhookToken, setWebhookToken] = useState<string | null>(null);
+  const [webhookTokenError, setWebhookTokenError] = useState(false);
+  const plexWebhookUrl = webhookToken
+    ? `${window.location.origin}/api/v1/webhook/plex/${webhookToken}`
+    : null;
 
   useEffect(() => {
     plugins.settings
@@ -57,12 +62,19 @@ export function MediaSettings() {
   }, []);
 
   useEffect(() => {
+    plexWebhook.token()
+      .then((data) => setWebhookToken(data.token))
+      .catch(() => setWebhookTokenError(true));
+  }, []);
+
+  useEffect(() => {
     plexWebhook.stats()
       .then((data) => setPlexEventCount(data.count))
       .catch(() => setPlexEventCount(null));
   }, []);
 
   const handlePlexCopy = () => {
+    if (!plexWebhookUrl) return;
     copyText(plexWebhookUrl).then((ok) => {
       if (!ok) return;
       setPlexCopied(true);
@@ -130,17 +142,22 @@ export function MediaSettings() {
             </label>
             <div className="flex items-center gap-2">
               <code className="flex-1 min-w-0 truncate rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-800 dark:text-gray-200">
-                {plexWebhookUrl}
+                {plexWebhookUrl ?? (webhookTokenError ? 'Could not load your webhook URL' : 'Loading…')}
               </code>
               <button
                 onClick={handlePlexCopy}
+                disabled={!plexWebhookUrl}
                 title={plexCopied ? 'Copied!' : 'Copy URL'}
-                className="shrink-0 flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                className="shrink-0 flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
               >
                 {plexCopied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
                 {plexCopied ? 'Copied' : 'Copy'}
               </button>
             </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              This URL is private to your account: anyone who has it can add media to your history.
+              Regenerating your webhook token in Account settings changes it, and Plex must then be given the new URL.
+            </p>
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
               {plexEventCount === null
                 ? 'Loading webhook stats…'

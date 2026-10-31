@@ -2,7 +2,7 @@
  * Client API helpers for the Music plugin (`/api/v1/music/*`).
  */
 
-import { request, withAuthHeader } from '../../../client/src/api/client';
+import { apiFetch, request } from '../../../client/src/api/client';
 import type { RankSessionState } from '../../../client/src/components/lists/ranking/engine';
 import type {
   AlbumBackfillStatus,
@@ -37,7 +37,7 @@ function rangeQuery(from?: string, to?: string, extra: Record<string, string> = 
 async function uploadImport(url: string, file: File): Promise<MusicImportResult> {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(url, { method: 'POST', headers: withAuthHeader(), body: form });
+  const res = await apiFetch(url, { method: 'POST', body: form });
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(error.error || error.message || `Import failed: ${res.status}`);
@@ -62,9 +62,9 @@ export const music = {
     ),
   /** Write down a song you heard. Throws NearDuplicateError (not stored) unless `force`. */
   createScrobble: async (input: ManualScrobbleInput): Promise<{ id: string; session_id: string | null }> => {
-    const res = await fetch('/api/v1/music/scrobbles', {
+    const res = await apiFetch('/api/v1/music/scrobbles', {
       method: 'POST',
-      headers: withAuthHeader({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
     const body = await res.json().catch(() => ({}));

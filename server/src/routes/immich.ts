@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { query } from '../db';
-import { pluginTimestampUnion } from '../plugins/registry';
+import { ownedCheckinTypes, pluginTimestampUnion } from '../plugins/registry';
+import { currentUserId } from '../auth/context';
 import { config } from '../config';
 import { isUuid, mapWithConcurrency, parseCheckinIdList } from '../services/batching';
 
@@ -15,17 +16,32 @@ const IMMICH_SEARCH_CONCURRENCY = 6;
 
 const router = Router();
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
+// Everything here uses the signed-in user's own Immich server and key, and
+// only resolves check-ins that belong to that user.
 
 // Person-photo disk cache: a featured person photo rarely changes, so keep it
 // for a day; a "no such person" miss is re-checked after an hour.
 const PERSON_PHOTO_TTL_MS = 24 * 60 * 60 * 1000;
 const PERSON_MISS_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * Anchor timestamps (id, checked_in_at) for those of `ids` that are the
+ * user's own check-ins; another user's check-in is treated as missing.
+ */
+async function ownCheckinTimestamps(ids: string[]): Promise<{ id: string; checked_in_at: string }[]> {
+  const owned = await ownedCheckinTypes(currentUserId(), ids);
+  if (owned.size === 0) return [];
+  const result = await query(
+    `${pluginTimestampUnion('       ')}`,
+    [[...owned.keys()]]
+  );
+  return result.rows;
+}
+
 async function getImmichSettings(): Promise<{ url: string; apiKey: string } | null> {
   const result = await query(
     'SELECT immich_url, immich_api_key FROM user_settings WHERE user_id = $1',
-    [USER_ID]
+    [currentUserId()]
   );
   const row = result.rows[0];
   if (!row?.immich_url || !row?.immich_api_key) return null;
@@ -42,15 +58,12 @@ router.get('/photos/:checkinId', async (req: Request, res: Response) => {
 
     // Get anchor timestamp (any check-in type — location, mood, sleep,
     // tracks, ... — each resolves its rows via its plugin hook).
-    const checkinResult = await query(
-      `${pluginTimestampUnion('       ')}`,
-       [[checkinId]]
-    );
-    if (checkinResult.rows.length === 0) {
+    const checkinRows = await ownCheckinTimestamps([String(checkinId)]);
+    if (checkinRows.length === 0) {
       return res.status(404).json({ error: 'Check-in not found' });
     }
 
-    const t = new Date(checkinResult.rows[0].checked_in_at);
+    const t = new Date(checkinRows[0].checked_in_at);
     const takenAfter = new Date(t.getTime() - 20 * 60 * 1000).toISOString();
     const takenBefore = new Date(t.getTime() + 2 * 60 * 60 * 1000).toISOString();
 
@@ -114,13 +127,10 @@ router.get('/photos', async (req: Request, res: Response) => {
 
     // Fetch all anchor timestamps across all check-in types (each resolves
     // its rows via its plugin hook).
-    const checkinsResult = await query(
-      `${pluginTimestampUnion('       ')}`,
-       [checkinIds]
-    );
+    const checkinRows = await ownCheckinTimestamps(checkinIds);
 
     const checkinTimes = new Map<string, Date>();
-    for (const row of checkinsResult.rows) {
+    for (const row of checkinRows) {
       checkinTimes.set(row.id, new Date(row.checked_in_at));
     }
 
@@ -231,7 +241,9 @@ router.get('/thumbnail/:assetId', async (req: Request, res: Response) => {
 
     const contentType = response.headers.get('content-type');
     if (contentType) res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    // private: the URL is the same for every user, but the image comes from
+    // this user's own Immich, so no shared cache may store it.
+    res.setHeader('Cache-Control', 'private, max-age=86400');
 
     const buffer = Buffer.from(await response.arrayBuffer());
     res.send(buffer);
@@ -264,9 +276,13 @@ function personCacheKey(name: string): string {
   return `${slug}-${hash}`;
 }
 
-function personCachePath(name: string): { dir: string; key: string; meta: string } {
+/**
+ * Cache files live in a per-user directory: each user has their own Immich
+ * (and their own "Sam"), so one user's lookup must never serve another's.
+ */
+function personCachePath(userId: string, name: string): { dir: string; key: string; meta: string } {
   const key = personCacheKey(name);
-  const dir = path.join(config.dataDir, 'cache', 'immich-people');
+  const dir = path.join(config.dataDir, 'cache', 'immich-people', userId);
   return { dir, key, meta: path.join(dir, `${key}.json`) };
 }
 
@@ -309,7 +325,7 @@ async function readPersonMeta(metaPath: string): Promise<PersonPhotoMeta | null>
 /**
  * GET /person-photo?name=John%20Doe — the featured photo of the Immich
  * person whose name exactly matches (used next to companion names). Disk-cached under
- * `<dataDir>/cache/immich-people/`; the browser is told to cache it for an
+ * `<dataDir>/cache/immich-people/<userId>/`; the browser is told to cache it for an
  * hour so re-renders don't even reach the server.
  */
 router.get('/person-photo', async (req: Request, res: Response) => {
@@ -319,7 +335,7 @@ router.get('/person-photo', async (req: Request, res: Response) => {
   const immich = await getImmichSettings();
   if (!immich) return res.status(404).send('Immich not configured');
 
-  const { dir, key, meta: metaPath } = personCachePath(name);
+  const { dir, key, meta: metaPath } = personCachePath(currentUserId(), name);
   const now = Date.now();
 
   try {
@@ -330,13 +346,13 @@ router.get('/person-photo', async (req: Request, res: Response) => {
         try {
           const img = await fs.readFile(path.join(dir, meta.file));
           res.setHeader('Content-Type', meta.contentType || 'image/jpeg');
-          res.setHeader('Cache-Control', 'public, max-age=3600');
+          res.setHeader('Cache-Control', 'private, max-age=3600');
           return res.send(img);
         } catch {
           // Cache image vanished (e.g. data dir wiped) — fall through and refetch.
         }
       } else {
-        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.setHeader('Cache-Control', 'private, max-age=300');
         return res.status(404).send('Person not found');
       }
     }
@@ -357,7 +373,7 @@ router.get('/person-photo', async (req: Request, res: Response) => {
     if (!person) {
       // Negative cache so absent people don't hit Immich on every render.
       await writeFileAtomic(metaPath, JSON.stringify({ found: false, fetchedAt: now } satisfies PersonPhotoMeta));
-      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Cache-Control', 'private, max-age=300');
       return res.status(404).send('Person not found');
     }
 
@@ -382,7 +398,7 @@ router.get('/person-photo', async (req: Request, res: Response) => {
     );
 
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(buf);
   } catch (err) {
     console.error('Error fetching person photo:', err);

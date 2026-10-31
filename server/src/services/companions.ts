@@ -15,9 +15,17 @@
  * There is intentionally no FK to the plugin's check-in table (the core
  * cannot reference plugin-owned tables); companion rows are cleaned up by
  * the owning plugin on check-in deletion and by its start-over/backup hooks.
+ *
+ * Every row has an owner (`user_id`), and every function here acts for the
+ * current user (`currentUserId()`): the name pool, autocomplete, renames and
+ * summaries are per-user, and writes never touch another user's rows. The
+ * signatures take no user id so plugin call sites stay unchanged. Callers
+ * are responsible for checking that the check-in itself belongs to the user
+ * before attaching companions to it.
  */
 
-import { query, pool } from '../db';
+import { query } from '../db';
+import { currentUserId } from '../auth/context';
 import { escapeLike } from './queryParams';
 /** Anything able to run parameterized queries (pool or a tx client). */
 export type QueryExecutor = {
@@ -62,9 +70,9 @@ export async function getCompanions(
 ): Promise<string[]> {
   const result = await executor(client).query(
     `SELECT name FROM companions
-     WHERE checkin_type = $1 AND checkin_id = $2
+     WHERE checkin_type = $1 AND checkin_id = $2 AND user_id = $3
      ORDER BY name`,
-    [checkinType, checkinId],
+    [checkinType, checkinId, currentUserId()],
   );
   return result.rows.map((r) => r.name as string);
 }
@@ -82,9 +90,9 @@ export async function getCompanionsByCheckin(
   if (checkinIds.length === 0) return map;
   const result = await executor(client).query(
     `SELECT checkin_id, name FROM companions
-     WHERE checkin_type = $1 AND checkin_id = ANY($2::uuid[])
+     WHERE checkin_type = $1 AND checkin_id = ANY($2::uuid[]) AND user_id = $3
      ORDER BY checkin_id, name`,
-    [checkinType, checkinIds],
+    [checkinType, checkinIds, currentUserId()],
   );
   for (const row of result.rows) {
     const key = row.checkin_id as string;
@@ -108,10 +116,10 @@ export async function insertCompanions(
   const clean = normalizeCompanions(names);
   if (clean.length === 0) return;
   await executor(client).query(
-    `INSERT INTO companions (checkin_type, checkin_id, name)
-     SELECT $1, $2, unnest($3::text[])
+    `INSERT INTO companions (user_id, checkin_type, checkin_id, name)
+     SELECT $4, $1, $2, unnest($3::text[])
      ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING`,
-    [checkinType, checkinId, clean],
+    [checkinType, checkinId, clean, currentUserId()],
   );
 }
 
@@ -128,17 +136,18 @@ export async function setCompanions(
   client?: QueryExecutor | null,
 ): Promise<string[]> {
   const clean = normalizeCompanions(names);
+  const userId = currentUserId();
   const ex = executor(client);
   await ex.query(
-    'DELETE FROM companions WHERE checkin_type = $1 AND checkin_id = $2',
-    [checkinType, checkinId],
+    'DELETE FROM companions WHERE checkin_type = $1 AND checkin_id = $2 AND user_id = $3',
+    [checkinType, checkinId, userId],
   );
   if (clean.length > 0) {
     await ex.query(
-      `INSERT INTO companions (checkin_type, checkin_id, name)
-       SELECT $1, $2, unnest($3::text[])
+      `INSERT INTO companions (user_id, checkin_type, checkin_id, name)
+       SELECT $4, $1, $2, unnest($3::text[])
        ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING`,
-      [checkinType, checkinId, clean],
+      [checkinType, checkinId, clean, userId],
     );
   }
   return clean;
@@ -152,15 +161,15 @@ export async function deleteCompanionsForCheckins(
 ): Promise<void> {
   if (checkinIds.length === 0) return;
   await executor(client).query(
-    'DELETE FROM companions WHERE checkin_type = $1 AND checkin_id = ANY($2::uuid[])',
-    [checkinType, checkinIds],
+    'DELETE FROM companions WHERE checkin_type = $1 AND checkin_id = ANY($2::uuid[]) AND user_id = $3',
+    [checkinType, checkinIds, currentUserId()],
   );
 }
 
 /**
- * Distinct companion names for autocomplete, case-insensitively filtered by
- * `q` (ILIKE) when present, alphabetically ordered. Shared across all
- * check-in types so a name typed on one type autocompletes on every other.
+ * The user's distinct companion names for autocomplete, case-insensitively
+ * filtered by `q` (ILIKE) when present, alphabetically ordered. Shared across
+ * all check-in types so a name typed on one type autocompletes on every other.
  */
 export async function searchCompanionNames(
   q?: string | null,
@@ -168,11 +177,11 @@ export async function searchCompanionNames(
   client?: QueryExecutor | null,
 ): Promise<string[]> {
   const limitNum = Math.min(Math.max(parseInt(String(limit ?? 50), 10) || 50, 1), 200);
-  const params: unknown[] = [];
-  let sql = 'SELECT name FROM companions';
+  const params: unknown[] = [currentUserId()];
+  let sql = 'SELECT name FROM companions WHERE user_id = $1';
   if (q && q.trim() !== '') {
     params.push(`%${escapeLike(q.trim())}%`);
-    sql += ' WHERE name ILIKE $1';
+    sql += ' AND name ILIKE $2';
   }
   sql += `
     GROUP BY name
@@ -193,20 +202,26 @@ export interface CompanionSummary {
 }
 
 /**
- * One row per companion name: how many check-ins it appears on and the most
- * recent such check-in. `timestampUnionSql` must resolve check-in ids to
- * anchor timestamps — use the registry's `pluginTimestampUnion()` (it takes
- * $1, a uuid[] of ids) — and is LEFT JOINed on checkin_id.
+ * One row per companion name of the user: how many check-ins it appears on
+ * and the most recent such check-in. `timestampUnionSql` must resolve
+ * check-in ids to anchor timestamps — use the registry's
+ * `pluginTimestampUnion()` (it takes $1, a uuid[] of ids) — and is LEFT
+ * JOINed on checkin_id. Only ids from the user's own companion rows are
+ * resolved.
  */
 export async function listCompanionSummaries(
   timestampUnionSql: string,
   client?: QueryExecutor | null,
 ): Promise<CompanionSummary[]> {
   const ex = executor(client);
+  const userId = currentUserId();
   const idsResult = await ex.query(
-    'SELECT DISTINCT checkin_id FROM companions WHERE checkin_id IS NOT NULL',
+    'SELECT DISTINCT checkin_id FROM companions WHERE checkin_id IS NOT NULL AND user_id = $1',
+    [userId],
   );
   const checkinIds: string[] = idsResult.rows.map((r) => r.checkin_id as string);
+  // The union is wrapped so its own $1 stays the id list; the user filter
+  // binds $2 outside it.
   const result = await ex.query(
     `SELECT c.name,
             COUNT(c.checkin_id) AS checkin_count,
@@ -215,9 +230,10 @@ export async function listCompanionSummaries(
      LEFT JOIN (
        ${timestampUnionSql}
      ) t ON t.id = c.checkin_id
+     WHERE c.user_id = $2
      GROUP BY c.name
      ORDER BY c.name`,
-    [checkinIds],
+    [checkinIds, userId],
   );
   return result.rows.map((r) => ({
     name: r.name as string,
@@ -228,7 +244,7 @@ export async function listCompanionSummaries(
 
 /**
  * Add a standalone companion name (not yet attached to any check-in) to the
- * shared name pool. Rejects names that already exist (case-insensitively).
+ * user's name pool. Rejects names the user already has (case-insensitively).
  * Returns the stored (trimmed) name.
  */
 export async function addCompanionName(
@@ -242,16 +258,22 @@ export async function addCompanionName(
     throw err;
   }
   const ex = executor(client);
+  const userId = currentUserId();
   const existing = await ex.query(
-    'SELECT 1 FROM companions WHERE lower(name) = lower($1) LIMIT 1',
-    [clean],
+    'SELECT 1 FROM companions WHERE user_id = $2 AND lower(name) = lower($1) LIMIT 1',
+    [clean, userId],
   );
   if ((existing.rowCount ?? existing.rows.length) > 0) {
     const err = new Error(`Companion "${clean}" already exists`) as Error & { status?: number };
     err.status = 409;
     throw err;
   }
-  await ex.query('INSERT INTO companions (name) VALUES ($1)', [clean]);
+  // Target-less ON CONFLICT: the standalone-name unique index must never
+  // turn another user's name into an error (which would also reveal it).
+  await ex.query(
+    'INSERT INTO companions (user_id, name) VALUES ($2, $1) ON CONFLICT DO NOTHING',
+    [clean, userId],
+  );
   return clean;
 }
 
@@ -276,15 +298,17 @@ export async function renameCompanionName(
   }
   if (from === to) return 0;
   const ex = executor(client);
+  const userId = currentUserId();
   // Standalone rows have NULL keys, which ON CONFLICT cannot dedupe — refuse
   // a rename that would create a second standalone row for the target name.
   const collision = await ex.query(
     `SELECT 1 FROM companions
-     WHERE checkin_id IS NULL
+     WHERE user_id = $3
+       AND checkin_id IS NULL
        AND lower(name) = lower($1)
        AND lower(name) <> lower($2)
      LIMIT 1`,
-    [to, from],
+    [to, from, userId],
   );
   if ((collision.rowCount ?? collision.rows.length) > 0) {
     const err = new Error(`Companion "${to}" already exists`) as Error & { status?: number };
@@ -297,17 +321,17 @@ export async function renameCompanionName(
     // which is exactly what a case-only rename (sam -> Sam) does.
     `WITH renamed_standalone AS (
        UPDATE companions SET name = $2
-       WHERE checkin_id IS NULL AND name = $1
+       WHERE checkin_id IS NULL AND name = $1 AND user_id = $3
        RETURNING id
      ),
      moved AS (
-       INSERT INTO companions (checkin_type, checkin_id, name)
-       SELECT checkin_type, checkin_id, $2 FROM companions
-       WHERE name = $1 AND checkin_id IS NOT NULL
+       INSERT INTO companions (user_id, checkin_type, checkin_id, name)
+       SELECT user_id, checkin_type, checkin_id, $2 FROM companions
+       WHERE name = $1 AND checkin_id IS NOT NULL AND user_id = $3
        ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING
      )
-     DELETE FROM companions WHERE name = $1 AND checkin_id IS NOT NULL`,
-    [from, to],
+     DELETE FROM companions WHERE name = $1 AND checkin_id IS NOT NULL AND user_id = $3`,
+    [from, to, userId],
   );
   return result.rowCount ?? 0;
 }
@@ -326,7 +350,10 @@ export async function deleteCompanionName(
     err.status = 400;
     throw err;
   }
-  const result = await executor(client).query('DELETE FROM companions WHERE name = $1', [clean]);
+  const result = await executor(client).query(
+    'DELETE FROM companions WHERE name = $1 AND user_id = $2',
+    [clean, currentUserId()],
+  );
   return result.rowCount ?? 0;
 }
 
@@ -337,6 +364,10 @@ export async function deleteCompanionName(
  * the partial unique index on lower(name) as the conflict arbiter, since the
  * composite unique constraint cannot dedupe NULL keys. Idempotent — the
  * plugins' payloads may re-restore the same rows. Returns per-row counts.
+ *
+ * Rows are always restored as the current user's. The caller must drop rows
+ * whose check-in the user does not own (see the backup route) — this
+ * function only refuses to touch another user's existing rows.
  */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -347,6 +378,7 @@ export async function restoreCompanionRows(
   let inserted = 0;
   let skipped = 0;
   const ex = executor(client);
+  const userId = currentUserId();
   // The dump is de-duplicated at export, but a hand-edited bundle could
   // carry case-variant duplicates that the indexes would reject — collapse
   // them here (case-insensitive per (check-in, name)).
@@ -374,14 +406,24 @@ export async function restoreCompanionRows(
     seen.add(dedupeKey);
 
     const createdAt = typeof row.created_at === 'string' ? row.created_at : null;
+    // Standalone names: the user's existing name (any case) wins; the
+    // target-less ON CONFLICT also absorbs a clash with the unique index on
+    // standalone names instead of failing the whole restore.
     const sql = checkinId === null
-      ? `INSERT INTO companions (name, created_at)
-         VALUES ($1, $2)
-         ON CONFLICT (lower(name)) WHERE checkin_id IS NULL DO NOTHING`
-      : `INSERT INTO companions (checkin_type, checkin_id, name, created_at)
-         VALUES ($1, $2, $3, $4)
+      ? `INSERT INTO companions (user_id, name, created_at)
+         SELECT $3, $1, $2
+         WHERE NOT EXISTS (
+           SELECT 1 FROM companions
+           WHERE user_id = $3 AND checkin_id IS NULL AND lower(name) = lower($1)
+         )
+         ON CONFLICT DO NOTHING`
+      : `INSERT INTO companions (user_id, checkin_type, checkin_id, name, created_at)
+         VALUES ($5, $1, $2, $3, $4)
          ON CONFLICT (checkin_type, checkin_id, name) DO NOTHING`;
-    const result = await ex.query(sql, checkinId === null ? [name, createdAt] : [checkinType, checkinId, name, createdAt]);
+    const result = await ex.query(
+      sql,
+      checkinId === null ? [name, createdAt, userId] : [checkinType, checkinId, name, createdAt, userId],
+    );
     if ((result.rowCount ?? 0) > 0) inserted++;
     else skipped++;
   }

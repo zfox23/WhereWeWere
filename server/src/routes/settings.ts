@@ -3,12 +3,16 @@ import { pool, query } from '../db';
 import {
   applyReconciliationUpdate,
   getTimestampReconciliationSuggestions,
+  reconciliationOwnership,
   type TimestampReconciliationUpdate,
 } from '../services/timestampReconciliation';
 
+import { currentUserId } from '../auth/context';
+
+// The signed-in user's own settings. Username/display name changes live at
+// PUT /api/v1/auth/profile.
 const router = Router();
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const DISTANCE_UNITS = new Set(['metric', 'imperial']);
 const TIMELINE_DENSITIES = new Set(['comfortable', 'compact']);
 const DEFAULT_SYSTEM_LIGHT_THEME = 'sunrise';
@@ -31,7 +35,7 @@ router.get('/', async (_req: Request, res: Response) => {
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.id = $1`,
-      [USER_ID, DEFAULT_SYSTEM_LIGHT_THEME, DEFAULT_SYSTEM_DARK_THEME]
+      [currentUserId(), DEFAULT_SYSTEM_LIGHT_THEME, DEFAULT_SYSTEM_DARK_THEME]
     );
 
     if (result.rows.length === 0) {
@@ -47,7 +51,7 @@ router.get('/', async (_req: Request, res: Response) => {
 
 router.get('/timestamp-reconciliation', async (_req: Request, res: Response) => {
   try {
-    const result = await getTimestampReconciliationSuggestions(USER_ID);
+    const result = await getTimestampReconciliationSuggestions(currentUserId());
     res.json(result);
   } catch (err) {
     console.error('Error scanning timestamp reconciliation suggestions:', err);
@@ -130,7 +134,7 @@ router.put('/', async (req: Request, res: Response) => {
          updated_at = NOW()
        RETURNING *`,
       [
-        USER_ID,
+        currentUserId(),
         dawarich_url ?? null,
         dawarich_api_key ?? null,
         immich_url ?? null,
@@ -171,6 +175,7 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
 
     await client.query('BEGIN');
 
+    const ownership = reconciliationOwnership(currentUserId());
     let updated = 0;
 
     for (const update of updates) {
@@ -182,7 +187,8 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
       // Label-only: the stored instant is the true moment the event happened;
       // reconciliation only corrects the stored timezone label. Built-in
       // types are updated here; plugin types persist via their own hook.
-      const applied = await applyReconciliationUpdate(client as any, update);
+      // Checks the check-in belongs to the user before the plugin writes.
+      const applied = await applyReconciliationUpdate(client as any, update, ownership);
       if (!applied) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: `Unable to reconcile ${update.type} check-in ${update.id}` });
@@ -199,31 +205,6 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
     res.status(500).json({ error: 'Failed to apply timestamp reconciliation updates' });
   } finally {
     client.release();
-  }
-});
-
-// PUT /profile - update username/display_name
-router.put('/profile', async (req: Request, res: Response) => {
-  try {
-    const { username, display_name } = req.body;
-
-    const result = await query(
-      `UPDATE users
-       SET username = COALESCE($2, username),
-           display_name = COALESCE($3, display_name)
-       WHERE id = $1
-       RETURNING id, username, email, display_name`,
-      [USER_ID, username ?? null, display_name ?? null]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error updating profile:', err);
-    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 

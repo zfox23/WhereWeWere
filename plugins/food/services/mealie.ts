@@ -7,6 +7,7 @@
 // and add entries to the household meal plan.
 // ============================================================================
 
+import crypto from 'crypto';
 import { query } from '../../../server/src/db';
 
 const TIMEOUT_MS = 15_000;
@@ -155,15 +156,20 @@ export async function listAllRecipes(config: MealieConfig, fetchImpl: FetchImpl 
 
 const recipeCache = new Map<string, { at: number; recipes: MealieRecipe[] }>();
 
-/** listAllRecipes behind a short in-memory cache (keyed by instance URL). */
+/**
+ * listAllRecipes behind a short in-memory cache, keyed by instance URL and
+ * token: users sharing a Mealie instance may see different recipes, and one
+ * without a working token must not be served another's list.
+ */
 export async function getRecipesCached(
   config: MealieConfig,
   { refresh = false }: { refresh?: boolean } = {},
 ): Promise<MealieRecipe[]> {
-  const hit = recipeCache.get(config.baseUrl);
+  const key = crypto.createHash('sha256').update(`${config.baseUrl}\n${config.token}`).digest('hex');
+  const hit = recipeCache.get(key);
   if (!refresh && hit && Date.now() - hit.at < RECIPE_CACHE_MS) return hit.recipes;
   const recipes = await listAllRecipes(config);
-  recipeCache.set(config.baseUrl, { at: Date.now(), recipes });
+  recipeCache.set(key, { at: Date.now(), recipes });
   return recipes;
 }
 

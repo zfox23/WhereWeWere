@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { earliestDateSources, pluginReflectionBranches } from '../plugins/registry';
 import { find as findTimezone } from 'geo-tz';
 import { query } from '../db';
+import { currentUserId } from '../auth/context';
 
 const router = Router();
 
@@ -10,11 +11,12 @@ const router = Router();
 // top-cities, additional-stats) now live in the location plugin at
 // /api/v1/location-checkins/stats/*.
 
-// GET /reflections?user_id= - check-ins from this date in past years
+// GET /reflections?target_date= - the signed-in user's check-ins from this
+// date in past years
 router.get('/reflections', async (req: Request, res: Response) => {
   try {
-    const { user_id, target_date } = req.query;
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+    const { target_date } = req.query;
+    const userId = currentUserId();
 
     const targetDate = typeof target_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(target_date)
       ? target_date
@@ -30,7 +32,7 @@ router.get('/reflections', async (req: Request, res: Response) => {
     const result = await query(
       `${branches.join('\n        UNION ALL\n        ')}
         ORDER BY checked_in_at DESC`,
-      [user_id, targetDate]
+      [userId, targetDate]
     );
 
     // Group by year. Every row is a generic item; plugin-typed payloads
@@ -75,18 +77,16 @@ router.get('/reflections', async (req: Request, res: Response) => {
   }
 });
 
-// GET /earliest-dates?user_id= - earliest entry date for each data type
-router.get('/earliest-dates', async (req: Request, res: Response) => {
+// GET /earliest-dates - the signed-in user's earliest entry date for each
+// data type
+router.get('/earliest-dates', async (_req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
-    }
+    const userId = currentUserId();
 
     // Every data type contributes its earliestDate hook (keyed by plugin id).
     const earliestResults = await Promise.all(
       earliestDateSources().map(({ key, sql }) =>
-        query(sql, [user_id])
+        query(sql, [userId])
           .then((r) => ({ key, date: r.rows[0]?.date ?? null }))
           .catch(() => ({ key, date: null as string | null })),
       )

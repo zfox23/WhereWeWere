@@ -346,6 +346,27 @@ export async function getPluginSettings(
  * Upsert a subset of a plugin's declared settings keys. Unknown keys are
  * rejected (400).
  */
+/**
+ * Whether another user stores the same value for a `uniquePerUser` setting.
+ * Null/empty values never clash.
+ */
+export async function heldByAnotherUser(
+  executor: { query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number | null }> },
+  user_id: string,
+  pluginId: string,
+  key: string,
+  value: unknown,
+): Promise<boolean> {
+  if (value === null || value === undefined || value === '') return false;
+  const result = await executor.query(
+    `SELECT 1 FROM plugin_settings
+     WHERE plugin_id = $1 AND key = $2 AND value = $3::jsonb AND user_id <> $4
+     LIMIT 1`,
+    [pluginId, key, JSON.stringify(value), user_id],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function setPluginSettings(
   user_id: string,
   plugin: CheckinTypeServer,
@@ -363,6 +384,11 @@ export async function setPluginSettings(
   const client = await pool.connect();
   try {
     for (const [key, value] of entries) {
+      if (declared.get(key)?.uniquePerUser && (await heldByAnotherUser(client, user_id, plugin.id, key, value))) {
+        const err = new Error(`That ${declared.get(key)!.label.toLowerCase()} is already in use`) as Error & { status?: number };
+        err.status = 409;
+        throw err;
+      }
       await client.query(
         `INSERT INTO plugin_settings (user_id, plugin_id, key, value)
          VALUES ($1, $2, $3, $4::jsonb)

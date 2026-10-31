@@ -9,6 +9,7 @@ import {
   teardownIntegrationDatabase,
 } from '../../../../server/tests/helpers/testDb';
 import { getMusicSettings } from '../../services/scrobbles';
+import { createTestUser } from '../../../../server/tests/helpers/auth';
 
 const BASE = '/apis/mlj_1';
 const T0 = 1714564800; // 2024-05-01T12:00:00Z
@@ -104,24 +105,24 @@ describe('music plugin', () => {
       for (let i = 0; i < 5; i++) await pushAt(i * 60);
       // No perpage: everything in range on one page, never a next_page that
       // multi-scrobbler can't follow.
-      const all = await request(app).get(`${BASE}/scrobbles`);
+      const all = await request(app).get(`${BASE}/scrobbles`).query({ key });
       expect(all.body.list.length).toBeGreaterThan(2);
       expect(all.body.pagination.next_page).toBeNull();
-      const first = await request(app).get(`${BASE}/scrobbles`).query({ perpage: 2, page: 0 });
+      const first = await request(app).get(`${BASE}/scrobbles`).query({ key }).query({ perpage: 2, page: 0 });
       expect(first.body.status).toBe('ok');
       expect(first.body.list.map((s: any) => s.track.title)).toEqual(['Song 240', 'Song 180']);
       expect(first.body.pagination.next_page).toContain('page=1');
-      const last = await request(app).get(`${BASE}/scrobbles`).query({ perpage: 2, page: 2 });
+      const last = await request(app).get(`${BASE}/scrobbles`).query({ key }).query({ perpage: 2, page: 2 });
       expect(last.body.list).toHaveLength(1);
       expect(last.body.pagination.next_page).toBeNull();
 
-      const day = await request(app).get(`${BASE}/scrobbles`).query({ in: '2024/05/01' });
+      const day = await request(app).get(`${BASE}/scrobbles`).query({ key }).query({ in: '2024/05/01' });
       expect(day.body.list).toHaveLength(5);
-      const none = await request(app).get(`${BASE}/scrobbles`).query({ in: '2024/05/04' }); // beyond the ±14h zone allowance
+      const none = await request(app).get(`${BASE}/scrobbles`).query({ key }).query({ in: '2024/05/04' }); // beyond the ±14h zone allowance
       expect(none.body.list).toEqual([]);
-      const from = await request(app).get(`${BASE}/scrobbles`).query({ from: '2024/05/01', until: '2024/05/01' });
+      const from = await request(app).get(`${BASE}/scrobbles`).query({ key }).query({ from: '2024/05/01', until: '2024/05/01' });
       expect(from.body.list).toHaveLength(5);
-      expect((await request(app).get(`${BASE}/scrobbles`).query({ in: 'garbage' })).status).toBe(400);
+      expect((await request(app).get(`${BASE}/scrobbles`).query({ key }).query({ in: 'garbage' })).status).toBe(400);
     });
   });
 
@@ -191,7 +192,7 @@ describe('music plugin', () => {
       const time = Date.UTC(2026, 9, 26, 2, 46, 29) / 1000;
       await push({ title: 'Smoke Signals', artists: ['PRAANA'], time });
       for (let i = 0; i < 150; i++) await push({ title: `Filler ${i}`, artists: ['F'], time: time - 3600 - i * 60 });
-      const res = await request(app).get(`${BASE}/scrobbles`).query({ from: '2026/10/25', until: '2026/10/25' });
+      const res = await request(app).get(`${BASE}/scrobbles`).query({ key }).query({ from: '2026/10/25', until: '2026/10/25' });
       expect(res.body.pagination.next_page).toBeNull();
       expect(res.body.list.map((e: any) => e.track.title)).toContain('Smoke Signals');
     });
@@ -228,7 +229,7 @@ describe('music plugin', () => {
 
   describe('home timeline', () => {
     const timeline = async (params: Record<string, string> = {}) =>
-      (await request(app).get('/api/v1/timeline').query({ user_id: DEFAULT_USER_ID, ...params })).body as any[];
+      (await request(app).get('/api/v1/timeline').query(params)).body as any[];
 
     it('shows sessions but keeps short ones off the feed', async () => {
       await pushAt(0);
@@ -284,6 +285,18 @@ describe('music plugin', () => {
       expect(body[id].has_more).toBe(true);
       const session = (await query('SELECT id FROM music_sessions')).rows[0].id;
       expect(body[id]).toMatchObject({ session_id: session, session_date: '2024-05-01', anchor_time: T0 + 7 * MIN });
+    });
+
+    it("ignores another user's check-in ids", async () => {
+      const id = await checkin(7);
+      // The other user has plays right before it, so a leak would show them.
+      const other = await createTestUser('other');
+      const otherKey = (await request(app).post('/api/v1/music/settings/regenerate-key').set('Cookie', other.cookie)).body.scrobbler_key;
+      for (const i of [0, 2, 4, 6]) {
+        expect((await push({ title: `Song ${i}`, time: T0 + i * MIN, key: otherKey })).status).toBe(200);
+      }
+      const res = await request(app).get('/api/v1/music/around').set('Cookie', other.cookie).query({ checkin_ids: id });
+      expect(res.body).toEqual({});
     });
 
     it('reaches back only ten minutes, not the whole session gap', async () => {
@@ -387,7 +400,7 @@ describe('music plugin', () => {
     });
 
     it('exposes the earliest scrobble date for the all-time selector', async () => {
-      const res = await request(app).get('/api/v1/stats/earliest-dates').query({ user_id: DEFAULT_USER_ID });
+      const res = await request(app).get('/api/v1/stats/earliest-dates');
       expect(res.body.music).toBe('2024-05-01');
     });
   });
@@ -497,7 +510,7 @@ describe('music plugin', () => {
     it('buckets the earliest-date selector by local date', async () => {
       await addCheckin(CHICAGO, T0 - 86400);
       await push({ title: 'late night', time: Date.parse('2024-05-01T03:00:00Z') / 1000 });
-      const res = await request(app).get('/api/v1/stats/earliest-dates').query({ user_id: DEFAULT_USER_ID });
+      const res = await request(app).get('/api/v1/stats/earliest-dates');
       expect(res.body.music).toBe('2024-04-30');
     });
 

@@ -20,8 +20,6 @@ import { AnalysisPanel } from './AnalysisPanel';
 import { TagBreakdown, TagUsage, ThemeInsights, WritingRhythm } from './NotesCharts';
 import { NoteLibrary } from './library/NoteLibrary';
 
-const USER_ID = '00000000-0000-0000-0000-000000000001';
-
 export function NotesTab() {
   const [periodMode, setPeriodMode] = useState<PeriodMode>('all');
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthIso);
@@ -38,7 +36,7 @@ export function NotesTab() {
   const range = useMemo(() => getPeriodDateRange(selectedMonth, periodMode, selectedWeek), [selectedMonth, periodMode, selectedWeek]);
 
   useEffect(() => {
-    coreStats.earliestDates(USER_ID).then((d: Record<string, string | null>) => setEarliest(d.notes ?? null)).catch(() => {});
+    coreStats.earliestDates().then((d: Record<string, string | null>) => setEarliest(d.notes ?? null)).catch(() => {});
     plugins.settings.get('notes').then((s) => {
       const t = Number(s.similarity_threshold);
       if (Number.isFinite(t) && t > 0 && t < 1) setThreshold(t);

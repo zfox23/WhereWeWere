@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import { Router, Request, Response } from 'express';
 import type { CheckinTypeServer, PluginLlmHook } from 'wwp-shared';
-import { allPlugins, pluginTimestampBranches } from '../plugins/registry';
+import { allPlugins, pluginTimestampBranches, userCheckinRefsSql } from '../plugins/registry';
+import { currentUserId } from '../auth/context';
 import sharp from 'sharp';
 import { query } from '../db';
 import {
@@ -28,9 +29,10 @@ import {
 
 const IMMICH_TIMEOUT_MS = 15_000;
 
+// Every summary and postcard is built from the signed-in user's own data,
+// LLM settings and Immich library.
 const router = Router();
 
-import { DEFAULT_USER_ID as USER_ID } from '../constants';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Cap on how many candidate images we return to the client.
@@ -75,7 +77,7 @@ async function gatherLifeData(from: string, to: string) {
   // Every check-in type (location, mood, sleep, tracks, ...) contributes via
   // its llm hook (gather + toLines).
   const pluginRowsList = await Promise.all(
-    llmPlugins.map(({ plugin, hook }) => hook.gather(USER_ID, from, to).catch((err: unknown) => {
+    llmPlugins.map(({ plugin, hook }) => hook.gather(currentUserId(), from, to).catch((err: unknown) => {
       console.error(`Plugin "${plugin.id}" llm.gather failed:`, err);
       return [];
     }))
@@ -134,7 +136,7 @@ async function fetchImageParts(
 
   const immichResult = await query(
     'SELECT immich_url, immich_api_key FROM user_settings WHERE user_id = $1',
-    [USER_ID]
+    [currentUserId()]
   );
   const immichRow = immichResult.rows[0];
   if (!immichRow?.immich_url || !immichRow?.immich_api_key) {
@@ -199,7 +201,7 @@ router.get('/candidate-images', async (req: Request, res: Response) => {
 
     const settingsResult = await query(
       'SELECT immich_url, immich_api_key FROM user_settings WHERE user_id = $1',
-      [USER_ID]
+      [currentUserId()]
     );
     const row = settingsResult.rows[0];
     if (!row?.immich_url || !row?.immich_api_key) {
@@ -266,7 +268,7 @@ async function generateSummary(reqBody: unknown): Promise<SummaryOutcome> {
     const fromStr = from as string;
     const toStr = to as string;
 
-    const llm = await getLlmSettings(USER_ID);
+    const llm = await getLlmSettings(currentUserId());
     if (!llm) {
       return fail(400, 'LLM integration is not configured. Set an API URL and model name in Settings → Integrations.');
     }
@@ -351,7 +353,9 @@ interface SummaryOutcome {
   status: number;
   json: Record<string, unknown>;
 }
+// A task is visible only to the user who started it.
 interface SummaryTask {
+  userId: string;
   state: 'running' | 'done';
   outcome?: SummaryOutcome;
   finishedAt?: number;
@@ -369,7 +373,7 @@ function pruneSummaryTasks() {
 router.post('/summarize', (req: Request, res: Response) => {
   pruneSummaryTasks();
   const id = randomUUID();
-  const task: SummaryTask = { state: 'running' };
+  const task: SummaryTask = { userId: currentUserId(), state: 'running' };
   summaryTasks.set(id, task);
   void generateSummary(req.body).then((outcome) => {
     task.state = 'done';
@@ -381,7 +385,8 @@ router.post('/summarize', (req: Request, res: Response) => {
 
 // GET /summarize/:id - poll a summary started by POST /summarize
 router.get('/summarize/:id', (req: Request, res: Response) => {
-  const task = summaryTasks.get(String(req.params.id));
+  const found = summaryTasks.get(String(req.params.id));
+  const task = found && found.userId === currentUserId() ? found : undefined;
   if (!task) return res.status(404).json({ error: 'Summary task not found (the server may have restarted). Please try again.' });
   if (task.state === 'running' || !task.outcome) return res.json({ status: 'running' });
   if (task.outcome.status !== 200) {
@@ -497,28 +502,37 @@ function stripIdFilter(sql: string): string {
 }
 
 /**
- * Every check-in timestamp across all plugins, as a single UNION of each
- * plugin's resolveTimestamps branch (id, checked_in_at) with the id filter
- * removed — the user's full history.
+ * Every check-in timestamp of the user across all plugins: the UNION of
+ * each plugin's resolveTimestamps branch (id, checked_in_at) with the id
+ * filter removed, restricted to the user's own check-in ids. The
+ * resolveTimestamps branches carry no user filter, so the restriction comes
+ * from the user-scoped timeline refs. Placeholders start after
+ * `paramOffset`; append `values` to the caller's parameters.
  */
-function allCheckinTimestampSql(): string {
+function userCheckinTimestampSql(paramOffset: number): { sql: string; values: unknown[] } {
   const branches = pluginTimestampBranches().map((sql) => `(\n    ${stripIdFilter(sql).trim()}\n  )`);
   if (branches.length === 0) {
-    return 'SELECT NULL::timestamptz AS checked_in_at WHERE FALSE';
+    return { sql: 'SELECT NULL::timestamptz AS checked_in_at WHERE FALSE', values: [] };
   }
+  const refs = userCheckinRefsSql(currentUserId(), paramOffset);
   // Each branch selects (id, checked_in_at); we only need the timestamp.
-  return `SELECT checked_in_at FROM (\n  ${branches.join('\n  UNION ALL\n')}\n) AS all_checkins`;
+  return {
+    sql: `SELECT checked_in_at FROM (\n  ${branches.join('\n  UNION ALL\n')}\n) AS all_checkins
+      WHERE all_checkins.id IN (SELECT refs.id FROM (\n${refs.sql}\n) refs)`,
+    values: refs.values,
+  };
 }
 
 /** Per-day check-in counts (UTC day) for the user, inside [from, to]. */
 async function dailyCheckinCounts(from: string, to: string): Promise<Map<string, number>> {
+  const timestamps = userCheckinTimestampSql(2);
   const result = await query(
     `SELECT to_char(checked_in_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)::int AS n
-     FROM (${allCheckinTimestampSql()}) AS ts
+     FROM (${timestamps.sql}) AS ts
      WHERE checked_in_at >= ($1 || 'T00:00:00.000Z')::timestamptz
        AND checked_in_at <= ($2 || 'T23:59:59.999Z')::timestamptz
      GROUP BY 1`,
-    [from, to]
+    [from, to, ...timestamps.values]
   );
   const map = new Map<string, number>();
   for (const row of result.rows) {
@@ -529,10 +543,12 @@ async function dailyCheckinCounts(from: string, to: string): Promise<Map<string,
 
 /** The user's overall first and last check-in dates (YYYY-MM-DD, UTC). */
 async function firstAndLastCheckinDate(): Promise<{ first: string; last: string } | null> {
+  const timestamps = userCheckinTimestampSql(0);
   const result = await query(
     `SELECT MIN(checked_in_at) AS first, MAX(checked_in_at) AS last
-     FROM (${allCheckinTimestampSql()}) AS ts
-     WHERE checked_in_at IS NOT NULL`
+     FROM (${timestamps.sql}) AS ts
+     WHERE checked_in_at IS NOT NULL`,
+    timestamps.values
   );
   const row = result.rows[0];
   if (!row?.first || !row?.last) return null;
@@ -584,7 +600,7 @@ async function pickInterestingPeriod(): Promise<CandidateWindow | null> {
 async function readImmichSettings(): Promise<{ url: string; apiKey: string } | null> {
   const settingsResult = await query(
     'SELECT immich_url, immich_api_key FROM user_settings WHERE user_id = $1',
-    [USER_ID]
+    [currentUserId()]
   );
   const row = settingsResult.rows[0];
   if (!row?.immich_url || !row?.immich_api_key) return null;
@@ -702,11 +718,12 @@ async function stampCityAt(periodEnd: string): Promise<string | null> {
     `SELECT v.city
      FROM checkins c
      JOIN venues v ON c.venue_id = v.id
-     WHERE c.checked_in_at <= ($1 || 'T00:00:00.000Z')::timestamptz
+     WHERE c.user_id = $2
+       AND c.checked_in_at <= ($1 || 'T00:00:00.000Z')::timestamptz
        AND v.city IS NOT NULL AND TRIM(v.city) <> ''
      ORDER BY c.checked_in_at DESC
      LIMIT 1`,
-    [cutoff]
+    [cutoff, currentUserId()]
   );
   const city = result.rows[0]?.city;
   return typeof city === 'string' && city.trim() ? city.trim() : null;
@@ -714,7 +731,7 @@ async function stampCityAt(periodEnd: string): Promise<string | null> {
 
 /** Addressed-to: display_name, falling back to username. */
 async function addressedTo(): Promise<string> {
-  const result = await query('SELECT username, display_name FROM users WHERE id = $1', [USER_ID]);
+  const result = await query('SELECT username, display_name FROM users WHERE id = $1', [currentUserId()]);
   const row = result.rows[0];
   const display = row?.display_name && String(row.display_name).trim() ? String(row.display_name).trim() : null;
   return display || (row?.username ? String(row.username) : 'Friend');
@@ -723,16 +740,18 @@ async function addressedTo(): Promise<string> {
 // POST /postcard - generate (and persist) a postcard about an interesting
 // period in the user's past.
 // A postcard generation takes minutes and persists a row: a double click (or a
-// second tab) must not start a parallel one.
-let postcardGenerating = false;
+// second tab) must not start a parallel one. Tracked per user, so one user's
+// postcard never blocks another's.
+const postcardGenerating = new Set<string>();
 
 router.post('/postcard', async (_req: Request, res: Response) => {
-  if (postcardGenerating) {
+  const userId = currentUserId();
+  if (postcardGenerating.has(userId)) {
     return res.status(409).json({ error: 'A postcard is already being generated. Try again when it finishes.' });
   }
-  postcardGenerating = true;
+  postcardGenerating.add(userId);
   try {
-    const llm = await getLlmSettings(USER_ID);
+    const llm = await getLlmSettings(currentUserId());
     if (!llm) {
       return res.status(400).json({ error: 'LLM integration is not configured. Set an API URL and model name in Settings → Integrations.' });
     }
@@ -802,7 +821,7 @@ router.post('/postcard', async (_req: Request, res: Response) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, created_at`,
       [
-        USER_ID,
+        currentUserId(),
         fromStr,
         toStr,
         toName,
@@ -832,7 +851,7 @@ router.post('/postcard', async (_req: Request, res: Response) => {
     console.error('Error generating postcard:', err);
     res.status(500).json({ error: 'Failed to generate postcard' });
   } finally {
-    postcardGenerating = false;
+    postcardGenerating.delete(userId);
   }
 });
 
@@ -846,7 +865,7 @@ router.get('/postcards', async (_req: Request, res: Response) => {
        FROM postcards
        WHERE user_id = $1
        ORDER BY created_at DESC`,
-      [USER_ID]
+      [currentUserId()]
     );
     res.json(
       result.rows.map((r) => ({
@@ -869,12 +888,13 @@ router.get('/postcards', async (_req: Request, res: Response) => {
 // GET /postcards/:id - full postcard payload.
 router.get('/postcards/:id', async (req: Request, res: Response) => {
   try {
+    if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Postcard not found' });
     const result = await query(
       `SELECT id, period_from, period_to, addressed_to, sender_line, stamp_city,
               message, images, counts, created_at
        FROM postcards
        WHERE id = $1::uuid AND user_id = $2`,
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     const r = result.rows[0];
     if (!r) return res.status(404).json({ error: 'Postcard not found' });
@@ -901,9 +921,10 @@ router.get('/postcards/:id', async (req: Request, res: Response) => {
 // DELETE /postcards/:id - remove a postcard from history.
 router.delete('/postcards/:id', async (req: Request, res: Response) => {
   try {
+    if (!isUuid(req.params.id)) return res.status(404).json({ error: 'Postcard not found' });
     const result = await query(
       'DELETE FROM postcards WHERE id = $1::uuid AND user_id = $2 RETURNING id',
-      [req.params.id, USER_ID]
+      [req.params.id, currentUserId()]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Postcard not found' });
     res.json({ message: 'Postcard deleted', id: req.params.id });

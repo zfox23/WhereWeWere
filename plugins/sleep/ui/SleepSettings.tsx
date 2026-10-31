@@ -2,9 +2,9 @@
  * Sleep > Settings tab.
  *
  * Self-contained settings tab rendered by the core Settings page through the
- * plugin `settings` slot. Currently hosts the Sleep as Android webhook URL +
- * event counter, moved out of the core Integrations tab so it lives under
- * Settings > Sleep.
+ * plugin `settings` slot. Currently hosts the user's personal Sleep as Android
+ * webhook URL (it embeds their secret webhook token) + event counter, moved
+ * out of the core Integrations tab so it lives under Settings > Sleep.
  */
 
 import { useEffect, useState } from 'react';
@@ -16,16 +16,21 @@ import { copyText } from '../../../client/src/utils/clipboard';
 export function SleepSettings() {
   const [webhookEventCount, setWebhookEventCount] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
-  const webhookUrl = `${window.location.origin}/api/v1/webhook/sleep-as-android`;
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
 
   useEffect(() => {
     sleepWebhook
       .stats()
       .then((data) => setWebhookEventCount(data.count))
       .catch(() => setWebhookEventCount(null));
+    sleepWebhook
+      .url()
+      .then(setWebhookUrl)
+      .catch(() => setWebhookUrl(null));
   }, []);
 
   const handleCopy = () => {
+    if (!webhookUrl) return;
     copyText(webhookUrl).then((ok) => {
       if (!ok) return;
       setCopied(true);
@@ -47,10 +52,11 @@ export function SleepSettings() {
 
       <div className="flex items-center gap-2">
         <code className="flex-1 min-w-0 truncate rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-800 dark:text-gray-200">
-          {webhookUrl}
+          {webhookUrl ?? 'Loading…'}
         </code>
         <button
           onClick={handleCopy}
+          disabled={!webhookUrl}
           title={copied ? 'Copied!' : 'Copy URL'}
           className="shrink-0 flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
         >
@@ -58,6 +64,11 @@ export function SleepSettings() {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
+
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        This URL is personal to your account: anyone who has it can add sleep entries for you.
+        Regenerating your webhook token in Settings → Account changes it, so update Sleep as Android afterwards.
+      </p>
 
       <p className="text-xs text-gray-500 dark:text-gray-400">
         {webhookEventCount === null

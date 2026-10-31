@@ -8,10 +8,14 @@
  * GET /api/v1/companions/names?q=&limit=
  *   Distinct companion names across all check-in types that implement
  *   companions, for the "Here With…" chip input autocomplete. The name pool
- *   is shared, so a name entered on any check-in type autocompletes on all.
+ *   is shared across check-in types, so a name entered on any type
+ *   autocompletes on all.
  *
  * POST /api/v1/companions/names        { name }
- *   Add a standalone companion name to the shared pool (409 if it exists).
+ *   Add a standalone companion name to the pool (409 if it exists).
+ *
+ * Everything here is the signed-in user's own name pool: the service scopes
+ * every query to currentUserId().
  *
  * PUT /api/v1/companions/names         { from, to }
  *   Rename a companion name across every check-in (and its standalone row).

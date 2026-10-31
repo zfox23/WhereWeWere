@@ -31,7 +31,7 @@ import { timelineColumnList } from '../../server/src/plugins/timeline';
 import { timelineWhereConditions } from '../../server/src/plugins/sql';
 import { getVenueTimezone } from '../location/services/geoTimezone';
 import { NO_ACTIVITY_TYPE } from './constants';
-import { DEFAULT_USER_ID as USER_ID } from '../../server/src/constants';
+import { currentUserId, maybeCurrentUserId, preserveUserContext } from '../../server/src/auth/context';
 import {
   getCompanions,
   setCompanions,
@@ -158,17 +158,11 @@ const TRACK_LIST_FIELDS = `
 // GET / - list tracks
 tracksRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to, limit = '50', offset = '0' } = req.query;
+    const { from, to, limit = '50', offset = '0' } = req.query;
 
-    const params: unknown[] = [];
-    const conditions: string[] = [];
-    let paramIndex = 1;
-
-    if (user_id) {
-      conditions.push(`t.user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
-    }
+    const params: unknown[] = [currentUserId()];
+    const conditions: string[] = ['t.user_id = $1'];
+    let paramIndex = 2;
 
     if (from) {
       conditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= $${paramIndex}::date`);
@@ -182,7 +176,7 @@ tracksRouter.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     const page = pagination(limit, offset);
     params.push(page.limit);
@@ -210,17 +204,11 @@ tracksRouter.get('/', async (req: Request, res: Response) => {
 // GET /map-data - lightweight track list with geometry for map views
 tracksRouter.get('/map-data', async (req: Request, res: Response) => {
   try {
-    const { user_id, from, to } = req.query;
+    const { from, to } = req.query;
 
-    const params: unknown[] = [];
-    const conditions: string[] = [];
-    let paramIndex = 1;
-
-    if (user_id) {
-      conditions.push(`t.user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
-    }
+    const params: unknown[] = [currentUserId()];
+    const conditions: string[] = ['t.user_id = $1'];
+    let paramIndex = 2;
 
     if (from) {
       conditions.push(`(t.started_at AT TIME ZONE COALESCE(t.timezone, 'UTC'))::date >= $${paramIndex}::date`);
@@ -234,7 +222,7 @@ tracksRouter.get('/map-data', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     const result = await query(
       `SELECT t.id, t.name, t.activity_type, t.timezone, t.started_at,
@@ -295,26 +283,14 @@ tracksRouter.get('/map-data', async (req: Request, res: Response) => {
 });
 
 // GET /activity-types - distinct activity types used across tracks, for autocomplete
-tracksRouter.get('/activity-types', async (req: Request, res: Response) => {
+tracksRouter.get('/activity-types', async (_req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
-
-    const params: unknown[] = [];
-    const conditions: string[] = ['activity_type IS NOT NULL'];
-    let paramIndex = 1;
-
-    if (user_id) {
-      conditions.push(`user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
-    }
-
     const result = await query(
       `SELECT activity_type FROM tracks
-       WHERE ${conditions.join(' AND ')}
+       WHERE activity_type IS NOT NULL AND user_id = $1
        GROUP BY activity_type
        ORDER BY LOWER(activity_type)`,
-      params
+      [currentUserId()]
     );
 
     res.json(result.rows.map((r: any) => r.activity_type));
@@ -326,27 +302,15 @@ tracksRouter.get('/activity-types', async (req: Request, res: Response) => {
 
 // GET /activity-types/summary - activity types with per-type track counts,
 // for the Settings activity-types pane
-tracksRouter.get('/activity-types/summary', async (req: Request, res: Response) => {
+tracksRouter.get('/activity-types/summary', async (_req: Request, res: Response) => {
   try {
-    const { user_id } = req.query;
-
-    const params: unknown[] = [];
-    const conditions: string[] = ['activity_type IS NOT NULL'];
-    let paramIndex = 1;
-
-    if (user_id) {
-      conditions.push(`user_id = $${paramIndex}`);
-      params.push(user_id);
-      paramIndex++;
-    }
-
     const result = await query(
       `SELECT activity_type, COUNT(*)::int AS count
        FROM tracks
-       WHERE ${conditions.join(' AND ')}
+       WHERE activity_type IS NOT NULL AND user_id = $1
        GROUP BY activity_type
        ORDER BY LOWER(activity_type), activity_type`,
-      params
+      [currentUserId()]
     );
 
     res.json(
@@ -358,7 +322,8 @@ tracksRouter.get('/activity-types/summary', async (req: Request, res: Response) 
   }
 });
 
-// PUT /activity-types - rename an activity type across all tracks that use it.
+// PUT /activity-types - rename an activity type across all of the user's
+// tracks that use it.
 // Names are matched case-sensitively. When the target name already exists and
 // `merge` is not true, the request fails with 409; retry with merge: true to
 // fold the old type's tracks into the existing one.
@@ -383,9 +348,10 @@ tracksRouter.put('/activity-types', async (req: Request, res: Response) => {
 
     // Case-sensitive exact match: only a DIFFERENT type carrying the exact
     // same name conflicts.
+    const userId = currentUserId();
     const clash = await query(
-      'SELECT COUNT(*)::int AS count FROM tracks WHERE activity_type = $1',
-      [toName]
+      'SELECT COUNT(*)::int AS count FROM tracks WHERE activity_type = $1 AND user_id = $2',
+      [toName, userId]
     );
     const clashCount = Number(clash.rows[0]?.count ?? 0);
     if (clashCount > 0 && merge !== true) {
@@ -397,9 +363,9 @@ tracksRouter.put('/activity-types', async (req: Request, res: Response) => {
     const result = await query(
       `UPDATE tracks
        SET activity_type = $1, updated_at = NOW()
-       WHERE activity_type = $2
+       WHERE activity_type = $2 AND user_id = $3
        RETURNING id`,
-      [toName, fromName]
+      [toName, fromName, userId]
     );
 
     res.json({ updated: result.rowCount ?? 0, merged: merge === true });
@@ -409,9 +375,25 @@ tracksRouter.put('/activity-types', async (req: Request, res: Response) => {
   }
 });
 
+// GET /stats/earliest - earliest track date (profile period selector)
+tracksRouter.get('/stats/earliest', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT MIN(DATE(started_at AT TIME ZONE COALESCE(timezone, 'UTC')))::text AS date
+       FROM tracks WHERE user_id = $1`,
+      [currentUserId()]
+    );
+    res.json({ date: result.rows[0]?.date ?? null });
+  } catch (err) {
+    console.error('Error getting earliest track date:', err);
+    res.status(500).json({ error: 'Failed to get earliest track date' });
+  }
+});
+
 /**
- * Fetch a track including its geometry and per-point series, shaped like the
- * GET /:id response. Returns null when the track doesn't exist.
+ * Fetch one of the current user's tracks including its geometry and per-point
+ * series, shaped like the GET /:id response. Returns null when the track
+ * doesn't exist or belongs to someone else.
  */
 async function fetchTrackFull(id: string | string[]): Promise<any | null> {
   const result = await query(
@@ -424,8 +406,8 @@ async function fetchTrackFull(id: string | string[]): Promise<any | null> {
             t.points,
             ST_AsGeoJSON(t.path) AS geojson
      FROM tracks t
-     WHERE t.id = $1`,
-    [id]
+     WHERE t.id = $1 AND t.user_id = $2`,
+    [id, currentUserId()]
   );
 
   if (result.rows.length === 0) return null;
@@ -464,7 +446,8 @@ tracksRouter.get('/:id', async (req: Request, res: Response) => {
 });
 
 // POST / - upload a .gpx or .tcx file and create a track
-tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Response) => {
+tracksRouter.post('/', preserveUserContext(trackUpload.single('file')), async (req: Request, res: Response) => {
+  const userId = currentUserId();
   const filePath = (req.file as any)?.path;
   let tempFilePath: string | undefined = filePath;
   let fileHash = '';
@@ -509,7 +492,7 @@ tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Res
     // Reject duplicate uploads without touching the database
     const existing = await query(
       'SELECT id, name FROM tracks WHERE user_id = $1 AND file_hash = $2 LIMIT 1',
-      [USER_ID, fileHash]
+      [userId, fileHash]
     );
 
     if (existing.rows.length > 0) {
@@ -537,7 +520,7 @@ tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Res
        )
        RETURNING *`,
       [
-        USER_ID,
+        userId,
         stats.name,
         stats.activityType,
         trackTimezone,
@@ -560,7 +543,7 @@ tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Res
     );
 
     // Keep a copy of the original uploaded file for the user
-    storeUploadedTrack(USER_ID, tempFilePath!, result.rows[0].id, ext);
+    storeUploadedTrack(userId, tempFilePath!, result.rows[0].id, ext);
     tempFilePath = undefined;
 
     res.status(201).json(trackRowToApi(result.rows[0]));
@@ -572,7 +555,7 @@ tracksRouter.post('/', trackUpload.single('file'), async (req: Request, res: Res
     if (err?.code === '23505') {
       const existing = await query(
         'SELECT id, name FROM tracks WHERE user_id = $1 AND file_hash = $2 LIMIT 1',
-        [USER_ID, fileHash]
+        [userId, fileHash]
       );
       const dup = existing.rows[0];
       return res.status(409).json({
@@ -594,6 +577,7 @@ tracksRouter.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, activity_type, companions } = req.body ?? {};
+    const userId = currentUserId();
 
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -627,10 +611,10 @@ tracksRouter.put('/:id', async (req: Request, res: Response) => {
     }
 
     if (sets.length > 0) {
-      params.push(id);
+      params.push(id, userId);
       const result = await query(
         `UPDATE tracks SET ${sets.join(', ')}, updated_at = NOW()
-         WHERE id = $${paramIndex}
+         WHERE id = $${paramIndex} AND user_id = $${paramIndex + 1}
          RETURNING id`,
         params
       );
@@ -640,7 +624,7 @@ tracksRouter.put('/:id', async (req: Request, res: Response) => {
       }
     } else {
       // Companions-only update: still require the track to exist.
-      const existing = await query('SELECT id FROM tracks WHERE id = $1', [id]);
+      const existing = await query('SELECT id FROM tracks WHERE id = $1 AND user_id = $2', [id, userId]);
       if (existing.rows.length === 0) {
         return res.status(404).json({ error: 'Track not found' });
       }
@@ -731,7 +715,7 @@ tracksRouter.post('/:id/trim', async (req: Request, res: Response) => {
          path = ST_SetSRID(ST_GeomFromText($12), 4326),
          points = $13::jsonb,
          updated_at = NOW()
-       WHERE id = $14`,
+       WHERE id = $14 AND user_id = $15`,
       [
         stats.startedAt.toISOString(),
         stats.endedAt.toISOString(),
@@ -747,6 +731,7 @@ tracksRouter.post('/:id/trim', async (req: Request, res: Response) => {
         stats.wktLineString,
         JSON.stringify(stats.points),
         id,
+        currentUserId(),
       ]
     );
 
@@ -768,8 +753,8 @@ tracksRouter.get('/:id/download', async (req: Request, res: Response) => {
               ST_AsGeoJSON(t.path) AS geojson,
               t.points
        FROM tracks t
-       WHERE t.id = $1`,
-      [id]
+       WHERE t.id = $1 AND t.user_id = $2`,
+      [id, currentUserId()]
     );
 
     if (result.rows.length === 0) {
@@ -816,10 +801,11 @@ tracksRouter.get('/:id/download', async (req: Request, res: Response) => {
 tracksRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = currentUserId();
 
     const result = await query(
-      'DELETE FROM tracks WHERE id = $1 RETURNING id',
-      [id]
+      'DELETE FROM tracks WHERE id = $1 AND user_id = $2 RETURNING id',
+      [id, userId]
     );
 
     if (result.rows.length === 0) {
@@ -829,7 +815,7 @@ tracksRouter.delete('/:id', async (req: Request, res: Response) => {
     // The shared companion table has no FK into tracks; clean up explicitly.
     await deleteCompanionsForCheckins('tracks', [String(id)]);
 
-    deleteStoredTrack(USER_ID, String(id));
+    deleteStoredTrack(userId, String(id));
 
     res.json({ message: 'Track deleted', id });
   } catch (err) {
@@ -932,7 +918,8 @@ export const server: CheckinTypeServerPlugin = {
   }),
 
   buildTimelineWhere: (ctx: PluginTimelineContext) => {
-    const conds = timelineWhereConditions(ctx, {
+    // The requesting user always scopes the branch (never a client value).
+    const conds = timelineWhereConditions({ ...ctx, user_id: maybeCurrentUserId() ?? ctx.user_id }, {
       alias: 't',
       timestampColumn: 'started_at',
       timezoneColumn: 'timezone',
@@ -962,13 +949,12 @@ export const server: CheckinTypeServerPlugin = {
   backupExport: async ({ user_id }) => {
     // Start a fresh export plan (a stale plan from a previous export is
     // discarded and its staged temp dir removed).
-    if (trackBackupPlan?.userId === user_id && trackBackupPlan.plan.tempDir) {
-      removeTrackBackupPlanDir(trackBackupPlan.plan);
+    const stale = trackBackupPlans.get(user_id);
+    if (stale?.tempDir) {
+      removeTrackBackupPlanDir(stale);
     }
-    trackBackupPlan = {
-      userId: user_id,
-      plan: { files: new Map<string, string>(), tempDir: null },
-    };
+    const plan: TrackBackupFilePlan = { files: new Map<string, string>(), tempDir: null };
+    trackBackupPlans.set(user_id, plan);
 
     const result = await query(
       `SELECT id, user_id, name, activity_type, timezone,
@@ -984,7 +970,6 @@ export const server: CheckinTypeServerPlugin = {
        ORDER BY started_at ASC`,
       [user_id],
     );
-    const plan = trackBackupPlan.plan;
     // Bundle-wide filename de-duplication (original names may collide).
     const usedFilenames = new Set<string>();
     return result.rows.map((row: any) => {
@@ -1090,11 +1075,11 @@ export const server: CheckinTypeServerPlugin = {
    * for any generated files.
    */
   backupFiles: async ({ user_id }) => {
-    if (!trackBackupPlan || trackBackupPlan.userId !== user_id) {
+    const plan = trackBackupPlans.get(user_id);
+    if (!plan) {
       return { files: [], tempDir: undefined };
     }
-    const plan = trackBackupPlan.plan;
-    trackBackupPlan = null; // consumed by this call
+    trackBackupPlans.delete(user_id); // consumed by this call
     const files = [...plan.files.entries()].map(([zipPath, absPath]) => ({ zipPath, absPath }));
     return { files, tempDir: plan.tempDir ?? undefined };
   },
@@ -1324,9 +1309,9 @@ export const server: CheckinTypeServerPlugin = {
       const result = await (executor ?? { query }).query(
         `UPDATE tracks
          SET timezone = $2, updated_at = NOW()
-         WHERE id = $1
+         WHERE id = $1 AND user_id = $3
          RETURNING id`,
-        [id, suggested_timezone],
+        [id, suggested_timezone, currentUserId()],
       );
       return (result.rowCount ?? 0) > 0;
     },
@@ -1363,7 +1348,8 @@ function readStoredTrackForBackup(
 // backupExport decides, per row, which file to ship; backupFiles (run by the
 // framework immediately afterwards) returns the accumulated file list. The
 // plan is module state keyed by user (the framework calls the hooks
-// sequentially per export).
+// sequentially per export), so concurrent exports by different users never
+// see each other's files.
 // ---------------------------------------------------------------------------
 
 interface TrackBackupFilePlan {
@@ -1373,7 +1359,7 @@ interface TrackBackupFilePlan {
   tempDir: string | null;
 }
 
-let trackBackupPlan: { userId: string; plan: TrackBackupFilePlan } | null = null;
+const trackBackupPlans = new Map<string, TrackBackupFilePlan>();
 
 function removeTrackBackupPlanDir(plan: TrackBackupFilePlan): void {
   if (plan.tempDir) {
@@ -1410,7 +1396,8 @@ function stageGeneratedTrackGpx(
 /**
  * Insert one track row from a backup payload row (new-format backupImport or
  * legacy restore share the same statement). Returns the row count (1 when the
- * row was inserted, 0 when skipped/conflicting).
+ * row was inserted, 0 when skipped/conflicting). The row is always owned by
+ * `user_id`; an id that already belongs to another user's track is skipped.
  */
 async function insertTrackRow(
   client: { query: (sql: string, values: unknown[]) => Promise<{ rowCount: number | null }> },
@@ -1449,7 +1436,7 @@ async function insertTrackRow(
        ST_SetSRID(ST_GeomFromText($21), 4326),
        $22::jsonb
      )
-     ON CONFLICT (id) DO NOTHING`,
+     ON CONFLICT DO NOTHING`,
     [
       row.id,
       user_id,

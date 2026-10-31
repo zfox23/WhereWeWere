@@ -43,6 +43,7 @@ vi.mock('../../src/plugins/registry', () => ({
 }));
 
 import { getTimestampReconciliationSuggestions } from '../../src/services/timestampReconciliation';
+import { DEFAULT_USER_ID } from '../../src/constants';
 
 // The core scan is hook-driven (no direct queries); plugin rows come from
 // their reconcile.loadCheckins hooks (stubbed above).
@@ -78,7 +79,7 @@ describe('getTimestampReconciliationSuggestions', () => {
       ]
     );
 
-    const result = await getTimestampReconciliationSuggestions();
+    const result = await getTimestampReconciliationSuggestions(DEFAULT_USER_ID);
 
     const moodSuggestion = result.suggestions.find((s) => s.id === 'm1');
     expect(moodSuggestion).toMatchObject({ type: 'mood', suggested_timezone: 'America/New_York' });
@@ -102,7 +103,7 @@ describe('getTimestampReconciliationSuggestions', () => {
       []
     );
 
-    const result = await getTimestampReconciliationSuggestions();
+    const result = await getTimestampReconciliationSuggestions(DEFAULT_USER_ID);
 
     expect(result.suggestions).toEqual([]);
     // No uninferable mood check-in: the key is only created when one exists.

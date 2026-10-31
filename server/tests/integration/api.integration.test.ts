@@ -325,7 +325,10 @@ describe('API integration', () => {
       const { runPluginJob, findPluginJob } = await import('../../src/services/jobs');
       const definition = findPluginJob('backfill')!;
       let handlerRan = false;
-      const inserted = await query(`INSERT INTO jobs (type, status) VALUES ('backfill', 'cancelled') RETURNING id`);
+      const inserted = await query(
+        `INSERT INTO jobs (user_id, type, status) VALUES ($1, 'backfill', 'cancelled') RETURNING id`,
+        [DEFAULT_USER_ID]
+      );
       await runPluginJob(inserted.rows[0].id, {
         ...definition,
         handler: async () => {
