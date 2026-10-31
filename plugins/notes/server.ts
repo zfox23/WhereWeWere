@@ -76,7 +76,7 @@ import {
   type PlannedNote,
 } from './services/importNotes';
 import { getEmbeddingConfig } from './services/embeddings';
-import { PENDING_WHERE, runSimilarityAnalysis } from './services/analysis';
+import { MOOD_STALE, MOOD_WITH_TEXT, PENDING_WHERE, includesMoodEntries, runSimilarityAnalysis } from './services/analysis';
 
 export const SIMILARITY_JOB = 'notes-similarity';
 
@@ -98,6 +98,7 @@ function sendError(res: Response, err: unknown, fallback: string) {
 
 /** `(n.checked_in_at AT TIME ZONE ...)`: the note's wall-clock time. */
 const LOCAL_TS = `(n.checked_in_at AT TIME ZONE COALESCE(n.checkin_timezone, 'UTC'))`;
+const MOOD_LOCAL_TS = `(mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -243,11 +244,17 @@ router.get('/checkins/:id/related', async (req: Request, res: Response) => {
     if (!(await loadNote(currentUserId(), id))) return res.status(404).json({ error: 'Note not found' });
     const [related, analyzed] = await Promise.all([
       query(
-        `SELECT n.id, n.title, left(n.body, 300) AS excerpt, n.checked_in_at, n.checkin_timezone,
-                nb.similarity, ${tagsJsonSql('n.id')} AS tags
-         FROM note_neighbors nb JOIN note_checkins n ON n.id = nb.neighbor_id
-         WHERE nb.note_id = $1 AND n.user_id = $2
-         ORDER BY nb.similarity DESC LIMIT $3`,
+        `SELECT * FROM (
+           SELECT n.id, n.title, left(n.body, 300) AS excerpt, n.checked_in_at, n.checkin_timezone,
+                  nb.similarity, ${tagsJsonSql('n.id')} AS tags, 'note' AS kind
+           FROM note_neighbors nb JOIN note_checkins n ON n.id = nb.neighbor_id
+           WHERE nb.note_id = $1 AND n.user_id = $2
+           UNION ALL
+           SELECT mc.id, NULL AS title, left(mc.note, 300) AS excerpt, mc.checked_in_at, mc.mood_timezone AS checkin_timezone,
+                  nb.similarity, '[]'::json AS tags, 'mood' AS kind
+           FROM note_mood_neighbors nb JOIN mood_checkins mc ON mc.id = nb.neighbor_id
+           WHERE nb.entry_id = $1 AND nb.user_id = $2 AND mc.user_id = $2
+         ) r ORDER BY similarity DESC LIMIT $3`,
         [id, currentUserId(), limit],
       ),
       query('SELECT 1 FROM note_embeddings WHERE note_id = $1', [id]),
@@ -423,13 +430,23 @@ router.get('/library', async (_req: Request, res: Response) => {
 
 router.get('/graph', async (_req: Request, res: Response) => {
   try {
-    const [notes, edges, tags, themes] = await Promise.all([
+    const [notes, moods, edges, moodEdges, tags, themes] = await Promise.all([
       query(
         `SELECT n.id, n.title, left(n.body, 120) AS excerpt, ${LOCAL_TS}::date::text AS local_date, n.word_count,
                 COALESCE((SELECT array_agg(l.tag_id) FROM note_tag_links l WHERE l.note_id = n.id), '{}') AS tag_ids,
-                (SELECT m.theme_id FROM note_theme_members m WHERE m.note_id = n.id AND m.rank = 1) AS theme_id
+                (SELECT m.theme_id FROM note_theme_members m WHERE m.note_id = n.id AND m.rank = 1) AS theme_id,
+                'note' AS kind
          FROM note_checkins n JOIN note_embeddings e ON e.note_id = n.id
          WHERE n.user_id = $1`,
+        [currentUserId()],
+      ),
+      // Mood entries are in the web only while they hold a theme (the setting is on).
+      query(
+        `SELECT mc.id, NULL AS title, left(mc.note, 120) AS excerpt, ${MOOD_LOCAL_TS}::date::text AS local_date,
+                COALESCE(array_length(regexp_split_to_array(btrim(mc.note), '\\s+'), 1), 0) AS word_count,
+                '{}'::uuid[] AS tag_ids, m.theme_id, 'mood' AS kind
+         FROM mood_checkins mc JOIN note_theme_mood_members m ON m.mood_checkin_id = mc.id AND m.rank = 1
+         WHERE mc.user_id = $1`,
         [currentUserId()],
       ),
       // Each pair once: the neighbor lists are symmetric-ish (top-k per note).
@@ -440,10 +457,19 @@ router.get('/graph', async (_req: Request, res: Response) => {
          WHERE n.user_id = $1`,
         [currentUserId()],
       ),
+      query(
+        `SELECT DISTINCT LEAST(entry_id, neighbor_id) AS source, GREATEST(entry_id, neighbor_id) AS target, similarity
+         FROM note_mood_neighbors WHERE user_id = $1`,
+        [currentUserId()],
+      ),
       query('SELECT id, name, color FROM note_tags WHERE user_id = $1 ORDER BY lower(name)', [currentUserId()]),
       loadThemes(),
     ]);
-    res.json({ nodes: notes.rows, edges: edges.rows, tags: tags.rows, themes });
+    const nodes = [...notes.rows, ...moods.rows];
+    const ids = new Set(nodes.map((n) => n.id as string));
+    // Neighbor rows can outlive an entry (deleted, or edited out of the analysis).
+    const mixed = moodEdges.rows.filter((e) => ids.has(e.source as string) && ids.has(e.target as string));
+    res.json({ nodes, edges: [...edges.rows, ...mixed], tags: tags.rows, themes });
   } catch (err) {
     sendError(res, err, 'Failed to load the similarity web');
   }
@@ -457,6 +483,8 @@ router.get('/stats', async (req: Request, res: Response) => {
   try {
     const params: unknown[] = [currentUserId()];
     const range = dateRange(req, params);
+    // The same range on the mood table's alias and local-time expression.
+    const moodRange = range.split(LOCAL_TS).join(MOOD_LOCAL_TS);
     const base = `FROM note_checkins n WHERE n.user_id = $1${range}`;
     const [totals, byTag, tagMonths, rhythm, themes, themeYears, themeTags] = await Promise.all([
       query(
@@ -494,17 +522,28 @@ router.get('/stats', async (req: Request, res: Response) => {
       ),
       query(
         `SELECT t.id, t.label, t.description, t.color, COUNT(*)::int AS notes
-         FROM note_checkins n
-         JOIN note_theme_members m ON m.note_id = n.id AND m.rank = 1 JOIN note_themes t ON t.id = m.theme_id
-         WHERE n.user_id = $1${range}
+         FROM (
+           SELECT m.theme_id FROM note_checkins n
+           JOIN note_theme_members m ON m.note_id = n.id AND m.rank = 1
+           WHERE n.user_id = $1${range}
+           UNION ALL
+           SELECT m.theme_id FROM mood_checkins mc
+           JOIN note_theme_mood_members m ON m.mood_checkin_id = mc.id AND m.rank = 1
+           WHERE mc.user_id = $1${moodRange}
+         ) x JOIN note_themes t ON t.id = x.theme_id
          GROUP BY t.id ORDER BY notes DESC`,
         params,
       ),
       query(
-        `SELECT EXTRACT(YEAR FROM ${LOCAL_TS})::int AS year, m.theme_id, COUNT(*)::int AS notes
-         FROM note_checkins n JOIN note_theme_members m ON m.note_id = n.id AND m.rank = 1
-         WHERE n.user_id = $1${range}
-         GROUP BY 1, 2 ORDER BY 1`,
+        `SELECT year, theme_id, COUNT(*)::int AS notes FROM (
+           SELECT EXTRACT(YEAR FROM ${LOCAL_TS})::int AS year, m.theme_id
+           FROM note_checkins n JOIN note_theme_members m ON m.note_id = n.id AND m.rank = 1
+           WHERE n.user_id = $1${range}
+           UNION ALL
+           SELECT EXTRACT(YEAR FROM ${MOOD_LOCAL_TS})::int, m.theme_id
+           FROM mood_checkins mc JOIN note_theme_mood_members m ON m.mood_checkin_id = mc.id AND m.rank = 1
+           WHERE mc.user_id = $1${moodRange}
+         ) x GROUP BY 1, 2 ORDER BY 1`,
         params,
       ),
       query(
@@ -539,7 +578,8 @@ router.get('/analysis/status', async (_req: Request, res: Response) => {
   try {
     const userId = currentUserId();
     const [config, llm] = await Promise.all([getEmbeddingConfig(userId), getLlmSettings(userId)]);
-    const [counts, themes, lastRun, active] = await Promise.all([
+    const includeMood = await includesMoodEntries(userId);
+    const [counts, moodCounts, themes, lastRun, active] = await Promise.all([
       query(
         `SELECT COUNT(*)::int AS total,
                 COUNT(*) FILTER (WHERE ${PENDING_WHERE.replace('n.user_id = $1 AND ', '')})::int AS pending
@@ -547,6 +587,14 @@ router.get('/analysis/status', async (_req: Request, res: Response) => {
          WHERE n.user_id = $1`,
         [userId, config?.model ?? ''],
       ),
+      includeMood
+        ? query(
+          `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE ${MOOD_STALE})::int AS pending
+           FROM mood_checkins mc LEFT JOIN note_mood_embeddings e ON e.mood_checkin_id = mc.id
+           WHERE ${MOOD_WITH_TEXT}`,
+          [userId, config?.model ?? ''],
+        )
+        : Promise.resolve(null),
       query('SELECT COUNT(*)::int AS n FROM note_themes WHERE user_id = $1', [userId]),
       query(
         `SELECT completed_at FROM jobs WHERE type = $1 AND user_id = $2 AND status = 'completed' ORDER BY completed_at DESC LIMIT 1`,
@@ -557,8 +605,13 @@ router.get('/analysis/status', async (_req: Request, res: Response) => {
         [SIMILARITY_JOB, userId],
       ),
     ]);
-    const { total, pending } = counts.rows[0] as { total: number; pending: number };
+    const noteCounts = counts.rows[0] as { total: number; pending: number };
+    const mood = (moodCounts?.rows[0] ?? { total: 0, pending: 0 }) as { total: number; pending: number };
+    const total = noteCounts.total + mood.total;
+    const pending = noteCounts.pending + mood.pending;
     res.json({
+      include_mood_entries: includeMood,
+      mood_total: mood.total,
       embeddings_configured: Boolean(config),
       embedding_model: config?.model ?? null,
       llm_configured: Boolean(llm),
@@ -962,6 +1015,7 @@ export const server: CheckinTypeServerPlugin = {
     { name: 'embedding_model', type: 'string', label: 'Embedding model' },
     { name: 'embedding_api_key', type: 'string', label: 'Embedding API key' },
     { name: 'similarity_threshold', type: 'number', label: 'Similarity Web link threshold', default: 0.6 },
+    { name: 'include_mood_entries', type: 'boolean', label: 'Include mood check-ins with text in the similarity analysis', default: false },
   ],
 
   jobs: [

@@ -58,6 +58,8 @@ export interface RelatedNote {
   checkin_timezone: string | null;
   similarity: number;
   tags: NoteTag[];
+  /** A mood check-in with text (when included in the analysis) opens at /mood-checkins/:id. */
+  kind: 'note' | 'mood';
 }
 
 export interface NoteTheme {
@@ -94,6 +96,7 @@ export interface GraphNode {
   word_count: number;
   tag_ids: string[];
   theme_id: string | null;
+  kind: 'note' | 'mood';
 }
 
 export interface GraphEdge {
@@ -131,6 +134,9 @@ export interface AnalysisStatus {
   embeddings_configured: boolean;
   embedding_model: string | null;
   llm_configured: boolean;
+  include_mood_entries: boolean;
+  /** Mood check-ins with text (0 unless included). */
+  mood_total: number;
   total: number;
   pending: number;
   analyzed: number;

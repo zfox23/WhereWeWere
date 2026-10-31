@@ -314,6 +314,72 @@ describe('Notes plugin (integration)', () => {
     expect(restored.body.tags.map((t: { name: string }) => t.name)).toEqual(['Journal']);
   });
 
+  it('includes mood check-ins with text only while the setting is on', async () => {
+    const { embedded } = stubExternal();
+    await request(app).put('/api/v1/plugins/notes/settings').send({
+      embedding_api_url: 'http://embed.test/v1/', embedding_model: 'fake-embed',
+    });
+    await query(`INSERT INTO user_settings (user_id, llm_api_url, llm_model, llm_context_window)
+                 VALUES ($1, 'http://llm.test/v1', 'test', 32768)
+                 ON CONFLICT (user_id) DO UPDATE SET llm_api_url = EXCLUDED.llm_api_url,
+                   llm_model = EXCLUDED.llm_model, llm_context_window = EXCLUDED.llm_context_window`, [DEFAULT_USER_ID]);
+    const topics = ['mom', 'work', 'dream'];
+    const notes: { id: string }[] = [];
+    for (let i = 0; i < 9; i++) {
+      notes.push(await createNote({ body: `Thinking about ${topics[i % 3]} (${i}).`, checked_in_at: `20${10 + i}-01-01T12:00:00Z` }));
+    }
+    const mood = async (note: string | null, at: string) => (await query(
+      `INSERT INTO mood_checkins (user_id, mood, note, checked_in_at, mood_timezone)
+       VALUES ($1, 4, $2, $3, 'UTC') RETURNING id`, [DEFAULT_USER_ID, note, at],
+    )).rows[0].id as string;
+    const withText = await mood('Called mom today', '2020-03-01T12:00:00Z');
+    await mood('mom', '2020-03-02T12:00:00Z');
+    await mood('   ', '2020-03-03T12:00:00Z');
+    await mood(null, '2020-03-04T12:00:00Z');
+
+    // Off by default: mood entries are ignored.
+    expect((await runJob()).status).toBe('completed');
+    expect(embedded).toHaveLength(9);
+    expect((await request(app).get('/api/v1/notes/graph')).body.nodes).toHaveLength(9);
+    const off = (await request(app).get('/api/v1/notes/analysis/status')).body;
+    expect(off).toMatchObject({ include_mood_entries: false, mood_total: 0, total: 9, pending: 0 });
+
+    // On: only the two with text count, and they join the "mom" theme.
+    await request(app).put('/api/v1/plugins/notes/settings').send({ include_mood_entries: true });
+    expect((await request(app).get('/api/v1/notes/analysis/status')).body)
+      .toMatchObject({ include_mood_entries: true, mood_total: 2, total: 11, pending: 2 });
+    embedded.length = 0;
+    expect((await runJob()).status).toBe('completed');
+    expect(embedded.sort()).toEqual(['Called mom today', 'mom']);
+    expect((await request(app).get('/api/v1/notes/analysis/status')).body).toMatchObject({ total: 11, pending: 0, themes: 3 });
+    const members = await query(
+      `SELECT t.label, COUNT(*)::int AS n FROM note_theme_mood_members m JOIN note_themes t ON t.id = m.theme_id
+       WHERE m.rank = 1 GROUP BY t.label`);
+    expect(members.rows).toEqual([{ label: 'About mom', n: 2 }]);
+
+    const graph = (await request(app).get('/api/v1/notes/graph')).body;
+    expect(graph.nodes).toHaveLength(11);
+    expect(graph.nodes.filter((n: { kind: string }) => n.kind === 'mood')).toHaveLength(2);
+    expect(graph.edges.some((e: { source: string; target: string }) => [e.source, e.target].includes(withText))).toBe(true);
+    const related = (await request(app).get(`/api/v1/notes/checkins/${notes[0].id}/related?limit=15`)).body.related;
+    expect(related.filter((r: { kind: string }) => r.kind === 'mood').map((r: { id: string }) => r.id)).toContain(withText);
+    const stats = (await request(app).get('/api/v1/notes/stats')).body;
+    expect(stats.totals.notes).toBe(9);
+    expect(stats.themes.find((t: { label: string }) => t.label === 'About mom').notes).toBe(5);
+
+    // Deleting a mood entry takes its derived rows with it.
+    await query('DELETE FROM mood_checkins WHERE id = $1', [withText]);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_theme_mood_members')).rows[0].n).toBe(1);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_mood_embeddings')).rows[0].n).toBe(1);
+
+    // Off again: the next run removes mood entries from members, neighbors and the web.
+    await request(app).put('/api/v1/plugins/notes/settings').send({ include_mood_entries: false });
+    expect((await runJob()).status).toBe('completed');
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_theme_mood_members')).rows[0].n).toBe(0);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_mood_neighbors')).rows[0].n).toBe(0);
+    expect((await request(app).get('/api/v1/notes/graph')).body.nodes).toHaveLength(9);
+  });
+
   it('restores links onto an existing tag of the same name', async () => {
     const note = await createNote({ body: 'x', tags: ['Therapy'] });
     const payload = await exportPluginData(DEFAULT_USER_ID);

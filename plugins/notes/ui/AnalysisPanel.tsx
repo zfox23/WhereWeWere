@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertCircle, Loader2, Sparkles, Square } from 'lucide-react';
 import { jobs } from '../../../client/src/api/client';
+import { plugins } from '../../../client/src/plugins/api';
 import { notes, type AnalysisStatus } from './api';
 
 const JOB_TYPE = 'notes-similarity';
@@ -87,6 +88,16 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }) {
     }
   };
 
+  const toggleMood = async (include: boolean) => {
+    setError(null);
+    try {
+      await plugins.settings.set('notes', { include_mood_entries: include });
+      await loadStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the setting');
+    }
+  };
+
   const cancel = async () => {
     if (!job) return;
     try {
@@ -114,10 +125,27 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }) {
               {status.total === 0
                 ? 'No notes yet.'
                 : status.pending === 0
-                  ? <>All {status.total.toLocaleString()} notes analyzed into {status.themes} themes.</>
-                  : <><strong>{status.pending.toLocaleString()}</strong> of {status.total.toLocaleString()} notes not yet analyzed.</>}
+                  ? <>All {status.total.toLocaleString()} {status.include_mood_entries ? 'entries' : 'notes'} analyzed into {status.themes} themes.</>
+                  : <><strong>{status.pending.toLocaleString()}</strong> of {status.total.toLocaleString()} {status.include_mood_entries ? 'entries' : 'notes'} not yet analyzed.</>}
               {status.last_run_at && <span className="text-gray-400"> Last run {ago(status.last_run_at)}.</span>}
             </p>
+          )}
+          {status && (
+            <label className="flex items-start gap-2 pt-1 text-xs text-gray-700 dark:text-gray-200">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={status.include_mood_entries}
+                disabled={running}
+                onChange={(e) => toggleMood(e.target.checked)}
+              />
+              <span>
+                Include mood check-ins that have text
+                <span className="block text-gray-500 dark:text-gray-400">
+                  They join the themes, the Similarity Web, and Related notes. Applied on the next analysis run.
+                </span>
+              </span>
+            </label>
           )}
           {status && !configured && (
             <p className="text-xs text-amber-700 dark:text-amber-300">

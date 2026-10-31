@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ForceGraph2D, { type ForceGraphMethods, type LinkObject, type NodeObject } from 'react-force-graph-2d';
 import { useTheme } from '../../../../client/src/contexts/ThemeContext';
 import { OVERFLOW_COLOR } from '../../manifest';
@@ -19,6 +20,7 @@ interface WebNode {
   id: string;
   label: string;
   date: string;
+  mood: boolean;
   themeId: string | null;
   tagIds: string[];
   size: number;
@@ -39,6 +41,7 @@ interface SimilarityWebProps {
 
 export default function SimilarityWeb({ graph, selectedId, onSelect, defaultThreshold = 0.6 }: SimilarityWebProps) {
   const { resolvedTheme } = useTheme();
+  const navigate = useNavigate();
   const dark = resolvedTheme === 'dark';
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fgRef = useRef<ForceGraphMethods<NodeObject<WebNode>, LinkObject<WebNode, WebLink>> | undefined>(undefined);
@@ -67,6 +70,7 @@ export default function SimilarityWeb({ graph, selectedId, onSelect, defaultThre
       id: n.id,
       label: noteHeading(n.title, n.excerpt),
       date: n.local_date,
+      mood: n.kind === 'mood',
       themeId: n.theme_id,
       tagIds: n.tag_ids,
       size: 2 + Math.min(4, Math.sqrt(n.word_count) / 10),
@@ -156,7 +160,8 @@ export default function SimilarityWeb({ graph, selectedId, onSelect, defaultThre
           nodeVal={(n) => n.size}
           nodeRelSize={3}
           cooldownTicks={200}
-          onNodeClick={(n) => onSelect(String(n.id))}
+          // Mood check-ins have no reading pane: open their own page.
+          onNodeClick={(n) => (n.mood ? navigate(`/mood-checkins/${n.id}`) : onSelect(String(n.id)))}
           onNodeHover={(n) => setHoverId(n ? String(n.id) : null)}
           linkColor={(l) => {
             const s = String((l.source as NodeObject<WebNode>)?.id ?? l.source);
@@ -175,7 +180,9 @@ export default function SimilarityWeb({ graph, selectedId, onSelect, defaultThre
             const dim = focusId && n.id !== focusId && !focusSet?.has(String(n.id));
             ctx.globalAlpha = dim ? 0.25 : 1;
             ctx.beginPath();
-            ctx.arc(n.x ?? 0, n.y ?? 0, r, 0, 2 * Math.PI);
+            // Mood check-ins are squares, notes are dots.
+            if (n.mood) ctx.rect((n.x ?? 0) - r, (n.y ?? 0) - r, 2 * r, 2 * r);
+            else ctx.arc(n.x ?? 0, n.y ?? 0, r, 0, 2 * Math.PI);
             ctx.fillStyle = colorOf(n);
             ctx.fill();
             // A surface ring keeps overlapping dots apart; the selected one gets an ink ring.
@@ -233,6 +240,7 @@ export default function SimilarityWeb({ graph, selectedId, onSelect, defaultThre
             <li key={l.id} className="inline-flex items-center gap-1"><TagDot color={l.color} />{l.name}</li>
           ))}
           <li className="inline-flex items-center gap-1 text-gray-400"><TagDot color={OVERFLOW_COLOR} />{colorBy === 'theme' ? 'Other / no theme' : 'Untagged'}</li>
+          {data.nodes.some((n) => n.mood) && <li className="text-gray-400">Squares are mood check-ins</li>}
         </ul>
       )}
     </div>

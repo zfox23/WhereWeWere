@@ -1,5 +1,6 @@
 /**
- * "Related notes": the most similar notes by the similarity analysis. Used
+ * "Related notes": the most similar notes by the similarity analysis (and
+ * mood check-ins, when included; those link to their own page). Used
  * on the detail page and in the Note Library's reading pane.
  */
 
@@ -54,6 +55,9 @@ export function RelatedNotes({ noteId, onSelect, limit = 6 }: RelatedNotesProps)
             const content = (
               <>
                 <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100">{label}</span>
+                {r.kind === 'mood' && (
+                  <span className="shrink-0 rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">Mood</span>
+                )}
                 <span className="flex shrink-0 items-center gap-1">
                   {r.tags.slice(0, 3).map((t) => <TagDot key={t.id} color={t.color} />)}
                 </span>
@@ -63,13 +67,14 @@ export function RelatedNotes({ noteId, onSelect, limit = 6 }: RelatedNotesProps)
                 </span>
               </>
             );
+            const isMood = r.kind === 'mood';
             const cls = 'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-800';
             return (
               <li key={r.id}>
-                {onSelect ? (
+                {onSelect && !isMood ? (
                   <button type="button" onClick={() => onSelect(r.id)} className={cls}>{content}</button>
                 ) : (
-                  <Link to={`/notes/${r.id}`} className={cls}>{content}</Link>
+                  <Link to={isMood ? `/mood-checkins/${r.id}` : `/notes/${r.id}`} className={cls}>{content}</Link>
                 )}
               </li>
             );

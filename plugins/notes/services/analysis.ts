@@ -5,6 +5,11 @@
  *                content hash and model it came from)
  *   2. link      each note's most similar notes -> note_neighbors
  *   3. cluster   all embedded notes into themes
+ *
+ * With the `include_mood_entries` setting on, mood check-ins that have text
+ * are embedded, linked and clustered alongside the notes (their own
+ * embedding and theme-member tables; pairs involving one go to
+ * note_mood_neighbors).
  *   4. name      new themes with the chat LLM; a theme whose notes are mostly
  *                unchanged keeps its id, name and color
  */
@@ -53,6 +58,25 @@ function checkCancelled(ctx: AnalysisContext) {
 /** SQL: this user's notes whose embedding is missing or stale for `$2` (the model). */
 export const PENDING_WHERE = `n.user_id = $1 AND (e.note_id IS NULL OR e.content_hash <> n.content_hash OR e.model <> $2)`;
 
+/** SQL: this user's mood check-ins that have text (alias `mc`). */
+export const MOOD_WITH_TEXT = `mc.user_id = $1 AND btrim(COALESCE(mc.note, '')) <> ''`;
+
+/** SQL: a mood check-in's embedding is missing or stale for `$2` (alias `e` is note_mood_embeddings). */
+export const MOOD_STALE = `(e.mood_checkin_id IS NULL OR e.content_hash <> md5(mc.note) OR e.model <> $2)`;
+
+export const MOOD_PENDING_WHERE = `${MOOD_WITH_TEXT} AND ${MOOD_STALE}`;
+
+/** Settings > Profile > Notes: also analyze mood check-ins that have text. */
+export async function includesMoodEntries(userId: string): Promise<boolean> {
+  const result = await query(
+    `SELECT value FROM plugin_settings WHERE user_id = $1 AND plugin_id = 'notes' AND key = 'include_mood_entries'`,
+    [userId],
+  );
+  return result.rows[0]?.value === true;
+}
+
+type EntryKind = 'note' | 'mood';
+
 export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext): Promise<AnalysisResult> {
   const config = await getEmbeddingConfig(userId);
   if (!config) {
@@ -60,6 +84,7 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
   }
 
   // ---- 1. embed ----------------------------------------------------------
+  const includeMood = await includesMoodEntries(userId);
   const pending = await query(
     `SELECT n.id, n.title, n.body, n.content_hash
      FROM note_checkins n LEFT JOIN note_embeddings e ON e.note_id = n.id
@@ -67,9 +92,22 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
      ORDER BY n.checked_in_at ASC`,
     [userId, config.model],
   );
-  const todo = pending.rows as { id: string; title: string | null; body: string; content_hash: string }[];
+  const todo = (pending.rows as { id: string; title: string | null; body: string; content_hash: string }[])
+    .map((r) => ({ ...r, kind: 'note' as EntryKind }));
+  if (includeMood) {
+    const pendingMood = await query(
+      `SELECT mc.id, mc.note AS body, md5(mc.note) AS content_hash
+       FROM mood_checkins mc LEFT JOIN note_mood_embeddings e ON e.mood_checkin_id = mc.id
+       WHERE ${MOOD_PENDING_WHERE}
+       ORDER BY mc.checked_in_at ASC`,
+      [userId, config.model],
+    );
+    for (const r of pendingMood.rows as { id: string; body: string; content_hash: string }[]) {
+      todo.push({ ...r, title: null, kind: 'mood' });
+    }
+  }
   let embedded = 0;
-  await ctx.updateProgress({ phase: 'embedding', updated: 0, remaining: todo.length, message: `Embedding ${todo.length} notes…` });
+  await ctx.updateProgress({ phase: 'embedding', updated: 0, remaining: todo.length, message: `Embedding ${todo.length} ${includeMood ? 'entries' : 'notes'}…` });
 
   let i = 0;
   while (i < todo.length) {
@@ -90,11 +128,17 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
       const pooled = meanPool(vectors.slice(offset, offset + chunks.length));
       offset += chunks.length;
       await query(
-        `INSERT INTO note_embeddings (note_id, model, content_hash, dims, chunk_count, embedding, embedded_at)
-         VALUES ($1, $2, $3, $4, $5, $6::real[], NOW())
-         ON CONFLICT (note_id) DO UPDATE SET
-           model = EXCLUDED.model, content_hash = EXCLUDED.content_hash, dims = EXCLUDED.dims,
-           chunk_count = EXCLUDED.chunk_count, embedding = EXCLUDED.embedding, embedded_at = NOW()`,
+        note.kind === 'mood'
+          ? `INSERT INTO note_mood_embeddings (mood_checkin_id, model, content_hash, dims, chunk_count, embedding, embedded_at)
+             VALUES ($1, $2, $3, $4, $5, $6::real[], NOW())
+             ON CONFLICT (mood_checkin_id) DO UPDATE SET
+               model = EXCLUDED.model, content_hash = EXCLUDED.content_hash, dims = EXCLUDED.dims,
+               chunk_count = EXCLUDED.chunk_count, embedding = EXCLUDED.embedding, embedded_at = NOW()`
+          : `INSERT INTO note_embeddings (note_id, model, content_hash, dims, chunk_count, embedding, embedded_at)
+             VALUES ($1, $2, $3, $4, $5, $6::real[], NOW())
+             ON CONFLICT (note_id) DO UPDATE SET
+               model = EXCLUDED.model, content_hash = EXCLUDED.content_hash, dims = EXCLUDED.dims,
+               chunk_count = EXCLUDED.chunk_count, embedding = EXCLUDED.embedding, embedded_at = NOW()`,
         [note.id, config.model, note.content_hash, pooled.length, chunks.length, pooled],
       );
       embedded++;
@@ -103,7 +147,7 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
       phase: 'embedding',
       updated: embedded,
       remaining: todo.length - embedded,
-      message: `Embedded ${embedded} of ${todo.length} notes`,
+      message: `Embedded ${embedded} of ${todo.length} ${includeMood ? 'entries' : 'notes'}`,
     });
   }
 
@@ -121,18 +165,31 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
      ORDER BY n.checked_in_at ASC`,
     [userId, config.model],
   )).rows as { id: string; title: string | null; excerpt: string; date: string; tags: string[]; embedding: number[] }[];
+  const entryRows = rows.map((r) => ({ ...r, kind: 'note' as EntryKind }));
+  if (includeMood) {
+    const moodRows = (await query(
+      `SELECT mc.id, left(mc.note, 1200) AS excerpt,
+              (mc.checked_in_at AT TIME ZONE COALESCE(mc.mood_timezone, 'UTC'))::date::text AS date,
+              e.embedding
+       FROM mood_checkins mc JOIN note_mood_embeddings e ON e.mood_checkin_id = mc.id
+       WHERE ${MOOD_WITH_TEXT} AND e.model = $2 AND e.content_hash = md5(mc.note)
+       ORDER BY mc.checked_in_at ASC`,
+      [userId, config.model],
+    )).rows as { id: string; excerpt: string; date: string; embedding: number[] }[];
+    for (const r of moodRows) entryRows.push({ ...r, title: null, tags: [], kind: 'mood' });
+  }
 
   // Mixed dimensions mean the model changed mid-history; keep the majority.
   const dimCounts = new Map<number, number>();
-  for (const r of rows) dimCounts.set(r.embedding.length, (dimCounts.get(r.embedding.length) ?? 0) + 1);
+  for (const r of entryRows) dimCounts.set(r.embedding.length, (dimCounts.get(r.embedding.length) ?? 0) + 1);
   const dims = [...dimCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
-  const notes = rows.filter((r) => r.embedding.length === dims);
+  const notes = entryRows.filter((r) => r.embedding.length === dims);
   const vectors: Vector[] = notes.map((r) => Float32Array.from(r.embedding));
 
-  await ctx.updateProgress({ phase: 'linking', updated: embedded, remaining: 0, message: `Finding similar notes among ${notes.length}…` });
+  await ctx.updateProgress({ phase: 'linking', updated: embedded, remaining: 0, message: `Finding similar ${includeMood ? 'entries' : 'notes'} among ${notes.length}…` });
   const neighbors = await topKNeighbors(vectors, NEIGHBOR_K, NEIGHBOR_FLOOR, async (done, total) => {
     checkCancelled(ctx);
-    await ctx.updateProgress({ phase: 'linking', updated: embedded, remaining: 0, message: `Comparing notes (${done}/${total})…` });
+    await ctx.updateProgress({ phase: 'linking', updated: embedded, remaining: 0, message: `Comparing ${includeMood ? 'entries' : 'notes'} (${done}/${total})…` });
   });
 
   // ---- 3. cluster --------------------------------------------------------
@@ -145,7 +202,11 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
   const previousColors = new Map<string, string>();
   const prev = await query(
     `SELECT t.id, t.color, m.note_id
-     FROM note_themes t LEFT JOIN note_theme_members m ON m.theme_id = t.id AND m.rank = 1
+     FROM note_themes t LEFT JOIN (
+       SELECT note_id, theme_id FROM note_theme_members WHERE rank = 1
+       UNION ALL
+       SELECT mood_checkin_id, theme_id FROM note_theme_mood_members WHERE rank = 1
+     ) m ON m.theme_id = t.id
      WHERE t.user_id = $1`,
     [userId],
   );
@@ -195,14 +256,19 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
       'DELETE FROM note_neighbors WHERE note_id IN (SELECT id FROM note_checkins WHERE user_id = $1)',
       [userId],
     );
+    await client.query('DELETE FROM note_mood_neighbors WHERE user_id = $1', [userId]);
     const src: string[] = [];
     const dst: string[] = [];
     const sim: number[] = [];
+    const moodSrc: string[] = [];
+    const moodDst: string[] = [];
+    const moodSim: number[] = [];
     neighbors.forEach((list, idx) => {
       for (const nb of list) {
-        src.push(notes[idx].id);
-        dst.push(notes[nb.index].id);
-        sim.push(Math.round(nb.similarity * 10000) / 10000);
+        const mixed = notes[idx].kind === 'mood' || notes[nb.index].kind === 'mood';
+        (mixed ? moodSrc : src).push(notes[idx].id);
+        (mixed ? moodDst : dst).push(notes[nb.index].id);
+        (mixed ? moodSim : sim).push(Math.round(nb.similarity * 10000) / 10000);
       }
     });
     if (src.length > 0) {
@@ -212,10 +278,18 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
         [src, dst, sim],
       );
     }
+    if (moodSrc.length > 0) {
+      await client.query(
+        `INSERT INTO note_mood_neighbors (user_id, entry_id, neighbor_id, similarity)
+         SELECT $4, * FROM unnest($1::uuid[], $2::uuid[], $3::real[])`,
+        [moodSrc, moodDst, moodSim, userId],
+      );
+    }
 
     const keep = reused.filter((r): r is string => Boolean(r));
     await client.query('DELETE FROM note_themes WHERE user_id = $1 AND NOT (id = ANY($2::uuid[]))', [userId, keep]);
     await client.query('DELETE FROM note_theme_members WHERE theme_id = ANY($1::uuid[])', [keep]);
+    await client.query('DELETE FROM note_theme_mood_members WHERE theme_id = ANY($1::uuid[])', [keep]);
 
     const usedColors = new Set(keep.map((id) => previousColors.get(id)));
     const freeColors = THEME_PALETTE.filter((c) => !usedColors.has(c));
@@ -237,27 +311,33 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
       }
     }
 
-    const mNote: string[] = [];
-    const mTheme: string[] = [];
-    const mRank: number[] = [];
-    const mScore: number[] = [];
+    const members: Record<EntryKind, { id: string[]; theme: string[]; rank: number[]; score: number[] }> = {
+      note: { id: [], theme: [], rank: [], score: [] },
+      mood: { id: [], theme: [], rank: [], score: [] },
+    };
     assignments.forEach((a, idx) => {
-      mNote.push(notes[idx].id);
-      mTheme.push(themeIds[a.primary.cluster]);
-      mRank.push(1);
-      mScore.push(Math.round(a.primary.score * 10000) / 10000);
+      const m = members[notes[idx].kind];
+      m.id.push(notes[idx].id);
+      m.theme.push(themeIds[a.primary.cluster]);
+      m.rank.push(1);
+      m.score.push(Math.round(a.primary.score * 10000) / 10000);
       if (a.secondary) {
-        mNote.push(notes[idx].id);
-        mTheme.push(themeIds[a.secondary.cluster]);
-        mRank.push(2);
-        mScore.push(Math.round(a.secondary.score * 10000) / 10000);
+        m.id.push(notes[idx].id);
+        m.theme.push(themeIds[a.secondary.cluster]);
+        m.rank.push(2);
+        m.score.push(Math.round(a.secondary.score * 10000) / 10000);
       }
     });
-    if (mNote.length > 0) {
+    for (const [kind, table, column] of [
+      ['note', 'note_theme_members', 'note_id'],
+      ['mood', 'note_theme_mood_members', 'mood_checkin_id'],
+    ] as const) {
+      const m = members[kind];
+      if (m.id.length === 0) continue;
       await client.query(
-        `INSERT INTO note_theme_members (note_id, theme_id, rank, score)
+        `INSERT INTO ${table} (${column}, theme_id, rank, score)
          SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::smallint[], $4::real[])`,
-        [mNote, mTheme, mRank, mScore],
+        [m.id, m.theme, m.rank, m.score],
       );
     }
     await client.query('COMMIT');
@@ -273,7 +353,7 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
     phase: 'done',
     updated: embedded,
     remaining: 0,
-    message: `Analyzed ${result.analyzed} notes into ${result.themes} themes (${embedded} newly embedded).`,
+    message: `Analyzed ${result.analyzed} ${includeMood ? 'entries' : 'notes'} into ${result.themes} themes (${embedded} newly embedded).`,
   });
   return result;
 }
