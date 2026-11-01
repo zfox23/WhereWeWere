@@ -9,7 +9,7 @@
 #   TRANSCRIPTION_PORT   not used here: the port inside the container is always 8000.
 #
 # The download happens once; the model lives in the mounted Hugging Face cache
-# (./data/whisper), so later starts only check that it is there.
+# (the whisper_models volume), so later starts only check that it is there.
 
 PORT=8000
 BASE="http://127.0.0.1:${PORT}"
