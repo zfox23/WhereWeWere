@@ -20,9 +20,6 @@ import { DEFAULT_PROCESSING, appliedMismatches, processingConstraints, type Audi
 
 export type Channels = 1 | 2;
 
-/** What the user picks: a channel count, or leave it to the microphone and browser. */
-export type ChannelChoice = Channels | 'auto';
-
 /** Opus bitrate: 256 kbps for stereo, and half that for mono, which is the same 128 kbps per channel. */
 export const AUDIO_BITS_PER_SECOND = 256_000;
 export const MONO_BITS_PER_SECOND = 128_000;
@@ -56,61 +53,17 @@ export function extensionForMime(mime: string): string {
 
 /**
  * `channels` is a request, not a guarantee: a microphone that only has one
- * channel stays mono whatever is asked (the recorder reports that). With
- * `hints: false` the channel count, sample rate and sample size are not asked
- * for at all, leaving the browser's own capture format (the fallback for
- * microphones that go silent when those hints are present).
+ * channel stays mono whatever is asked (the recorder reports that).
  */
-export function audioConstraints(
-  deviceId: string,
-  channels: ChannelChoice = 2,
-  processing: AudioProcessing = DEFAULT_PROCESSING,
-  hints = true,
-): MediaStreamConstraints {
-  const { sampleRate: _rate, sampleSize: _size, ...flags } = processingConstraints(processing);
+export function audioConstraints(deviceId: string, channels: Channels = 2, processing: AudioProcessing = DEFAULT_PROCESSING): MediaStreamConstraints {
   return {
     audio: {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      ...(hints && channels !== 'auto' ? { channelCount: { ideal: channels } } : {}),
-      ...(hints ? processingConstraints(processing) : flags),
+      channelCount: { ideal: channels },
+      ...processingConstraints(processing),
     },
   };
 }
-
-/** One way of opening the microphone, tried in order until one produces sound. */
-export interface CaptureAttempt {
-  /** Said to the user when this is what finally worked ("…recording with noise suppression on"). */
-  label: string;
-  /** Channel count, sample rate and sample size were left to the browser. */
-  hintsDropped: boolean;
-  processing: AudioProcessing;
-}
-
-/**
- * Some browsers (Firefox on Android, notably) give a silent stream when every
- * voice-processing flag is off. The attempts, least intrusive first: as
- * requested; without the format hints; then with noise suppression on; then
- * with echo cancellation on. Only used when echo cancellation AND noise
- * suppression are both off: with either on, exact silence can be legitimate
- * gating of a quiet room, so it proves nothing.
- */
-export function captureAttempts(processing: AudioProcessing): CaptureAttempt[] {
-  const asked: CaptureAttempt = { label: 'with your settings', hintsDropped: false, processing };
-  if (processing.echoCancellation || processing.noiseSuppression) return [asked];
-  const plain: AudioProcessing = { ...processing, sampleRate: null, sampleSize: null };
-  return [
-    asked,
-    { label: "using the browser's default audio format", hintsDropped: true, processing: plain },
-    { label: 'with noise suppression turned on', hintsDropped: true, processing: { ...plain, noiseSuppression: true } },
-    { label: 'with echo cancellation turned on', hintsDropped: true, processing: { ...plain, echoCancellation: true } },
-  ];
-}
-
-/** Is the stream carrying sound? `unknown` when it cannot be measured (never treated as a failure). */
-export type SignalResult = 'signal' | 'silent' | 'unknown';
-
-/** How long a stream may stay exactly silent before it is called dead. A live microphone's noise floor is never exactly zero. */
-export const SIGNAL_TIMEOUT_MS = 1500;
 
 export type RecorderState = 'idle' | 'starting' | 'recording' | 'paused' | 'stopping' | 'interrupted';
 
@@ -122,11 +75,6 @@ export interface RecorderEvents {
   onLevel?: (level: number) => void;
   /** What the browser actually applied to the microphone (getSettings), once the stream is open. */
   onSettings?: (applied: MediaTrackSettings) => void;
-  /**
-   * The microphone gave no sound with the chosen settings, and these made it work
-   * instead. The caller can keep them (so the next recording starts working at once).
-   */
-  onRecovered?: (fix: { attempt: CaptureAttempt; label: string }) => void;
   /** Something the user should know while the recording continues. */
   onWarning?: (message: string | null) => void;
   /** The recording ended without the user stopping it; what was captured is saved. */
@@ -139,8 +87,6 @@ export interface RecorderDeps {
   now: () => number;
   /** Optional level metering and screen wake lock; absent in tests. */
   createMeter?: (stream: MediaStream, onLevel: (level: number) => void) => () => void;
-  /** Measure whether a freshly opened stream carries any sound (absent in tests that don't care). */
-  detectSignal?: (stream: MediaStream, timeoutMs: number) => Promise<SignalResult>;
   acquireWakeLock?: () => Promise<() => void>;
 }
 
@@ -150,7 +96,6 @@ export function browserDeps(): RecorderDeps {
     MediaRecorderCtor: MediaRecorder,
     now: () => Date.now(),
     createMeter: createAnalyserMeter,
-    detectSignal: detectSignalWithAnalyser,
     acquireWakeLock: acquireScreenWakeLock,
   };
 }
@@ -180,7 +125,7 @@ export class NoteRecorder {
   private finishing: Promise<StopResult> | null = null;
 
   constructor(
-    private readonly opts: { userId: string; deviceId: string; deviceLabel: string | null; channels?: ChannelChoice; processing?: AudioProcessing },
+    private readonly opts: { userId: string; deviceId: string; deviceLabel: string | null; channels?: Channels; processing?: AudioProcessing },
     private readonly events: RecorderEvents = {},
     private readonly deps: RecorderDeps = browserDeps(),
   ) {}
@@ -204,58 +149,27 @@ export class NoteRecorder {
 
   async start(): Promise<RecordingMeta> {
     if (this.state !== 'idle' && this.state !== 'interrupted') throw new Error('Already recording');
-    const channels: ChannelChoice = this.opts.channels === 1 ? 1 : this.opts.channels === 'auto' ? 'auto' : 2;
-    const requested = this.opts.processing ?? DEFAULT_PROCESSING;
+    const channels: Channels = this.opts.channels === 1 ? 1 : 2;
+    const processing = this.opts.processing ?? DEFAULT_PROCESSING;
     const notes: string[] = []; // things to tell the user once, after the stream is open
     this.setState('starting');
-
-    let deviceId = this.opts.deviceId;
-    /** Open the microphone; if the remembered one is gone, fall back to the default (once). */
-    const open = async (attempt: CaptureAttempt): Promise<MediaStream> => {
-      try {
-        return await this.deps.getUserMedia(audioConstraints(deviceId, channels, attempt.processing, !attempt.hintsDropped));
-      } catch (err) {
-        if (deviceId && err instanceof Error && err.name === 'OverconstrainedError') {
-          deviceId = '';
-          notes.push('The selected microphone was not found; recording with the default one.');
-          return this.deps.getUserMedia(audioConstraints('', channels, attempt.processing, !attempt.hintsDropped));
-        }
-        throw err;
-      }
-    };
-
-    // Open it, check that sound is actually arriving, and if not try the next way of opening it.
-    const attempts = captureAttempts(requested);
-    let stream: MediaStream | null = null;
-    let processing = requested;
+    let stream: MediaStream;
     try {
-      for (let i = 0; i < attempts.length && !stream; i++) {
-        const candidate = await open(attempts[i]);
-        const verdict = attempts.length > 1 && this.deps.detectSignal
-          ? await this.deps.detectSignal(candidate, SIGNAL_TIMEOUT_MS)
-          : 'unknown';
-        if (verdict === 'silent' && i < attempts.length - 1) {
-          candidate.getTracks().forEach((t) => t.stop());
-          continue;
-        }
-        stream = candidate;
-        processing = attempts[i].processing;
-        if (verdict === 'silent') {
-          notes.push('No sound is coming from this microphone. Check that it is not muted or covered, or try another microphone.');
-        } else if (i > 0) {
-          const label = attempts[i].label;
-          notes.push(`No sound came through with your settings, so this recording is ${label}.`);
-          this.events.onRecovered?.({ attempt: attempts[i], label });
-        }
-      }
+      stream = await this.deps.getUserMedia(audioConstraints(this.opts.deviceId, channels, processing));
     } catch (err) {
-      stream?.getTracks().forEach((t) => t.stop());
-      this.setState('idle');
-      throw new Error(micErrorMessage(err));
-    }
-    if (!stream) {
-      this.setState('idle');
-      throw new Error('Could not open the microphone.');
+      if (this.opts.deviceId && err instanceof Error && err.name === 'OverconstrainedError') {
+        // The remembered microphone isn't plugged in: use the default instead of failing.
+        try {
+          stream = await this.deps.getUserMedia(audioConstraints('', channels, processing));
+          notes.push('The selected microphone was not found; recording with the default one.');
+        } catch (inner) {
+          this.setState('idle');
+          throw new Error(micErrorMessage(inner));
+        }
+      } else {
+        this.setState('idle');
+        throw new Error(micErrorMessage(err));
+      }
     }
 
     const mime = pickMimeType((m) => this.deps.MediaRecorderCtor.isTypeSupported(m));
@@ -288,10 +202,7 @@ export class NoteRecorder {
     this.finishing = null;
     this.elapsedBefore = 0;
 
-    // Size the encoder for what the microphone really delivers (mono needs half the bitrate).
-    const delivered = stream.getAudioTracks()[0]?.getSettings?.().channelCount;
-    const encodeChannels: Channels = typeof delivered === 'number' ? (delivered === 1 ? 1 : 2) : channels === 1 ? 1 : 2;
-    const recorder = new this.deps.MediaRecorderCtor(stream, { mimeType: mime, audioBitsPerSecond: bitrateFor(encodeChannels) });
+    const recorder = new this.deps.MediaRecorderCtor(stream, { mimeType: mime, audioBitsPerSecond: bitrateFor(channels) });
     this.recorder = recorder;
     recorder.ondataavailable = (e: BlobEvent) => {
       if (e.data && e.data.size > 0) this.enqueueWrite(e.data);
@@ -305,7 +216,7 @@ export class NoteRecorder {
     const applied = stream.getAudioTracks()[0]?.getSettings?.();
     if (applied) this.events.onSettings?.(applied);
     const actual = applied?.channelCount;
-    if (typeof actual === 'number' && channels !== 'auto' && actual !== channels) {
+    if (typeof actual === 'number' && actual !== channels) {
       notes.push(
         actual === 1
           ? 'This microphone only records in mono, so the recording will be mono.'
@@ -443,48 +354,6 @@ export class NoteRecorder {
     this.meta = null;
     this.setState(outcome === 'interrupted' ? 'interrupted' : 'idle');
     return { meta: finished, unsaved };
-  }
-}
-
-/**
- * Watch a new stream for up to `timeoutMs` and report whether any non-zero sample arrives.
- * Returns `unknown` (never a failure) if the browser can't run an AudioContext here, so a
- * missing measurement can never block recording.
- */
-async function detectSignalWithAnalyser(stream: MediaStream, timeoutMs: number): Promise<SignalResult> {
-  const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctx) return 'unknown';
-  let ctx: AudioContext | null = null;
-  try {
-    ctx = new Ctx();
-    await ctx.resume().catch(() => {});
-    if (ctx.state !== 'running') return 'unknown';
-    const source = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 1024;
-    source.connect(analyser);
-    const buf = new Float32Array(analyser.fftSize);
-    const startedAt = Date.now();
-    return await new Promise<SignalResult>((resolve) => {
-      const timer = setInterval(() => {
-        analyser.getFloatTimeDomainData(buf);
-        for (const v of buf) {
-          if (Math.abs(v) > 1e-7) {
-            clearInterval(timer);
-            resolve('signal');
-            return;
-          }
-        }
-        if (Date.now() - startedAt >= timeoutMs) {
-          clearInterval(timer);
-          resolve('silent');
-        }
-      }, 40);
-    });
-  } catch {
-    return 'unknown';
-  } finally {
-    void ctx?.close().catch(() => {});
   }
 }
 

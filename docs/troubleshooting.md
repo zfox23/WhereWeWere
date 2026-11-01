@@ -79,9 +79,3 @@ If you see it on audio transcribed before these settings:
 2. Open the note and press **Transcribe again** on the audio file (this replaces the transcript, including any corrections you made).
 
 Other things that help: set a **language hint** in Settings > Integrations > Audio transcription (a wrong automatic guess at the start of a noisy recording can derail the whole file), and make sure `TRANSCRIPTION_BATCHED_MODE` has not been set to `false`. A server log line `Transcript of "…" looped: folded N repeated segments` means the guard caught one.
-
-## A recording is silent (the level meter stays flat)
-
-Some browsers give a silent stream when every voice-processing setting is off. Firefox on Android is the known case: with echo cancellation and noise suppression both off, no sound arrives, while turning either on works. When the app starts a recording with both off, it checks for sound for about a second and a half and, if the stream is dead, retries on its own: first without the channel-count and sample-rate hints (leaving processing off), then with noise suppression on, then with echo cancellation on. The first one that produces sound is used, a note says which, and it is saved for that microphone (and channels switch to **Auto** if the format hints were the problem). **Reset to defaults** in Advanced audio settings undoes it.
-
-If it still stays silent, a message says no sound is coming from the microphone: check it isn't muted or covered, that the browser has microphone permission, and try another microphone. With echo cancellation or noise suppression turned on the check is skipped, because those can legitimately output exact silence in a quiet room.

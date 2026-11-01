@@ -32,22 +32,16 @@ export function savePreferredInput(input: StoredInput | null): void {
   }
 }
 
-/**
- * Mono, stereo, or "auto" (leave the channel count to the microphone and browser),
- * remembered per device like the microphone. Stereo is the default.
- */
-export type ChannelPreference = 1 | 2 | 'auto';
-
-export function loadPreferredChannels(): ChannelPreference {
+/** Mono or stereo, remembered per device like the microphone. Stereo is the default. */
+export function loadPreferredChannels(): 1 | 2 {
   try {
-    const v = window.localStorage.getItem(CHANNELS_KEY);
-    return v === '1' ? 1 : v === 'auto' ? 'auto' : 2;
+    return window.localStorage.getItem(CHANNELS_KEY) === '1' ? 1 : 2;
   } catch {
     return 2;
   }
 }
 
-export function savePreferredChannels(channels: ChannelPreference): void {
+export function savePreferredChannels(channels: 1 | 2): void {
   try {
     window.localStorage.setItem(CHANNELS_KEY, String(channels));
   } catch {

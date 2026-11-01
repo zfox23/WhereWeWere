@@ -6,15 +6,13 @@ A note can carry any number of audio files. Record from a microphone you choose,
 
 The browser's voice processing (noise suppression, echo cancellation, automatic gain) is **off**, 48 kHz is requested, and the audio is encoded as Opus at 256 kbps for stereo (Safari uses AAC in MP4 at its highest bitrate).
 
-Choose **Mono** or **Stereo** next to the microphone picker (stereo is the default; the choice is remembered per device). **Auto** leaves the channel count to the microphone and browser. Mono is encoded at 128 kbps, the same per channel, so the file is half the size. The browser treats this as a request: a one-channel microphone stays mono under *Stereo*, and you are told when that happens. The server stores exactly the bytes the browser produced; nothing is re-encoded.
+Choose **Mono** or **Stereo** next to the microphone picker (stereo is the default; the choice is remembered per device). Mono is encoded at 128 kbps, the same per channel, so the file is half the size. The browser treats this as a request: a one-channel microphone stays mono under *Stereo*, and you are told when that happens. The server stores exactly the bytes the browser produced; nothing is re-encoded.
 
 Recording needs a **secure context**: HTTPS (see [Deployment](deployment.md#reverse-proxy-behavior)) or `localhost`. Over plain HTTP the browser refuses microphone access.
 
 The microphone and channel choice are remembered per browser/device and survive signing out.
 
 Under **Advanced audio settings** on the recording panel you can change the capture options your browser's media APIs offer: echo cancellation, noise suppression, automatic gain control, voice isolation (where the browser supports it), sample rate and sample size. They are saved **per microphone** on this device, so a USB interface can stay unprocessed while a laptop microphone gets noise suppression. Only what your browser supports is shown. **Check what this microphone supports** opens the microphone for an instant to read its capabilities (a setting the device fixes is locked, and the sample-rate and sample-size choices narrow to what it offers). The defaults are all processing off and 48 kHz, which keeps the most detail. These are requests that browsers and devices may override, so the panel shows what the browser actually applied to your last recording, and a warning appears if it overrode something you chose.
-
-If a microphone delivers no sound with the settings you chose (Firefox on Android does this with all processing off), the app notices, retries with gentler settings, tells you what worked, and remembers it for that microphone; see [Troubleshooting](troubleshooting.md#a-recording-is-silent-the-level-meter-stays-flat).
 
 While recording, **Blank screen** covers the app with solid black (handy for a phone on a table or an OLED screen). The recording and the wake lock carry on underneath; **double-tap** (or double-click) the black screen, or press Escape, to return. If the recording is interrupted while the screen is black, the app comes back on its own so you see why.
 
