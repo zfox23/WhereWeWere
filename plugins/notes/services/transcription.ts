@@ -19,7 +19,8 @@ import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
 import { pool, query } from '../../../server/src/db';
-import { audioExtForMime, noteAudioPath } from './audioFiles';
+import path from 'path';
+import { audioExtForMime, noteAudioDir, noteAudioPath } from './audioFiles';
 
 export interface TranscriptionConfig {
   apiUrl: string;
@@ -281,6 +282,25 @@ export async function drainTranscriptionQueue(): Promise<number> {
 
 let started = false;
 
+const ABANDONED_UPLOAD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Drop upload sessions nobody finished for a week (and their partial files).
+ * Safe: the browser keeps its own copy until the server confirms, and starts
+ * a fresh session if the old one is gone.
+ */
+export async function cleanupAbandonedUploads(): Promise<number> {
+  const r = await query(
+    `DELETE FROM note_audio WHERE status = 'uploading' AND created_at < NOW() - ($1 || ' milliseconds')::interval
+      RETURNING id, user_id`,
+    [String(ABANDONED_UPLOAD_MS)],
+  );
+  for (const row of r.rows as { id: string; user_id: string }[]) {
+    fs.unlink(path.join(noteAudioDir(row.user_id), '.partial', `${row.id}.part`), () => {});
+  }
+  return r.rowCount ?? 0;
+}
+
 /** Nudge the worker after new work arrives; a no-op until the server started it. */
 export function kickTranscription(): void {
   if (!started) return;
@@ -294,6 +314,9 @@ export async function startTranscriptionWorker(): Promise<void> {
   await query(`UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() WHERE status = 'processing'`);
   setInterval(kickTranscription, POLL_INTERVAL_MS).unref();
   kickTranscription();
+  const sweep = () => cleanupAbandonedUploads().catch((err) => console.error('Upload cleanup failed:', err));
+  void sweep();
+  setInterval(sweep, 6 * 60 * 60 * 1000).unref();
 }
 
 /** Put one file back in the queue (manual retry / re-transcribe). */

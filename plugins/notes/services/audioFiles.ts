@@ -74,3 +74,32 @@ export function sha256File(filePath: string): Promise<string> {
       .on('end', () => resolve(hash.digest('hex')));
   });
 }
+
+/**
+ * Remove the files of audio rows that were just deleted. Deletes a file only
+ * if its row is really gone, so a transaction that rolled back after the
+ * deletion keeps its audio. `delayMs` lets callers inside a transaction wait
+ * for the commit.
+ */
+export function scheduleAudioFileCleanup(
+  userId: string,
+  rows: { id: string; mime: string }[],
+  isGone: (id: string) => Promise<boolean>,
+  delayMs = 0,
+): void {
+  if (rows.length === 0) return;
+  const run = async () => {
+    for (const row of rows) {
+      try {
+        if (!(await isGone(row.id))) continue;
+        const ext = audioExtForMime(row.mime);
+        if (ext) deleteNoteAudioFile(noteAudioPath(userId, row.id, ext));
+        deleteNoteAudioFile(path.join(noteAudioDir(userId), '.partial', `${row.id}.part`));
+      } catch {
+        // best effort: a leftover file is harmless
+      }
+    }
+  };
+  if (delayMs > 0) setTimeout(() => void run(), delayMs).unref();
+  else void run();
+}

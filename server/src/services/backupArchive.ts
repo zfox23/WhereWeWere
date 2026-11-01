@@ -106,7 +106,9 @@ export function buildBackupZip(
     }
     for (const file of files) {
       if (!fs.existsSync(file.absPath)) continue; // row already fell back to inline
-      archive.file(file.absPath, { name: `plugins/${file.pluginId}/${file.zipPath}` });
+      // Audio is already compressed: deflating it again only burns CPU.
+      const store = /\.(webm|ogg|m4a|mp3|aac|flac|wav)$/i.test(file.zipPath);
+      archive.file(file.absPath, { name: `plugins/${file.pluginId}/${file.zipPath}`, ...(store ? { store: true } : {}) });
     }
 
     archive.finalize().catch((err) => done(err));
@@ -129,7 +131,8 @@ function safeArchiveDest(root: string, name: string): string | null {
 export const BACKUP_EXTRACT_LIMITS = {
   maxEntries: 50_000,
   maxEntryBytes: 2 * 1024 * 1024 * 1024,
-  maxTotalBytes: 8 * 1024 * 1024 * 1024,
+  // Note audio is already compressed, so a backup with hours of it is close to its upload size.
+  maxTotalBytes: 32 * 1024 * 1024 * 1024,
   /** Only enforced for entries above minBytesForRatioCheck (tiny text compresses very well legitimately). */
   maxCompressionRatio: 2_000,
   minBytesForRatioCheck: 50 * 1024 * 1024,

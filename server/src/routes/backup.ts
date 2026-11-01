@@ -35,7 +35,11 @@ const router = Router();
 const FIRST_START_OVER_CONFIRMATION = 'DELETE MY DATA';
 const SECOND_START_OVER_CONFIRMATION = 'START OVER';
 
-// Stream uploads to disk instead of buffering up to 500 MB in memory.
+// A v2 backup ZIP carries the original audio of notes, so it can be many GB.
+// (A JSON backup stays far smaller; its separate body limit lives in index.ts.)
+const MAX_BACKUP_UPLOAD_BYTES = 20 * 1024 * 1024 * 1024;
+
+// Stream uploads to disk instead of buffering them in memory.
 const upload = multer({
   storage: multer.diskStorage({ destination: os.tmpdir() }),
   fileFilter: (_req, file, cb) => {
@@ -52,7 +56,7 @@ const upload = multer({
       cb(new Error('Only backup .json or .zip files are allowed'));
     }
   },
-  limits: { fileSize: 500 * 1024 * 1024 },
+  limits: { fileSize: MAX_BACKUP_UPLOAD_BYTES },
 });
 
 interface BackupUser {

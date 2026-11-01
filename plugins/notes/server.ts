@@ -52,7 +52,9 @@ import {
 } from '../../server/src/services/companions';
 import { HEX_COLOR_RE, MAX_TAG_LENGTH } from './manifest';
 import { registerAudioRoutes } from './audioRoutes';
-import { startTranscriptionWorker } from './services/transcription';
+import { kickTranscription, startTranscriptionWorker } from './services/transcription';
+import { planAudioBackup, restoreAudioBackup } from './services/audioBackup';
+import { scheduleAudioFileCleanup } from './services/audioFiles';
 import {
   InputError,
   NOTE_SELECT,
@@ -100,6 +102,11 @@ function sendError(res: Response, err: unknown, fallback: string) {
   if (err instanceof InputError) return res.status(400).json({ error: err.message });
   console.error(`${fallback}:`, err);
   return res.status(500).json({ error: fallback });
+}
+
+/** True once an audio row no longer exists (its file may then be removed). */
+async function audioRowGone(audioId: string): Promise<boolean> {
+  return ((await query('SELECT 1 FROM note_audio WHERE id = $1', [audioId])).rowCount ?? 0) === 0;
 }
 
 /** `(n.checked_in_at AT TIME ZONE ...)`: the note's wall-clock time. */
@@ -234,13 +241,18 @@ router.delete('/checkins/:id', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   if (!isUuid(id)) return res.status(404).json({ error: 'Note not found' });
   try {
+    const userId = currentUserId();
+    let audio: { id: string; mime: string }[] = [];
     const deleted = await withTransaction(async (client) => {
-      const result = await client.query('DELETE FROM note_checkins WHERE id = $1 AND user_id = $2', [id, currentUserId()]);
+      // The rows go with the note (cascade); remember them so their files can follow.
+      audio = (await client.query('SELECT id, mime FROM note_audio WHERE note_id = $1 AND user_id = $2', [id, userId])).rows;
+      const result = await client.query('DELETE FROM note_checkins WHERE id = $1 AND user_id = $2', [id, userId]);
       if ((result.rowCount ?? 0) === 0) return false;
       await deleteCompanionsForCheckins('notes', [id], client);
       return true;
     });
     if (!deleted) return res.status(404).json({ error: 'Note not found' });
+    scheduleAudioFileCleanup(userId, audio, audioRowGone);
     res.json({ message: 'Note deleted', id });
   } catch (err) {
     sendError(res, err, 'Failed to delete note');
@@ -893,7 +905,7 @@ export const server: CheckinTypeServerPlugin = {
     return result.rows;
   },
 
-  backupImport: async ({ user_id, client: txClient, errors }, payload) => {
+  backupImport: async ({ user_id, client: txClient, errors, filesDir }, payload) => {
     const ownsClient = txClient == null;
     const client = txClient ?? (await pool.connect());
     let inserted = 0;
@@ -902,7 +914,8 @@ export const server: CheckinTypeServerPlugin = {
         const title = typeof row.title === 'string' && row.title.trim() ? row.title : null;
         const body = typeof row.body === 'string' ? row.body : '';
         const at = row.checked_in_at ? new Date(String(row.checked_in_at)) : null;
-        if (!isUuid(row.id) || (!title && !/\S/.test(body)) || !at || Number.isNaN(at.getTime())) {
+        // A note may be audio only (its audio restores right after the notes), so empty text is fine.
+        if (!isUuid(row.id) || !at || Number.isNaN(at.getTime())) {
           errors?.push(`Skipped a note with missing or invalid fields (${String(row.id ?? 'no id')}).`);
           continue;
         }
@@ -916,11 +929,16 @@ export const server: CheckinTypeServerPlugin = {
         ]);
         if ((result.rowCount ?? 0) > 0) inserted++;
       }
+      // Audio attachments (originals + transcripts) ride in the bundle's files.
+      if (await restoreAudioBackup(client, user_id, filesDir, errors) > 0) kickTranscription();
     } finally {
       if (ownsClient) client.release();
     }
     return inserted;
   },
+
+  // Original audio and an index of its metadata + transcripts (see services/audioBackup.ts).
+  backupFiles: ({ user_id }) => planAudioBackup(user_id),
 
   // Restore runs in one transaction, so every insert below is guarded: a row
   // whose note/tag/theme didn't restore (or a tag name already taken by a
@@ -1007,6 +1025,10 @@ export const server: CheckinTypeServerPlugin = {
   // until "reset settings" (they're the user's vocabulary, like Mood's activities).
   deleteUserData: async ({ user_id, client }) => {
     const run = client ?? db;
+    // Audio rows (attached or not) go with the user's notes; their files are
+    // removed once the surrounding transaction is known to have committed.
+    const audio = await run.query('DELETE FROM note_audio WHERE user_id = $1 RETURNING id, mime', [user_id]);
+    scheduleAudioFileCleanup(user_id, audio.rows, audioRowGone, 30_000);
     const companions = await run.query(
       `DELETE FROM companions WHERE checkin_type = 'notes'
          AND checkin_id IN (SELECT id FROM note_checkins WHERE user_id = $1) RETURNING id`,
@@ -1014,7 +1036,7 @@ export const server: CheckinTypeServerPlugin = {
     );
     const rows = await run.query('DELETE FROM note_checkins WHERE user_id = $1 RETURNING id', [user_id]);
     const themes = await run.query('DELETE FROM note_themes WHERE user_id = $1 RETURNING id', [user_id]);
-    return (companions.rowCount ?? 0) + (rows.rowCount ?? 0) + (themes.rowCount ?? 0);
+    return (companions.rowCount ?? 0) + (rows.rowCount ?? 0) + (themes.rowCount ?? 0) + (audio.rowCount ?? 0);
   },
 
   resetSettings: async ({ user_id, client }) => {

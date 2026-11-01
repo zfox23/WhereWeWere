@@ -1,12 +1,15 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
+import os from 'os';
+import path from 'path';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../../../server/src/index';
 import { noteAudioDir } from '../../services/audioFiles';
-import { MAX_ATTEMPTS, drainTranscriptionQueue } from '../../services/transcription';
-import { query } from '../../../../server/src/db';
+import { MAX_ATTEMPTS, cleanupAbandonedUploads, drainTranscriptionQueue } from '../../services/transcription';
+import { pool, query } from '../../../../server/src/db';
+import { restoreAudioBackup } from '../../services/audioBackup';
 import { NOTE_TEXT_SQL, PENDING_WHERE } from '../../services/analysis';
 import {
   DEFAULT_USER_ID,
@@ -392,5 +395,217 @@ describe('notes audio: transcript segments, editing, timeline count', () => {
     const res = await request(app).get('/api/v1/timeline');
     const entry = (res.body.checkins ?? res.body).find((c: { id: string }) => c.id === noteId);
     expect(entry.data.audio_count).toBe(1);
+  });
+});
+
+describe('notes audio: backup and restore', () => {
+  beforeEach(resetIntegrationDatabase);
+  const data = crypto.randomBytes(5000);
+
+  /** A finished, transcribed audio attachment on a note, with its file on disk. */
+  async function noteWithAudio(title = 'Voice', body = '') {
+    const start = await request(app).post('/api/v1/notes/audio/uploads')
+      .send({ filename: 'memo.webm', mime: 'audio/webm', bytes: data.length, sha256: sha(data), duration_ms: 4200 });
+    const id = start.body.id as string;
+    await request(app).put(`/api/v1/notes/audio/uploads/${id}?offset=0`).set('Content-Type', 'application/octet-stream').send(data);
+    await request(app).post(`/api/v1/notes/audio/uploads/${id}/complete`);
+    await query(`UPDATE note_audio SET status = 'done', transcript_text = 'the quick brown fox', language = 'en', model = 'm' WHERE id = $1`, [id]);
+    await query(
+      `INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text, edited) VALUES ($1, 0, 0, 2000, 'the quick', FALSE), ($1, 1, 2000, 4200, 'brown fox', TRUE)`,
+      [id],
+    );
+    const note = await request(app).post('/api/v1/notes/checkins')
+      .send({ title, body, checked_in_at: '2024-04-04T10:00:00Z', checkin_timezone: 'UTC', audio_ids: [id] });
+    return { audioId: id, noteId: note.body.id as string };
+  }
+
+  const fetchZip = () => new Promise<Buffer>((resolve, reject) => {
+    request(app).get('/api/v1/backup/export').buffer(true)
+      .parse((res, cb) => {
+        const parts: Buffer[] = [];
+        res.on('data', (c: Buffer) => parts.push(c));
+        res.on('end', () => cb(null, Buffer.concat(parts)));
+      })
+      .end((err, res) => (err ? reject(err) : resolve(res.body as Buffer)));
+  });
+  const wipeAll = async () => {
+    await request(app).delete(`/api/v1/notes/checkins/${(await query('SELECT id FROM note_checkins')).rows[0]?.id}`);
+    fs.rmSync(noteAudioDir(DEFAULT_USER_ID), { recursive: true, force: true });
+  };
+
+  it('round-trips an audio-only note through the real ZIP export and import', async () => {
+    const { audioId, noteId } = await noteWithAudio('', '');
+    const zip = await fetchZip();
+    // The original is stored uncompressed in the ZIP, next to an index of metadata and transcripts.
+    expect(zip.includes(data)).toBe(true);
+
+    await wipeAll();
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio')).rows[0].n).toBe(0);
+    expect(fs.existsSync(noteAudioDir(DEFAULT_USER_ID)) && fs.readdirSync(noteAudioDir(DEFAULT_USER_ID)).length > 0).toBe(false);
+
+    const res = await request(app).post('/api/v1/backup/import').attach('file', zip, 'backup.zip');
+    expect(res.status).toBe(200);
+    expect(res.body.errors).toEqual([]);
+
+    // The audio-only note and its audio are back, byte for byte, with the transcript and segments.
+    const notes = await request(app).get(`/api/v1/notes/checkins/${noteId}/audio?include=segments`);
+    expect(notes.body).toHaveLength(1);
+    expect(notes.body[0]).toMatchObject({ id: audioId, filename: 'memo.webm', status: 'done', language: 'en', duration_ms: 4200 });
+    expect(notes.body[0].segments.map((s: { text: string; edited: boolean }) => [s.text, s.edited]))
+      .toEqual([['the quick', false], ['brown fox', true]]);
+    const file = await request(app).get(`/api/v1/notes/audio/${audioId}`).buffer(true).parse((r, cb) => {
+      const parts: Buffer[] = [];
+      r.on('data', (c: Buffer) => parts.push(c));
+      r.on('end', () => cb(null, Buffer.concat(parts)));
+    });
+    expect(Buffer.compare(file.body, data)).toBe(0);
+    // ...and it is searchable again.
+    const hits = await request(app).get('/api/v1/timeline').query({ q: 'fox' });
+    expect((hits.body.checkins ?? hits.body).map((c: { id: string }) => c.id)).toEqual([noteId]);
+  });
+
+  it('is idempotent: restoring over existing data adds nothing and breaks nothing', async () => {
+    const { audioId } = await noteWithAudio('Keep', 'text');
+    const zip = await fetchZip();
+    const res = await request(app).post('/api/v1/backup/import').attach('file', zip, 'backup.zip');
+    expect(res.status).toBe(200);
+    expect(res.body.errors).toEqual([]);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio WHERE id = $1', [audioId])).rows[0].n).toBe(1);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio_segments WHERE audio_id = $1', [audioId])).rows[0].n).toBe(2);
+  });
+
+  it('restores into another account, never trusting the backup’s user, and keeps the file private to it', async () => {
+    const { audioId, noteId } = await noteWithAudio('Mine', 'body');
+    const zip = await fetchZip();
+    const other = await createTestUser('restorer');
+    const res = await request(app).post('/api/v1/backup/import').set('Cookie', other.cookie).attach('file', zip, 'backup.zip');
+    expect(res.status).toBe(200);
+    // The original owner's audio row has that id already (ON CONFLICT DO NOTHING), so nothing leaks or moves.
+    expect((await query('SELECT user_id FROM note_audio WHERE id = $1', [audioId])).rows[0].user_id).toBe(DEFAULT_USER_ID);
+    expect((await request(app).get(`/api/v1/notes/audio/${audioId}`).set('Cookie', other.cookie)).status).toBe(404);
+    expect(noteId).toBeTruthy();
+  });
+
+  it('skips a corrupted audio file with a warning instead of restoring bad bytes', async () => {
+    await noteWithAudio('Bad', 'text');
+    const zip = await fetchZip();
+    const at = zip.indexOf(data);
+    const tampered = Buffer.from(zip);
+    tampered[at + 10] ^= 0xff; // stored uncompressed, so this flips a byte of the audio
+    await wipeAll();
+    const res = await request(app).post('/api/v1/backup/import').attach('file', tampered, 'backup.zip');
+    // The ZIP's own CRC may reject the archive outright; either way bad audio must not be restored.
+    if (res.status === 200) expect(res.body.errors.join(' ')).toMatch(/corrupt|checksum/i);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio')).rows[0].n).toBe(0);
+  });
+
+  it('removes an audio file from disk when its note is deleted', async () => {
+    const { audioId, noteId } = await noteWithAudio('Gone', 'x');
+    const file = path.join(noteAudioDir(DEFAULT_USER_ID), `${audioId}.webm`);
+    expect(fs.existsSync(file)).toBe(true);
+    expect((await request(app).delete(`/api/v1/notes/checkins/${noteId}`)).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(fs.existsSync(file)).toBe(false);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio WHERE id = $1', [audioId])).rows[0].n).toBe(0);
+  });
+
+  it('sweeps upload sessions abandoned for over a week, keeping fresh ones', async () => {
+    const stale = (await startUploadFor()).id;
+    const fresh = (await startUploadFor()).id;
+    await query(`UPDATE note_audio SET created_at = NOW() - INTERVAL '8 days' WHERE id = $1`, [stale]);
+    expect(await cleanupAbandonedUploads()).toBe(1);
+    const left = (await query('SELECT id FROM note_audio')).rows.map((r) => r.id);
+    expect(left).toEqual([fresh]);
+  });
+
+  async function startUploadFor() {
+    const res = await request(app).post('/api/v1/notes/audio/uploads')
+      .send({ filename: 'p.webm', mime: 'audio/webm', bytes: 10, sha256: 'a'.repeat(64) });
+    return res.body as { id: string };
+  }
+});
+
+describe('notes audio: restore rejects bad entries', () => {
+  beforeEach(resetIntegrationDatabase);
+
+  /** A hand-built extracted backup folder (what the framework passes as filesDir). */
+  function bundle(entries: Record<string, unknown>[], files: Record<string, Buffer>) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wwp-audio-restore-test-'));
+    fs.mkdirSync(path.join(root, 'audio'), { recursive: true });
+    for (const [name, buf] of Object.entries(files)) fs.writeFileSync(path.join(root, name), buf);
+    fs.writeFileSync(path.join(root, 'audio/index.json'), JSON.stringify({ version: 1, audio: entries }));
+    return root;
+  }
+  const good = crypto.randomBytes(300);
+  const entry = (over: Record<string, unknown> = {}) => {
+    const id = crypto.randomUUID();
+    return { id, note_id: null, filename: 'x.webm', mime: 'audio/webm', bytes: good.length, sha256: sha(good), duration_ms: 1, position: 0,
+      status: 'done', error: null, language: 'en', model: 'm', transcript_text: 'hi', created_at: '2024-01-01T00:00:00Z',
+      file: `audio/${id}.webm`, segments: [{ idx: 0, start_ms: 0, end_ms: 1, text: 'hi', edited: false }], ...over };
+  };
+  const restore = async (root: string) => {
+    const errors: string[] = [];
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const n = await restoreAudioBackup(client, DEFAULT_USER_ID, root, errors);
+      await client.query('COMMIT');
+      return { n, errors };
+    } finally {
+      client.release();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+  afterAll(() => fs.rmSync(noteAudioDir(DEFAULT_USER_ID), { recursive: true, force: true }));
+
+  it('restores a valid entry', async () => {
+    const e = entry();
+    const { n, errors } = await restore(bundle([e], { [e.file as string]: good }));
+    expect({ n, errors }).toEqual({ n: 1, errors: [] });
+    expect(fs.readFileSync(path.join(noteAudioDir(DEFAULT_USER_ID), `${e.id}.webm`)).equals(good)).toBe(true);
+  });
+
+  it('refuses a file whose bytes do not match the recorded checksum, and leaves no row or file', async () => {
+    const e = entry();
+    const bad = Buffer.from(good);
+    bad[0] ^= 1;
+    const { n, errors } = await restore(bundle([e], { [e.file as string]: bad }));
+    expect(n).toBe(0);
+    expect(errors.join(' ')).toMatch(/corrupted \(checksum mismatch\)/);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio WHERE id = $1', [e.id])).rows[0].n).toBe(0);
+    expect(fs.existsSync(path.join(noteAudioDir(DEFAULT_USER_ID), `${e.id}.webm`))).toBe(false);
+  });
+
+  it('refuses entries that point outside the backup folder or are malformed', async () => {
+    const secret = path.join(os.tmpdir(), 'wwp-secret-outside.webm');
+    fs.writeFileSync(secret, good);
+    const id = crypto.randomUUID();
+    const bundles = [
+      entry({ id, file: `audio/../../${path.basename(secret)}` }),
+      entry({ file: '/etc/passwd' }),
+      entry({ id: 'not-a-uuid' }),
+      entry({ mime: 'text/html' }),
+      entry({ sha256: 'zz' }),
+    ];
+    const { n, errors } = await restore(bundle(bundles, {}));
+    fs.rmSync(secret, { force: true });
+    expect(n).toBe(0);
+    expect(errors).toHaveLength(bundles.length);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio')).rows[0].n).toBe(0);
+  });
+
+  it('reports a missing file and an unreadable index without failing the restore', async () => {
+    const e = entry();
+    expect((await restore(bundle([e], {}))).errors.join(' ')).toMatch(/missing from the backup/);
+    const root = bundle([], {});
+    fs.writeFileSync(path.join(root, 'audio/index.json'), '{ not json');
+    expect((await restore(root)).errors.join(' ')).toMatch(/could not be read/);
+  });
+
+  it('queues unfinished transcripts again, and binds rows to the restoring user whatever the backup says', async () => {
+    const e = entry({ status: 'processing', transcript_text: '', user_id: '00000000-0000-0000-0000-0000000000ff' });
+    await restore(bundle([e], { [e.file as string]: good }));
+    const row = (await query('SELECT user_id, status, attempts FROM note_audio WHERE id = $1', [e.id])).rows[0];
+    expect(row).toEqual({ user_id: DEFAULT_USER_ID, status: 'pending', attempts: 0 });
   });
 });
