@@ -58,3 +58,13 @@ Fix:
 
 1. Use the stock Compose stack, which runs `postgis/postgis:16-3.4`.
 2. If using an external database, enable the PostGIS extension: `CREATE EXTENSION IF NOT EXISTS postgis;`.
+
+## The Record button says the microphone is blocked or unavailable
+
+- Microphone access needs HTTPS or `localhost`. Over plain `http://` on a LAN address the browser refuses; put the app behind a TLS reverse proxy.
+- Allow the microphone for the site in the browser's site settings, then reload.
+- Another app may be holding the microphone; close it and try again.
+
+## Audio is stuck on "Waiting to be transcribed"
+
+No transcription endpoint is configured, or it is unreachable. Set it in **Settings → Integrations → Audio transcription** and use **Test connection**. For the bundled service, start it with `docker compose --profile transcription up -d` and check `docker compose logs transcription`. Waiting audio is processed automatically once the service answers.

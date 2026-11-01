@@ -9,6 +9,7 @@ It helps you record where you were, how you felt, and how you slept, then browse
 - [Getting Started](docs/getting-started.md)
 - [Configuration](docs/configuration.md)
 - [Accounts & Sign-in](docs/accounts.md)
+- [Audio notes & transcription](docs/audio-notes.md)
 - [Deployment](docs/deployment.md)
 - [Unraid Deployment](docs/unraid.md)
 - [Troubleshooting](docs/troubleshooting.md)

@@ -57,6 +57,8 @@ If behind Traefik/Caddy/Nginx, set:
 TRUST_PROXY=true
 ```
 
+Serve the app over HTTPS: browsers only allow microphone access (audio notes) on HTTPS or `localhost`. If your proxy sits in front of the bundled nginx, allow large request bodies on `/api/v1/backup/` (restoring a backup that includes audio can be many GB) and use long timeouts there. See [Audio notes](audio-notes.md).
+
 ## Persistence
 
 By default, Docker Compose uses direct appdata path mapping for database files. To instead use the named Docker volume `postgres_data` for database persistence, swap the commented lines under `volumes` in the `db` service definition, like this:
@@ -67,7 +69,7 @@ By default, Docker Compose uses direct appdata path mapping for database files. 
       - postgres_data:/var/lib/postgresql/data
 ```
 
-Uploaded files (GPS track originals, etc.) live under `./data/server` on the host (`/app/data` in the server container). Back up that directory in addition to the database if you want a complete picture of your data — or use the in-app backup/restore feature, which bundles both database rows and plugin files into a single ZIP.
+Uploaded files (GPS track originals, note audio, etc.) live under `./data/server` on the host (`/app/data` in the server container). Back up that directory in addition to the database if you want a complete picture of your data — or use the in-app backup/restore feature, which bundles both database rows and plugin files into a single ZIP.
 
 ## Update workflow
 
