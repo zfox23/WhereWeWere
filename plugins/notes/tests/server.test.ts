@@ -66,12 +66,13 @@ describe('buildTimelineWhere', () => {
     expect(clause.values).toEqual(['u1']);
   });
 
-  it('searches full text, title and tag names with numbered params', () => {
+  it('searches full text, audio transcripts, title and tag names with numbered params', () => {
     const clause = server.buildTimelineWhere!({ ...(ctx as object), q: '50%' } as never);
-    expect(clause.sql).toContain(`plainto_tsquery('english', $2)`);
-    expect(clause.sql).toContain('n.title ILIKE $3');
-    expect(clause.sql).toContain('st.name ILIKE $4');
-    expect(clause.values).toEqual(['u1', '50%', '%50\\%%', '%50\\%%']);
+    expect(clause.sql).toContain(`n.search_vector @@ plainto_tsquery('english', $2)`);
+    expect(clause.sql).toContain(`sa.transcript_vector @@ plainto_tsquery('english', $3)`);
+    expect(clause.sql).toContain('n.title ILIKE $4');
+    expect(clause.sql).toContain('st.name ILIKE $5');
+    expect(clause.values).toEqual(['u1', '50%', '50%', '%50\\%%', '%50\\%%']);
   });
 
   it('filters by tag names case-insensitively', () => {
