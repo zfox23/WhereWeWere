@@ -94,7 +94,9 @@ function ServerRow({ audio, onRemove }: { audio: NoteAudio; onRemove: () => void
       <FileAudio size={16} className="shrink-0 text-rose-500" />
       <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-gray-100">{audio.filename}</span>
       <span className="text-xs text-gray-500">{audio.duration_ms ? `${formatDuration(audio.duration_ms)} · ` : ''}{formatSize(Number(audio.bytes))}</span>
-      <span className="text-xs text-gray-500">{state}</span>
+      <span className={`text-xs ${audio.error ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500'}`} title={audio.error ?? undefined}>
+        {state}{audio.error && audio.status === 'pending' ? ' (last attempt failed, retrying)' : ''}
+      </span>
       <button type="button" onClick={onRemove} aria-label={`Delete ${audio.filename}`} className="text-gray-400 hover:text-red-600">
         <Trash2 size={14} />
       </button>

@@ -139,6 +139,10 @@ describe('notes audio: transcription queue', () => {
   let fakeUrl = '';
   let requests: { auth?: string; body: Buffer }[] = [];
   let respond: (res: http.ServerResponse) => void = () => {};
+  // Like Speaches: transcription 404s until the model has been installed via POST /v1/models/<id>.
+  let modelInstalled = true;
+  let installStatus = 201;
+  let installs: string[] = [];
 
   beforeAll(async () => {
     fake = http.createServer((req, res) => {
@@ -149,7 +153,18 @@ describe('notes audio: transcription queue', () => {
           res.setHeader('Content-Type', 'application/json');
           return res.end(JSON.stringify({ data: [{ id: 'fake-model' }] }));
         }
+        if (req.method === 'POST' && req.url?.includes('/models/')) {
+          installs.push(decodeURIComponent(req.url));
+          if (installStatus < 300) modelInstalled = true;
+          res.statusCode = installStatus;
+          return res.end('{}');
+        }
         requests.push({ auth: req.headers.authorization, body: Buffer.concat(parts) });
+        if (!modelInstalled) {
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ detail: "Model 'fake-model' is not installed locally. You can download the model using `POST /v1/models`" }));
+        }
         respond(res);
       });
     });
@@ -159,6 +174,9 @@ describe('notes audio: transcription queue', () => {
   beforeEach(async () => {
     await resetIntegrationDatabase();
     requests = [];
+    installs = [];
+    modelInstalled = true;
+    installStatus = 201;
     respond = (res) => {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({
@@ -212,6 +230,44 @@ describe('notes audio: transcription queue', () => {
     expect(requests).toHaveLength(0);
   });
 
+  it('picks up waiting audio as soon as settings are saved, with no leftover delay', async () => {
+    const id = await uploadedAudio();
+    await drainTranscriptionQueue(); // nothing configured: it just waits
+    expect(await state(id)).toMatchObject({ status: 'pending', attempts: 0 });
+    const before = (await query('SELECT next_attempt_at FROM note_audio WHERE id = $1', [id])).rows[0].next_attempt_at;
+    await drainTranscriptionQueue();
+    expect((await query('SELECT next_attempt_at FROM note_audio WHERE id = $1', [id])).rows[0].next_attempt_at).toEqual(before);
+
+    await configure();
+    expect(await drainTranscriptionQueue()).toBe(1); // the very next pass, not minutes later
+    expect(await state(id)).toMatchObject({ status: 'done' });
+  });
+
+  it('installs a model the service does not have yet, then transcribes', async () => {
+    await configure();
+    modelInstalled = false;
+    const id = await uploadedAudio();
+    await drainTranscriptionQueue();
+    expect(installs).toEqual(['/v1/models/fake-model']);
+    expect(requests).toHaveLength(2); // refused, installed, retried once
+    expect(await state(id)).toMatchObject({ status: 'done', transcript_text: 'Hello there. General Kenobi.' });
+    // Once installed, later audio doesn't trigger another install.
+    await uploadedAudio();
+    await drainTranscriptionQueue();
+    expect(installs).toHaveLength(1);
+  });
+
+  it('records why when the model cannot be installed, and keeps the audio queued', async () => {
+    await configure();
+    modelInstalled = false;
+    installStatus = 500;
+    const id = await uploadedAudio();
+    await drainTranscriptionQueue();
+    const row = await state(id);
+    expect(row).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(row.error).toContain('Could not install the model "fake-model"');
+  });
+
   it('retries with backoff on failure, gives up after MAX_ATTEMPTS, and retranscribe resets', async () => {
     await configure();
     respond = (res) => { res.statusCode = 503; res.end('busy'); };
@@ -234,7 +290,7 @@ describe('notes audio: transcription queue', () => {
     const ok = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'fake-model' });
     expect(ok.body).toEqual({ ok: true, message: 'Connected.' });
     const unknownModel = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'other' });
-    expect(unknownModel.body.message).toContain('not listed');
+    expect(unknownModel.body.message).toContain('not installed on the service yet');
     const down = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: 'http://127.0.0.1:1/v1', model: 'x' });
     expect(down.body.ok).toBe(false);
     expect((await request(app).post('/api/v1/notes/transcription/test').send({})).status).toBe(400);

@@ -94,7 +94,7 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
   return { text, language: typeof body.language === 'string' && body.language ? body.language : null, durationMs: duration, segments };
 }
 
-interface HttpResult {
+export interface HttpResult {
   status: number;
   body: string;
 }
@@ -145,8 +145,33 @@ async function postAudio(config: TranscriptionConfig, filePath: string, filename
   });
 }
 
+/** A server that doesn't have the configured model yet (Speaches answers 404 "... is not installed locally"). */
+export function isModelMissing(res: HttpResult): boolean {
+  return res.status === 404 && /not installed|not found/i.test(res.body) && /model/i.test(res.body);
+}
+
+/**
+ * Ask the service to download the configured model (`POST {url}/models/{id}`,
+ * which Speaches answers once the download finished). Slow the first time:
+ * large-v3 is a few GB.
+ */
+export async function installModel(config: TranscriptionConfig): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Length': '0' };
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  const url = new URL(`${config.apiUrl}/models/${config.model.split('/').map(encodeURIComponent).join('/')}`);
+  const res = await request(url, { method: 'POST', headers }, (req) => req.end());
+  // 200/201: installed now; 409: it was already there.
+  if (![200, 201, 409].includes(res.status)) {
+    throw new Error(`Could not install the model "${config.model}" (service returned ${res.status}: ${res.body.slice(0, 200)})`);
+  }
+}
+
 export async function transcribeFile(config: TranscriptionConfig, filePath: string, filename: string, mime: string): Promise<TranscriptionResult> {
-  const res = await postAudio(config, filePath, filename, mime);
+  let res = await postAudio(config, filePath, filename, mime);
+  if (isModelMissing(res)) {
+    await installModel(config);
+    res = await postAudio(config, filePath, filename, mime);
+  }
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`Transcription service returned ${res.status}: ${res.body.slice(0, 300)}`);
   }
@@ -173,7 +198,10 @@ export async function testTranscriptionConfig(config: Pick<TranscriptionConfig, 
       ids = Array.isArray(data) ? data.map((m) => String(m.id)) : [];
     } catch { /* not every server lists models */ }
     if (ids.length > 0 && !ids.includes(config.model)) {
-      return { ok: true, message: `Connected. "${config.model}" is not listed yet; some servers download it on first use.` };
+      return {
+        ok: true,
+        message: `Connected, but "${config.model}" is not installed on the service yet. It will be downloaded automatically when the first audio is transcribed (a large download that can take several minutes).`,
+      };
     }
     return { ok: true, message: 'Connected.' };
   } catch (err) {
@@ -194,6 +222,12 @@ async function claimNext(): Promise<AudioRow | null> {
     `UPDATE note_audio SET status = 'processing'
       WHERE id = (SELECT id FROM note_audio
                    WHERE status = 'pending' AND next_attempt_at <= NOW()
+                     -- Audio of a user with no endpoint set up just waits; it is picked
+                     -- up on the next poll once they save one, with no delay to unwind.
+                     AND (SELECT COUNT(*) FROM plugin_settings ps
+                           WHERE ps.user_id = note_audio.user_id AND ps.plugin_id = 'notes'
+                             AND ps.key IN ('transcription_api_url', 'transcription_model')
+                             AND jsonb_typeof(ps.value) = 'string' AND btrim(ps.value #>> '{}') <> '') = 2
                    ORDER BY next_attempt_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING id, user_id, filename, mime, attempts`,
   );

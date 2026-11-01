@@ -114,6 +114,11 @@ describe('AudioPlayer', () => {
     expect(screen.queryByRole('button', { name: /Edit transcript/ })).toBeNull();
   });
 
+  it('shows why a waiting transcription has not happened yet', () => {
+    render(<AudioPlayer audio={make({ status: 'pending', error: "Model 'x' is not installed locally", segments: [] })} onChanged={vi.fn()} />);
+    expect(screen.getByText(/Waiting to be transcribed — last attempt failed: Model 'x' is not installed locally/)).toBeInTheDocument();
+  });
+
   it('marks corrected segments', () => {
     render(<AudioPlayer audio={make()} onChanged={vi.fn()} />);
     expect(within(screen.getByRole('button', { name: /Second line/ })).getByTitle('Corrected by you')).toBeInTheDocument();

@@ -98,7 +98,7 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
   };
 
   const status = STATUS[audio.status];
-  const waiting = audio.status === 'pending' || audio.status === 'processing' || audio.status === 'uploading';
+  const waiting = audio.status === 'processing' || audio.status === 'uploading' || (audio.status === 'pending' && !audio.error);
 
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2" aria-label={`Audio: ${audio.filename}`}>
@@ -132,7 +132,7 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
       {status && (
         <p className={`flex items-center gap-1.5 text-xs ${audio.status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
           {waiting ? <Loader2 size={12} className="animate-spin" /> : <AlertCircle size={12} />}
-          {status}{audio.status === 'failed' && audio.error ? ` — ${audio.error}` : ''}
+          {status}{audio.error && (audio.status === 'failed' || audio.status === 'pending') ? ` — ${audio.status === 'pending' ? 'last attempt failed: ' : ''}${audio.error}` : ''}
         </p>
       )}
 

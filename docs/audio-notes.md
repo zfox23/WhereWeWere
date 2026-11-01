@@ -28,9 +28,15 @@ docker compose --profile transcription up -d
 
 Then open **Settings → Integrations → Audio transcription**, enter the URL (`http://transcription:8000/v1` from the server container), the model (for example `Systran/faster-whisper-large-v3`), optionally an API key and a language hint (blank detects the language), and use **Test connection**.
 
-> The Compose service definition has not been run end to end: the image exists, but the model name, cache path and GPU settings are unverified. Check `docker compose logs transcription` on first start. Any other OpenAI-compatible transcription server works if you point the URL at it.
+The service starts with **no models installed**. The first time audio is transcribed, the app asks it to download the configured model (large-v3 is a few GB, so the first transcription can take several minutes). To do it up front instead:
 
-Audio waits (status "Waiting to be transcribed") until an endpoint is configured; nothing is lost. Failures retry with growing delays and then show **Retry**. **Transcribe again** replaces a transcript, including your corrections. Transcripts also feed the notes similarity analysis.
+```bash
+curl -X POST http://localhost:${TRANSCRIPTION_PORT:-8000}/v1/models/Systran/faster-whisper-large-v3
+```
+
+Any other OpenAI-compatible transcription server works if you point the URL at it. If audio stays on "Waiting to be transcribed", the note shows the last error; `docker compose logs transcription` has the service's side.
+
+Audio waits (status "Waiting to be transcribed") until an endpoint is saved in Settings (the connection test uses what is typed in the form, saved or not); nothing is lost, and it is picked up within a minute of saving. Failures retry with growing delays and then show **Retry**. **Transcribe again** replaces a transcript, including your corrections. Transcripts also feed the notes similarity analysis.
 
 | Variable | Default | Description |
 | --- | --- | --- |

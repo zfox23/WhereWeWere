@@ -50,7 +50,7 @@ export function TranscriptionSettings() {
       setMsg({
         type: 'success',
         text: url.trim() && model.trim()
-          ? 'Saved. Audio waiting for a transcript will be processed now.'
+          ? 'Saved. Audio waiting for a transcript is picked up within a minute.'
           : 'Saved. Add a URL and model to turn transcription on.',
       });
     } catch (err) {
