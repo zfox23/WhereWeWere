@@ -1,0 +1,26 @@
+# Pinned so pip cannot drift. The base image ships torch 2.4.1, torchvision 0.19.1 and torchaudio 2.4.1;
+# an unpinned `pip install pyannote.audio` upgraded torch and torchaudio but left torchvision behind
+# ("operator torchvision::nms does not exist"), and pulled numpy 2.x and huggingface_hub 2.x, which
+# pyannote.audio 3.3.2 predates. Keep these in step with the base image in the Dockerfile.
+
+# The same torch stack as the base image (the +cu121 build is kept: a plain pin matches it).
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+
+pyannote.audio==3.3.2
+
+# Versions pyannote.audio 3.3.2 was written against.
+numpy==1.26.4
+huggingface_hub==0.25.2
+lightning==2.4.0
+torchmetrics==1.4.2
+speechbrain==1.0.2
+pyannote.core==5.0.0
+pyannote.database==5.1.0
+pyannote.metrics==3.2.1
+pyannote.pipeline==3.0.1
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
