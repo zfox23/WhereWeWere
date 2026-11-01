@@ -46,6 +46,29 @@ services:
       retries: 10
       start_period: 30s
 
+  # Optional local speech-to-text (faster-whisper behind an OpenAI-compatible
+  # API). Not started by default; enable with:
+  #   docker compose --profile transcription up -d
+  # Then in the app: Settings -> Integrations -> Notes -> Audio transcription,
+  # base URL http://transcription:8000/v1 (from the server container) or
+  # http://localhost:${TRANSCRIPTION_PORT:-8000}/v1. Requires an NVIDIA GPU and the
+  # NVIDIA Container Toolkit.
+  transcription:
+    profiles: ["transcription"]
+    image: ghcr.io/speaches-ai/speaches:latest-cuda
+    restart: unless-stopped
+    ports:
+      - "${TRANSCRIPTION_PORT:-8000}:8000"
+    volumes:
+      - ./data/whisper:/home/ubuntu/.cache/huggingface/hub
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   client:
     build:
       context: .
