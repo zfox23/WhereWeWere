@@ -11,3 +11,7 @@ data/
 
 # Personal Diving Log backup (import source for the scuba plugin)
 Logbook.sql
+
+# Python bytecode (the diarization service)
+__pycache__/
+*.pyc
