@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NoteRecorder, audioConstraints, bitrateFor, pickMimeType, TIMESLICE_MS, AUDIO_BITS_PER_SECOND, MONO_BITS_PER_SECOND, type RecorderDeps } from '../../ui/audio/recorder';
 import * as store from '../../ui/audio/recordingStore';
 import { resolveInput } from '../../ui/audio/audioInput';
+import { DEFAULT_PROCESSING } from '../../ui/audio/audioSettings';
 
 class FakeTrack extends EventTarget {
   readyState = 'live';
@@ -125,6 +126,36 @@ describe('NoteRecorder', () => {
     await rec2.stop();
     expect(onWarning).not.toHaveBeenCalled();
     expect(onWarning2).not.toHaveBeenCalled();
+  });
+
+  it('asks for exactly the advanced settings it was given', async () => {
+    const d = deps();
+    const processing = { ...DEFAULT_PROCESSING, echoCancellation: true, noiseSuppression: true, voiceIsolation: true, sampleRate: 16000, sampleSize: 24 };
+    const rec = new NoteRecorder({ ...opts, processing }, {}, d);
+    await rec.start();
+    expect(vi.mocked(d.getUserMedia).mock.calls[0][0]).toEqual({
+      audio: {
+        deviceId: { exact: 'mic-1' }, channelCount: { ideal: 2 },
+        echoCancellation: true, noiseSuppression: true, autoGainControl: false, voiceIsolation: true,
+        sampleRate: { ideal: 16000 }, sampleSize: { ideal: 24 },
+      },
+    });
+    await rec.stop();
+  });
+
+  it('reports what the browser really applied, and warns about settings it overrode (one message, with any other notes)', async () => {
+    const stream = new FakeStream();
+    stream.track.settings = { echoCancellation: true, noiseSuppression: false, autoGainControl: false, sampleRate: 44100, channelCount: 1 };
+    const onSettings = vi.fn();
+    const onWarning = vi.fn();
+    const rec = new NoteRecorder({ ...opts, channels: 2 }, { onSettings, onWarning }, deps({ getUserMedia: vi.fn(async () => stream as unknown as MediaStream) }));
+    await rec.start();
+    expect(onSettings).toHaveBeenCalledWith(expect.objectContaining({ sampleRate: 44100, echoCancellation: true }));
+    expect(onWarning).toHaveBeenCalledTimes(1);
+    const message = onWarning.mock.calls[0][0] as string;
+    expect(message).toContain('only records in mono');
+    expect(message).toContain('Echo cancellation is on (you chose off)');
+    await rec.stop();
   });
 
   it('writes every chunk to storage as it arrives, in order, before stop', async () => {

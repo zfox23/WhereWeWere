@@ -12,6 +12,8 @@ Recording needs a **secure context**: HTTPS (see [Deployment](deployment.md#reve
 
 The microphone and channel choice are remembered per browser/device and survive signing out.
 
+Under **Advanced audio settings** on the recording panel you can change the capture options your browser's media APIs offer: echo cancellation, noise suppression, automatic gain control, voice isolation (where the browser supports it), sample rate and sample size. They are saved **per microphone** on this device, so a USB interface can stay unprocessed while a laptop microphone gets noise suppression. Only what your browser supports is shown. **Check what this microphone supports** opens the microphone for an instant to read its capabilities (a setting the device fixes is locked, and the sample-rate and sample-size choices narrow to what it offers). The defaults are all processing off and 48 kHz, which keeps the most detail. These are requests that browsers and devices may override, so the panel shows what the browser actually applied to your last recording, and a warning appears if it overrode something you chose.
+
 While recording, **Blank screen** covers the app with solid black (handy for a phone on a table or an OLED screen). The recording and the wake lock carry on underneath; **double-tap** (or double-click) the black screen, or press Escape, to return. If the recording is interrupted while the screen is black, the app comes back on its own so you see why.
 
 ## What protects a recording

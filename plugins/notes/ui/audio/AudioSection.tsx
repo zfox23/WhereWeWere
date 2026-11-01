@@ -7,10 +7,14 @@
  * from a crash or a closed tab is offered back under "Unsent recordings".
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, CloudUpload, Download, FileAudio, Loader2, Mic, MonitorOff, Pause, Play, Square, Trash2, Plus } from 'lucide-react';
 import { notes, type NoteAudio } from '../api';
 import { micErrorMessage, loadPreferredChannels, savePreferredChannels, useAudioInputs } from './audioInput';
+import { AudioAdvancedSettings } from './AudioAdvancedSettings';
+import {
+  DEFAULT_PROCESSING, loadProcessing, resetProcessing, saveProcessing, type AudioProcessing, type MicrophoneRef,
+} from './audioSettings';
 import { BlackoutScreen } from './BlackoutScreen';
 import { AUDIO_FILE_ACCEPT, importAudioFile } from './importFile';
 import { NoteRecorder, browserDeps, type Channels, type RecorderState } from './recorder';
@@ -121,6 +125,26 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
   const inputs = useAudioInputs();
   const [channels, setChannels] = useState<Channels>(() => loadPreferredChannels());
   const [blank, setBlank] = useState(false);
+  // Advanced capture settings are saved per microphone: reload them whenever the selection changes.
+  const selectedDevice = inputs.devices.find((d) => d.deviceId === inputs.selectedId);
+  const mic = useMemo<MicrophoneRef>(
+    () => ({ deviceId: inputs.selectedId, label: selectedDevice?.label ?? '' }),
+    [inputs.selectedId, selectedDevice?.label],
+  );
+  const [processing, setProcessing] = useState<AudioProcessing>(() => loadProcessing({ deviceId: '', label: '' }));
+  const [applied, setApplied] = useState<MediaTrackSettings | null>(null);
+  useEffect(() => {
+    setProcessing(loadProcessing(mic));
+    setApplied(null);
+  }, [mic]);
+  const changeProcessing = (next: AudioProcessing) => {
+    setProcessing(next);
+    saveProcessing(mic, next);
+  };
+  const resetSettings = () => {
+    resetProcessing(mic);
+    setProcessing({ ...DEFAULT_PROCESSING });
+  };
   const recordings = useLocalRecordings(userId);
   const [serverAudio, setServerAudio] = useState<NoteAudio[]>([]);
   const [state, setState] = useState<RecorderState>('idle');
@@ -201,12 +225,13 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
     setWarning(null);
     const device = inputs.devices.find((d) => d.deviceId === inputs.selectedId);
     const recorder = new NoteRecorder(
-      { userId, deviceId: inputs.selectedId, deviceLabel: device?.label || null, channels },
+      { userId, deviceId: inputs.selectedId, deviceLabel: device?.label || null, channels, processing },
       {
         onState: setState,
         onTick: setElapsed,
         onLevel: setLevel,
         onWarning: setWarning,
+        onSettings: setApplied,
         onInterrupted: (reason, meta) => {
           if (meta) add(meta.id);
           setError(`${reason} What was recorded so far is saved. Press Record to continue in a new recording.`);
@@ -359,6 +384,7 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
             </>
           )}
         </div>
+        <AudioAdvancedSettings mic={mic} value={processing} onChange={changeProcessing} onReset={resetSettings} locked={live} applied={applied} />
         {live && <p className="text-xs text-gray-500">Saved to this device every second as you record, so a crash or closed tab won't lose it.</p>}
         {inputs.error && <p className="text-sm text-red-600 dark:text-red-400">{inputs.error}</p>}
         {warning && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{warning}</p>}

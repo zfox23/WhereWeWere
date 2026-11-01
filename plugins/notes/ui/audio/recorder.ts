@@ -16,6 +16,7 @@ import {
   appendChunk, createRecording, updateRecording, type RecordingMeta,
 } from './recordingStore';
 import { micErrorMessage } from './audioInput';
+import { DEFAULT_PROCESSING, appliedMismatches, processingConstraints, type AudioProcessing } from './audioSettings';
 
 export type Channels = 1 | 2;
 
@@ -54,15 +55,12 @@ export function extensionForMime(mime: string): string {
  * `channels` is a request, not a guarantee: a microphone that only has one
  * channel stays mono whatever is asked (the recorder reports that).
  */
-export function audioConstraints(deviceId: string, channels: Channels = 2): MediaStreamConstraints {
+export function audioConstraints(deviceId: string, channels: Channels = 2, processing: AudioProcessing = DEFAULT_PROCESSING): MediaStreamConstraints {
   return {
     audio: {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
       channelCount: { ideal: channels },
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-      sampleRate: { ideal: 48000 },
+      ...processingConstraints(processing),
     },
   };
 }
@@ -75,6 +73,8 @@ export interface RecorderEvents {
   onTick?: (elapsedMs: number) => void;
   /** Input level 0..1, for a meter. */
   onLevel?: (level: number) => void;
+  /** What the browser actually applied to the microphone (getSettings), once the stream is open. */
+  onSettings?: (applied: MediaTrackSettings) => void;
   /** Something the user should know while the recording continues. */
   onWarning?: (message: string | null) => void;
   /** The recording ended without the user stopping it; what was captured is saved. */
@@ -125,7 +125,7 @@ export class NoteRecorder {
   private finishing: Promise<StopResult> | null = null;
 
   constructor(
-    private readonly opts: { userId: string; deviceId: string; deviceLabel: string | null; channels?: Channels },
+    private readonly opts: { userId: string; deviceId: string; deviceLabel: string | null; channels?: Channels; processing?: AudioProcessing },
     private readonly events: RecorderEvents = {},
     private readonly deps: RecorderDeps = browserDeps(),
   ) {}
@@ -150,16 +150,18 @@ export class NoteRecorder {
   async start(): Promise<RecordingMeta> {
     if (this.state !== 'idle' && this.state !== 'interrupted') throw new Error('Already recording');
     const channels: Channels = this.opts.channels === 1 ? 1 : 2;
+    const processing = this.opts.processing ?? DEFAULT_PROCESSING;
+    const notes: string[] = []; // things to tell the user once, after the stream is open
     this.setState('starting');
     let stream: MediaStream;
     try {
-      stream = await this.deps.getUserMedia(audioConstraints(this.opts.deviceId, channels));
+      stream = await this.deps.getUserMedia(audioConstraints(this.opts.deviceId, channels, processing));
     } catch (err) {
       if (this.opts.deviceId && err instanceof Error && err.name === 'OverconstrainedError') {
         // The remembered microphone isn't plugged in: use the default instead of failing.
         try {
-          stream = await this.deps.getUserMedia(audioConstraints('', channels));
-          this.events.onWarning?.('The selected microphone was not found; recording with the default one.');
+          stream = await this.deps.getUserMedia(audioConstraints('', channels, processing));
+          notes.push('The selected microphone was not found; recording with the default one.');
         } catch (inner) {
           this.setState('idle');
           throw new Error(micErrorMessage(inner));
@@ -210,15 +212,20 @@ export class NoteRecorder {
       // A stop the user didn't ask for (the browser or OS ended the capture).
       if (!this.userStopped) void this.handleInterruption('The browser stopped the recording.');
     };
-    // Say so when the microphone can't do what was asked (e.g. stereo from a mono mic).
-    const actual = stream.getAudioTracks()[0]?.getSettings?.().channelCount;
+    // Say so when the microphone can't do what was asked (e.g. stereo from a mono mic, or processing forced on).
+    const applied = stream.getAudioTracks()[0]?.getSettings?.();
+    if (applied) this.events.onSettings?.(applied);
+    const actual = applied?.channelCount;
     if (typeof actual === 'number' && actual !== channels) {
-      this.events.onWarning?.(
+      notes.push(
         actual === 1
           ? 'This microphone only records in mono, so the recording will be mono.'
           : 'This microphone records in stereo and the browser would not mix it down to mono.',
       );
     }
+    const overridden = appliedMismatches(processing, applied);
+    if (overridden.length > 0) notes.push(`The browser overrode some audio settings: ${overridden.join('; ')}.`);
+    if (notes.length > 0) this.events.onWarning?.(notes.join(' '));
     for (const track of stream.getAudioTracks()) {
       track.addEventListener('ended', () => {
         if (!this.userStopped) void this.handleInterruption('The microphone was disconnected or taken by the system.');
