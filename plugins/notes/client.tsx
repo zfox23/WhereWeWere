@@ -25,6 +25,7 @@ import { NoteReflectionCard } from './ui/NoteReflectionCard';
 import { NotesTab } from './ui/NotesTab';
 import { NotesSettings } from './ui/NotesSettings';
 import { NotesIntegrationSettings } from './ui/NotesIntegrationSettings';
+import './ui/audio/syncTask';
 
 export const client: CheckinTypeClientPlugin = {
   icon: NotebookPen,

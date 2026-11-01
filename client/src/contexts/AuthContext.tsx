@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ApiError, auth, type Account } from '../api/client';
 import { onAuthFailure } from '../utils/authEvents';
 import { wipeLocalUserData } from '../utils/localData';
+import { runSignOutGuards } from '../utils/signOutGuards';
 
 /**
  * Page navigation used after signing out. A full page load (not a router
@@ -159,18 +160,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // A plugin may hold this back (unsent recordings), asking the user first.
+    if (user && !(await runSignOutGuards(user.id))) return;
     try {
       await auth.logout();
     } catch {
       // Already signed out server-side or unreachable: still wipe locally.
     }
     await leave('home');
-  }, [leave]);
+  }, [leave, user]);
 
   const signOutEverywhere = useCallback(async () => {
+    if (user && !(await runSignOutGuards(user.id))) return;
     await auth.signOutEverywhere();
     await leave('home');
-  }, [leave]);
+  }, [leave, user]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

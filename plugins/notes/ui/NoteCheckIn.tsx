@@ -4,12 +4,13 @@
  * editable time zone. Unsaved text is kept as a local draft.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, History, Loader2, Trash2, X } from 'lucide-react';
 import type { CheckInFormProps } from 'wwp-shared';
 import { isValidTimeZone } from 'wwp-shared';
 import CompanionChipInput from '../../../client/src/components/CompanionChipInput';
+import { useAuth } from '../../../client/src/contexts/AuthContext';
 import { deviceTimezone } from '../../../client/src/utils/slugify';
 import { utcToZonedLocalValue, zonedLocalToIso } from '../../../client/src/utils/zoned';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
@@ -18,6 +19,9 @@ import { notes, type NoteInput } from './api';
 import { MarkdownEditor } from './MarkdownEditor';
 import TagChipInput from './TagChipInput';
 import { TimezoneInput } from './TimezoneInput';
+import { AudioSection } from './audio/AudioSection';
+import { deleteRecording, listRecordings, updateRecording } from './audio/recordingStore';
+import { processUploads } from './audio/uploadQueue';
 import { clearDraft, draftKey, loadDraft, sameContent, saveDraft, type NoteDraft } from './noteDraft';
 
 const labelClass = 'block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5';
@@ -39,6 +43,15 @@ export default function NoteCheckIn({ editId = null, dateParam = null, onCreated
   const navigate = useNavigate();
   usePageTitle(editId ? 'Edit Note' : 'New Note');
   const key = useMemo(() => draftKey(editId), [editId]);
+  const { user } = useAuth();
+
+  // Audio: recordings (on this device) chosen for this note, audio the note
+  // already has, and whether a recording is running right now.
+  const [localAudio, setLocalAudio] = useState<string[]>([]);
+  const [serverAudioCount, setServerAudioCount] = useState(0);
+  const [recordingLive, setRecordingLive] = useState(false);
+  const onServerCount = useCallback((n: number) => setServerAudioCount(n), []);
+  const onRecordingChange = useCallback((live: boolean) => setRecordingLive(live), []);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -116,8 +129,12 @@ export default function NoteCheckIn({ editId = null, dateParam = null, onCreated
       setError('Pick a valid time zone (e.g. America/Chicago).');
       return null;
     }
-    if (!title.trim() && !body.trim()) {
-      setError('Write something, or at least give the note a title.');
+    if (recordingLive) {
+      setError('Stop the recording before saving.');
+      return null;
+    }
+    if (!title.trim() && !body.trim() && localAudio.length === 0 && serverAudioCount === 0) {
+      setError('Write something, record audio, or at least give the note a title.');
       return null;
     }
     const unchanged = loaded && loaded.dateTime === dateTime && loaded.timezone === tz;
@@ -137,15 +154,24 @@ export default function NoteCheckIn({ editId = null, dateParam = null, onCreated
     if (!input) return;
     setSaving(true);
     try {
-      if (editId) {
-        await notes.update(editId, input);
-        clearDraft(key);
-        navigate(`/notes/${editId}`);
-      } else {
-        const row = await notes.create(input);
-        clearDraft(key);
-        onCreated(row.id);
+      // Audio that already has a server-side id is attached with the note itself
+      // (atomically); the rest attaches by itself when its upload finishes, so
+      // saving never waits on an upload.
+      const chosen = user ? (await listRecordings(user.id)).filter((m) => localAudio.includes(m.id)) : [];
+      const audioIds = chosen.flatMap((m) => (m.serverId ? [m.serverId] : []));
+      if (audioIds.length > 0) input.audio_ids = audioIds;
+      const saved = editId ? await notes.update(editId, input) : await notes.create(input);
+      const id = editId ?? saved.id;
+      for (const m of chosen) {
+        // Recordings fully uploaded and attached are done with; the others keep their local
+        // audio and are attached to this note once the upload completes.
+        if (m.state === 'uploaded' && m.serverId) await deleteRecording(m.id).catch(() => {});
+        else await updateRecording(m.id, { noteId: id }).catch(() => {});
       }
+      if (user) void processUploads(user.id);
+      clearDraft(key);
+      if (editId) navigate(`/notes/${editId}`);
+      else onCreated(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
       setSaving(false);
@@ -212,6 +238,17 @@ export default function NoteCheckIn({ editId = null, dateParam = null, onCreated
           <label htmlFor="note-body" className="sr-only">Note</label>
           <MarkdownEditor id="note-body" value={body} onChange={setBody} placeholder="Write in Markdown…" />
         </div>
+
+        {user && (
+          <AudioSection
+            userId={user.id}
+            editId={editId}
+            localIds={localAudio}
+            onLocalIdsChange={setLocalAudio}
+            onServerCount={onServerCount}
+            onRecordingChange={onRecordingChange}
+          />
+        )}
 
         <div>
           <span className={labelClass}>Tags</span>

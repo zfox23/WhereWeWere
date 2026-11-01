@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, User, Settings, CircleUser, LogOut, ChevronDown } from 'lucide-react';
 import { accountLabel, useAuth } from '../contexts/AuthContext';
+import { startBackgroundTasks } from '../plugins/backgroundTasks';
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
@@ -88,6 +89,12 @@ function UserMenu() {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
+  const { user } = useAuth();
+  const userId = user?.id;
+
+  // Plugin background work for the signed-in account (e.g. uploading audio
+  // recordings that were saved on this device but not yet sent).
+  useEffect(() => (userId ? startBackgroundTasks(userId) : undefined), [userId]);
 
   return (
     <div className="app-shell min-h-screen pb-16 md:pb-0 flex flex-col">

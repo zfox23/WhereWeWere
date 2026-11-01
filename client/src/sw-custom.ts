@@ -49,7 +49,7 @@ registerRoute(
 // webhook secret; admin: user management). Those must always hit the network
 // and never land in CacheStorage. The page deletes 'api-cache' on sign-out.
 const UNCACHED_API_PATHS =
-  /^\/api\/v1\/(?:settings|backup|immich|llm|jobs|import|webhook|auth|admin)(?:\/|$)|^\/api\/v1\/plugins\/[^/]+\/settings(?:\/|$)/;
+  /^\/api\/v1\/(?:settings|backup|immich|llm|jobs|import|webhook|auth|admin)(?:\/|$)|^\/api\/v1\/plugins\/[^/]+\/settings(?:\/|$)|^\/api\/v1\/notes\/audio(?:\/|$)/;
 
 // Earlier builds cached every API GET; drop whatever they stored (it may
 // include API keys or a full backup archive).

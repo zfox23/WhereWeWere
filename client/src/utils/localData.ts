@@ -11,8 +11,12 @@
  *   Private — deleted, along with every other key not listed below.
  * - sessionStorage: nothing today; cleared wholesale in case a plugin adds
  *   something.
- * - IndexedDB: nothing of the app's own; the service worker keeps cache
- *   expiry bookkeeping (cached API URLs) there — deleted.
+ * - IndexedDB: the service worker keeps cache expiry bookkeeping (cached
+ *   API URLs) there — deleted. EXCEPT 'wwp-note-audio' (PRESERVED_INDEXED_DBS):
+ *   audio recordings that have not been confirmed by the server yet. Wiping
+ *   them would silently destroy the only copy, so they stay; each record is
+ *   tagged with its owner's id and only ever offered back to that account.
+ *   Sign-out asks before leaving unsent recordings behind (signOutGuards.ts).
  *
  * Kept: the pure device preferences in DEVICE_PREFERENCE_KEYS (theme and
  * background choice). They hold nothing about the user's data, and the login
@@ -25,7 +29,13 @@ export const DEVICE_PREFERENCE_KEYS: readonly string[] = [
   'system-dark-theme',
   'bg-pattern',
   'bg-gradient',
+  // Which microphone this device records with (an input device is a property
+  // of the device, not of the account).
+  'wwp:notes:audio-input',
 ];
+
+/** IndexedDB databases that hold unsaved user work and must survive a wipe. */
+export const PRESERVED_INDEXED_DBS: readonly string[] = ['wwp-note-audio'];
 
 /** The service worker's runtime cache of API responses (see sw-custom.ts). */
 export const API_CACHE_NAME = 'api-cache';
@@ -60,7 +70,9 @@ function clearIndexedDb(): void {
     indexedDB
       .databases()
       .then((dbs) => {
-        for (const db of dbs) if (db.name) indexedDB.deleteDatabase(db.name);
+        for (const db of dbs) {
+          if (db.name && !PRESERVED_INDEXED_DBS.includes(db.name)) indexedDB.deleteDatabase(db.name);
+        }
       })
       .catch(() => {});
   } catch {
