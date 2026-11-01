@@ -78,7 +78,7 @@ describe('AudioPlayer', () => {
     expect(container.querySelector('audio')!.playbackRate).toBe(1.5);
   });
 
-  it('saves corrected text for every segment', async () => {
+  it('saves only the corrected lines, pinned to their start time', async () => {
     const user = userEvent.setup();
     const onChanged = vi.fn();
     render(<AudioPlayer audio={make()} onChanged={onChanged} />);
@@ -88,9 +88,24 @@ describe('AudioPlayer', () => {
     await user.type(box, 'Fixed line.');
     await user.click(screen.getByRole('button', { name: /Save transcript/ }));
     await waitFor(() => expect(notes.saveTranscript).toHaveBeenCalledWith('a1', [
-      { idx: 0, text: 'First line.' }, { idx: 1, text: 'Fixed line.' }, { idx: 2, text: 'Third line.' },
+      { idx: 1, start_ms: 3000, prev_text: 'Second line.', text: 'Fixed line.' },
     ]));
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('sends nothing when no line changed', async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn();
+    render(<AudioPlayer audio={make()} onChanged={onChanged} />);
+    await user.click(screen.getByRole('button', { name: /Edit transcript/ }));
+    await user.click(screen.getByRole('button', { name: /Save transcript/ }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(notes.saveTranscript).not.toHaveBeenCalled();
+  });
+
+  it('offers no editing while speakers are being identified (the lines are about to be re-cut)', () => {
+    render(<AudioPlayer audio={make({ diarization_status: 'processing' })} onChanged={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /Edit transcript/ })).toBeNull();
   });
 
   it('warns before a re-transcription would discard corrections', async () => {

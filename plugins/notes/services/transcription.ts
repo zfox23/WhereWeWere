@@ -20,7 +20,7 @@ import { pool, query } from '../../../server/src/db';
 import { audioExtForMime, noteAudioDir, noteAudioPath } from './audioFiles';
 import { postMultipartFile, request } from './httpClient';
 import { DiarizationError, diarizeAudio, getDiarizationConfig } from './diarization';
-import { labelSpeakers, restoreOriginalSegments, type SpeakerSegment, type TimedWord } from './speakers';
+import { labelSpeakers, restoreOriginalSegments, type SpeakerSegment, type TimedWord, type Turn } from './speakers';
 
 export interface TranscriptionConfig {
   apiUrl: string;
@@ -407,10 +407,33 @@ function toSpeakerSegment(r: StoredSegment): SpeakerSegment {
   };
 }
 
-async function saveSpeakerLabels(audioId: string, segments: SpeakerSegment[], speakers: string[]): Promise<void> {
+/**
+ * Label the stored transcript with `turns` and write it back, in one transaction holding the audio
+ * row's lock. Transcript edits take the same lock, so an edit saved while the service was working is
+ * read here (and respected) instead of being overwritten, and an editor never sees half-written segments.
+ */
+async function applySpeakerTurns(audioId: string, turns: Turn[]): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const row = await client.query(
+      `SELECT 1 FROM note_audio WHERE id = $1 AND status = 'done' AND diarization_status = 'processing' FOR UPDATE`,
+      [audioId],
+    );
+    if (row.rowCount === 0) {
+      // Deleted, or transcribed again meanwhile (which queues a fresh speaker pass): nothing to label.
+      await client.query('ROLLBACK');
+      return;
+    }
+    const stored = (await client.query(
+      'SELECT idx, start_ms, end_ms, text, edited, words, src FROM note_audio_segments WHERE audio_id = $1 ORDER BY idx',
+      [audioId],
+    )).rows as StoredSegment[];
+    // Text the user corrected must not be re-cut: label whole segments only. Otherwise start again from the
+    // transcriber's own segments (undoing any earlier split) and cut at each change of speaker.
+    const edited = stored.some((s) => s.edited);
+    const base = stored.map(toSpeakerSegment);
+    const { segments, speakers } = labelSpeakers(edited ? base : restoreOriginalSegments(base), turns, { split: !edited });
     await client.query('DELETE FROM note_audio_segments WHERE audio_id = $1', [audioId]);
     if (segments.length > 0) {
       await client.query(
@@ -456,16 +479,7 @@ async function processDiarization(row: DiarizeRow): Promise<void> {
     const file = ext ? noteAudioPath(row.user_id, row.id, ext) : null;
     if (!file || !fs.existsSync(file)) throw new DiarizationError('The audio file is missing on the server', false);
     const turns = await diarizeAudio(config, file, row.filename, row.mime);
-    const stored = (await query(
-      'SELECT idx, start_ms, end_ms, text, edited, words, src FROM note_audio_segments WHERE audio_id = $1 ORDER BY idx',
-      [row.id],
-    )).rows as StoredSegment[];
-    // Text the user corrected must not be re-cut: label whole segments only. Otherwise start again from the
-    // transcriber's own segments (undoing any earlier split) and cut at each change of speaker.
-    const edited = stored.some((s) => s.edited);
-    const base = stored.map(toSpeakerSegment);
-    const labeled = labelSpeakers(edited ? base : restoreOriginalSegments(base), turns, { split: !edited });
-    await saveSpeakerLabels(row.id, labeled.segments, labeled.speakers);
+    await applySpeakerTurns(row.id, turns);
   } catch (err) {
     const retryable = !(err instanceof DiarizationError) || err.retryable;
     const attempts = row.diarization_attempts + 1;

@@ -497,6 +497,21 @@ describe('notes audio: transcript segments, editing, timeline count', () => {
     expect((await query('SELECT text FROM note_audio_segments WHERE audio_id = $1 AND idx = 0', [audio])).rows[0].text).toBe('hello world');
   });
 
+  it('refuses edits aimed at segments that were re-cut since the editor loaded them', async () => {
+    const { audio } = await transcribedNote();
+    // Speakers were identified meanwhile: segment 1 now starts elsewhere, and there is no segment 5.
+    await query('UPDATE note_audio_segments SET start_ms = 2000 WHERE audio_id = $1 AND idx = 1', [audio]);
+    const put = (segments: unknown[]) => request(app).put(`/api/v1/notes/audio/${audio}/transcript`).send({ segments });
+    expect((await put([{ idx: 1, start_ms: 1500, text: 'and goodbye' }])).status).toBe(409);
+    expect((await put([{ idx: 5, start_ms: 9000, text: 'nowhere' }])).status).toBe(409);
+    expect((await query('SELECT text, edited FROM note_audio_segments WHERE audio_id = $1 AND idx = 1', [audio])).rows[0])
+      .toEqual({ text: 'and farewell', edited: false });
+    expect((await put([{ idx: 1, start_ms: 2000, prev_text: 'and so long', text: 'and goodbye' }])).status).toBe(409);
+    const ok = await put([{ idx: 1, start_ms: 2000, prev_text: 'and farewell', text: 'and goodbye' }]);
+    expect(ok.status).toBe(200);
+    expect(ok.body.segments[1]).toMatchObject({ text: 'and goodbye', edited: true });
+  });
+
   it('refuses to edit a transcript that does not exist yet', async () => {
     const pending = (await query(
       `INSERT INTO note_audio (user_id, filename, mime, bytes, sha256, status) VALUES ($1, 'p.webm', 'audio/webm', 1, $2, 'pending') RETURNING id`,
@@ -887,6 +902,8 @@ describe('notes audio: speaker identification', () => {
   let turns: { start: number; end: number; speaker: string }[] = [];
   let diarizeStatus = 200;
   let diarizeBody = '';
+  /** Runs while the fake diarizer is "working", before it answers. */
+  let whileDiarizing: (() => Promise<void>) | null = null;
 
   /** One 2-second segment, "How are you? Good, thanks.", with each word's timing. */
   const WORDS = [['How', 0, 0.38], ['are', 0.4, 0.78], ['you?', 0.8, 1.18], ['Good,', 1.2, 1.58], ['thanks.', 1.6, 1.98]];
@@ -917,6 +934,7 @@ describe('notes audio: speaker identification', () => {
         return res.end(JSON.stringify(diarizeHealth));
       }
       diarizeRequests.push(await readBody(req));
+      if (whileDiarizing) await whileDiarizing();
       res.statusCode = diarizeStatus;
       res.setHeader('Content-Type', 'application/json');
       res.end(diarizeBody || JSON.stringify({ duration: 2, speakers: [...new Set(turns.map((t) => t.speaker))], turns }));
@@ -937,6 +955,7 @@ describe('notes audio: speaker identification', () => {
     turns = [{ start: 0, end: 1.2, speaker: 'SPEAKER_01' }, { start: 1.2, end: 2.5, speaker: 'SPEAKER_00' }];
     diarizeStatus = 200;
     diarizeBody = '';
+    whileDiarizing = null;
     diarizeHealth = { status: 'ok', pipeline_loaded: true, device: 'cuda' };
   });
 
@@ -968,6 +987,49 @@ describe('notes audio: speaker identification', () => {
   const audioRow = async (id: string) => (await query(
     'SELECT status, diarization_status, diarization_error, diarization_attempts, speakers, transcript_text FROM note_audio WHERE id = $1', [id])).rows[0];
   const view = (s: { speaker: string | null; text: string }[]) => s.map((x) => [x.speaker, x.text]);
+
+  it('keeps a correction saved while speakers were being identified (and does not re-cut it)', async () => {
+    await configureTranscription();
+    await configureDiarization();
+    whileDiarizing = async () => {
+      const res = await request(app).put(`/api/v1/notes/audio/${id}/transcript`)
+        .send({ segments: [{ idx: 0, start_ms: 0, text: 'How are you? Fine, thanks.' }] });
+      expect(res.status).toBe(200);
+    };
+    let id = '';
+    const start = await request(app).post('/api/v1/notes/audio/uploads')
+      .send({ filename: 'talk.webm', mime: 'audio/webm', bytes: data.length, sha256: sha(data) });
+    id = start.body.id as string;
+    await request(app).put(`/api/v1/notes/audio/uploads/${id}?offset=0`).set('Content-Type', 'application/octet-stream').send(data);
+    await request(app).post(`/api/v1/notes/audio/uploads/${id}/complete`);
+    await drainTranscriptionQueue();
+
+    expect(diarizeRequests).toHaveLength(1);
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'done', transcript_text: 'How are you? Fine, thanks.' });
+    const segs = await segments(id);
+    expect(view(segs)).toEqual([['S1', 'How are you? Fine, thanks.']]); // labelled whole: the edit survives
+    expect(segs[0].edited).toBe(true);
+  });
+
+  it('refuses an edit made against the transcript as it was before speakers split it', async () => {
+    await configureTranscription();
+    const id = await transcribedAudio(); // speaker identification off: one segment, as the editor loads it
+    const loaded = (await segments(id))[0];
+    expect(loaded).toMatchObject({ idx: 0, start_ms: 0, text: 'How are you? Good, thanks.' });
+
+    await configureDiarization();
+    await request(app).post(`/api/v1/notes/audio/${id}/diarize`);
+    await drainTranscriptionQueue();
+    // Without word timings the segment is labelled whole; force the split the editor didn't see.
+    await query(`UPDATE note_audio_segments SET end_ms = 1180, text = 'How are you?' WHERE audio_id = $1 AND idx = 0`, [id]);
+    await query(`INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text, src) VALUES ($1, 1, 1200, 1980, 'Good, thanks.', 0)`, [id]);
+
+    // The first piece still starts at 0, so the start time alone would let this through.
+    const res = await request(app).put(`/api/v1/notes/audio/${id}/transcript`)
+      .send({ segments: [{ idx: 0, start_ms: 0, prev_text: loaded.text, text: 'How are you? Fine, thanks.' }] });
+    expect(res.status).toBe(409);
+    expect(view(await segments(id)).map(([, text]) => text)).toEqual(['How are you?', 'Good, thanks.']);
+  });
 
   it('asks the transcriber for word timings only when speaker identification is set up', async () => {
     await configureTranscription();

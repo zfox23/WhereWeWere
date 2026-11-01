@@ -77,7 +77,13 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
     setBusy(true);
     setError(null);
     try {
-      await notes.saveTranscript(audio.id, segments.map((s) => ({ idx: s.idx, text: drafts[s.idx] ?? s.text })));
+      // Only the lines that changed, each pinned to the start time and text the editor saw: if the
+      // transcript was re-cut meanwhile (speakers identified, transcribed again) the server refuses
+      // instead of guessing.
+      const changed = segments
+        .filter((s) => drafts[s.idx] !== undefined && drafts[s.idx].trim() !== s.text)
+        .map((s) => ({ idx: s.idx, start_ms: s.start_ms, prev_text: s.text, text: drafts[s.idx] }));
+      if (changed.length > 0) await notes.saveTranscript(audio.id, changed);
       setEditing(false);
       onChanged();
     } catch (err) {
@@ -262,7 +268,7 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
           </>
         ) : (
           <>
-            {segments.length > 0 && audio.status === 'done' && (
+            {segments.length > 0 && audio.status === 'done' && !diarizing && (
               <button type="button" onClick={beginEdit} className={iconBtn}><Pencil size={12} /> Edit transcript</button>
             )}
             {segments.length > 0 && audio.status === 'done' && !diarizing && (

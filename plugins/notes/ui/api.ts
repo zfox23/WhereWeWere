@@ -264,7 +264,7 @@ export const notes = {
   audio: (noteId: string) => request<NoteAudio[]>(`${BASE}/checkins/${noteId}/audio`),
   audioWithTranscripts: (noteId: string) => request<NoteAudioWithTranscript[]>(`${BASE}/checkins/${noteId}/audio?include=segments`),
   audioUrl: (audioId: string) => `/api/v1${BASE}/audio/${audioId}`,
-  saveTranscript: (audioId: string, segments: { idx: number; text: string }[]) =>
+  saveTranscript: (audioId: string, segments: { idx: number; start_ms: number; prev_text: string; text: string }[]) =>
     request<{ segments: TranscriptSegment[] }>(`${BASE}/audio/${audioId}/transcript`, { method: 'PUT', body: JSON.stringify({ segments }) }),
   identifySpeakers: (audioId: string) => request<{ id: string }>(`${BASE}/audio/${audioId}/diarize`, { method: 'POST' }),
   renameSpeakers: (audioId: string, names: Record<string, string>) =>

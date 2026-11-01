@@ -317,18 +317,58 @@ export function registerAudioRoutes(router: Router): void {
       }
       const idx: number[] = [];
       const text: string[] = [];
+      // start_ms and prev_text (both optional) pin each edit to the segment the editor saw: idx alone is
+      // not stable, since identifying speakers splits segments and renumbers them. The start time alone
+      // isn't enough either (the first piece of a split keeps it), but a split, a new transcription or
+      // an edit from elsewhere all change the text.
+      const expectedStart = new Map<number, number>();
+      const expectedText = new Map<number, string>();
       for (const s of incoming) {
         if (!Number.isInteger(s?.idx) || s.idx < 0 || typeof s?.text !== 'string' || s.text.length > 20_000) {
           return res.status(400).json({ error: 'Each segment needs an idx and text' });
         }
+        if (s.start_ms !== undefined) {
+          if (!Number.isInteger(s.start_ms)) return res.status(400).json({ error: 'start_ms must be an integer' });
+          expectedStart.set(s.idx, s.start_ms);
+        }
+        if (s.prev_text !== undefined) {
+          if (typeof s.prev_text !== 'string') return res.status(400).json({ error: 'prev_text must be text' });
+          expectedText.set(s.idx, s.prev_text);
+        }
         idx.push(s.idx);
         text.push(s.text.trim());
       }
-      const owned = await query(`SELECT 1 FROM note_audio WHERE id = $1 AND user_id = $2 AND status = 'done'`, [id, userId]);
-      if (owned.rowCount === 0) return res.status(404).json({ error: 'Audio not found or not transcribed yet' });
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        // Lock the audio row: the speaker pass rewrites the segments under the same lock, so the two never interleave.
+        const owned = await client.query(
+          `SELECT 1 FROM note_audio WHERE id = $1 AND user_id = $2 AND status = 'done' FOR UPDATE`,
+          [id, userId],
+        );
+        if (owned.rowCount === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Audio not found or not transcribed yet' });
+        }
+        const current = await client.query(
+          'SELECT idx, start_ms, text FROM note_audio_segments WHERE audio_id = $1 AND idx = ANY($2::int[])',
+          [id, idx],
+        );
+        const byIdx = new Map<number, { start_ms: number; text: string }>(
+          current.rows.map((r: { idx: number; start_ms: number; text: string }) => [r.idx, r]),
+        );
+        const stale = idx.some((i) => {
+          const seg = byIdx.get(i);
+          return !seg
+            || (expectedStart.has(i) && expectedStart.get(i) !== seg.start_ms)
+            || (expectedText.has(i) && expectedText.get(i) !== seg.text);
+        });
+        if (stale) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: 'The transcript changed while you were editing it (speakers were identified or it was transcribed again). Reload the page and make your corrections again.',
+          });
+        }
         await client.query(
           `UPDATE note_audio_segments s SET text = t.txt, edited = TRUE
              FROM unnest($2::int[], $3::text[]) AS t(idx, txt)
