@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOOP_MIN_RUN, backoffMs, collapseRepeatedSegments, parseTranscriptionResponse } from '../services/transcription';
+import { LOOP_MIN_RUN, backoffMs, classifyTranscriptionStatus, collapseRepeatedSegments, parseTranscriptionResponse } from '../services/transcription';
 
 describe('parseTranscriptionResponse', () => {
   it('converts segment seconds to milliseconds and trims text', () => {
@@ -85,5 +85,15 @@ describe('collapseRepeatedSegments (a model stuck in a loop)', () => {
     const result = parseTranscriptionResponse({ text: 'Exact text, as the service wrote it.', segments: [{ start: 0, end: 1, text: 'Exact text' }] });
     expect(result.text).toBe('Exact text, as the service wrote it.');
     expect(result.collapsedRepeats).toBe(0);
+  });
+});
+
+describe('classifyTranscriptionStatus', () => {
+  it('waits on a service that is not ready, gives up on refused audio, and retries the rest', () => {
+    expect(classifyTranscriptionStatus(503, 'busy')).toBe('unavailable');
+    expect(classifyTranscriptionStatus(404, '{"detail":"Model \'x\' is not installed locally."}')).toBe('unavailable');
+    expect(classifyTranscriptionStatus(404, 'Not Found')).toBe('failed');
+    for (const s of [400, 413, 415, 422]) expect(classifyTranscriptionStatus(s, '')).toBe('rejected');
+    for (const s of [401, 403, 500, 502, 504]) expect(classifyTranscriptionStatus(s, '')).toBe('failed');
   });
 });

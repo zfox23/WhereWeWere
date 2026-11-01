@@ -8,7 +8,12 @@
  *
  * A background queue works through `note_audio` rows in status `pending`:
  *   - no endpoint configured for the owner -> the row is parked, not failed
- *   - a request fails -> retried with exponential backoff, then `failed`
+ *   - the service is unreachable or not ready (down, restarting, still installing its model) -> retried
+ *     every few minutes without using up attempts, so an outage of any length fails nothing
+ *   - the service refuses the audio itself (400/413/415/422) -> `failed` at once; retrying can't help
+ *   - any other failure -> retried with exponential backoff, then `failed`
+ *   - a transcription succeeds -> that user's files that failed by running out of attempts are queued
+ *     again, since whatever was wrong with the service evidently is no longer
  *   - the server restarts mid-transcription -> `processing` rows are re-queued
  * Transcripts are stored as timestamped segments plus the joined text (which
  * is what search and the similarity analysis read).
@@ -51,6 +56,34 @@ export interface TranscriptionResult {
 
 export const MAX_ATTEMPTS = 8;
 const UNCONFIGURED_RETRY_MS = 5 * 60 * 1000;
+/** How soon to try again while the service is unreachable or not ready (no attempt is used up). */
+export const UNAVAILABLE_RETRY_MS = 2 * 60 * 1000;
+
+/**
+ * Why a transcription request failed, which decides what the queue does next:
+ *   unavailable - the service can't be reached or isn't ready: wait and retry, without using an attempt
+ *   rejected    - the service refused this audio: retrying won't change that
+ *   failed      - anything else: retry with backoff, a limited number of times
+ */
+export class TranscriptionError extends Error {
+  constructor(message: string, readonly kind: 'unavailable' | 'rejected' | 'failed') {
+    super(message);
+    this.name = 'TranscriptionError';
+  }
+}
+
+/** Errors raised before any connection was made: the service is down, restarting, or the host is unreachable. */
+const UNREACHABLE_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'EHOSTDOWN', 'ETIMEDOUT']);
+
+/** Classify a non-2xx answer from the transcription service. */
+export function classifyTranscriptionStatus(status: number, body: string): TranscriptionError['kind'] {
+  if (status === 503) return 'unavailable';
+  // The bundled service (Speaches) answers 404 "... is not installed locally" while it is still
+  // downloading the model on its first start.
+  if (status === 404 && /not installed/i.test(body)) return 'unavailable';
+  if (status === 400 || status === 413 || status === 415 || status === 422) return 'rejected';
+  return 'failed';
+}
 const POLL_INTERVAL_MS = 30 * 1000;
 
 function normalizeUrl(url: string): string {
@@ -187,15 +220,25 @@ async function postAudio(config: TranscriptionConfig, filePath: string, filename
 }
 
 export async function transcribeFile(config: TranscriptionConfig, filePath: string, filename: string, mime: string): Promise<TranscriptionResult> {
-  const res = await postAudio(config, filePath, filename, mime);
+  let res;
+  try {
+    res = await postAudio(config, filePath, filename, mime);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const message = err instanceof Error ? err.message : 'unknown error';
+    if (code && UNREACHABLE_CODES.has(code)) {
+      throw new TranscriptionError(`Could not reach the transcription service (${message}); will keep trying until it is back`, 'unavailable');
+    }
+    throw new TranscriptionError(`Transcription request failed: ${message}`, 'failed');
+  }
   if (res.status < 200 || res.status >= 300) {
-    throw new Error(`Transcription service returned ${res.status}: ${res.body.slice(0, 300)}`);
+    throw new TranscriptionError(`Transcription service returned ${res.status}: ${res.body.slice(0, 300)}`, classifyTranscriptionStatus(res.status, res.body));
   }
   let json: unknown;
   try {
     json = JSON.parse(res.body);
   } catch {
-    throw new Error('Transcription service returned a non-JSON response');
+    throw new TranscriptionError('Transcription service returned a non-JSON response', 'failed');
   }
   return parseTranscriptionResponse(json);
 }
@@ -296,6 +339,7 @@ async function processRow(row: AudioRow): Promise<void> {
     );
     return;
   }
+  let transcribed = false;
   try {
     const ext = audioExtForMime(row.mime);
     const file = ext ? noteAudioPath(row.user_id, row.id, ext) : null;
@@ -310,10 +354,23 @@ async function processRow(row: AudioRow): Promise<void> {
       console.warn(`Transcript of "${row.filename}" looped: folded ${result.collapsedRepeats} repeated segments. Check the transcription service's VAD / batched-mode settings.`);
     }
     await saveTranscript(row.id, config.model, result, diarization !== null);
+    transcribed = true;
   } catch (err) {
-    const attempts = row.attempts + 1;
+    const kind = err instanceof TranscriptionError ? err.kind : 'failed';
     const message = (err instanceof Error ? err.message : 'Transcription failed').slice(0, 500);
-    if (attempts >= MAX_ATTEMPTS) {
+    if (kind === 'unavailable') {
+      await query(
+        `UPDATE note_audio SET status = 'pending', error = $2, next_attempt_at = NOW() + ($3 || ' milliseconds')::interval WHERE id = $1`,
+        [row.id, message, String(UNAVAILABLE_RETRY_MS)],
+      );
+      return;
+    }
+    const attempts = row.attempts + 1;
+    if (kind === 'rejected') {
+      // Kept below MAX_ATTEMPTS so a later success elsewhere doesn't queue it again (see requeueExhausted).
+      await query(`UPDATE note_audio SET status = 'failed', attempts = $2, error = $3 WHERE id = $1`,
+        [row.id, Math.min(attempts, MAX_ATTEMPTS - 1), message]);
+    } else if (attempts >= MAX_ATTEMPTS) {
       await query(`UPDATE note_audio SET status = 'failed', attempts = $2, error = $3 WHERE id = $1`, [row.id, attempts, message]);
     } else {
       await query(
@@ -323,6 +380,20 @@ async function processRow(row: AudioRow): Promise<void> {
       );
     }
   }
+  // Outside the try: a hiccup here must not count against the file that was just transcribed.
+  if (transcribed) await requeueExhausted(row.user_id).catch((err) => console.error('Re-queueing failed audio failed:', err));
+}
+
+/**
+ * A transcription just worked, so the service is healthy again: give this user's files that failed
+ * by running out of attempts (not ones the service refused, which stop short of MAX_ATTEMPTS) another go.
+ */
+async function requeueExhausted(userId: string): Promise<void> {
+  await query(
+    `UPDATE note_audio SET status = 'pending', attempts = 0, next_attempt_at = NOW()
+      WHERE user_id = $1 AND status = 'failed' AND attempts >= $2`,
+    [userId, MAX_ATTEMPTS],
+  );
 }
 
 /**

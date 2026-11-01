@@ -7,7 +7,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../../../server/src/index';
 import { noteAudioDir } from '../../services/audioFiles';
-import { MAX_ATTEMPTS, cleanupAbandonedUploads, drainTranscriptionQueue, releaseIdleHeldAudio } from '../../services/transcription';
+import { MAX_ATTEMPTS, UNAVAILABLE_RETRY_MS, cleanupAbandonedUploads, drainTranscriptionQueue, releaseIdleHeldAudio } from '../../services/transcription';
 import { pool, query } from '../../../../server/src/db';
 import { restoreAudioBackup } from '../../services/audioBackup';
 import { NOTE_TEXT_SQL, PENDING_WHERE } from '../../services/analysis';
@@ -253,24 +253,80 @@ describe('notes audio: transcription queue', () => {
     expect(await state(id)).toMatchObject({ status: 'done' });
   });
 
-  it('shows the service’s own error when the model is not installed, and keeps the audio queued', async () => {
+  const retryInMs = async (id: string) => Number((await query(
+    `SELECT EXTRACT(EPOCH FROM next_attempt_at - NOW()) * 1000 AS ms FROM note_audio WHERE id = $1`, [id])).rows[0].ms);
+
+  it('shows the service’s own error while the model is still installing, and waits without using attempts', async () => {
     await configure();
     modelInstalled = false;
     const id = await uploadedAudio();
     await drainTranscriptionQueue();
     expect(installs).toEqual([]); // the app never installs models; the service does that from its own config
     const row = await state(id);
-    expect(row).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(row).toMatchObject({ status: 'pending', attempts: 0 });
     expect(row.error).toContain('is not installed locally');
+    expect(await retryInMs(id)).toBeGreaterThan(UNAVAILABLE_RETRY_MS - 10_000);
+  });
+
+  it('waits out a service that is down or busy (503) without ever failing the audio', async () => {
+    await query(
+      `INSERT INTO plugin_settings (user_id, plugin_id, key, value) VALUES
+         ($1, 'notes', 'transcription_api_url', '"http://127.0.0.1:1/v1"'::jsonb), ($1, 'notes', 'transcription_model', '"m"'::jsonb)`,
+      [DEFAULT_USER_ID],
+    );
+    const id = await uploadedAudio();
+    for (let i = 0; i < MAX_ATTEMPTS + 2; i++) {
+      await query('UPDATE note_audio SET next_attempt_at = NOW() WHERE id = $1', [id]);
+      await drainTranscriptionQueue();
+    }
+    const down = await state(id);
+    expect(down).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(down.error).toContain('Could not reach the transcription service');
+
+    await query('DELETE FROM plugin_settings WHERE user_id = $1', [DEFAULT_USER_ID]);
+    await configure();
+    respond = (res) => { res.statusCode = 503; res.end('busy'); };
+    await query('UPDATE note_audio SET next_attempt_at = NOW() WHERE id = $1', [id]);
+    await drainTranscriptionQueue();
+    expect(await state(id)).toMatchObject({ status: 'pending', attempts: 0 });
+    expect((await state(id)).error).toContain('503');
+  });
+
+  it('fails audio the service refuses at once, and never queues it again by itself', async () => {
+    await configure();
+    respond = (res) => { res.statusCode = 400; res.end('{"detail":"could not decode"}'); };
+    const refused = await uploadedAudio();
+    await drainTranscriptionQueue();
+    expect(await state(refused)).toMatchObject({ status: 'failed', attempts: 1 });
+
+    respond = (res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ text: 'fine' })); };
+    await uploadedAudio();
+    await drainTranscriptionQueue();
+    expect(await state(refused)).toMatchObject({ status: 'failed' });
+  });
+
+  it('queues files that ran out of attempts again once a transcription succeeds', async () => {
+    await configure();
+    respond = (res) => { res.statusCode = 500; res.end('boom'); };
+    const id = await uploadedAudio();
+    await query(`UPDATE note_audio SET attempts = $2 WHERE id = $1`, [id, MAX_ATTEMPTS - 1]);
+    await drainTranscriptionQueue();
+    expect(await state(id)).toMatchObject({ status: 'failed', attempts: MAX_ATTEMPTS });
+
+    respond = (res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ text: 'back up' })); };
+    const next = await uploadedAudio();
+    await drainTranscriptionQueue();
+    expect(await state(next)).toMatchObject({ status: 'done' });
+    expect(await state(id)).toMatchObject({ status: 'done', attempts: 0, transcript_text: 'back up' });
   });
 
   it('retries with backoff on failure, gives up after MAX_ATTEMPTS, and retranscribe resets', async () => {
     await configure();
-    respond = (res) => { res.statusCode = 503; res.end('busy'); };
+    respond = (res) => { res.statusCode = 500; res.end('boom'); };
     const id = await uploadedAudio();
     await drainTranscriptionQueue();
     expect(await state(id)).toMatchObject({ status: 'pending', attempts: 1 });
-    expect((await state(id)).error).toContain('503');
+    expect((await state(id)).error).toContain('500');
 
     await query(`UPDATE note_audio SET attempts = $2, next_attempt_at = NOW() WHERE id = $1`, [id, MAX_ATTEMPTS - 1]);
     await drainTranscriptionQueue();

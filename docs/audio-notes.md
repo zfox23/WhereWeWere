@@ -40,7 +40,7 @@ Any other OpenAI-compatible transcription server works if you point the URL at i
 
 The app folds any run of four or more identical segments into one, as a safety net against a model looping on a phrase. See [Troubleshooting](troubleshooting.md#a-transcript-repeats-one-word-or-phrase-over-and-over) for the batched-mode option and its trade-offs.
 
-Audio waits (status "Waiting to be transcribed") until an endpoint is saved in Settings (the connection test uses what is typed in the form, saved or not); nothing is lost, and it is picked up within a minute of saving. Failures retry with growing delays and then show **Retry**. **Transcribe again** replaces a transcript, including your corrections. Transcripts also feed the notes similarity analysis.
+Audio waits (status "Waiting to be transcribed") until an endpoint is saved in Settings (the connection test uses what is typed in the form, saved or not); nothing is lost, and it is picked up within a minute of saving. While the service is down, restarting or still installing its model, audio waits and is retried every couple of minutes, however long that takes. Audio the service refuses (it can't decode it, or it's too large) fails straight away. Other failures retry with growing delays and then show **Retry**; files that failed that way are queued again automatically the next time a transcription succeeds. **Transcribe again** replaces a transcript, including your corrections. Transcripts also feed the notes similarity analysis.
 
 | Variable | Default | Description |
 | --- | --- | --- |
