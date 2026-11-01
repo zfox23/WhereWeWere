@@ -81,6 +81,33 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Optional speaker diarization ("who spoke when") for audio notes, using pyannote 3.1. Not started
+  # by default; enable with:
+  #   docker compose --profile diarization up -d --build diarization
+  # The model is gated on Hugging Face: put a read token in .env as HF_TOKEN and accept the terms of
+  # pyannote/speaker-diarization-3.1 and pyannote/segmentation-3.0 once (see docs/audio-notes.md).
+  # Then in the app: Settings -> Integrations -> Notes -> Speaker identification, URL
+  # http://diarization:8001 (from the server container). Uses the NVIDIA GPU.
+  diarization:
+    profiles: ["diarization"]
+    build:
+      context: ./diarization
+    restart: unless-stopped
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - "${DIARIZATION_PORT:-8001}:8001"
+    volumes:
+      # A named volume (not a ./data bind mount) so the non-bind directory is writable; models download once.
+      - diarization_models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   client:
     build:
       context: .
@@ -101,3 +128,4 @@ services:
 volumes:
   postgres_data:
   whisper_models:
+  diarization_models:
