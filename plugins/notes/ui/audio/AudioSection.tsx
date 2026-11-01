@@ -219,6 +219,14 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
     if (!localIdsRef.current.includes(id)) onLocalIdsChange([...localIdsRef.current, id]);
   };
 
+  // Recordings saved with this note that haven't finished uploading belong to the form being edited:
+  // they count as its content (an audio-only note must stay savable) and are handed back on save.
+  useEffect(() => {
+    if (!editId) return;
+    const mine = recordings.filter((r) => r.noteId === editId && !localIdsRef.current.includes(r.id)).map((r) => r.id);
+    if (mine.length > 0) onLocalIdsChange([...localIdsRef.current, ...mine]);
+  }, [recordings, editId, onLocalIdsChange]);
+
   const start = async () => {
     setError(null);
     setNotice(null);
@@ -298,8 +306,12 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
     }
   };
 
-  const inForm = recordings.filter((r) => localIds.includes(r.id));
-  const leftovers = recordings.filter((r) => !localIds.includes(r.id) && !isOrphaned(r) && !(r.state === 'uploaded' && r.noteId));
+  // A recording belongs to this form if it was added here, or was saved with this note and is still uploading.
+  const belongsHere = (r: RecordingMeta) => localIds.includes(r.id) || (editId !== null && r.noteId === editId);
+  const inForm = recordings.filter(belongsHere);
+  // Leftovers are only recordings no note has claimed: one saved with another note attaches there by itself,
+  // and offering it here would either fail the save or quietly move it to this note.
+  const leftovers = recordings.filter((r) => !belongsHere(r) && !r.noteId && !isOrphaned(r));
   const live = state === 'recording' || state === 'paused';
   const chooseChannels = (c: Channels) => {
     setChannels(c);

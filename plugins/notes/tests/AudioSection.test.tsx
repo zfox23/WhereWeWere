@@ -81,3 +81,37 @@ describe('AudioSection channel choice', () => {
     expect(screen.queryByRole('button', { name: /Blank screen/ })).toBeNull();
   });
 });
+
+describe('AudioSection unsent recordings', () => {
+  it('offers only recordings no note has claimed, and shows this note’s own uploads as attached', async () => {
+    const { createRecording, updateRecording } = await import('../ui/audio/recordingStore');
+    const userId = 'u-leftovers';
+    const make = async (filename: string, noteId: string | null) => {
+      const meta = await createRecording({ userId, mime: 'audio/webm', filename, deviceLabel: null, source: 'recorded', state: 'stopped' });
+      await updateRecording(meta.id, { noteId, bytes: 10 });
+    };
+    await make('free.webm', null);
+    await make('for-other-note.webm', 'note-a');
+    await make('for-this-note.webm', 'note-b');
+
+    render(<AudioSection {...props} userId={userId} editId="note-b" />);
+    const unsent = await screen.findByText(/Unsent recordings \(1\)/);
+    expect(unsent.parentElement).toHaveTextContent('free.webm');
+    expect(unsent.parentElement).not.toHaveTextContent('for-other-note.webm');
+    expect(screen.queryByText('for-other-note.webm')).toBeNull();
+    const attached = screen.getByRole('list', { name: 'Audio attached to this note' });
+    expect(attached).toHaveTextContent('for-this-note.webm');
+  });
+});
+
+describe('AudioSection editing a note whose recording is still uploading', () => {
+  it('counts that recording as part of the form, so an audio-only note stays savable', async () => {
+    const { createRecording, updateRecording } = await import('../ui/audio/recordingStore');
+    const userId = 'u-adopt';
+    const meta = await createRecording({ userId, mime: 'audio/webm', filename: 'mine.webm', deviceLabel: null, source: 'recorded', state: 'stopped' });
+    await updateRecording(meta.id, { noteId: 'note-c', bytes: 10 });
+    const onLocalIdsChange = vi.fn();
+    render(<AudioSection {...props} userId={userId} editId="note-c" onLocalIdsChange={onLocalIdsChange} />);
+    await waitFor(() => expect(onLocalIdsChange).toHaveBeenCalledWith([meta.id]));
+  });
+});
