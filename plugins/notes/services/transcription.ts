@@ -445,12 +445,9 @@ async function claimNextDiarization(): Promise<DiarizeRow | null> {
   const r = await query(
     `UPDATE note_audio SET diarization_status = 'processing'
       WHERE id = (SELECT id FROM note_audio
+                   -- Including users who have since turned the service off: processDiarization then marks the
+                   -- row 'none', rather than leaving it "Identifying speakers…" forever with no way to retry.
                    WHERE status = 'done' AND diarization_status = 'pending' AND diarization_next_at <= NOW()
-                     -- Only for users who have set up the service; their transcripts wait until they do.
-                     AND EXISTS (SELECT 1 FROM plugin_settings ps
-                                  WHERE ps.user_id = note_audio.user_id AND ps.plugin_id = 'notes'
-                                    AND ps.key = 'diarization_api_url'
-                                    AND jsonb_typeof(ps.value) = 'string' AND btrim(ps.value #>> '{}') <> '')
                    ORDER BY diarization_next_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING id, user_id, filename, mime, diarization_attempts`,
   );

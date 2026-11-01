@@ -108,6 +108,13 @@ describe('AudioPlayer', () => {
     expect(screen.queryByRole('button', { name: /Edit transcript/ })).toBeNull();
   });
 
+  it('says when audio is only waiting because no transcription service is set up, with no spinner or useless button', () => {
+    const { container } = render(<AudioPlayer audio={make({ status: 'pending', segments: [], transcription_configured: false })} onChanged={vi.fn()} />);
+    expect(screen.getByText(/no transcription service is set up/)).toBeInTheDocument();
+    expect(container.querySelector('.animate-spin')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Transcribe now/ })).toBeNull();
+  });
+
   it('warns before a re-transcription would discard corrections', async () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);

@@ -30,6 +30,8 @@ export interface NoteAudio {
   speakers: Record<string, string>;
   diarization_status: 'none' | 'pending' | 'processing' | 'done' | 'failed';
   diarization_error: string | null;
+  /** False when no transcription service is set up, so pending audio is parked rather than queued. */
+  transcription_configured?: boolean;
 }
 
 export interface TranscriptSegment {

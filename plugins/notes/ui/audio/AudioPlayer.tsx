@@ -34,6 +34,11 @@ const STATUS: Record<NoteAudioWithTranscript['status'], string> = {
   failed: 'Transcription failed',
 };
 
+/** Pending only because no transcription service is set up: nothing will happen until one is. */
+export function isParked(audio: Pick<NoteAudioWithTranscript, 'status' | 'transcription_configured'>): boolean {
+  return audio.status === 'pending' && audio.transcription_configured === false;
+}
+
 const iconBtn = 'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50';
 
 export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscript; onChanged: () => void }) {
@@ -141,8 +146,9 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
   };
 
   const diarizing = audio.diarization_status === 'pending' || audio.diarization_status === 'processing';
-  const status = STATUS[audio.status];
-  const waiting = audio.status === 'processing' || audio.status === 'uploading' || (audio.status === 'pending' && !audio.error);
+  const parked = isParked(audio);
+  const status = parked ? 'Waiting to be transcribed — no transcription service is set up (Settings > Integrations)' : STATUS[audio.status];
+  const waiting = !parked && (audio.status === 'processing' || audio.status === 'uploading' || (audio.status === 'pending' && !audio.error));
 
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2" aria-label={`Audio: ${audio.filename}`}>
@@ -276,7 +282,7 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
                 <Users size={12} /> {audio.diarization_status === 'done' ? 'Identify speakers again' : 'Identify speakers'}
               </button>
             )}
-            {(audio.status === 'done' || audio.status === 'failed' || audio.status === 'pending') && (
+            {(audio.status === 'done' || audio.status === 'failed' || audio.status === 'pending') && !parked && (
               <button type="button" onClick={() => void retranscribe()} disabled={busy} className={iconBtn}>
                 <RefreshCw size={12} /> {audio.status === 'done' ? 'Transcribe again' : audio.status === 'failed' ? 'Retry' : 'Transcribe now'}
               </button>
@@ -302,7 +308,9 @@ export function NoteAudioList({ noteId }: { noteId: string }) {
     void load();
   }, [load]);
 
-  const anyWaiting = audio.some((a) => a.status === 'pending' || a.status === 'processing' || a.diarization_status === 'pending' || a.diarization_status === 'processing');
+  // Parked audio won't move until the user sets a service up, so it is no reason to keep polling.
+  const anyWaiting = audio.some((a) => (a.status === 'pending' && !isParked(a)) || a.status === 'processing'
+    || a.diarization_status === 'pending' || a.diarization_status === 'processing');
   useEffect(() => {
     if (!anyWaiting) return;
     const timer = setInterval(() => void load(), 5000);

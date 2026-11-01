@@ -233,11 +233,18 @@ describe('notes audio: transcription queue', () => {
     expect(requests[0].body.toString('latin1')).not.toContain('name="vad_filter"');
   });
 
-  it('parks audio without burning attempts when no endpoint is configured', async () => {
+  it('parks audio without burning attempts when no endpoint is configured, and says so to the page', async () => {
     const id = await uploadedAudio();
     await drainTranscriptionQueue();
     expect(await state(id)).toMatchObject({ status: 'pending', attempts: 0 });
     expect(requests).toHaveLength(0);
+
+    const note = await request(app).post('/api/v1/notes/checkins')
+      .send({ title: 'T', body: '', checked_in_at: '2024-02-02T10:00:00Z', checkin_timezone: 'UTC', audio_ids: [id] });
+    const listed = async () => (await request(app).get(`/api/v1/notes/checkins/${note.body.id}/audio`)).body[0];
+    expect(await listed()).toMatchObject({ status: 'pending', transcription_configured: false });
+    await configure();
+    expect(await listed()).toMatchObject({ status: 'pending', transcription_configured: true });
   });
 
   it('picks up waiting audio as soon as settings are saved, with no leftover delay', async () => {
@@ -1089,6 +1096,21 @@ describe('notes audio: speaker identification', () => {
     expect(segs[0].edited).toBe(true);
   });
 
+  it('stops "identifying speakers" when the service is turned off while files wait for it', async () => {
+    await configureTranscription();
+    diarizeStatus = 503;
+    diarizeBody = JSON.stringify({ detail: 'still loading' });
+    await configureDiarization();
+    const id = await transcribedAudio();
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'pending' });
+
+    await query(`DELETE FROM plugin_settings WHERE user_id = $1 AND key = 'diarization_api_url'`, [DEFAULT_USER_ID]);
+    await query('UPDATE note_audio SET diarization_next_at = NOW() WHERE id = $1', [id]);
+    await drainTranscriptionQueue();
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'none' });
+    expect(diarizeRequests).toHaveLength(1);
+  });
+
   it('refuses an edit made against the transcript as it was before speakers split it', async () => {
     await configureTranscription();
     const id = await transcribedAudio(); // speaker identification off: one segment, as the editor loads it
@@ -1255,14 +1277,15 @@ describe('notes audio: speaker identification', () => {
     });
   });
 
-  it('leaves transcripts waiting, without failing them, for a user who has not set up the service', async () => {
+  it('puts a waiting transcript back to "not identified", without failing it, for a user who has not set up the service', async () => {
     await configureTranscription();
     const id = await transcribedAudio();
     await query(`UPDATE note_audio SET diarization_status = 'pending' WHERE id = $1`, [id]);
     await drainTranscriptionQueue();
-    expect(await audioRow(id)).toMatchObject({ diarization_status: 'pending', diarization_attempts: 0 });
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'none', diarization_attempts: 0 });
     expect(diarizeRequests).toHaveLength(0);
-    await configureDiarization(); // now they set it up: it is picked up on the next pass
+    await configureDiarization(); // now they set it up: Identify speakers works
+    expect((await request(app).post(`/api/v1/notes/audio/${id}/diarize`)).status).toBe(200);
     await drainTranscriptionQueue();
     expect(await audioRow(id)).toMatchObject({ diarization_status: 'done' });
   });

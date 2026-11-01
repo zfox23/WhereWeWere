@@ -493,7 +493,12 @@ export function registerAudioRoutes(router: Router): void {
           WHERE a.note_id = $1 AND a.user_id = $2 AND a.status <> 'uploading' ORDER BY a.position, a.created_at`,
         [id, userId],
       );
-      res.json(r.rows);
+      // Audio of a user with no transcription service set up just waits; say so, so the page can tell
+      // them instead of showing a spinner (and polling) forever.
+      const configured = r.rows.some((row: { status: string }) => row.status === 'pending')
+        ? (await getTranscriptionConfig(userId)) !== null
+        : true;
+      res.json(r.rows.map((row: Record<string, unknown>) => ({ ...row, transcription_configured: configured })));
     } catch (err) {
       fail(res, err, 'Failed to list audio');
     }
