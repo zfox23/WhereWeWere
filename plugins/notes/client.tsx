@@ -24,7 +24,7 @@ import { NoteFilter } from './ui/NoteFilter';
 import { NoteReflectionCard } from './ui/NoteReflectionCard';
 import { NotesTab } from './ui/NotesTab';
 import { NotesSettings } from './ui/NotesSettings';
-import { EmbeddingSettings } from './ui/EmbeddingSettings';
+import { NotesIntegrationSettings } from './ui/NotesIntegrationSettings';
 
 export const client: CheckinTypeClientPlugin = {
   icon: NotebookPen,
@@ -42,7 +42,7 @@ export const client: CheckinTypeClientPlugin = {
   profileTab: (_props: PluginProfileTabProps) => <NotesTab />,
 
   settings: NotesSettings,
-  integrationsSettings: EmbeddingSettings,
+  integrationsSettings: NotesIntegrationSettings,
 };
 
 export { manifest };

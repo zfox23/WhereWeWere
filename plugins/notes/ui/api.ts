@@ -221,6 +221,8 @@ export const notes = {
   related: (id: string, limit = 6) =>
     request<{ analyzed: boolean; related: RelatedNote[] }>(`${BASE}/checkins/${id}/related?limit=${limit}`),
 
+  testTranscription: (data: { api_url: string; model: string; api_key: string }) =>
+    request<{ ok: boolean; message: string }>(`${BASE}/transcription/test`, { method: 'POST', body: JSON.stringify(data) }),
   tags: () => request<NoteTagSummary[]>(`${BASE}/tags`),
   createTag: (name: string, color?: string) =>
     request<NoteTag>(`${BASE}/tags`, { method: 'POST', body: JSON.stringify({ name, color }) }),

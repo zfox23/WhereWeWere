@@ -539,6 +539,13 @@ export interface CheckinTypeServerPlugin {
   jobs?: PluginJobDefinition[];
 
   /**
+   * Runs once after migrations when the server process starts, for plugins
+   * that own a background worker (e.g. resuming a work queue a restart
+   * interrupted). Failures are logged and never stop the server.
+   */
+  onServerStart?: () => void | Promise<void>;
+
+  /**
    * `user_settings` column names this plugin has migrated to
    * `plugin_settings` (same key name must be declared in `settingsKeys`).
    * When restoring a backup whose settings object carries one of these

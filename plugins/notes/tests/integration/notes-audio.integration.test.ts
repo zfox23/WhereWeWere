@@ -1,9 +1,12 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import http from 'http';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../../../server/src/index';
 import { noteAudioDir } from '../../services/audioFiles';
+import { MAX_ATTEMPTS, drainTranscriptionQueue } from '../../services/transcription';
+import { query } from '../../../../server/src/db';
 import {
   DEFAULT_USER_ID,
   resetIntegrationDatabase,
@@ -15,21 +18,22 @@ import { createTestUser, type TestUser } from '../../../../server/tests/helpers/
 const app = createApp();
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
 
+beforeAll(setupIntegrationDatabase);
+afterAll(teardownIntegrationDatabase);
+
 describe('notes audio: resumable upload, range playback, ownership', () => {
   let other: TestUser;
   const data = crypto.randomBytes(3000);
 
-  beforeAll(setupIntegrationDatabase);
   beforeEach(async () => {
     await resetIntegrationDatabase();
     other = await createTestUser('other');
   });
-  afterAll(async () => {
+  afterAll(() => {
     // The tests write real files under DATA_DIR; leave nothing behind.
     for (const id of [DEFAULT_USER_ID, other?.id]) {
       if (id) fs.rmSync(noteAudioDir(id), { recursive: true, force: true });
     }
-    await teardownIntegrationDatabase();
   });
 
   async function startUpload(buf = data, mime = 'audio/webm;codecs=opus') {
@@ -122,5 +126,113 @@ describe('notes audio: resumable upload, range playback, ownership', () => {
 
     expect((await request(app).delete(`/api/v1/notes/audio/${id}`)).status).toBe(200);
     expect((await request(app).get(`/api/v1/notes/audio/${id}`)).status).toBe(404);
+  });
+});
+
+describe('notes audio: transcription queue', () => {
+  const data = crypto.randomBytes(2000);
+  let fake: http.Server;
+  let fakeUrl = '';
+  let requests: { auth?: string; body: Buffer }[] = [];
+  let respond: (res: http.ServerResponse) => void = () => {};
+
+  beforeAll(async () => {
+    fake = http.createServer((req, res) => {
+      const parts: Buffer[] = [];
+      req.on('data', (c: Buffer) => parts.push(c));
+      req.on('end', () => {
+        if (req.url?.endsWith('/models')) {
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ data: [{ id: 'fake-model' }] }));
+        }
+        requests.push({ auth: req.headers.authorization, body: Buffer.concat(parts) });
+        respond(res);
+      });
+    });
+    await new Promise<void>((r) => fake.listen(0, '127.0.0.1', r));
+    fakeUrl = `http://127.0.0.1:${(fake.address() as { port: number }).port}/v1`;
+  });
+  beforeEach(async () => {
+    await resetIntegrationDatabase();
+    requests = [];
+    respond = (res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({
+        text: 'Hello there. General Kenobi.', language: 'en', duration: 4.2,
+        segments: [{ start: 0, end: 1.5, text: ' Hello there.' }, { start: 1.5, end: 4.2, text: ' General Kenobi.' }],
+      }));
+    };
+  });
+  afterAll(async () => {
+    await new Promise((r) => fake.close(r));
+    fs.rmSync(noteAudioDir(DEFAULT_USER_ID), { recursive: true, force: true });
+  });
+
+  async function uploadedAudio(): Promise<string> {
+    const start = await request(app).post('/api/v1/notes/audio/uploads')
+      .send({ filename: 'm.webm', mime: 'audio/webm', bytes: data.length, sha256: sha(data) });
+    const id = start.body.id as string;
+    await request(app).put(`/api/v1/notes/audio/uploads/${id}?offset=0`).set('Content-Type', 'application/octet-stream').send(data);
+    await request(app).post(`/api/v1/notes/audio/uploads/${id}/complete`);
+    return id;
+  }
+  const configure = () => query(
+    `INSERT INTO plugin_settings (user_id, plugin_id, key, value) VALUES
+       ($1, 'notes', 'transcription_api_url', $2::jsonb), ($1, 'notes', 'transcription_model', '"fake-model"'::jsonb),
+       ($1, 'notes', 'transcription_api_key', '"sekret"'::jsonb)`,
+    [DEFAULT_USER_ID, JSON.stringify(fakeUrl)],
+  );
+  const state = async (id: string) => (await query('SELECT status, attempts, error, transcript_text, language, duration_ms FROM note_audio WHERE id = $1', [id])).rows[0];
+
+  it('transcribes a completed upload and stores timestamped segments', async () => {
+    await configure();
+    const id = await uploadedAudio();
+    expect(await drainTranscriptionQueue()).toBe(1);
+
+    const row = await state(id);
+    expect(row).toMatchObject({ status: 'done', transcript_text: 'Hello there. General Kenobi.', language: 'en', duration_ms: 4200 });
+    const segs = (await query('SELECT idx, start_ms, end_ms, text FROM note_audio_segments WHERE audio_id = $1 ORDER BY idx', [id])).rows;
+    expect(segs).toEqual([
+      { idx: 0, start_ms: 0, end_ms: 1500, text: 'Hello there.' },
+      { idx: 1, start_ms: 1500, end_ms: 4200, text: 'General Kenobi.' },
+    ]);
+    // The original bytes and the key reached the service.
+    expect(requests[0].auth).toBe('Bearer sekret');
+    expect(requests[0].body.includes(data)).toBe(true);
+  });
+
+  it('parks audio without burning attempts when no endpoint is configured', async () => {
+    const id = await uploadedAudio();
+    await drainTranscriptionQueue();
+    expect(await state(id)).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('retries with backoff on failure, gives up after MAX_ATTEMPTS, and retranscribe resets', async () => {
+    await configure();
+    respond = (res) => { res.statusCode = 503; res.end('busy'); };
+    const id = await uploadedAudio();
+    await drainTranscriptionQueue();
+    expect(await state(id)).toMatchObject({ status: 'pending', attempts: 1 });
+    expect((await state(id)).error).toContain('503');
+
+    await query(`UPDATE note_audio SET attempts = $2, next_attempt_at = NOW() WHERE id = $1`, [id, MAX_ATTEMPTS - 1]);
+    await drainTranscriptionQueue();
+    expect(await state(id)).toMatchObject({ status: 'failed', attempts: MAX_ATTEMPTS });
+
+    respond = (res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ text: 'ok again' })); };
+    expect((await request(app).post(`/api/v1/notes/audio/${id}/retranscribe`)).status).toBe(200);
+    await drainTranscriptionQueue();
+    expect(await state(id)).toMatchObject({ status: 'done', attempts: 0, transcript_text: 'ok again' });
+  });
+
+  it('tests the connection using saved or supplied settings', async () => {
+    const ok = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'fake-model' });
+    expect(ok.body).toEqual({ ok: true, message: 'Connected.' });
+    const unknownModel = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'other' });
+    expect(unknownModel.body.message).toContain('not listed');
+    const down = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: 'http://127.0.0.1:1/v1', model: 'x' });
+    expect(down.body.ok).toBe(false);
+    expect((await request(app).post('/api/v1/notes/transcription/test').send({})).status).toBe(400);
   });
 });

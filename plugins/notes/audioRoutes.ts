@@ -9,6 +9,8 @@
  *   GET    /audio/:id                     stream the original (HTTP Range supported)
  *   PUT    /audio/:id/attach              attach to a note { note_id, position? }
  *   DELETE /audio/:id                     remove the row, its segments and the file
+ *   POST   /audio/:id/retranscribe        queue a fresh transcription (also retries a failed one)
+ *   POST   /transcription/test            check the transcription endpoint { api_url?, model?, api_key? }
  *   GET    /checkins/:id/audio            a note's audio files (with transcripts' status)
  *
  * Uploads are resumable on purpose: a recording that is hundreds of MB must
@@ -32,6 +34,7 @@ import {
   noteAudioPath,
   storeNoteAudio,
 } from './services/audioFiles';
+import { getTranscriptionConfig, kickTranscription, requeueAudio, testTranscriptionConfig } from './services/transcription';
 
 /** Largest single chunk the server accepts; clients send ~8 MB. */
 export const MAX_CHUNK_BYTES = 32 * 1024 * 1024;
@@ -183,6 +186,7 @@ export function registerAudioRoutes(router: Router): void {
         return res.status(422).json({ error: (err as Error).message, offset: 0 });
       }
       await query(`UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() WHERE id = $1`, [row.id]);
+      kickTranscription();
       res.json({ id: row.id, status: 'pending' });
     } catch (err) {
       fail(res, err, 'Failed to finish audio upload');
@@ -263,6 +267,34 @@ export function registerAudioRoutes(router: Router): void {
       res.json({ message: 'Audio deleted', id });
     } catch (err) {
       fail(res, err, 'Failed to delete audio');
+    }
+  });
+
+  router.post('/audio/:id/retranscribe', async (req: Request, res: Response) => {
+    const userId = currentUserId();
+    try {
+      const id = String(req.params.id);
+      if (!isUuid(id)) return res.status(404).json({ error: 'Audio not found' });
+      if (!(await requeueAudio(id, userId))) return res.status(404).json({ error: 'Audio not found or still processing' });
+      res.json({ id, status: 'pending' });
+    } catch (err) {
+      fail(res, err, 'Failed to queue transcription');
+    }
+  });
+
+  router.post('/transcription/test', async (req: Request, res: Response) => {
+    const userId = currentUserId();
+    try {
+      const saved = await getTranscriptionConfig(userId);
+      const str = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim() : '');
+      const apiUrl = str(req.body?.api_url) || saved?.apiUrl || '';
+      const model = str(req.body?.model) || saved?.model || '';
+      if (!apiUrl) return res.status(400).json({ ok: false, message: 'Enter the transcription API URL first.' });
+      // A blank key field means "use the saved one", mirroring the settings form.
+      const apiKey = str(req.body?.api_key) || saved?.apiKey || null;
+      res.json(await testTranscriptionConfig({ apiUrl, model, apiKey }));
+    } catch (err) {
+      fail(res, err, 'Failed to test the transcription service');
     }
   });
 

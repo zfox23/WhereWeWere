@@ -177,6 +177,15 @@ export async function startServer() {
   const { cleanupStaleJobs } = await import('./services/jobs');
   await cleanupStaleJobs();
 
+  const { allPlugins } = await import('./plugins/registry');
+  for (const plugin of allPlugins()) {
+    try {
+      await plugin.server.onServerStart?.();
+    } catch (err) {
+      console.error(`Plugin ${plugin.id} failed to start:`, err);
+    }
+  }
+
   app.listen(config.port, () => {
     console.log(`WhereWeWere server listening on port ${config.port}`);
   });

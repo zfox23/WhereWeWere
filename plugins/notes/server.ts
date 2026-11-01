@@ -52,6 +52,7 @@ import {
 } from '../../server/src/services/companions';
 import { HEX_COLOR_RE, MAX_TAG_LENGTH } from './manifest';
 import { registerAudioRoutes } from './audioRoutes';
+import { startTranscriptionWorker } from './services/transcription';
 import {
   InputError,
   NOTE_SELECT,
@@ -1016,9 +1017,16 @@ export const server: CheckinTypeServerPlugin = {
     { name: 'embedding_api_url', type: 'string', label: 'Embedding API URL' },
     { name: 'embedding_model', type: 'string', label: 'Embedding model' },
     { name: 'embedding_api_key', type: 'string', label: 'Embedding API key' },
+    { name: 'transcription_api_url', type: 'string', label: 'Transcription API URL' },
+    { name: 'transcription_model', type: 'string', label: 'Transcription model' },
+    { name: 'transcription_api_key', type: 'string', label: 'Transcription API key' },
+    { name: 'transcription_language', type: 'string', label: 'Transcription language hint' },
     { name: 'similarity_threshold', type: 'number', label: 'Similarity Web link threshold', default: 0.6 },
     { name: 'include_mood_entries', type: 'boolean', label: 'Include mood check-ins with text in the similarity analysis', default: false },
   ],
+
+  // Resumes the audio transcription queue after a restart.
+  onServerStart: () => startTranscriptionWorker(),
 
   jobs: [
     {
