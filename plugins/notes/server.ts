@@ -17,7 +17,7 @@
  *   GET             /graph                 nodes + similarity edges for the Similarity Web
  *   GET             /stats                 Profile > Notes (?from=&to=)
  *   GET             /analysis/status       embedding setup + how many notes need analysis
- * Mounted at /api/v1/import/notes:
+ * Mounted at /api/v1/import/notes (audio files: see audioImportRoutes.ts):
  *   POST            /preview               plan an upload of .md/.markdown/.txt files
  *   POST            /                      import the selected files
  *
@@ -52,6 +52,7 @@ import {
 } from '../../server/src/services/companions';
 import { HEX_COLOR_RE, MAX_TAG_LENGTH } from './manifest';
 import { registerAudioRoutes } from './audioRoutes';
+import { registerAudioImportRoutes } from './audioImportRoutes';
 import { kickTranscription, startTranscriptionWorker } from './services/transcription';
 import { planAudioBackup, restoreAudioBackup } from './services/audioBackup';
 import { scheduleAudioFileCleanup } from './services/audioFiles';
@@ -93,6 +94,7 @@ const TIMELINE_BODY_CHARS = 6000;
 const router = Router();
 const importRouter = Router();
 registerAudioRoutes(router);
+registerAudioImportRoutes(importRouter);
 
 function asRecordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];

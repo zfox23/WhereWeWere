@@ -79,7 +79,7 @@ export function parseDatePrefix(base: string): { y: number; m: number; d: number
   return { y, m, d, date: `${match[1]}-${match[2]}-${match[3]}`, rest: match[4] };
 }
 
-function cleanTitle(text: string): string | null {
+export function cleanTitle(text: string): string | null {
   const title = text.replace(/^[\s_\-.,:;–—]+/, '').replace(/[\s_\-.,:;–—]+$/, '').replace(/\s+/g, ' ');
   return title ? title.slice(0, MAX_TITLE_LENGTH) : null;
 }

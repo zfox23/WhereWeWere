@@ -7,7 +7,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../../../server/src/index';
 import { noteAudioDir } from '../../services/audioFiles';
-import { MAX_ATTEMPTS, cleanupAbandonedUploads, drainTranscriptionQueue } from '../../services/transcription';
+import { MAX_ATTEMPTS, cleanupAbandonedUploads, drainTranscriptionQueue, releaseIdleHeldAudio } from '../../services/transcription';
 import { pool, query } from '../../../../server/src/db';
 import { restoreAudioBackup } from '../../services/audioBackup';
 import { NOTE_TEXT_SQL, PENDING_WHERE } from '../../services/analysis';
@@ -22,8 +22,19 @@ import { createTestUser, type TestUser } from '../../../../server/tests/helpers/
 const app = createApp();
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
 
+// Every user these tests create; their audio folders (real files under DATA_DIR) are removed at the end.
+const createdUserIds = new Set<string>();
+async function makeUser(name: string): Promise<TestUser> {
+  const user = await createTestUser(name);
+  createdUserIds.add(user.id);
+  return user;
+}
+
 beforeAll(setupIntegrationDatabase);
-afterAll(teardownIntegrationDatabase);
+afterAll(async () => {
+  for (const id of [DEFAULT_USER_ID, ...createdUserIds]) fs.rmSync(noteAudioDir(id), { recursive: true, force: true });
+  await teardownIntegrationDatabase();
+});
 
 describe('notes audio: resumable upload, range playback, ownership', () => {
   let other: TestUser;
@@ -31,7 +42,7 @@ describe('notes audio: resumable upload, range playback, ownership', () => {
 
   beforeEach(async () => {
     await resetIntegrationDatabase();
-    other = await createTestUser('other');
+    other = await makeUser('other');
   });
   afterAll(() => {
     // The tests write real files under DATA_DIR; leave nothing behind.
@@ -269,6 +280,69 @@ describe('notes audio: transcription queue', () => {
     expect(await state(id)).toMatchObject({ status: 'done', attempts: 0, transcript_text: 'ok again' });
   });
 
+  /** An upload the way an import run makes one: held from transcription. */
+  async function heldAudio(bytes = data, name = 'held.m4a'): Promise<string> {
+    const start = await request(app).post('/api/v1/notes/audio/uploads')
+      .send({ filename: name, mime: 'audio/mp4', bytes: bytes.length, sha256: sha(bytes), defer: true });
+    const id = start.body.id as string;
+    await request(app).put(`/api/v1/notes/audio/uploads/${id}?offset=0`).set('Content-Type', 'application/octet-stream').send(bytes);
+    await request(app).post(`/api/v1/notes/audio/uploads/${id}/complete`);
+    return id;
+  }
+  const isHeld = async (id: string) => (await query(`SELECT next_attempt_at = 'infinity' AS held FROM note_audio WHERE id = $1`, [id])).rows[0].held as boolean;
+
+  it('holds imported audio from transcription until the run finishes, then releases exactly the files named', async () => {
+    await configure();
+    const a = await heldAudio(crypto.randomBytes(500), 'a.m4a');
+    const b = await heldAudio(crypto.randomBytes(500), 'b.m4a');
+    expect(await state(a)).toMatchObject({ status: 'pending' });
+    expect(await isHeld(a)).toBe(true); // still held after the upload completed
+
+    expect(await drainTranscriptionQueue()).toBe(0); // the worker leaves held audio alone
+    expect(requests).toHaveLength(0);
+
+    const fin = await request(app).post('/api/v1/import/notes/audio/finish').send({ audio_ids: [a, 'not-a-uuid'] });
+    expect(fin.body).toEqual({ released: 1, transcription_configured: true });
+    expect(await isHeld(a)).toBe(false);
+    expect(await isHeld(b)).toBe(true); // not named: still held
+    expect(await drainTranscriptionQueue()).toBe(1);
+    expect(await state(a)).toMatchObject({ status: 'done' });
+    expect(await state(b)).toMatchObject({ status: 'pending' });
+  });
+
+  it('finish reports when transcription is not set up, and never releases another user’s audio', async () => {
+    const id = await heldAudio();
+    const other = await makeUser('releaser');
+    const res = await request(app).post('/api/v1/import/notes/audio/finish').set('Cookie', other.cookie).send({ audio_ids: [id] });
+    expect(res.body).toEqual({ released: 0, transcription_configured: false });
+    expect(await isHeld(id)).toBe(true);
+    expect((await request(app).post('/api/v1/import/notes/audio/finish').send({ audio_ids: [id] })).body.transcription_configured).toBe(false);
+  });
+
+  it('releases a user’s held audio once none of it has been touched for an hour (an abandoned run)', async () => {
+    const a = await heldAudio(crypto.randomBytes(300), 'a.m4a');
+    const b = await heldAudio(crypto.randomBytes(300), 'b.m4a');
+    // updated_at is maintained by a trigger; switch it off just long enough to backdate rows.
+    const backdate = async (id: string, interval: string) => {
+      await query('ALTER TABLE note_audio DISABLE TRIGGER update_note_audio_updated_at');
+      try {
+        await query(`UPDATE note_audio SET updated_at = NOW() - $2::interval WHERE id = $1`, [id, interval]);
+      } finally {
+        await query('ALTER TABLE note_audio ENABLE TRIGGER update_note_audio_updated_at');
+      }
+    };
+    // The run is still going: b was touched just now, so neither is released.
+    await backdate(a, '3 hours');
+    expect(await releaseIdleHeldAudio()).toBe(0);
+    expect(await isHeld(a)).toBe(true);
+    expect(await isHeld(b)).toBe(true);
+    // The run died: everything has been idle for over an hour.
+    await backdate(b, '2 hours');
+    expect(await releaseIdleHeldAudio()).toBe(2);
+    expect(await isHeld(a)).toBe(false);
+    expect(await isHeld(b)).toBe(false);
+  });
+
   it('tests the connection using saved or supplied settings', async () => {
     const ok = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'fake-model' });
     expect(ok.body).toEqual({ ok: true, message: 'Connected.' });
@@ -319,7 +393,7 @@ describe('notes audio: audio-only notes, transcript search, content hash', () =>
     expect(await search('heron')).toEqual([spoken.body.id]);
     expect(await search('herons')).toEqual([spoken.body.id]); // stemmed like body text
     expect(await search('platypus')).toEqual([]);
-    const other = await createTestUser('searcher');
+    const other = await makeUser('searcher');
     const res = await request(app).get('/api/v1/timeline').query({ q: 'heron' }).set('Cookie', other.cookie);
     expect(JSON.stringify(res.body)).not.toContain(spoken.body.id);
   });
@@ -414,7 +488,7 @@ describe('notes audio: transcript segments, editing, timeline count', () => {
     expect((await put({ segments: [] })).status).toBe(400);
     expect((await put({ segments: [{ idx: 'a', text: 'x' }] })).status).toBe(400);
     expect((await put({ segments: [{ idx: 0, text: 5 }] })).status).toBe(400);
-    const other = await createTestUser('editor');
+    const other = await makeUser('editor');
     const res = await request(app).put(`/api/v1/notes/audio/${audio}/transcript`).set('Cookie', other.cookie)
       .send({ segments: [{ idx: 0, text: 'hijacked' }] });
     expect(res.status).toBe(404);
@@ -516,7 +590,7 @@ describe('notes audio: backup and restore', () => {
   it('restores into another account, never trusting the backup’s user, and keeps the file private to it', async () => {
     const { audioId, noteId } = await noteWithAudio('Mine', 'body');
     const zip = await fetchZip();
-    const other = await createTestUser('restorer');
+    const other = await makeUser('restorer');
     const res = await request(app).post('/api/v1/backup/import').set('Cookie', other.cookie).attach('file', zip, 'backup.zip');
     expect(res.status).toBe(200);
     // The original owner's audio row has that id already (ON CONFLICT DO NOTHING), so nothing leaks or moves.
@@ -646,5 +720,132 @@ describe('notes audio: restore rejects bad entries', () => {
     await restore(bundle([e], { [e.file as string]: good }));
     const row = (await query('SELECT user_id, status, attempts FROM note_audio WHERE id = $1', [e.id])).rows[0];
     expect(row).toEqual({ user_id: DEFAULT_USER_ID, status: 'pending', attempts: 0 });
+  });
+});
+
+
+describe('notes audio import: plan, create notes, reuse', () => {
+  beforeEach(resetIntegrationDatabase);
+  const bytes = crypto.randomBytes(800);
+
+  async function upload(buf: Buffer, opts: { defer?: boolean; reuse?: boolean; complete?: boolean } = {}) {
+    const start = await request(app).post('/api/v1/notes/audio/uploads')
+      .send({ filename: 'x.m4a', mime: 'audio/mp4', bytes: buf.length, sha256: sha(buf), defer: opts.defer, reuse: opts.reuse });
+    if (start.body.complete || opts.complete === false) return start;
+    const id = start.body.id as string;
+    await request(app).put(`/api/v1/notes/audio/uploads/${id}?offset=0`).set('Content-Type', 'application/octet-stream').send(buf);
+    await request(app).post(`/api/v1/notes/audio/uploads/${id}/complete`);
+    return start;
+  }
+  const plan = (files: unknown[], tz = 'America/Chicago', cookie?: string) => {
+    const r = request(app).post('/api/v1/import/notes/audio/plan').send({ files, fallback_timezone: tz });
+    return cookie ? r.set('Cookie', cookie) : r;
+  };
+  const addNote = (item: Record<string, unknown>, cookie?: string) => {
+    const r = request(app).post('/api/v1/import/notes/audio').send(item);
+    return cookie ? r.set('Cookie', cookie) : r;
+  };
+  const note = (audio_id: string, over: Record<string, unknown> = {}) => ({
+    audio_id, title: 'Walk', checked_in_at: '2023-04-05T19:30:59.000Z', timezone: 'America/Chicago', filename: '2023-04-05 14.30.59 Walk.m4a', tags: [], ...over,
+  });
+
+  it('plans titles, dates and zones from the file names, and flags audio already imported by checksum', async () => {
+    const id = (await upload(bytes)).body.id as string;
+    const attached = await addNote(note(id));
+    expect(attached.status).toBe(201);
+    const other = crypto.randomBytes(800);
+    await upload(other); // finished but never attached to a note: not "imported"
+
+    const res = await plan([
+      { name: '2023-04-05 14.30.59 Walk in the park.m4a', size: 800, last_modified: 1, sha256: sha(bytes) },
+      { name: '2023-04-06 08.00.00.mp3', size: 800, last_modified: 1, sha256: sha(other) },
+      { name: 'notes.txt', size: 5, last_modified: 1, sha256: null },
+    ]);
+    expect(res.status).toBe(200);
+    expect(res.body.rows.map((r: { duplicate: string | null; selected_default: boolean }) => [r.duplicate, r.selected_default]))
+      .toEqual([['checksum', false], [null, true], [null, false]]);
+    expect(res.body.rows[0]).toMatchObject({ title: 'Walk in the park', checked_in_at: '2023-04-05T19:30:59.000Z', time_source: 'filename', timezone: 'America/Chicago' });
+    expect(res.body.rows[1]).toMatchObject({ title: null, local_date: '2023-04-06' });
+    expect(res.body.rows[2].error).toBe('Not a supported audio file');
+    expect(res.body).toMatchObject({ total: 3, selected: 1, duplicate_count: 1 });
+  });
+
+  it('does not count another user’s audio as already imported, and rejects a malformed request', async () => {
+    const id = (await upload(bytes)).body.id as string;
+    await addNote(note(id));
+    const other = await makeUser('planner');
+    const res = await plan([{ name: 'a.m4a', size: 800, last_modified: 1, sha256: sha(bytes) }], 'UTC', other.cookie);
+    expect(res.body.rows[0].duplicate).toBeNull();
+    expect((await plan([])).status).toBe(400);
+    expect((await plan([{ size: 1 }])).status).toBe(400);
+  });
+
+  it('creates an audio-only note from a held upload: dated, titled, tagged, marked as an import, audio attached', async () => {
+    const id = (await upload(bytes, { defer: true })).body.id as string;
+    const res = await addNote(note(id, { tags: ['Voice Memos', 'voice memos', 'Walks'] }));
+    expect(res.status).toBe(201);
+    const row = (await query('SELECT title, body, checked_in_at, checkin_timezone, source, source_filename FROM note_checkins WHERE id = $1', [res.body.note_id])).rows[0];
+    expect(row).toMatchObject({ title: 'Walk', body: '', checkin_timezone: 'America/Chicago', source: 'import', source_filename: '2023-04-05 14.30.59 Walk.m4a' });
+    expect(new Date(row.checked_in_at).toISOString()).toBe('2023-04-05T19:30:59.000Z');
+    const tags = (await query('SELECT t.name FROM note_tag_links l JOIN note_tags t ON t.id = l.tag_id WHERE l.note_id = $1 ORDER BY t.name', [res.body.note_id])).rows.map((r) => r.name);
+    expect(tags).toEqual(['Voice Memos', 'Walks']); // names are matched case-insensitively
+    expect((await request(app).get(`/api/v1/notes/checkins/${res.body.note_id}/audio`)).body).toHaveLength(1);
+    // Held from transcription until the run says it is over.
+    expect((await query(`SELECT next_attempt_at = 'infinity' AS held FROM note_audio WHERE id = $1`, [id])).rows[0].held).toBe(true);
+  });
+
+  it('is safe to retry: a second request for the same audio returns the same note', async () => {
+    const id = (await upload(bytes)).body.id as string;
+    const first = await addNote(note(id));
+    const again = await addNote(note(id, { title: 'Different' }));
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual({ note_id: first.body.note_id, already: true });
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_checkins')).rows[0].n).toBe(1);
+  });
+
+  it('rejects bad input, unfinished uploads, and audio that belongs to someone else', async () => {
+    const id = (await upload(bytes)).body.id as string;
+    expect((await addNote(note('nope'))).status).toBe(400);
+    expect((await addNote(note(id, { timezone: 'Mars/Base' }))).status).toBe(400);
+    expect((await addNote(note(id, { checked_in_at: 'yesterday-ish' }))).status).toBe(400);
+    expect((await addNote(note(id, { title: 'x'.repeat(400) }))).status).toBe(400);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_checkins')).rows[0].n).toBe(0);
+
+    const unfinished = (await upload(crypto.randomBytes(100), { complete: false })).body.id as string;
+    expect((await addNote(note(unfinished))).status).toBe(409);
+
+    const other = await makeUser('thief');
+    expect((await addNote(note(id), other.cookie)).status).toBe(404);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_checkins')).rows[0].n).toBe(0);
+  });
+
+  it('reuses a finished, unattached upload of identical audio instead of uploading it again', async () => {
+    const first = await upload(bytes, { defer: true });
+    const again = await upload(bytes, { defer: true, reuse: true });
+    expect(again.body).toEqual({ id: first.body.id, offset: bytes.length, complete: true });
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio')).rows[0].n).toBe(1);
+
+    // Once attached to a note it is "imported" and a new upload is a new file.
+    await addNote(note(first.body.id));
+    const fresh = await upload(bytes, { defer: true, reuse: true });
+    expect(fresh.body.id).not.toBe(first.body.id);
+    expect(fresh.body.complete).toBeUndefined();
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio')).rows[0].n).toBe(2);
+  });
+
+  it('never reuses an unfinished upload, or another user’s upload', async () => {
+    const half = await upload(bytes, { complete: false });
+    const retry = await upload(bytes, { reuse: true, complete: false });
+    expect(retry.body.id).not.toBe(half.body.id);
+    expect(retry.body.complete).toBeUndefined();
+
+    const done = await upload(crypto.randomBytes(400));
+    expect(done.body.id).toBeTruthy();
+    const other = await makeUser('reuser');
+    const mine = (await query('SELECT sha256, bytes FROM note_audio WHERE id = $1', [done.body.id])).rows[0];
+    const res = await request(app).post('/api/v1/notes/audio/uploads').set('Cookie', other.cookie)
+      .send({ filename: 'x.m4a', mime: 'audio/mp4', bytes: Number(mine.bytes), sha256: mine.sha256, reuse: true });
+    expect(res.body.complete).toBeUndefined();
+    expect(res.body.id).not.toBe(done.body.id);
   });
 });

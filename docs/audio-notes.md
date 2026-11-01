@@ -39,6 +39,23 @@ Audio waits (status "Waiting to be transcribed") until an endpoint is saved in S
 | `TRANSCRIPTION_PORT` | `8000` | Host port the optional transcription service publishes. |
 | `TRANSCRIPTION_MODEL` | `Systran/faster-whisper-large-v3` | Model the transcription service installs when it starts. Empty installs nothing. |
 
+## Importing audio files
+
+**Settings → Notes → Import audio files** turns existing recordings into notes. Drag files and folders onto it (folders are searched recursively; only mp3, m4a, aac, wav, flac, ogg/opus and webm are kept, and hidden files are ignored), or use *Choose files* / *Choose folder*. Drop as many batches as you like: every drop adds to one list, and nothing uploads until you press **Import**.
+
+Each file becomes one note with the audio attached. The date comes from the file name:
+
+| File name | Note |
+| --- | --- |
+| `2023-04-05 14.30.59 Walk in the park.m4a` | Apr 5, 2023 at 2:30:59 pm, titled "Walk in the park" (the time is local time) |
+| `2023-04-05 14.30.59.m4a` | same time, no title |
+| `2023-04-05 Walk in the park.m4a` | the file's modified time if it falls on that day, else 8 pm |
+| `Walk in the park.m4a` | the file's modified time |
+
+The time zone is taken from your check-ins around that date (so a trip is respected); before your first check-in, the fallback zone on the form is used. The review table shows each file's title, date, zone and where each came from; untick anything you don't want. Files whose audio is byte-for-byte identical to audio already on one of your notes are flagged and unticked, whatever they are called, so dropping the same folder twice never creates duplicates. Tags you enter are added to every imported note.
+
+Files upload one at a time, straight from your disk, with the same resumable, checksummed upload as recordings. Transcription starts only when the whole import run has finished. If the page is closed mid-run, files already uploaded are kept; drop the folder again to finish (uploads that already completed are reused rather than sent again), and anything left waiting is released to the transcriber after an hour of inactivity. A file that fails stays in the list so you can retry it.
+
 ## Limits
 
 - 1 GB per audio file (about 4 hours at 256 kbps).

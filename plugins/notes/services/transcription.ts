@@ -271,6 +271,37 @@ async function processRow(row: AudioRow): Promise<void> {
   }
 }
 
+/**
+ * Import runs hold their audio (next_attempt_at = infinity) until the run is
+ * done. Release a user's held audio once none of it has been touched for an
+ * hour, so an import abandoned halfway doesn't leave files untranscribed forever.
+ */
+const HELD_IDLE_MS = 60 * 60 * 1000;
+
+export async function releaseIdleHeldAudio(): Promise<number> {
+  const r = await query(
+    `UPDATE note_audio a SET next_attempt_at = NOW()
+      WHERE a.next_attempt_at = 'infinity' AND a.status = 'pending'
+        AND NOT EXISTS (SELECT 1 FROM note_audio b
+                         WHERE b.user_id = a.user_id AND b.next_attempt_at = 'infinity'
+                           AND b.updated_at > NOW() - ($1 || ' milliseconds')::interval)`,
+    [String(HELD_IDLE_MS)],
+  );
+  return r.rowCount ?? 0;
+}
+
+/** An import run finished: let the worker have these files. */
+export async function releaseHeldAudio(userId: string, audioIds: string[]): Promise<number> {
+  if (audioIds.length === 0) return 0;
+  const r = await query(
+    `UPDATE note_audio SET next_attempt_at = NOW()
+      WHERE user_id = $1 AND id = ANY($2::uuid[]) AND next_attempt_at = 'infinity' AND status = 'pending'`,
+    [userId, audioIds],
+  );
+  if ((r.rowCount ?? 0) > 0) kickTranscription();
+  return r.rowCount ?? 0;
+}
+
 let draining = false;
 
 /** Work through every due `pending` row, one at a time. Returns how many were handled. */
@@ -279,6 +310,7 @@ export async function drainTranscriptionQueue(): Promise<number> {
   draining = true;
   let handled = 0;
   try {
+    await releaseIdleHeldAudio();
     for (let row = await claimNext(); row; row = await claimNext()) {
       await processRow(row);
       handled += 1;

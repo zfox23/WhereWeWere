@@ -46,10 +46,14 @@ export interface UploadInit {
   bytes: number;
   sha256: string;
   duration_ms?: number | null;
+  /** Import runs: hold the file back from transcription until the run is finished. */
+  defer?: boolean;
+  /** Import runs: if an identical finished upload is waiting unattached, reuse it instead of sending the bytes again. */
+  reuse?: boolean;
 }
 
 export const audioApi = {
-  start: async (data: UploadInit, f: FetchLike = apiFetch) => (await call(f, '/audio/uploads', json(data))) as { id: string; offset: number },
+  start: async (data: UploadInit, f: FetchLike = apiFetch) => (await call(f, '/audio/uploads', json(data))) as { id: string; offset: number; complete?: boolean },
   state: async (id: string, f: FetchLike = apiFetch) =>
     (await call(f, `/audio/uploads/${id}`)) as { id: string; offset: number; bytes: number; status: string },
   chunk: async (id: string, offset: number, data: Blob, f: FetchLike = apiFetch) =>

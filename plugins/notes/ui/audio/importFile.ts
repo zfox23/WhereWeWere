@@ -4,28 +4,17 @@
  * slices first, then uploaded by the queue.
  */
 
+import { AUDIO_FILE_ACCEPT, audioMimeForName } from '../../audioTypes';
 import { appendChunk, createRecording, deleteRecording, updateRecording, type RecordingMeta } from './recordingStore';
 
 export const MAX_AUDIO_BYTES = 1024 * 1024 * 1024;
 const SLICE_BYTES = 4 * 1024 * 1024;
 
-const MIME_BY_EXT: Record<string, string> = {
-  '.webm': 'audio/webm', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
-  '.m4a': 'audio/mp4', '.mp4': 'audio/mp4', '.aac': 'audio/aac', '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav', '.flac': 'audio/flac',
-};
-const ACCEPTED_MIMES = new Set([
-  'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/flac', 'audio/x-flac',
-]);
-
-export const AUDIO_FILE_ACCEPT = Object.keys(MIME_BY_EXT).join(',') + ',audio/*';
+export { AUDIO_FILE_ACCEPT };
 
 /** The MIME type the server will accept for this file, or null if it isn't a supported audio file. */
 export function audioMimeForFile(file: Pick<File, 'name' | 'type'>): string | null {
-  const type = file.type.split(';')[0].trim().toLowerCase();
-  if (ACCEPTED_MIMES.has(type)) return type;
-  const ext = /\.[^./\\]+$/.exec(file.name)?.[0].toLowerCase() ?? '';
-  return MIME_BY_EXT[ext] ?? null;
+  return audioMimeForName(file.name, file.type);
 }
 
 export async function importAudioFile(userId: string, file: File): Promise<RecordingMeta> {

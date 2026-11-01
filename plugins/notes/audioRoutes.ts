@@ -3,6 +3,7 @@
  * Mounted on the notes router (/api/v1/notes).
  *
  *   POST   /audio/uploads                 start an upload session -> { id, offset: 0 }
+ *                                         (import runs may pass defer: hold transcription, reuse: skip a finished duplicate upload)
  *   GET    /audio/uploads/:id             how many bytes the server has -> { offset, bytes }
  *   PUT    /audio/uploads/:id?offset=N    append one raw chunk (409 + { offset } on mismatch)
  *   POST   /audio/uploads/:id/complete    verify size + SHA-256, store the original, queue transcription
@@ -90,12 +91,27 @@ export function registerAudioRoutes(router: Router): void {
       if (bytes > MAX_AUDIO_BYTES) return res.status(413).json({ error: 'Audio file is too large (limit 1 GB)' });
       if (typeof sha256 !== 'string' || !SHA256_RE.test(sha256)) return res.status(400).json({ error: 'sha256 must be a hex digest' });
       const duration = Number.isInteger(duration_ms) && duration_ms >= 0 ? duration_ms : null;
+      const digest = sha256.toLowerCase();
+      // An import run that was interrupted leaves finished, unattached uploads behind: hand
+      // one back instead of uploading the same bytes again.
+      if (req.body?.reuse === true) {
+        const existing = await query(
+          `SELECT id FROM note_audio
+            WHERE user_id = $1 AND sha256 = $2 AND bytes = $3 AND note_id IS NULL
+              AND status IN ('pending', 'done', 'failed')
+            ORDER BY created_at LIMIT 1`,
+          [userId, digest, bytes],
+        );
+        if ((existing.rowCount ?? 0) > 0) return res.json({ id: existing.rows[0].id, offset: bytes, complete: true });
+      }
       const name = typeof filename === 'string' && filename.trim() ? filename.trim().slice(0, 255) : `recording${ext}`;
       const baseMime = (mime as string).split(';')[0].trim().toLowerCase();
       const result = await query(
-        `INSERT INTO note_audio (user_id, filename, mime, bytes, sha256, duration_ms, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'uploading') RETURNING id`,
-        [userId, name, baseMime, bytes, sha256.toLowerCase(), duration],
+        // `defer`: an import run holds its files (next_attempt_at = infinity) until the whole run is done.
+        `INSERT INTO note_audio (user_id, filename, mime, bytes, sha256, duration_ms, status, next_attempt_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'uploading', CASE WHEN $7::boolean THEN 'infinity'::timestamptz ELSE NOW() END)
+         RETURNING id`,
+        [userId, name, baseMime, bytes, digest, duration, req.body?.defer === true],
       );
       const id = result.rows[0].id as string;
       fs.mkdirSync(path.dirname(partialPath(userId, id)), { recursive: true });
@@ -185,7 +201,12 @@ export function registerAudioRoutes(router: Router): void {
         fs.writeFileSync(part, '');
         return res.status(422).json({ error: (err as Error).message, offset: 0 });
       }
-      await query(`UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() WHERE id = $1`, [row.id]);
+      await query(
+        `UPDATE note_audio SET status = 'pending',
+                next_attempt_at = CASE WHEN next_attempt_at = 'infinity' THEN next_attempt_at ELSE NOW() END
+          WHERE id = $1`,
+        [row.id],
+      );
       kickTranscription();
       res.json({ id: row.id, status: 'pending' });
     } catch (err) {

@@ -301,6 +301,47 @@ export const notesImport = {
     }),
 };
 
+export type AudioImportTimeSource = 'filename' | 'file_modified' | 'default_evening' | 'missing';
+
+export interface AudioImportRow {
+  index: number;
+  filename: string;
+  mime: string | null;
+  bytes: number;
+  title: string | null;
+  checked_in_at: string;
+  timezone: string;
+  local_date: string;
+  time_source: AudioImportTimeSource;
+  tz_source: 'history' | 'fallback';
+  duplicate: 'checksum' | 'batch' | null;
+  selected_default: boolean;
+  error: string | null;
+}
+
+export interface AudioImportPlan {
+  total: number;
+  selected: number;
+  fallback_count: number;
+  duplicate_count: number;
+  rows: AudioImportRow[];
+}
+
+export const notesAudioImport = {
+  plan: (files: { name: string; size: number; last_modified: number; sha256: string | null }[], fallbackTimezone: string) =>
+    request<AudioImportPlan>('/import/notes/audio/plan', {
+      method: 'POST',
+      body: JSON.stringify({ files, fallback_timezone: fallbackTimezone }),
+    }),
+  addNote: (item: { audio_id: string; title: string | null; checked_in_at: string; timezone: string; filename: string; tags: string[] }) =>
+    request<{ note_id: string; already: boolean }>('/import/notes/audio', { method: 'POST', body: JSON.stringify(item) }),
+  finish: (audioIds: string[]) =>
+    request<{ released: number; transcription_configured: boolean }>('/import/notes/audio/finish', {
+      method: 'POST',
+      body: JSON.stringify({ audio_ids: audioIds }),
+    }),
+};
+
 /**
  * A tag chip's tint and border from its color. Text stays in the neutral ink
  * classes (TAG_TEXT_CLASS) so it's readable on any tag color in both themes.
