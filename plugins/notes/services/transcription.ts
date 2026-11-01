@@ -164,10 +164,6 @@ async function postAudio(config: TranscriptionConfig, filePath: string, filename
     ['model', config.model],
     ['response_format', 'verbose_json'],
     ['timestamp_granularities[]', 'segment'],
-    // Voice activity detection drops the silence and noise where Whisper models start to
-    // hallucinate and loop, and is required by the service's batched mode (which stops a loop
-    // from carrying across chunks) for any audio longer than 30 s.
-    ['vad_filter', 'true'],
   ];
   if (config.language) fields.push(['language', config.language]);
   const safeName = filename.replace(/["\r\n]/g, '_');

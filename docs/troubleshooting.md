@@ -71,11 +71,8 @@ No transcription endpoint is configured, or it is unreachable. Set it in **Setti
 
 ## A transcript repeats one word or phrase over and over
 
-Whisper-family models can get stuck in a loop, especially after silence or background noise, and by default each stretch of audio is fed the previous one's text, so the loop continues to the end of the recording. The bundled transcription service is set up to avoid this: the app always asks for voice-activity detection, and the service runs in batched mode (`TRANSCRIPTION_BATCHED_MODE=true`, the default), which transcribes each chunk of speech independently so a loop cannot carry on. As a safety net the app also folds a run of four or more identical segments into one.
+Whisper-family models can get stuck in a loop, especially after silence or background noise, and by default each stretch of audio is fed the previous one's text, so the loop continues to the end of the recording. As a safety net the app folds a run of four or more identical segments into one before storing it, and logs `Transcript of "…" looped: folded N repeated segments`.
 
-If you see it on audio transcribed before these settings:
+To stop loops at the source you can turn on **batched mode** (`TRANSCRIPTION_BATCHED_MODE=true` in `.env`, then `docker compose --profile transcription up -d --force-recreate transcription`). It decodes each chunk of speech independently, so a loop can't carry on. The cost is real, which is why it is off by default: it requires voice-activity detection, which discards speech it takes for silence (quiet voices, children, singing: one test clip lost nearly all its words), and it returns one large segment per 30 seconds instead of sentences. If you turn it on, the app must also request voice-activity detection, which it currently does not, so long recordings would fail; do not enable it without that.
 
-1. Recreate the service so it picks up batched mode: `docker compose --profile transcription up -d --force-recreate transcription`, and rebuild the server (`docker compose up -d --build server`).
-2. Open the note and press **Transcribe again** on the audio file (this replaces the transcript, including any corrections you made).
-
-Other things that help: set a **language hint** in Settings > Integrations > Audio transcription (a wrong automatic guess at the start of a noisy recording can derail the whole file), and make sure `TRANSCRIPTION_BATCHED_MODE` has not been set to `false`. A server log line `Transcript of "…" looped: folded N repeated segments` means the guard caught one.
+Other things that help: set a **language hint** in Settings > Integrations > Audio transcription (a wrong automatic guess at the start of a noisy recording can derail the whole file), and press **Transcribe again** on an affected file.

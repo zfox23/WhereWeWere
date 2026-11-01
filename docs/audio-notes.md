@@ -38,7 +38,7 @@ The service ships with no models, so on start it installs the one named by `TRAN
 
 Any other OpenAI-compatible transcription server works if you point the URL at it. If audio stays on "Waiting to be transcribed", the note shows the last error; `docker compose logs transcription` has the service's side.
 
-Transcripts avoid the repeating-word failure Whisper models are prone to by detecting speech first (voice-activity detection, always requested) and decoding chunks independently (batched mode); the app also folds any run of four or more identical segments into one. See [Troubleshooting](troubleshooting.md#a-transcript-repeats-one-word-or-phrase-over-and-over).
+The app folds any run of four or more identical segments into one, as a safety net against a model looping on a phrase. See [Troubleshooting](troubleshooting.md#a-transcript-repeats-one-word-or-phrase-over-and-over) for the batched-mode option and its trade-offs.
 
 Audio waits (status "Waiting to be transcribed") until an endpoint is saved in Settings (the connection test uses what is typed in the form, saved or not); nothing is lost, and it is picked up within a minute of saving. Failures retry with growing delays and then show **Retry**. **Transcribe again** replaces a transcript, including your corrections. Transcripts also feed the notes similarity analysis.
 
@@ -46,7 +46,7 @@ Audio waits (status "Waiting to be transcribed") until an endpoint is saved in S
 | --- | --- | --- |
 | `TRANSCRIPTION_PORT` | `8000` | Host port the optional transcription service publishes. |
 | `TRANSCRIPTION_MODEL` | `Systran/faster-whisper-large-v3` | Model the transcription service installs when it starts. Empty installs nothing. |
-| `TRANSCRIPTION_BATCHED_MODE` | `true` | Decode each chunk of speech independently, which stops transcripts getting stuck repeating a word or phrase. Leave on. |
+| `TRANSCRIPTION_BATCHED_MODE` | `false` | Batched decoding stops looping transcripts but needs voice-activity detection (which drops quiet speech) and gives 30-second segments. Leave off unless loops are your main problem. |
 
 ## Importing audio files
 

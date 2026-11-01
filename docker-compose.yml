@@ -62,10 +62,10 @@ services:
     command: ["sh", "/start.sh"]
     environment:
       TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL-Systran/faster-whisper-large-v3}
-      # Batched mode decodes each chunk of speech on its own instead of feeding every window the
-      # previous one's text, which is how a Whisper model gets stuck repeating one phrase for the rest
-      # of a recording. It needs voice-activity detection, which the app always requests.
-      WHISPER__USE_BATCHED_MODE: ${TRANSCRIPTION_BATCHED_MODE-true}
+      # Off by default. Batched mode stops a transcript looping on one phrase, but it only works with
+      # voice-activity detection, which discards quiet speech (children, singing, distant voices), and
+      # it returns one segment per 30 s chunk instead of sentences. See docs/audio-notes.md.
+      WHISPER__USE_BATCHED_MODE: ${TRANSCRIPTION_BATCHED_MODE-false}
     ports:
       - "${TRANSCRIPTION_PORT:-8000}:8000"
     volumes:
