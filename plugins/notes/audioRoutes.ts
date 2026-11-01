@@ -243,12 +243,18 @@ export function registerAudioRoutes(router: Router): void {
         res.status(206);
         res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
         res.setHeader('Content-Length', String(range.end - range.start + 1));
-        return fs.createReadStream(file, { start: range.start, end: range.end }).pipe(res);
+      } else {
+        res.setHeader('Content-Length', String(size));
       }
-      res.setHeader('Content-Length', String(size));
-      fs.createReadStream(file).pipe(res);
+      // pipeline, not .pipe: players abort range requests all the time while seeking, and .pipe would
+      // leave the file open; a read error with no listener would also take the whole server down.
+      await pipeline(fs.createReadStream(file, range ? { start: range.start, end: range.end } : {}), res).catch((err) => {
+        if ((err as NodeJS.ErrnoException).code === 'ERR_STREAM_PREMATURE_CLOSE') return; // the player hung up
+        console.error('Failed to stream audio:', err);
+      });
     } catch (err) {
-      fail(res, err, 'Failed to read audio');
+      if (res.headersSent) res.destroy();
+      else fail(res, err, 'Failed to read audio');
     }
   });
 

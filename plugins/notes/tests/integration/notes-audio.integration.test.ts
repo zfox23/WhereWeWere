@@ -101,6 +101,32 @@ describe('notes audio: resumable upload, range playback, ownership', () => {
     expect((await request(app).get(`/api/v1/notes/audio/${id}`).set('Range', 'bytes=9999-')).status).toBe(416);
   });
 
+  it('survives a file that fails while being read, and keeps serving', async () => {
+    const id = (await startUpload()).body.id as string;
+    await put(id, 0, data);
+    expect((await request(app).post(`/api/v1/notes/audio/uploads/${id}/complete`)).status).toBe(200);
+    // Swap the stored file for a directory: opening works, reading fails (EISDIR) after the headers went out.
+    const file = path.join(noteAudioDir(DEFAULT_USER_ID), `${id}.webm`);
+    fs.rmSync(file);
+    fs.mkdirSync(file);
+    try {
+      const errors: unknown[] = [];
+      const onUncaught = (err: unknown) => errors.push(err);
+      process.on('uncaughtException', onUncaught);
+      try {
+        await request(app).get(`/api/v1/notes/audio/${id}`).catch(() => {});
+        await new Promise((r) => setTimeout(r, 100));
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
+      expect(errors).toEqual([]);
+    } finally {
+      fs.rmdirSync(file);
+      fs.writeFileSync(file, data);
+    }
+    expect((await request(app).get(`/api/v1/notes/audio/${id}`)).status).toBe(200);
+  });
+
   it('rejects a corrupted upload and lets the client start over', async () => {
     const start = await startUpload();
     const id = start.body.id as string;
