@@ -462,8 +462,8 @@ describe('notes audio: transcript segments, editing, timeline count', () => {
     const full = await request(app).get(`/api/v1/notes/checkins/${noteId}/audio?include=segments`);
     expect(full.body[0]).toMatchObject({ id: audio, status: 'done', language: 'en' });
     expect(full.body[0].segments).toEqual([
-      { idx: 0, start_ms: 0, end_ms: 1500, text: 'hello world', edited: false },
-      { idx: 1, start_ms: 1500, end_ms: 3000, text: 'and farewell', edited: false },
+      { idx: 0, start_ms: 0, end_ms: 1500, text: 'hello world', edited: false, speaker: null },
+      { idx: 1, start_ms: 1500, end_ms: 3000, text: 'and farewell', edited: false, speaker: null },
     ]);
   });
 
@@ -873,5 +873,354 @@ describe('notes audio: library rows carry an audio count', () => {
     const byTitle = Object.fromEntries(res.body.notes.map((n: { title: string; audio_count: number }) => [n.title, n.audio_count]));
     expect(byTitle).toEqual({ 'Has audio': 2, 'Typed only': 0 });
     expect(plain.status).toBe(201);
+  });
+});
+
+describe('notes audio: speaker identification', () => {
+  const data = crypto.randomBytes(2000);
+  let whisper: http.Server;
+  let diarizer: http.Server;
+  let whisperUrl = '';
+  let diarizerUrl = '';
+  let whisperRequests: string[] = [];
+  let diarizeRequests: string[] = [];
+  let turns: { start: number; end: number; speaker: string }[] = [];
+  let diarizeStatus = 200;
+  let diarizeBody = '';
+
+  /** One 2-second segment, "How are you? Good, thanks.", with each word's timing. */
+  const WORDS = [['How', 0, 0.38], ['are', 0.4, 0.78], ['you?', 0.8, 1.18], ['Good,', 1.2, 1.58], ['thanks.', 1.6, 1.98]];
+  const segmentJson = (withWords: boolean) => ({
+    text: 'How are you? Good, thanks.', language: 'en', duration: 2,
+    segments: [{
+      start: 0, end: 1.98, text: ' How are you? Good, thanks.',
+      ...(withWords ? { words: WORDS.map(([word, start, end]) => ({ word: ` ${word}`, start, end })) } : {}),
+    }],
+  });
+
+  const readBody = (req: http.IncomingMessage) => new Promise<string>((resolve) => {
+    const parts: Buffer[] = [];
+    req.on('data', (c: Buffer) => parts.push(c));
+    req.on('end', () => resolve(Buffer.concat(parts).toString('latin1')));
+  });
+
+  beforeAll(async () => {
+    whisper = http.createServer(async (req, res) => {
+      const body = await readBody(req);
+      whisperRequests.push(body);
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(segmentJson(/name="timestamp_granularities\[\]"\r\n\r\nword/.test(body))));
+    });
+    diarizer = http.createServer(async (req, res) => {
+      if (req.url === '/health') {
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify(diarizeHealth));
+      }
+      diarizeRequests.push(await readBody(req));
+      res.statusCode = diarizeStatus;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(diarizeBody || JSON.stringify({ duration: 2, speakers: [...new Set(turns.map((t) => t.speaker))], turns }));
+    });
+    await Promise.all([whisper, diarizer].map((s) => new Promise<void>((r) => s.listen(0, '127.0.0.1', r))));
+    whisperUrl = `http://127.0.0.1:${(whisper.address() as { port: number }).port}/v1`;
+    diarizerUrl = `http://127.0.0.1:${(diarizer.address() as { port: number }).port}`;
+  });
+  afterAll(async () => {
+    await Promise.all([whisper, diarizer].map((s) => new Promise((r) => s.close(r))));
+  });
+
+  let diarizeHealth: Record<string, unknown> = { status: 'ok', pipeline_loaded: true, device: 'cuda' };
+  beforeEach(async () => {
+    await resetIntegrationDatabase();
+    whisperRequests = [];
+    diarizeRequests = [];
+    turns = [{ start: 0, end: 1.2, speaker: 'SPEAKER_01' }, { start: 1.2, end: 2.5, speaker: 'SPEAKER_00' }];
+    diarizeStatus = 200;
+    diarizeBody = '';
+    diarizeHealth = { status: 'ok', pipeline_loaded: true, device: 'cuda' };
+  });
+
+  const setting = (key: string, value: unknown) => query(
+    `INSERT INTO plugin_settings (user_id, plugin_id, key, value) VALUES ($1, 'notes', $2, $3::jsonb)
+     ON CONFLICT (user_id, plugin_id, key) DO UPDATE SET value = EXCLUDED.value`,
+    [DEFAULT_USER_ID, key, JSON.stringify(value)],
+  );
+  const configureTranscription = async () => {
+    await setting('transcription_api_url', whisperUrl);
+    await setting('transcription_model', 'fake-model');
+  };
+  const configureDiarization = (extra: Record<string, unknown> = {}) => Promise.all([
+    setting('diarization_api_url', diarizerUrl),
+    ...Object.entries(extra).map(([k, v]) => setting(k, v)),
+  ]);
+
+  async function transcribedAudio(): Promise<string> {
+    const start = await request(app).post('/api/v1/notes/audio/uploads')
+      .send({ filename: 'talk.webm', mime: 'audio/webm', bytes: data.length, sha256: sha(data) });
+    const id = start.body.id as string;
+    await request(app).put(`/api/v1/notes/audio/uploads/${id}?offset=0`).set('Content-Type', 'application/octet-stream').send(data);
+    await request(app).post(`/api/v1/notes/audio/uploads/${id}/complete`);
+    await drainTranscriptionQueue();
+    return id;
+  }
+  const segments = async (id: string) => (await query(
+    'SELECT idx, start_ms, end_ms, text, edited, speaker, src, words IS NOT NULL AS has_words FROM note_audio_segments WHERE audio_id = $1 ORDER BY idx', [id])).rows;
+  const audioRow = async (id: string) => (await query(
+    'SELECT status, diarization_status, diarization_error, diarization_attempts, speakers, transcript_text FROM note_audio WHERE id = $1', [id])).rows[0];
+  const view = (s: { speaker: string | null; text: string }[]) => s.map((x) => [x.speaker, x.text]);
+
+  it('asks the transcriber for word timings only when speaker identification is set up', async () => {
+    await configureTranscription();
+    const plain = await transcribedAudio();
+    expect(whisperRequests[0]).not.toMatch(/name="timestamp_granularities\[\]"\r\n\r\nword/);
+    expect(await audioRow(plain)).toMatchObject({ diarization_status: 'none' });
+    expect((await segments(plain)).map((s) => s.speaker)).toEqual([null]);
+    expect(diarizeRequests).toHaveLength(0);
+
+    await resetIntegrationDatabase();
+    whisperRequests = [];
+    await configureTranscription();
+    await configureDiarization();
+    await transcribedAudio();
+    expect(whisperRequests[0]).toMatch(/name="timestamp_granularities\[\]"\r\n\r\nword/);
+  });
+
+  it('identifies speakers after transcribing and splits the segment where the speaker changes', async () => {
+    await configureTranscription();
+    await configureDiarization();
+    const id = await transcribedAudio();
+
+    expect(await audioRow(id)).toMatchObject({ status: 'done', diarization_status: 'done', diarization_error: null, speakers: {} });
+    const segs = await segments(id);
+    expect(view(segs)).toEqual([['S1', 'How are you?'], ['S2', 'Good, thanks.']]); // SPEAKER_01 spoke first, so it is S1
+    expect(segs.map((s) => [s.start_ms, s.end_ms])).toEqual([[0, 1180], [1200, 1980]]);
+    expect(segs.every((s) => s.src === 0 && s.has_words)).toBe(true);
+    // The searchable text is the transcriber's, unchanged (speakers aren't words).
+    expect((await audioRow(id)).transcript_text).toBe('How are you? Good, thanks.');
+  });
+
+  it('sends the expected number of speakers as a hint: exact when min equals max, else a range', async () => {
+    await configureTranscription();
+    await configureDiarization({ diarization_min_speakers: 2, diarization_max_speakers: 2 });
+    await transcribedAudio();
+    expect(diarizeRequests[0]).toMatch(/name="num_speakers"\r\n\r\n2/);
+    expect(diarizeRequests[0]).not.toMatch(/name="min_speakers"/);
+
+    await resetIntegrationDatabase();
+    diarizeRequests = [];
+    await configureTranscription();
+    await configureDiarization({ diarization_min_speakers: 1, diarization_max_speakers: 3 });
+    await transcribedAudio();
+    expect(diarizeRequests[0]).toMatch(/name="min_speakers"\r\n\r\n1/);
+    expect(diarizeRequests[0]).toMatch(/name="max_speakers"\r\n\r\n3/);
+    expect(diarizeRequests[0]).not.toMatch(/name="num_speakers"/);
+  });
+
+  it('re-identifying cuts again from the original segments, so a better answer replaces the first split', async () => {
+    await configureTranscription();
+    await configureDiarization();
+    const id = await transcribedAudio();
+    expect(view(await segments(id))).toEqual([['S1', 'How are you?'], ['S2', 'Good, thanks.']]);
+
+    turns = [{ start: 0, end: 0.8, speaker: 'A' }, { start: 0.8, end: 2.5, speaker: 'B' }];
+    await request(app).put(`/api/v1/notes/audio/${id}/speakers`).send({ names: { S1: 'Dad' } });
+    const res = await request(app).post(`/api/v1/notes/audio/${id}/diarize`);
+    expect(res.status).toBe(200);
+    await drainTranscriptionQueue();
+    expect(view(await segments(id))).toEqual([['S1', 'How are'], ['S2', 'you? Good, thanks.']]);
+    expect((await audioRow(id)).speakers).toEqual({}); // names belonged to the old labelling
+  });
+
+  it('never re-cuts text the user corrected: it labels whole segments and keeps the correction', async () => {
+    await configureTranscription();
+    const id = await transcribedAudio(); // no speaker identification yet
+    await request(app).put(`/api/v1/notes/audio/${id}/transcript`).send({ segments: [{ idx: 0, text: 'How are you? Fine, thanks.' }] });
+    await configureDiarization();
+    expect((await request(app).post(`/api/v1/notes/audio/${id}/diarize`)).status).toBe(200);
+    await drainTranscriptionQueue();
+    const segs = await segments(id);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ text: 'How are you? Fine, thanks.', edited: true, speaker: 'S1' });
+  });
+
+  it('works on a transcript made before word timings were requested, labelling whole segments', async () => {
+    await configureTranscription();
+    const id = await transcribedAudio();
+    expect((await segments(id))[0].has_words).toBe(false);
+    await configureDiarization();
+    await request(app).post(`/api/v1/notes/audio/${id}/diarize`);
+    await drainTranscriptionQueue();
+    const segs = await segments(id);
+    expect(segs).toHaveLength(1); // no words, so no split
+    expect(segs[0].speaker).toBe('S1'); // A speaks 1.2 s of 1.98 s
+  });
+
+  it('a transcript with no detected speech is done, with a note, not failed', async () => {
+    await configureTranscription();
+    await configureDiarization();
+    turns = [];
+    const id = await transcribedAudio();
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'done', diarization_error: expect.stringContaining('No speech') });
+    expect((await segments(id))[0].speaker).toBeNull();
+  });
+
+  describe('when the diarization service fails', () => {
+    it('keeps the transcript, retries a server error with backoff, and gives up after the last attempt', async () => {
+      await configureTranscription();
+      await configureDiarization();
+      diarizeStatus = 503;
+      diarizeBody = JSON.stringify({ detail: 'The diarization model is still loading' });
+      const id = await transcribedAudio();
+      expect(await audioRow(id)).toMatchObject({ status: 'done', diarization_status: 'pending', diarization_attempts: 1 });
+      expect((await audioRow(id)).diarization_error).toContain('still loading');
+      expect(view(await segments(id))).toEqual([[null, 'How are you? Good, thanks.']]); // transcript untouched
+
+      for (let i = 0; i < 6; i++) {
+        await query(`UPDATE note_audio SET diarization_next_at = NOW() WHERE id = $1 AND diarization_status = 'pending'`, [id]);
+        await drainTranscriptionQueue();
+      }
+      expect(await audioRow(id)).toMatchObject({ diarization_status: 'failed', diarization_attempts: 5 });
+    });
+
+    it('fails at once when the service refuses the audio itself (4xx)', async () => {
+      await configureTranscription();
+      await configureDiarization();
+      diarizeStatus = 422;
+      diarizeBody = JSON.stringify({ detail: 'Could not decode the audio' });
+      const id = await transcribedAudio();
+      expect(await audioRow(id)).toMatchObject({ diarization_status: 'failed', diarization_attempts: 1 });
+      expect((await audioRow(id)).diarization_error).toContain('Could not decode');
+    });
+
+    it('recovers when the service comes back and you ask again', async () => {
+      await configureTranscription();
+      await configureDiarization();
+      diarizeStatus = 422;
+      const id = await transcribedAudio();
+      diarizeStatus = 200;
+      await request(app).post(`/api/v1/notes/audio/${id}/diarize`);
+      await drainTranscriptionQueue();
+      expect(await audioRow(id)).toMatchObject({ diarization_status: 'done', diarization_attempts: 0, diarization_error: null });
+      expect((await segments(id)).map((s) => s.speaker)).toEqual(['S1', 'S2']);
+    });
+  });
+
+  it('leaves transcripts waiting, without failing them, for a user who has not set up the service', async () => {
+    await configureTranscription();
+    const id = await transcribedAudio();
+    await query(`UPDATE note_audio SET diarization_status = 'pending' WHERE id = $1`, [id]);
+    await drainTranscriptionQueue();
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'pending', diarization_attempts: 0 });
+    expect(diarizeRequests).toHaveLength(0);
+    await configureDiarization(); // now they set it up: it is picked up on the next pass
+    await drainTranscriptionQueue();
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'done' });
+  });
+
+  it('refuses to identify speakers until the service is set up, and for audio that is not transcribed or not yours', async () => {
+    await configureTranscription();
+    const id = await transcribedAudio();
+    const none = await request(app).post(`/api/v1/notes/audio/${id}/diarize`);
+    expect(none.status).toBe(409);
+    expect(none.body.error).toContain('Settings > Integrations');
+
+    await configureDiarization();
+    const other = await createTestUser('diarizer');
+    expect((await request(app).post(`/api/v1/notes/audio/${id}/diarize`).set('Cookie', other.cookie)).status).toBe(404);
+    expect((await request(app).post('/api/v1/notes/audio/not-a-uuid/diarize')).status).toBe(404);
+    const pending = (await query(
+      `INSERT INTO note_audio (user_id, filename, mime, bytes, sha256, status) VALUES ($1, 'p.webm', 'audio/webm', 1, $2, 'pending') RETURNING id`,
+      [DEFAULT_USER_ID, 'e'.repeat(64)])).rows[0].id;
+    expect((await request(app).post(`/api/v1/notes/audio/${pending}/diarize`)).status).toBe(404); // not transcribed yet
+  });
+
+  it('transcribing again clears the speakers and runs the speaker pass on the new transcript', async () => {
+    await configureTranscription();
+    await configureDiarization();
+    const id = await transcribedAudio();
+    await request(app).put(`/api/v1/notes/audio/${id}/speakers`).send({ names: { S1: 'Dad' } });
+    await request(app).post(`/api/v1/notes/audio/${id}/retranscribe`);
+    await drainTranscriptionQueue();
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'done', speakers: {} });
+    expect(view(await segments(id))).toEqual([['S1', 'How are you?'], ['S2', 'Good, thanks.']]);
+  });
+
+  describe('naming speakers', () => {
+    it('renames speakers per file, blank goes back to the default, and the list carries names and speakers', async () => {
+      await configureTranscription();
+      await configureDiarization();
+      const id = await transcribedAudio();
+      const note = await request(app).post('/api/v1/notes/checkins')
+        .send({ title: 'Chat', body: '', checked_in_at: '2024-06-06T10:00:00Z', checkin_timezone: 'UTC', audio_ids: [id] });
+
+      const named = await request(app).put(`/api/v1/notes/audio/${id}/speakers`).send({ names: { S1: '  Dad ', S2: 'Cass' } });
+      expect(named.body).toEqual({ speakers: { S1: 'Dad', S2: 'Cass' } });
+      expect((await request(app).put(`/api/v1/notes/audio/${id}/speakers`).send({ names: { S2: '' } })).body).toEqual({ speakers: { S1: 'Dad' } });
+
+      const list = await request(app).get(`/api/v1/notes/checkins/${note.body.id}/audio?include=segments`);
+      expect(list.body[0]).toMatchObject({ diarization_status: 'done', speakers: { S1: 'Dad' } });
+      expect(list.body[0].segments.map((s: { speaker: string }) => s.speaker)).toEqual(['S1', 'S2']);
+    });
+
+    it('rejects bad names and other users', async () => {
+      await configureTranscription();
+      const id = await transcribedAudio();
+      const put = (names: unknown, cookie?: string) => {
+        const r = request(app).put(`/api/v1/notes/audio/${id}/speakers`).send({ names } as object);
+        return cookie ? r.set('Cookie', cookie) : r;
+      };
+      expect((await put({ 'not a speaker': 'x' })).status).toBe(400);
+      expect((await put({ S1: 5 })).status).toBe(400);
+      expect((await put({ S1: 'x'.repeat(61) })).status).toBe(400);
+      expect((await put('nope')).status).toBe(400);
+      expect((await put([])).status).toBe(400);
+      expect((await put({ S1: 'Dad' }, (await createTestUser('namer')).cookie)).status).toBe(404);
+      expect((await audioRow(id)).speakers).toEqual({});
+    });
+  });
+
+  it('tests the service: ready, still loading, model missing, unreachable', async () => {
+    const test = (api_url: string) => request(app).post('/api/v1/notes/diarization/test').send({ api_url });
+    expect((await test(diarizerUrl)).body).toEqual({ ok: true, message: 'Connected, model ready (cuda).' });
+    diarizeHealth = { status: 'loading', pipeline_loaded: false };
+    expect((await test(diarizerUrl)).body.message).toContain('still loading');
+    diarizeHealth = { status: 'error', pipeline_loaded: false, error: 'HF_TOKEN is not set' };
+    const bad = (await test(diarizerUrl)).body;
+    expect(bad.ok).toBe(false);
+    expect(bad.message).toContain('HF_TOKEN is not set');
+    expect((await test('http://127.0.0.1:1')).body.ok).toBe(false);
+    expect((await request(app).post('/api/v1/notes/diarization/test').send({})).status).toBe(400);
+  });
+
+  it('survives a backup and restore: speakers, names, word timings and the original-segment link', async () => {
+    await configureTranscription();
+    await configureDiarization();
+    const id = await transcribedAudio();
+    await request(app).post('/api/v1/notes/checkins')
+      .send({ title: 'Chat', body: 'x', checked_in_at: '2024-06-06T10:00:00Z', checkin_timezone: 'UTC', audio_ids: [id] });
+    await request(app).put(`/api/v1/notes/audio/${id}/speakers`).send({ names: { S1: 'Dad' } });
+    const before = await segments(id);
+
+    const zip = await new Promise<Buffer>((resolve, reject) => {
+      request(app).get('/api/v1/backup/export').buffer(true)
+        .parse((res, cb) => {
+          const parts: Buffer[] = [];
+          res.on('data', (c: Buffer) => parts.push(c));
+          res.on('end', () => cb(null, Buffer.concat(parts)));
+        })
+        .end((err, res) => (err ? reject(err) : resolve(res.body as Buffer)));
+    });
+    await request(app).delete(`/api/v1/notes/checkins/${(await query('SELECT id FROM note_checkins')).rows[0].id}`);
+    expect((await query('SELECT COUNT(*)::int AS n FROM note_audio')).rows[0].n).toBe(0);
+
+    const res = await request(app).post('/api/v1/backup/import').attach('file', zip, 'backup.zip');
+    expect(res.status).toBe(200);
+    expect(res.body.errors).toEqual([]);
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'done', speakers: { S1: 'Dad' } });
+    expect(await segments(id)).toEqual(before);
+    // The word timings came back too, so the speakers can be re-identified after a restore.
+    await request(app).post(`/api/v1/notes/audio/${id}/diarize`);
+    await drainTranscriptionQueue();
+    expect(view(await segments(id))).toEqual([['S1', 'How are you?'], ['S2', 'Good, thanks.']]);
   });
 });

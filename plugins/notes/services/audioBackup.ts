@@ -30,6 +30,9 @@ interface SegmentRow {
   end_ms: number;
   text: string;
   edited: boolean;
+  speaker?: string | null;
+  words?: [number, number, string][] | null;
+  src?: number | null;
 }
 
 interface IndexEntry {
@@ -46,6 +49,8 @@ interface IndexEntry {
   language: string | null;
   model: string | null;
   transcript_text: string;
+  /** Names the user gave the speakers: { S1: "Dad" }. */
+  speakers?: Record<string, string>;
   created_at: string;
   /** ZIP path of the original, relative to the plugin folder. */
   file: string;
@@ -56,9 +61,10 @@ interface IndexEntry {
 export async function planAudioBackup(userId: string): Promise<{ files: BackupFileRef[]; tempDir?: string }> {
   const rows = (await query(
     `SELECT a.id, a.note_id, a.filename, a.mime, a.bytes, a.sha256, a.duration_ms, a.position, a.status,
-            a.error, a.language, a.model, a.transcript_text, a.created_at,
+            a.error, a.language, a.model, a.transcript_text, a.speakers, a.created_at,
             COALESCE((SELECT json_agg(json_build_object('idx', s.idx, 'start_ms', s.start_ms, 'end_ms', s.end_ms,
-                                                       'text', s.text, 'edited', s.edited) ORDER BY s.idx)
+                                                       'text', s.text, 'edited', s.edited,
+                                                       'speaker', s.speaker, 'words', s.words, 'src', s.src) ORDER BY s.idx)
                         FROM note_audio_segments s WHERE s.audio_id = a.id), '[]'::json) AS segments
        FROM note_audio a
       WHERE a.user_id = $1 AND a.status <> 'uploading'
@@ -87,6 +93,28 @@ export async function planAudioBackup(userId: string): Promise<{ files: BackupFi
 }
 
 const FILE_RE = /^audio\/[0-9a-f-]{36}\.[a-z0-9]{1,5}$/;
+
+/** Speaker names from a backup: only `S<n>` keys with short text values. */
+function cleanSpeakerNames(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (/^S\d{1,2}$/.test(k) && typeof v === 'string' && v.trim() && v.length <= 60) out[k] = v.trim();
+    }
+  }
+  return out;
+}
+
+/** Word timings from a backup: [[startMs, endMs, "text"], ...], or null if it isn't that shape. */
+function cleanWords(raw: unknown): [number, number, string][] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: [number, number, string][] = [];
+  for (const w of raw) {
+    if (!Array.isArray(w) || typeof w[0] !== 'number' || typeof w[1] !== 'number' || typeof w[2] !== 'string') return null;
+    out.push([w[0], w[1], w[2]]);
+  }
+  return out;
+}
 
 /**
  * Restore audio from an extracted backup. `filesDir` is this plugin's folder in
@@ -141,15 +169,18 @@ export async function restoreAudioBackup(
       const text = typeof e.transcript_text === 'string' ? e.transcript_text : '';
       // A transcript that never finished is simply queued again.
       const done = e.status === 'done' && text !== '';
+      const speakers = cleanSpeakerNames(e.speakers);
+      const hasSpeakers = done && Array.isArray(e.segments) && e.segments.some((seg) => typeof seg?.speaker === 'string');
       const inserted = await client.query(
         `INSERT INTO note_audio (id, user_id, note_id, filename, mime, bytes, sha256, duration_ms, position, status,
-                                 error, language, model, transcript_text, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13, COALESCE($14::timestamptz, NOW()))
+                                 error, language, model, transcript_text, created_at, speakers, diarization_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13, COALESCE($14::timestamptz, NOW()), $15::jsonb, $16)
          ON CONFLICT (id) DO NOTHING`,
         [
           e.id, userId, noteId, label.slice(0, 255), e.mime, Number(e.bytes) || 0, String(e.sha256).toLowerCase(),
           Number.isInteger(e.duration_ms) ? e.duration_ms : null, Number.isInteger(e.position) ? e.position : 0,
           done ? 'done' : 'pending', e.language ?? null, e.model ?? null, done ? text : '', e.created_at ?? null,
+          JSON.stringify(hasSpeakers ? speakers : {}), hasSpeakers ? 'done' : 'none',
         ],
       );
       if ((inserted.rowCount ?? 0) === 0) continue; // already there
@@ -158,9 +189,14 @@ export async function restoreAudioBackup(
         for (const s of e.segments) {
           if (!Number.isInteger(s?.idx) || typeof s.text !== 'string') continue;
           await client.query(
-            `INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text, edited)
-             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
-            [e.id, s.idx, Math.max(Number(s.start_ms) || 0, 0), Math.max(Number(s.end_ms) || 0, 0), s.text, s.edited === true],
+            `INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text, edited, speaker, words, src)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) ON CONFLICT DO NOTHING`,
+            [
+              e.id, s.idx, Math.max(Number(s.start_ms) || 0, 0), Math.max(Number(s.end_ms) || 0, 0), s.text, s.edited === true,
+              typeof s.speaker === 'string' && /^S\d{1,2}$/.test(s.speaker) ? s.speaker : null,
+              cleanWords(s.words) ? JSON.stringify(cleanWords(s.words)) : null,
+              Number.isInteger(s.src) ? s.src : null,
+            ],
           );
         }
       }

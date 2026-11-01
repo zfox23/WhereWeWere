@@ -15,12 +15,12 @@
  */
 
 import fs from 'fs';
-import http from 'http';
-import https from 'https';
-import crypto from 'crypto';
-import { pool, query } from '../../../server/src/db';
 import path from 'path';
+import { pool, query } from '../../../server/src/db';
 import { audioExtForMime, noteAudioDir, noteAudioPath } from './audioFiles';
+import { postMultipartFile, request } from './httpClient';
+import { DiarizationError, diarizeAudio, getDiarizationConfig } from './diarization';
+import { labelSpeakers, restoreOriginalSegments, type SpeakerSegment, type TimedWord } from './speakers';
 
 export interface TranscriptionConfig {
   apiUrl: string;
@@ -28,12 +28,16 @@ export interface TranscriptionConfig {
   apiKey: string | null;
   /** ISO-639-1 hint; null lets the model auto-detect. */
   language: string | null;
+  /** Also ask for word timings (needed to split segments at a change of speaker). */
+  wordTimestamps?: boolean;
 }
 
 export interface TranscriptSegment {
   startMs: number;
   endMs: number;
   text: string;
+  /** Word timings, when the service returned them. */
+  words?: TimedWord[];
 }
 
 export interface TranscriptionResult {
@@ -48,8 +52,6 @@ export interface TranscriptionResult {
 export const MAX_ATTEMPTS = 8;
 const UNCONFIGURED_RETRY_MS = 5 * 60 * 1000;
 const POLL_INTERVAL_MS = 30 * 1000;
-/** A long recording on a busy GPU can take a while; this is an idle-socket limit. */
-const SOCKET_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/+$/, '');
@@ -98,7 +100,7 @@ export function collapseRepeatedSegments(segments: TranscriptSegment[]): { segme
     let j = i + 1;
     while (key !== '' && j < segments.length && loopKey(segments[j].text) === key) j += 1;
     if (j - i >= LOOP_MIN_RUN) {
-      out.push({ startMs: segments[i].startMs, endMs: segments[j - 1].endMs, text: segments[i].text });
+      out.push({ startMs: segments[i].startMs, endMs: segments[j - 1].endMs, text: segments[i].text, ...(segments[i].words ? { words: segments[i].words } : {}) });
       collapsed += j - i - 1;
     } else {
       out.push(...segments.slice(i, j));
@@ -106,6 +108,18 @@ export function collapseRepeatedSegments(segments: TranscriptSegment[]): { segme
     i = j;
   }
   return { segments: out, collapsed };
+}
+
+/** `{ word, start, end }` entries (seconds) -> timings in milliseconds; anything malformed is skipped. */
+function parseWords(raw: unknown): TimedWord[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TimedWord[] = [];
+  for (const w of raw as Record<string, unknown>[]) {
+    const text = typeof w?.word === 'string' ? w.word : typeof w?.text === 'string' ? w.text : '';
+    if (!text.trim() || typeof w.start !== 'number' || typeof w.end !== 'number') continue;
+    out.push({ startMs: Math.max(Math.round(w.start * 1000), 0), endMs: Math.max(Math.round(w.end * 1000), 0), text: text.startsWith(' ') ? text : ` ${text}` });
+  }
+  return out;
 }
 
 /** Normalize a verbose_json response (segments in seconds) into our shape. */
@@ -119,7 +133,24 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
       if (!text) continue;
       const start = typeof s.start === 'number' ? s.start : 0;
       const end = typeof s.end === 'number' ? s.end : start;
-      segments.push({ startMs: Math.max(Math.round(start * 1000), 0), endMs: Math.max(Math.round(end * 1000), 0), text });
+      const segWords = parseWords(s.words);
+      segments.push({
+        startMs: Math.max(Math.round(start * 1000), 0),
+        endMs: Math.max(Math.round(end * 1000), 0),
+        text,
+        ...(segWords.length > 0 ? { words: segWords } : {}),
+      });
+    }
+  }
+  // Some servers return word timings only at the top level: give each segment the words inside it.
+  const topWords = parseWords(body.words);
+  if (topWords.length > 0 && segments.every((seg) => !seg.words)) {
+    for (const seg of segments) {
+      const inside = topWords.filter((w) => {
+        const mid = (w.startMs + w.endMs) / 2;
+        return mid >= seg.startMs && mid < seg.endMs + 1;
+      });
+      if (inside.length > 0) seg.words = inside;
     }
   }
   let text = typeof body.text === 'string' ? body.text.trim() : '';
@@ -136,55 +167,23 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
   };
 }
 
-interface HttpResult {
-  status: number;
-  body: string;
-}
-
-function request(url: URL, options: http.RequestOptions, send: (req: http.ClientRequest) => void): Promise<HttpResult> {
-  const lib = url.protocol === 'https:' ? https : http;
-  return new Promise((resolve, reject) => {
-    const req = lib.request(url, options, (res) => {
-      const parts: Buffer[] = [];
-      res.on('data', (c: Buffer) => parts.push(c));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(parts).toString('utf8') }));
-      res.on('error', reject);
-    });
-    req.setTimeout(SOCKET_TIMEOUT_MS, () => req.destroy(new Error('Transcription request timed out')));
-    req.on('error', reject);
-    send(req);
-  });
-}
-
 /** POST the file as multipart/form-data, streaming it from disk. */
-async function postAudio(config: TranscriptionConfig, filePath: string, filename: string, mime: string): Promise<HttpResult> {
-  const url = new URL(`${config.apiUrl}/audio/transcriptions`);
-  const boundary = `----wwwaudio${crypto.randomBytes(12).toString('hex')}`;
+async function postAudio(config: TranscriptionConfig, filePath: string, filename: string, mime: string) {
   const fields: [string, string][] = [
     ['model', config.model],
     ['response_format', 'verbose_json'],
     ['timestamp_granularities[]', 'segment'],
   ];
+  // Word timings let a segment be split where the speaker changes (only asked for when speaker identification is on).
+  if (config.wordTimestamps) fields.push(['timestamp_granularities[]', 'word']);
   if (config.language) fields.push(['language', config.language]);
-  const safeName = filename.replace(/["\r\n]/g, '_');
-  const head = Buffer.from(
-    fields.map(([k, val]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${val}\r\n`).join('')
-      + `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeName}"\r\nContent-Type: ${mime}\r\n\r\n`,
+  return postMultipartFile(
+    new URL(`${config.apiUrl}/audio/transcriptions`),
+    fields,
+    { path: filePath, filename, mime },
+    config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
+    'Transcription request timed out',
   );
-  const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
-  const size = (await fs.promises.stat(filePath)).size;
-  const headers: Record<string, string | number> = {
-    'Content-Type': `multipart/form-data; boundary=${boundary}`,
-    'Content-Length': head.length + size + tail.length,
-  };
-  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-  return request(url, { method: 'POST', headers }, (req) => {
-    req.write(head);
-    const stream = fs.createReadStream(filePath);
-    stream.on('error', (err) => req.destroy(err));
-    stream.on('end', () => req.end(tail));
-    stream.pipe(req, { end: false });
-  });
 }
 
 export async function transcribeFile(config: TranscriptionConfig, filePath: string, filename: string, mime: string): Promise<TranscriptionResult> {
@@ -251,24 +250,32 @@ async function claimNext(): Promise<AudioRow | null> {
   return (r.rows[0] as AudioRow | undefined) ?? null;
 }
 
-async function saveTranscript(audioId: string, model: string, result: TranscriptionResult): Promise<void> {
+async function saveTranscript(audioId: string, model: string, result: TranscriptionResult, diarize: boolean): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query('DELETE FROM note_audio_segments WHERE audio_id = $1', [audioId]);
     if (result.segments.length > 0) {
       await client.query(
-        `INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text)
-         SELECT $1, t.idx - 1, t.s, t.e, t.txt
-           FROM unnest($2::int[], $3::int[], $4::text[]) WITH ORDINALITY AS t(s, e, txt, idx)`,
-        [audioId, result.segments.map((s) => s.startMs), result.segments.map((s) => s.endMs), result.segments.map((s) => s.text)],
+        `INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text, words, src)
+         SELECT $1, t.idx - 1, t.s, t.e, t.txt, NULLIF(t.w, '')::jsonb, t.idx - 1
+           FROM unnest($2::int[], $3::int[], $4::text[], $5::text[]) WITH ORDINALITY AS t(s, e, txt, w, idx)`,
+        [
+          audioId,
+          result.segments.map((s) => s.startMs),
+          result.segments.map((s) => s.endMs),
+          result.segments.map((s) => s.text),
+          result.segments.map((s) => (s.words ? JSON.stringify(s.words.map((w) => [w.startMs, w.endMs, w.text])) : '')),
+        ],
       );
     }
+    // A new transcript has no speakers yet; queue the speaker pass if it is set up.
     await client.query(
       `UPDATE note_audio SET status = 'done', error = NULL, transcript_text = $2, language = $3, model = $4,
-              duration_ms = COALESCE(duration_ms, $5)
+              duration_ms = COALESCE(duration_ms, $5), speakers = '{}'::jsonb,
+              diarization_status = $6, diarization_error = NULL, diarization_attempts = 0, diarization_next_at = NOW()
         WHERE id = $1`,
-      [audioId, result.text, result.language, model, result.durationMs],
+      [audioId, result.text, result.language, model, result.durationMs, diarize ? 'pending' : 'none'],
     );
     await client.query('COMMIT');
   } catch (err) {
@@ -296,11 +303,13 @@ async function processRow(row: AudioRow): Promise<void> {
       await query(`UPDATE note_audio SET status = 'failed', error = 'The audio file is missing on the server' WHERE id = $1`, [row.id]);
       return;
     }
-    const result = await transcribeFile(config, file, row.filename, row.mime);
+    // Speaker identification, if set up, needs word timings to split a segment where the speaker changes.
+    const diarization = await getDiarizationConfig(row.user_id);
+    const result = await transcribeFile({ ...config, wordTimestamps: diarization !== null }, file, row.filename, row.mime);
     if (result.collapsedRepeats > 0) {
       console.warn(`Transcript of "${row.filename}" looped: folded ${result.collapsedRepeats} repeated segments. Check the transcription service's VAD / batched-mode settings.`);
     }
-    await saveTranscript(row.id, config.model, result);
+    await saveTranscript(row.id, config.model, result, diarization !== null);
   } catch (err) {
     const attempts = row.attempts + 1;
     const message = (err instanceof Error ? err.message : 'Transcription failed').slice(0, 500);
@@ -347,6 +356,148 @@ export async function releaseHeldAudio(userId: string, audioIds: string[]): Prom
   return r.rowCount ?? 0;
 }
 
+// ---------------------------------------------------------------------------
+// Speaker identification: runs after a transcript is saved, when the user has set up the service.
+// ---------------------------------------------------------------------------
+
+const DIARIZATION_MAX_ATTEMPTS = 5;
+
+interface DiarizeRow {
+  id: string;
+  user_id: string;
+  filename: string;
+  mime: string;
+  diarization_attempts: number;
+}
+
+async function claimNextDiarization(): Promise<DiarizeRow | null> {
+  const r = await query(
+    `UPDATE note_audio SET diarization_status = 'processing'
+      WHERE id = (SELECT id FROM note_audio
+                   WHERE status = 'done' AND diarization_status = 'pending' AND diarization_next_at <= NOW()
+                     -- Only for users who have set up the service; their transcripts wait until they do.
+                     AND EXISTS (SELECT 1 FROM plugin_settings ps
+                                  WHERE ps.user_id = note_audio.user_id AND ps.plugin_id = 'notes'
+                                    AND ps.key = 'diarization_api_url'
+                                    AND jsonb_typeof(ps.value) = 'string' AND btrim(ps.value #>> '{}') <> '')
+                   ORDER BY diarization_next_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+      RETURNING id, user_id, filename, mime, diarization_attempts`,
+  );
+  return (r.rows[0] as DiarizeRow | undefined) ?? null;
+}
+
+interface StoredSegment {
+  idx: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  edited: boolean;
+  words: [number, number, string][] | null;
+  src: number | null;
+}
+
+function toSpeakerSegment(r: StoredSegment): SpeakerSegment {
+  return {
+    startMs: r.start_ms,
+    endMs: r.end_ms,
+    text: r.text,
+    edited: r.edited,
+    ...(r.words ? { words: r.words.map(([startMs, endMs, text]) => ({ startMs, endMs, text })) } : {}),
+    ...(r.src !== null ? { src: r.src } : {}),
+  };
+}
+
+async function saveSpeakerLabels(audioId: string, segments: SpeakerSegment[], speakers: string[]): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM note_audio_segments WHERE audio_id = $1', [audioId]);
+    if (segments.length > 0) {
+      await client.query(
+        `INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text, edited, speaker, words, src)
+         SELECT $1, t.idx - 1, t.s, t.e, t.txt, t.ed, t.sp, NULLIF(t.w, '')::jsonb, t.src
+           FROM unnest($2::int[], $3::int[], $4::text[], $5::boolean[], $6::text[], $7::text[], $8::int[])
+                WITH ORDINALITY AS t(s, e, txt, ed, sp, w, src, idx)`,
+        [
+          audioId,
+          segments.map((s) => s.startMs),
+          segments.map((s) => s.endMs),
+          segments.map((s) => s.text),
+          segments.map((s) => s.edited === true),
+          segments.map((s) => s.speaker ?? null),
+          segments.map((s) => (s.words ? JSON.stringify(s.words.map((w) => [w.startMs, w.endMs, w.text])) : '')),
+          segments.map((s) => s.src ?? null),
+        ],
+      );
+    }
+    // Names the user gave belong to the previous labelling; a fresh one starts unnamed.
+    await client.query(
+      `UPDATE note_audio SET speakers = '{}'::jsonb, diarization_status = 'done', diarization_attempts = 0,
+              diarization_error = $2 WHERE id = $1`,
+      [audioId, speakers.length === 0 ? 'No speech was detected, so no speakers were found.' : null],
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function processDiarization(row: DiarizeRow): Promise<void> {
+  const config = await getDiarizationConfig(row.user_id);
+  if (!config) {
+    await query(`UPDATE note_audio SET diarization_status = 'none' WHERE id = $1`, [row.id]);
+    return;
+  }
+  try {
+    const ext = audioExtForMime(row.mime);
+    const file = ext ? noteAudioPath(row.user_id, row.id, ext) : null;
+    if (!file || !fs.existsSync(file)) throw new DiarizationError('The audio file is missing on the server', false);
+    const turns = await diarizeAudio(config, file, row.filename, row.mime);
+    const stored = (await query(
+      'SELECT idx, start_ms, end_ms, text, edited, words, src FROM note_audio_segments WHERE audio_id = $1 ORDER BY idx',
+      [row.id],
+    )).rows as StoredSegment[];
+    // Text the user corrected must not be re-cut: label whole segments only. Otherwise start again from the
+    // transcriber's own segments (undoing any earlier split) and cut at each change of speaker.
+    const edited = stored.some((s) => s.edited);
+    const base = stored.map(toSpeakerSegment);
+    const labeled = labelSpeakers(edited ? base : restoreOriginalSegments(base), turns, { split: !edited });
+    await saveSpeakerLabels(row.id, labeled.segments, labeled.speakers);
+  } catch (err) {
+    const retryable = !(err instanceof DiarizationError) || err.retryable;
+    const attempts = row.diarization_attempts + 1;
+    const message = (err instanceof Error ? err.message : 'Speaker identification failed').slice(0, 500);
+    if (retryable && attempts < DIARIZATION_MAX_ATTEMPTS) {
+      await query(
+        `UPDATE note_audio SET diarization_status = 'pending', diarization_attempts = $2, diarization_error = $3,
+                diarization_next_at = NOW() + ($4 || ' milliseconds')::interval WHERE id = $1`,
+        [row.id, attempts, message, String(backoffMs(attempts))],
+      );
+    } else {
+      await query(`UPDATE note_audio SET diarization_status = 'failed', diarization_attempts = $2, diarization_error = $3 WHERE id = $1`, [row.id, attempts, message]);
+    }
+  }
+}
+
+/** Queue (or re-queue) speaker identification for a finished transcript. False when it can't run. */
+export async function requestDiarization(audioId: string, userId: string): Promise<'queued' | 'not_configured' | 'not_found'> {
+  // Unknown, someone else's, or not yet transcribed audio is "not found" whatever the settings are.
+  const exists = await query(`SELECT 1 FROM note_audio WHERE id = $1 AND user_id = $2 AND status = 'done'`, [audioId, userId]);
+  if ((exists.rowCount ?? 0) === 0) return 'not_found';
+  if (!(await getDiarizationConfig(userId))) return 'not_configured';
+  const r = await query(
+    `UPDATE note_audio SET diarization_status = 'pending', diarization_attempts = 0, diarization_error = NULL, diarization_next_at = NOW()
+      WHERE id = $1 AND user_id = $2 AND status = 'done' AND diarization_status <> 'processing'`,
+    [audioId, userId],
+  );
+  if ((r.rowCount ?? 0) === 0) return 'not_found';
+  kickTranscription();
+  return 'queued';
+}
+
 let draining = false;
 
 /** Work through every due `pending` row, one at a time. Returns how many were handled. */
@@ -356,9 +507,17 @@ export async function drainTranscriptionQueue(): Promise<number> {
   let handled = 0;
   try {
     await releaseIdleHeldAudio();
-    for (let row = await claimNext(); row; row = await claimNext()) {
-      await processRow(row);
-      handled += 1;
+    for (;;) {
+      const row = await claimNext();
+      if (row) {
+        await processRow(row);
+        handled += 1;
+        continue;
+      }
+      // Nothing left to transcribe: identify speakers on transcripts that are waiting for it.
+      const toLabel = await claimNextDiarization();
+      if (!toLabel) break;
+      await processDiarization(toLabel);
     }
   } finally {
     draining = false;
@@ -398,6 +557,7 @@ export async function startTranscriptionWorker(): Promise<void> {
   if (started) return;
   started = true;
   await query(`UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() WHERE status = 'processing'`);
+  await query(`UPDATE note_audio SET diarization_status = 'pending', diarization_next_at = NOW() WHERE diarization_status = 'processing'`);
   setInterval(kickTranscription, POLL_INTERVAL_MS).unref();
   kickTranscription();
   const sweep = () => cleanupAbandonedUploads().catch((err) => console.error('Upload cleanup failed:', err));

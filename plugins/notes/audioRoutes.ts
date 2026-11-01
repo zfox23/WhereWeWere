@@ -11,6 +11,9 @@
  *   PUT    /audio/:id/attach              attach to a note { note_id, position? }
  *   DELETE /audio/:id                     remove the row, its segments and the file
  *   POST   /audio/:id/retranscribe        queue a fresh transcription (also retries a failed one)
+ *   POST   /audio/:id/diarize             (re-)identify speakers on a finished transcript
+ *   PUT    /audio/:id/speakers            rename speakers { names: { S1: "Dad" } }
+ *   POST   /diarization/test              check the diarization service { api_url }
  *   POST   /transcription/test            check the transcription endpoint { api_url?, model?, api_key? }
  *   GET    /checkins/:id/audio            a note's audio files (with transcripts' status)
  *
@@ -35,14 +38,15 @@ import {
   noteAudioPath,
   storeNoteAudio,
 } from './services/audioFiles';
-import { getTranscriptionConfig, kickTranscription, requeueAudio, testTranscriptionConfig } from './services/transcription';
+import { getTranscriptionConfig, kickTranscription, requestDiarization, requeueAudio, testTranscriptionConfig } from './services/transcription';
+import { testDiarizationConfig } from './services/diarization';
 
 /** Largest single chunk the server accepts; clients send ~8 MB. */
 export const MAX_CHUNK_BYTES = 32 * 1024 * 1024;
 const SHA256_RE = /^[0-9a-f]{64}$/i;
 
 const AUDIO_COLUMNS = `id, note_id, filename, mime, bytes, sha256, duration_ms, position, status,
-  error, language, model, created_at`;
+  error, language, model, created_at, speakers, diarization_status, diarization_error`;
 
 function partialPath(userId: string, id: string): string {
   return path.join(noteAudioDir(userId), '.partial', `${id}.part`);
@@ -367,6 +371,57 @@ export function registerAudioRoutes(router: Router): void {
     }
   });
 
+  router.post('/audio/:id/diarize', async (req: Request, res: Response) => {
+    const userId = currentUserId();
+    try {
+      const id = String(req.params.id);
+      if (!isUuid(id)) return res.status(404).json({ error: 'Audio not found' });
+      const outcome = await requestDiarization(id, userId);
+      if (outcome === 'not_configured') {
+        return res.status(409).json({ error: 'Set up speaker identification in Settings > Integrations first.' });
+      }
+      if (outcome === 'not_found') return res.status(404).json({ error: 'Audio not found, not transcribed yet, or already being processed' });
+      res.json({ id, diarization_status: 'pending' });
+    } catch (err) {
+      fail(res, err, 'Failed to queue speaker identification');
+    }
+  });
+
+  router.put('/audio/:id/speakers', async (req: Request, res: Response) => {
+    const userId = currentUserId();
+    try {
+      const id = String(req.params.id);
+      if (!isUuid(id)) return res.status(404).json({ error: 'Audio not found' });
+      const names = req.body?.names;
+      if (!names || typeof names !== 'object' || Array.isArray(names)) return res.status(400).json({ error: 'names must be an object like { "S1": "Dad" }' });
+      const current = await query('SELECT speakers FROM note_audio WHERE id = $1 AND user_id = $2', [id, userId]);
+      if (current.rowCount === 0) return res.status(404).json({ error: 'Audio not found' });
+      const merged: Record<string, string> = { ...(current.rows[0].speakers as Record<string, string>) };
+      for (const [key, value] of Object.entries(names as Record<string, unknown>)) {
+        if (!/^S\d{1,2}$/.test(key) || typeof value !== 'string') return res.status(400).json({ error: 'Speaker ids look like S1 and names must be text' });
+        const name = value.trim();
+        if (name.length > 60) return res.status(400).json({ error: 'A speaker name can be at most 60 characters' });
+        if (name) merged[key] = name;
+        else delete merged[key]; // blank goes back to "Speaker N"
+      }
+      if (Object.keys(merged).length > 20) return res.status(400).json({ error: 'Too many speakers' });
+      await query('UPDATE note_audio SET speakers = $3::jsonb WHERE id = $1 AND user_id = $2', [id, userId, JSON.stringify(merged)]);
+      res.json({ speakers: merged });
+    } catch (err) {
+      fail(res, err, 'Failed to rename the speaker');
+    }
+  });
+
+  router.post('/diarization/test', async (req: Request, res: Response) => {
+    try {
+      const url = typeof req.body?.api_url === 'string' ? req.body.api_url.trim() : '';
+      if (!url) return res.status(400).json({ ok: false, message: 'Enter the speaker identification URL first.' });
+      res.json(await testDiarizationConfig(url));
+    } catch (err) {
+      fail(res, err, 'Failed to test the diarization service');
+    }
+  });
+
   router.post('/transcription/test', async (req: Request, res: Response) => {
     const userId = currentUserId();
     try {
@@ -392,7 +447,7 @@ export function registerAudioRoutes(router: Router): void {
       const r = await query(
         `SELECT ${AUDIO_COLUMNS.split(',').map((c) => `a.${c.trim()}`).join(', ')}
                 ${withSegments ? `, COALESCE((SELECT json_agg(json_build_object('idx', s.idx, 'start_ms', s.start_ms,
-                                                       'end_ms', s.end_ms, 'text', s.text, 'edited', s.edited) ORDER BY s.idx)
+                                                       'end_ms', s.end_ms, 'text', s.text, 'edited', s.edited, 'speaker', s.speaker) ORDER BY s.idx)
                                     FROM note_audio_segments s WHERE s.audio_id = a.id), '[]'::json) AS segments` : ''}
            FROM note_audio a
           WHERE a.note_id = $1 AND a.user_id = $2 AND a.status <> 'uploading' ORDER BY a.position, a.created_at`,
