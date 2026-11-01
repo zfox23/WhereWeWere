@@ -320,6 +320,17 @@ describe('notes audio: transcription queue', () => {
     expect(await state(id)).toMatchObject({ status: 'done', attempts: 0, transcript_text: 'back up' });
   });
 
+  it('picks up audio left marked "processing" (a crash or an escaped error) on the next pass, not only after a restart', async () => {
+    await configure();
+    const id = await uploadedAudio();
+    await query(`UPDATE note_audio SET status = 'processing' WHERE id = $1`, [id]);
+    // Retry is refused while it looks busy...
+    expect((await request(app).post(`/api/v1/notes/audio/${id}/retranscribe`)).status).toBe(404);
+    // ...but the worker, with nothing in flight, knows it isn't and takes it back.
+    expect(await drainTranscriptionQueue()).toBe(1);
+    expect(await state(id)).toMatchObject({ status: 'done', attempts: 0 });
+  });
+
   it('retries with backoff on failure, gives up after MAX_ATTEMPTS, and retranscribe resets', async () => {
     await configure();
     respond = (res) => { res.statusCode = 500; res.end('boom'); };
@@ -1096,6 +1107,16 @@ describe('notes audio: speaker identification', () => {
       .send({ segments: [{ idx: 0, start_ms: 0, prev_text: loaded.text, text: 'How are you? Fine, thanks.' }] });
     expect(res.status).toBe(409);
     expect(view(await segments(id)).map(([, text]) => text)).toEqual(['How are you?', 'Good, thanks.']);
+  });
+
+  it('takes back a speaker pass left marked "processing" on the next pass', async () => {
+    await configureTranscription();
+    await configureDiarization();
+    const id = await transcribedAudio();
+    await query(`UPDATE note_audio SET diarization_status = 'processing' WHERE id = $1`, [id]);
+    await drainTranscriptionQueue();
+    expect(diarizeRequests).toHaveLength(2);
+    expect(await audioRow(id)).toMatchObject({ diarization_status: 'done' });
   });
 
   it('asks the transcriber for word timings only when speaker identification is set up', async () => {

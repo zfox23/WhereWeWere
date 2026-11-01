@@ -330,17 +330,17 @@ async function saveTranscript(audioId: string, model: string, result: Transcript
 }
 
 async function processRow(row: AudioRow): Promise<void> {
-  const config = await getTranscriptionConfig(row.user_id);
-  if (!config) {
-    // Not set up (yet): keep the audio queued without burning attempts.
-    await query(
-      `UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() + ($2 || ' milliseconds')::interval WHERE id = $1`,
-      [row.id, String(UNCONFIGURED_RETRY_MS)],
-    );
-    return;
-  }
   let transcribed = false;
   try {
+    const config = await getTranscriptionConfig(row.user_id);
+    if (!config) {
+      // Not set up (yet): keep the audio queued without burning attempts.
+      await query(
+        `UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() + ($2 || ' milliseconds')::interval WHERE id = $1`,
+        [row.id, String(UNCONFIGURED_RETRY_MS)],
+      );
+      return;
+    }
     const ext = audioExtForMime(row.mime);
     const file = ext ? noteAudioPath(row.user_id, row.id, ext) : null;
     if (!file || !fs.existsSync(file)) {
@@ -540,12 +540,12 @@ async function applySpeakerTurns(audioId: string, turns: Turn[]): Promise<void> 
 }
 
 async function processDiarization(row: DiarizeRow): Promise<void> {
-  const config = await getDiarizationConfig(row.user_id);
-  if (!config) {
-    await query(`UPDATE note_audio SET diarization_status = 'none' WHERE id = $1`, [row.id]);
-    return;
-  }
   try {
+    const config = await getDiarizationConfig(row.user_id);
+    if (!config) {
+      await query(`UPDATE note_audio SET diarization_status = 'none' WHERE id = $1`, [row.id]);
+      return;
+    }
     const ext = audioExtForMime(row.mime);
     const file = ext ? noteAudioPath(row.user_id, row.id, ext) : null;
     if (!file || !fs.existsSync(file)) throw new DiarizationError('The audio file is missing on the server', false);
@@ -585,24 +585,38 @@ export async function requestDiarization(audioId: string, userId: string): Promi
 
 let draining = false;
 
+/**
+ * Put rows marked `processing` back in the queue. Only call this while nothing is being processed
+ * (at startup, or at the start of a drain, when this process has no request in flight): any such row
+ * was then left behind by a restart or by an error that escaped its handler, and would otherwise
+ * show "Transcribing…" forever, with no Retry offered.
+ */
+async function requeueAbandoned(): Promise<void> {
+  await query(`UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() WHERE status = 'processing'`);
+  await query(`UPDATE note_audio SET diarization_status = 'pending', diarization_next_at = NOW() WHERE diarization_status = 'processing'`);
+}
+
 /** Work through every due `pending` row, one at a time. Returns how many were handled. */
 export async function drainTranscriptionQueue(): Promise<number> {
   if (draining) return 0;
   draining = true;
   let handled = 0;
   try {
+    await requeueAbandoned();
     await releaseIdleHeldAudio();
     for (;;) {
       const row = await claimNext();
       if (row) {
-        await processRow(row);
+        // One file's trouble (say, the database blipped while recording its failure) must not stop the
+        // rest; the row itself goes back in the queue at the start of the next drain.
+        await processRow(row).catch((err) => console.error(`Transcribing audio ${row.id} failed unexpectedly:`, err));
         handled += 1;
         continue;
       }
       // Nothing left to transcribe: identify speakers on transcripts that are waiting for it.
       const toLabel = await claimNextDiarization();
       if (!toLabel) break;
-      await processDiarization(toLabel);
+      await processDiarization(toLabel).catch((err) => console.error(`Identifying speakers in audio ${toLabel.id} failed unexpectedly:`, err));
     }
   } finally {
     draining = false;
@@ -637,12 +651,10 @@ export function kickTranscription(): void {
   drainTranscriptionQueue().catch((err) => console.error('Transcription queue failed:', err));
 }
 
-/** Server start: re-queue rows a restart interrupted, then poll for due work. */
+/** Server start: poll for due work (each drain first re-queues rows a restart interrupted). */
 export async function startTranscriptionWorker(): Promise<void> {
   if (started) return;
   started = true;
-  await query(`UPDATE note_audio SET status = 'pending', next_attempt_at = NOW() WHERE status = 'processing'`);
-  await query(`UPDATE note_audio SET diarization_status = 'pending', diarization_next_at = NOW() WHERE diarization_status = 'processing'`);
   setInterval(kickTranscription, POLL_INTERVAL_MS).unref();
   kickTranscription();
   const sweep = () => cleanupAbandonedUploads().catch((err) => console.error('Upload cleanup failed:', err));
