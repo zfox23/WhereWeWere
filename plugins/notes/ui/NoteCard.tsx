@@ -4,7 +4,7 @@
  * plugin's timeline branch); the body and companions are envelope columns.
  */
 
-import { NotebookPen, Users } from 'lucide-react';
+import { Mic, NotebookPen, Users } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import type { CheckinCardProps } from 'wwp-shared';
 import { CardShell } from '../../../client/src/components/checkin-card/CardShell';
@@ -20,6 +20,7 @@ interface NoteData {
   tags?: NoteTag[];
   word_count?: number;
   truncated?: boolean;
+  audio_count?: number;
 }
 
 export function NoteCard({ item, compact = false }: CheckinCardProps) {
@@ -31,6 +32,7 @@ export function NoteCard({ item, compact = false }: CheckinCardProps) {
   const companions = (item as { companions?: string[] | null }).companions ?? [];
   const body = (item as { notes?: string | null }).notes ?? '';
   const heading = data.title || 'Note';
+  const audioCount = Number(data.audio_count ?? 0);
 
   if (compact) {
     return (
@@ -58,6 +60,15 @@ export function NoteCard({ item, compact = false }: CheckinCardProps) {
             {heading}
           </Link>
           {tags.map((t) => <TagChip key={t.id} tag={t} to={tagTimelinePath(t.name)} />)}
+          {audioCount > 0 && (
+            <Link
+              to={detailTo}
+              title="Play the audio on the note"
+              className="inline-flex items-center gap-1 rounded-full bg-rose-50 dark:bg-rose-900/20 px-2 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-300"
+            >
+              <Mic size={11} /> {audioCount === 1 ? 'Audio' : `${audioCount} audio`}
+            </Link>
+          )}
         </div>
 
         {companions.length > 0 && (

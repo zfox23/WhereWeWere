@@ -28,6 +28,19 @@ export interface NoteAudio {
   created_at: string;
 }
 
+export interface TranscriptSegment {
+  idx: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  /** Corrected by the user (a re-transcription replaces these). */
+  edited: boolean;
+}
+
+export interface NoteAudioWithTranscript extends NoteAudio {
+  segments: TranscriptSegment[];
+}
+
 export interface NoteTagSummary extends NoteTag {
   note_count: number;
   word_count: number;
@@ -241,6 +254,11 @@ export const notes = {
     request<{ analyzed: boolean; related: RelatedNote[] }>(`${BASE}/checkins/${id}/related?limit=${limit}`),
 
   audio: (noteId: string) => request<NoteAudio[]>(`${BASE}/checkins/${noteId}/audio`),
+  audioWithTranscripts: (noteId: string) => request<NoteAudioWithTranscript[]>(`${BASE}/checkins/${noteId}/audio?include=segments`),
+  audioUrl: (audioId: string) => `/api/v1${BASE}/audio/${audioId}`,
+  saveTranscript: (audioId: string, segments: { idx: number; text: string }[]) =>
+    request<{ segments: TranscriptSegment[] }>(`${BASE}/audio/${audioId}/transcript`, { method: 'PUT', body: JSON.stringify({ segments }) }),
+  retranscribe: (audioId: string) => request<{ id: string }>(`${BASE}/audio/${audioId}/retranscribe`, { method: 'POST' }),
   removeAudio: (audioId: string) => request<{ id: string }>(`${BASE}/audio/${audioId}`, { method: 'DELETE' }),
   testTranscription: (data: { api_url: string; model: string; api_key: string }) =>
     request<{ ok: boolean; message: string }>(`${BASE}/transcription/test`, { method: 'POST', body: JSON.stringify(data) }),

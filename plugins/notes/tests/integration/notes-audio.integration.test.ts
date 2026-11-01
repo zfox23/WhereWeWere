@@ -313,3 +313,84 @@ describe('notes audio: audio-only notes, transcript search, content hash', () =>
     expect((await query(`SELECT ${NOTE_TEXT_SQL} AS t FROM note_checkins n WHERE n.id = $1`, [made.body.id])).rows[0].t).toContain('something to analyse');
   });
 });
+
+describe('notes audio: transcript segments, editing, timeline count', () => {
+  beforeEach(resetIntegrationDatabase);
+
+  async function transcribedNote() {
+    const audio = (await query(
+      `INSERT INTO note_audio (user_id, filename, mime, bytes, sha256, status, transcript_text, language)
+       VALUES ($1, 'v.webm', 'audio/webm', 10, $2, 'done', 'hello world and farewell', 'en') RETURNING id`,
+      [DEFAULT_USER_ID, 'b'.repeat(64)],
+    )).rows[0].id as string;
+    await query(
+      `INSERT INTO note_audio_segments (audio_id, idx, start_ms, end_ms, text) VALUES
+         ($1, 0, 0, 1500, 'hello world'), ($1, 1, 1500, 3000, 'and farewell')`,
+      [audio],
+    );
+    const note = await request(app).post('/api/v1/notes/checkins')
+      .send({ title: 'Voice', body: '', checked_in_at: '2024-03-03T10:00:00Z', checkin_timezone: 'UTC', audio_ids: [audio] });
+    return { audio, noteId: note.body.id as string };
+  }
+  const search = async (q: string) => {
+    const res = await request(app).get('/api/v1/timeline').query({ q });
+    return (res.body.checkins ?? res.body).map((c: { id: string }) => c.id);
+  };
+
+  it('lists a note’s audio with its timestamped segments on request', async () => {
+    const { noteId, audio } = await transcribedNote();
+    const plain = await request(app).get(`/api/v1/notes/checkins/${noteId}/audio`);
+    expect(plain.body[0].segments).toBeUndefined();
+    const full = await request(app).get(`/api/v1/notes/checkins/${noteId}/audio?include=segments`);
+    expect(full.body[0]).toMatchObject({ id: audio, status: 'done', language: 'en' });
+    expect(full.body[0].segments).toEqual([
+      { idx: 0, start_ms: 0, end_ms: 1500, text: 'hello world', edited: false },
+      { idx: 1, start_ms: 1500, end_ms: 3000, text: 'and farewell', edited: false },
+    ]);
+  });
+
+  it('keeps an edited transcript searchable, flags edits, and refreshes the analysis hash', async () => {
+    const { noteId, audio } = await transcribedNote();
+    const before = (await query('SELECT content_hash FROM note_checkins WHERE id = $1', [noteId])).rows[0].content_hash;
+    expect(await search('farewell')).toEqual([noteId]);
+
+    const saved = await request(app).put(`/api/v1/notes/audio/${audio}/transcript`)
+      .send({ segments: [{ idx: 0, text: 'hello world' }, { idx: 1, text: ' and goodbye ' }] });
+    expect(saved.status).toBe(200);
+    expect(saved.body.segments.map((s: { text: string; edited: boolean }) => [s.text, s.edited]))
+      .toEqual([['hello world', false], ['and goodbye', true]]); // only the changed one is flagged
+    expect(await search('goodbye')).toEqual([noteId]);
+    expect(await search('farewell')).toEqual([]);
+    expect((await query('SELECT transcript_text FROM note_audio WHERE id = $1', [audio])).rows[0].transcript_text).toBe('hello world and goodbye');
+    expect((await query('SELECT content_hash FROM note_checkins WHERE id = $1', [noteId])).rows[0].content_hash).not.toBe(before);
+  });
+
+  it('rejects malformed edits and edits to someone else’s audio', async () => {
+    const { audio } = await transcribedNote();
+    const put = (body: unknown) => request(app).put(`/api/v1/notes/audio/${audio}/transcript`).send(body as object);
+    expect((await put({})).status).toBe(400);
+    expect((await put({ segments: [] })).status).toBe(400);
+    expect((await put({ segments: [{ idx: 'a', text: 'x' }] })).status).toBe(400);
+    expect((await put({ segments: [{ idx: 0, text: 5 }] })).status).toBe(400);
+    const other = await createTestUser('editor');
+    const res = await request(app).put(`/api/v1/notes/audio/${audio}/transcript`).set('Cookie', other.cookie)
+      .send({ segments: [{ idx: 0, text: 'hijacked' }] });
+    expect(res.status).toBe(404);
+    expect((await query('SELECT text FROM note_audio_segments WHERE audio_id = $1 AND idx = 0', [audio])).rows[0].text).toBe('hello world');
+  });
+
+  it('refuses to edit a transcript that does not exist yet', async () => {
+    const pending = (await query(
+      `INSERT INTO note_audio (user_id, filename, mime, bytes, sha256, status) VALUES ($1, 'p.webm', 'audio/webm', 1, $2, 'pending') RETURNING id`,
+      [DEFAULT_USER_ID, 'c'.repeat(64)],
+    )).rows[0].id;
+    expect((await request(app).put(`/api/v1/notes/audio/${pending}/transcript`).send({ segments: [{ idx: 0, text: 'x' }] })).status).toBe(404);
+  });
+
+  it('puts the number of audio files on the note’s timeline entry', async () => {
+    const { noteId } = await transcribedNote();
+    const res = await request(app).get('/api/v1/timeline');
+    const entry = (res.body.checkins ?? res.body).find((c: { id: string }) => c.id === noteId);
+    expect(entry.data.audio_count).toBe(1);
+  });
+});

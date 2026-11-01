@@ -12,6 +12,7 @@ import { CompanionName } from '../../../client/src/components/CompanionName';
 import { formatDate, formatTime, localDateKey, normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 import { notes, type Note } from './api';
+import { NoteAudioList } from './audio/AudioPlayer';
 import { RelatedNotes } from './RelatedNotes';
 import { TagChip, tagTimelinePath } from './TagChip';
 
@@ -101,6 +102,8 @@ export default function NoteDetail() {
             {row.companions.map((name) => <CompanionName key={name} name={name} />)}
           </p>
         )}
+
+        <NoteAudioList noteId={row.id} />
 
         {row.body && <MarkdownNote note={row.body} />}
 

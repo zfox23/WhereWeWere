@@ -841,7 +841,8 @@ export const server: CheckinTypeServerPlugin = {
           'title', n.title,
           'tags', ${tagsJsonSql('n.id')},
           'word_count', n.word_count,
-          'truncated', length(n.body) > ${TIMELINE_BODY_CHARS}
+          'truncated', length(n.body) > ${TIMELINE_BODY_CHARS},
+          'audio_count', (SELECT COUNT(*) FROM note_audio a WHERE a.note_id = n.id AND a.status <> 'uploading')
         )`,
         timezone: 'n.checkin_timezone',
       })}

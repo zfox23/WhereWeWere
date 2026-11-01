@@ -23,7 +23,7 @@ import path from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { Request, Response, Router } from 'express';
-import { query } from '../../server/src/db';
+import { pool, query } from '../../server/src/db';
 import { isUuid } from '../../server/src/services/batching';
 import { currentUserId } from '../../server/src/auth/context';
 import {
@@ -281,6 +281,59 @@ export function registerAudioRoutes(router: Router): void {
     }
   });
 
+  router.put('/audio/:id/transcript', async (req: Request, res: Response) => {
+    const userId = currentUserId();
+    try {
+      const id = String(req.params.id);
+      if (!isUuid(id)) return res.status(404).json({ error: 'Audio not found' });
+      const incoming = req.body?.segments;
+      if (!Array.isArray(incoming) || incoming.length === 0 || incoming.length > 20_000) {
+        return res.status(400).json({ error: 'segments must be a non-empty array' });
+      }
+      const idx: number[] = [];
+      const text: string[] = [];
+      for (const s of incoming) {
+        if (!Number.isInteger(s?.idx) || s.idx < 0 || typeof s?.text !== 'string' || s.text.length > 20_000) {
+          return res.status(400).json({ error: 'Each segment needs an idx and text' });
+        }
+        idx.push(s.idx);
+        text.push(s.text.trim());
+      }
+      const owned = await query(`SELECT 1 FROM note_audio WHERE id = $1 AND user_id = $2 AND status = 'done'`, [id, userId]);
+      if (owned.rowCount === 0) return res.status(404).json({ error: 'Audio not found or not transcribed yet' });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `UPDATE note_audio_segments s SET text = t.txt, edited = TRUE
+             FROM unnest($2::int[], $3::text[]) AS t(idx, txt)
+            WHERE s.audio_id = $1 AND s.idx = t.idx AND s.text IS DISTINCT FROM t.txt`,
+          [id, idx, text],
+        );
+        // Search and analysis read the joined text, so keep it in step with the segments.
+        await client.query(
+          `UPDATE note_audio SET transcript_text = COALESCE(
+             (SELECT string_agg(text, ' ' ORDER BY idx) FROM note_audio_segments WHERE audio_id = $1 AND text <> ''), '')
+           WHERE id = $1`,
+          [id],
+        );
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+      const segments = await query(
+        `SELECT idx, start_ms, end_ms, text, edited FROM note_audio_segments WHERE audio_id = $1 ORDER BY idx`,
+        [id],
+      );
+      res.json({ segments: segments.rows });
+    } catch (err) {
+      fail(res, err, 'Failed to save the transcript');
+    }
+  });
+
   router.post('/audio/:id/retranscribe', async (req: Request, res: Response) => {
     const userId = currentUserId();
     try {
@@ -314,9 +367,14 @@ export function registerAudioRoutes(router: Router): void {
     try {
       const id = String(req.params.id);
       if (!isUuid(id)) return res.status(404).json({ error: 'Note not found' });
+      const withSegments = req.query.include === 'segments';
       const r = await query(
-        `SELECT ${AUDIO_COLUMNS} FROM note_audio
-         WHERE note_id = $1 AND user_id = $2 AND status <> 'uploading' ORDER BY position, created_at`,
+        `SELECT ${AUDIO_COLUMNS.split(',').map((c) => `a.${c.trim()}`).join(', ')}
+                ${withSegments ? `, COALESCE((SELECT json_agg(json_build_object('idx', s.idx, 'start_ms', s.start_ms,
+                                                       'end_ms', s.end_ms, 'text', s.text, 'edited', s.edited) ORDER BY s.idx)
+                                    FROM note_audio_segments s WHERE s.audio_id = a.id), '[]'::json) AS segments` : ''}
+           FROM note_audio a
+          WHERE a.note_id = $1 AND a.user_id = $2 AND a.status <> 'uploading' ORDER BY a.position, a.created_at`,
         [id, userId],
       );
       res.json(r.rows);
