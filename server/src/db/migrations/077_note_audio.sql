@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS note_audio (
   sha256 TEXT NOT NULL,
   duration_ms INT NULL,
   position INT NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'processing', 'done', 'failed')),
+  status TEXT NOT NULL DEFAULT 'uploading'
+    CHECK (status IN ('uploading', 'pending', 'processing', 'done', 'failed')),
   error TEXT NULL,
   attempts INT NOT NULL DEFAULT 0,
   next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

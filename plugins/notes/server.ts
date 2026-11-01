@@ -51,6 +51,7 @@ import {
   setCompanions,
 } from '../../server/src/services/companions';
 import { HEX_COLOR_RE, MAX_TAG_LENGTH } from './manifest';
+import { registerAudioRoutes } from './audioRoutes';
 import {
   InputError,
   NOTE_SELECT,
@@ -85,6 +86,7 @@ const TIMELINE_BODY_CHARS = 6000;
 
 const router = Router();
 const importRouter = Router();
+registerAudioRoutes(router);
 
 function asRecordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
