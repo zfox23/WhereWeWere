@@ -17,7 +17,7 @@ import {
 } from './audioSettings';
 import { BlackoutScreen } from './BlackoutScreen';
 import { AUDIO_FILE_ACCEPT, importAudioFile } from './importFile';
-import { NoteRecorder, browserDeps, type Channels, type RecorderState } from './recorder';
+import { NoteRecorder, browserDeps, type ChannelChoice, type RecorderState } from './recorder';
 import {
   assembleBlob, deleteRecording, isOrphaned, listRecordings, onRecordingsChanged, recoverRecording, type RecordingMeta,
 } from './recordingStore';
@@ -123,7 +123,7 @@ export interface AudioSectionProps {
 
 export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onServerCount, onRecordingChange }: AudioSectionProps) {
   const inputs = useAudioInputs();
-  const [channels, setChannels] = useState<Channels>(() => loadPreferredChannels());
+  const [channels, setChannels] = useState<ChannelChoice>(() => loadPreferredChannels());
   const [blank, setBlank] = useState(false);
   // Advanced capture settings are saved per microphone: reload them whenever the selection changes.
   const selectedDevice = inputs.devices.find((d) => d.deviceId === inputs.selectedId);
@@ -232,6 +232,13 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
         onLevel: setLevel,
         onWarning: setWarning,
         onSettings: setApplied,
+        // The microphone was silent with the chosen settings and this worked: keep it for this microphone,
+        // so the next recording doesn't have to find it out again (Reset to defaults undoes it).
+        onRecovered: ({ attempt }) => {
+          setProcessing(attempt.processing);
+          saveProcessing(mic, attempt.processing);
+          if (attempt.hintsDropped) chooseChannels('auto');
+        },
         onInterrupted: (reason, meta) => {
           if (meta) add(meta.id);
           setError(`${reason} What was recorded so far is saved. Press Record to continue in a new recording.`);
@@ -301,7 +308,7 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
   const inForm = recordings.filter((r) => localIds.includes(r.id));
   const leftovers = recordings.filter((r) => !localIds.includes(r.id) && !isOrphaned(r) && !(r.state === 'uploaded' && r.noteId));
   const live = state === 'recording' || state === 'paused';
-  const chooseChannels = (c: Channels) => {
+  const chooseChannels = (c: ChannelChoice) => {
     setChannels(c);
     savePreferredChannels(c);
   };
@@ -330,7 +337,7 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
           <div>
             <span id="audio-channels-label" className={labelClass}>Channels</span>
             <div role="radiogroup" aria-labelledby="audio-channels-label" className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-0.5 text-xs">
-              {([[1, 'Mono'], [2, 'Stereo']] as const).map(([value, label]) => (
+              {([[1, 'Mono'], [2, 'Stereo'], ['auto', 'Auto']] as const).map(([value, label]) => (
                 <button
                   key={value}
                   type="button"
@@ -385,6 +392,7 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
           )}
         </div>
         <AudioAdvancedSettings mic={mic} value={processing} onChange={changeProcessing} onReset={resetSettings} locked={live} applied={applied} />
+        {state === 'starting' && <p role="status" className="text-xs text-gray-500">Checking the microphone…</p>}
         {live && <p className="text-xs text-gray-500">Saved to this device every second as you record, so a crash or closed tab won't lose it.</p>}
         {inputs.error && <p className="text-sm text-red-600 dark:text-red-400">{inputs.error}</p>}
         {warning && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{warning}</p>}

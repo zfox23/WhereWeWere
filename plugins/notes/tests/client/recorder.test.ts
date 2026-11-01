@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NoteRecorder, audioConstraints, bitrateFor, pickMimeType, TIMESLICE_MS, AUDIO_BITS_PER_SECOND, MONO_BITS_PER_SECOND, type RecorderDeps } from '../../ui/audio/recorder';
+import { NoteRecorder, audioConstraints, bitrateFor, captureAttempts, pickMimeType, SIGNAL_TIMEOUT_MS, type SignalResult, TIMESLICE_MS, AUDIO_BITS_PER_SECOND, MONO_BITS_PER_SECOND, type RecorderDeps } from '../../ui/audio/recorder';
 import * as store from '../../ui/audio/recordingStore';
 import { resolveInput } from '../../ui/audio/audioInput';
 import { DEFAULT_PROCESSING } from '../../ui/audio/audioSettings';
@@ -326,5 +326,153 @@ describe('recorder helpers', () => {
     expect(resolveInput(devices, { deviceId: 'old', label: 'USB Mic' })).toBe('b2');
     expect(resolveInput(devices, { deviceId: 'old', label: 'Gone' })).toBe('');
     expect(resolveInput(devices, null)).toBe('');
+  });
+});
+
+describe('a microphone that goes silent with the chosen settings (Firefox on Android)', () => {
+  const streams: FakeStream[] = [];
+  const dep = (verdicts: SignalResult[], extra: Partial<RecorderDeps> = {}) => {
+    streams.length = 0;
+    let n = 0;
+    const detectSignal = vi.fn(async () => verdicts[n++] ?? 'signal');
+    const getUserMedia = vi.fn(async () => {
+      const stream = new FakeStream();
+      streams.push(stream);
+      return stream as unknown as MediaStream;
+    });
+    return { d: deps({ getUserMedia, detectSignal, ...extra }), detectSignal, getUserMedia };
+  };
+  const audio = (getUserMedia: ReturnType<typeof vi.fn>, call: number) =>
+    (getUserMedia.mock.calls[call][0] as MediaStreamConstraints).audio as Record<string, unknown>;
+
+  it('records normally, without retrying, when sound arrives at once', async () => {
+    const { d, detectSignal, getUserMedia } = dep(['signal']);
+    const onRecovered = vi.fn();
+    const rec = new NoteRecorder(opts, { onRecovered }, d);
+    await rec.start();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(detectSignal).toHaveBeenCalledWith(expect.anything(), SIGNAL_TIMEOUT_MS);
+    expect(onRecovered).not.toHaveBeenCalled();
+    await rec.stop();
+  });
+
+  it('first retries without the channel, sample-rate and sample-size hints, keeping processing off', async () => {
+    const { d, getUserMedia } = dep(['silent', 'signal']);
+    const onRecovered = vi.fn();
+    const onWarning = vi.fn();
+    const rec = new NoteRecorder({ ...opts, deviceId: '' }, { onRecovered, onWarning }, d);
+    await rec.start();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(audio(getUserMedia, 0)).toMatchObject({ channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 }, echoCancellation: false });
+    expect(audio(getUserMedia, 1)).toEqual({ echoCancellation: false, noiseSuppression: false, autoGainControl: false });
+    expect(streams[0].track.stop).toHaveBeenCalled(); // the dead stream is released
+    expect(streams[1].track.stop).not.toHaveBeenCalled(); // the working one is the recording
+    expect(onRecovered).toHaveBeenCalledWith(expect.objectContaining({
+      attempt: expect.objectContaining({ hintsDropped: true, processing: expect.objectContaining({ noiseSuppression: false, echoCancellation: false, sampleRate: null }) }),
+    }));
+    expect(onWarning.mock.calls[0][0]).toContain("browser's default audio format");
+    await rec.stop();
+  });
+
+  it('then turns noise suppression on, then echo cancellation, stopping at the first that works', async () => {
+    const a = dep(['silent', 'silent', 'signal']);
+    const onRecovered = vi.fn();
+    await new NoteRecorder({ ...opts, deviceId: '' }, { onRecovered }, a.d).start();
+    expect(audio(a.getUserMedia, 2)).toMatchObject({ noiseSuppression: true, echoCancellation: false });
+    expect(audio(a.getUserMedia, 2)).not.toHaveProperty('channelCount');
+    expect(onRecovered.mock.calls[0][0].label).toBe('with noise suppression turned on');
+    expect(a.getUserMedia).toHaveBeenCalledTimes(3);
+
+    const b = dep(['silent', 'silent', 'silent', 'signal']);
+    const onRecoveredB = vi.fn();
+    await new NoteRecorder({ ...opts, deviceId: '' }, { onRecovered: onRecoveredB }, b.d).start();
+    expect(audio(b.getUserMedia, 3)).toMatchObject({ echoCancellation: true, noiseSuppression: false });
+    expect(onRecoveredB.mock.calls[0][0].label).toBe('with echo cancellation turned on');
+  });
+
+  it('keeps the other settings the user chose while stepping (automatic gain control stays on)', async () => {
+    const { d, getUserMedia } = dep(['silent', 'silent', 'signal']);
+    await new NoteRecorder({ ...opts, deviceId: '', processing: { ...DEFAULT_PROCESSING, autoGainControl: true } }, {}, d).start();
+    expect(audio(getUserMedia, 2)).toMatchObject({ autoGainControl: true, noiseSuppression: true });
+  });
+
+  it('still records when every way fails, and says the microphone is silent', async () => {
+    const { d, getUserMedia } = dep(['silent', 'silent', 'silent', 'silent']);
+    const onWarning = vi.fn();
+    const onRecovered = vi.fn();
+    const rec = new NoteRecorder({ ...opts, deviceId: '' }, { onWarning, onRecovered }, d);
+    const meta = await rec.start();
+    expect(getUserMedia).toHaveBeenCalledTimes(4); // bounded
+    expect(meta.id).toBeTruthy();
+    expect(onWarning.mock.calls[0][0]).toContain('No sound is coming from this microphone');
+    expect(onRecovered).not.toHaveBeenCalled(); // nothing worked, so nothing to remember
+    expect(rec.currentState).toBe('recording');
+    await rec.stop();
+  });
+
+  it('does not judge a stream whose silence could be legitimate noise gating (echo cancellation or noise suppression on)', async () => {
+    for (const processing of [{ ...DEFAULT_PROCESSING, echoCancellation: true }, { ...DEFAULT_PROCESSING, noiseSuppression: true }]) {
+      const { d, detectSignal, getUserMedia } = dep(['silent']);
+      const rec = new NoteRecorder(opts, {}, d);
+      await new NoteRecorder({ ...opts, processing }, {}, d).start();
+      expect(detectSignal).not.toHaveBeenCalled();
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      void rec;
+    }
+  });
+
+  it('never fails a recording just because the browser could not measure the signal', async () => {
+    const { d, getUserMedia } = dep(['unknown']);
+    const onRecovered = vi.fn();
+    await new NoteRecorder(opts, { onRecovered }, d).start();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(onRecovered).not.toHaveBeenCalled();
+  });
+
+  it('copes with the remembered microphone being gone partway through the attempts', async () => {
+    streams.length = 0;
+    let call = 0;
+    const getUserMedia = vi.fn(async (c: MediaStreamConstraints) => {
+      call += 1;
+      const a = c.audio as Record<string, unknown>;
+      if (a.deviceId) throw Object.assign(new Error('x'), { name: 'OverconstrainedError' });
+      const s = new FakeStream();
+      streams.push(s);
+      return s as unknown as MediaStream;
+    });
+    const onWarning = vi.fn();
+    const verdicts: SignalResult[] = ['silent', 'signal'];
+    let n = 0;
+    const d = deps({ getUserMedia: getUserMedia as never, detectSignal: async () => verdicts[n++] ?? 'signal' });
+    await new NoteRecorder(opts, { onWarning }, d).start();
+    expect(call).toBeGreaterThanOrEqual(3);
+    const msg = onWarning.mock.calls[0][0] as string;
+    expect(msg.match(/was not found/g)).toHaveLength(1); // said once, not per attempt
+  });
+
+  it('Auto leaves the channel count to the browser, and sizes the encoder from what was delivered', async () => {
+    const mono = new FakeStream();
+    mono.track.settings = { channelCount: 1 };
+    const d = deps({ getUserMedia: vi.fn(async () => mono as unknown as MediaStream) });
+    const onWarning = vi.fn();
+    await new NoteRecorder({ ...opts, deviceId: '', channels: 'auto' }, { onWarning }, d).start();
+    expect(vi.mocked(d.getUserMedia).mock.calls[0][0].audio).not.toHaveProperty('channelCount');
+    expect(lastRecorder.options).toMatchObject({ audioBitsPerSecond: MONO_BITS_PER_SECOND });
+    expect(onWarning).not.toHaveBeenCalled(); // nothing was asked, so nothing was missed
+  });
+});
+
+describe('captureAttempts and audioConstraints', () => {
+  it('only plans a ladder when both echo cancellation and noise suppression are off', () => {
+    expect(captureAttempts(DEFAULT_PROCESSING).map((a) => [a.hintsDropped, a.processing.noiseSuppression, a.processing.echoCancellation]))
+      .toEqual([[false, false, false], [true, false, false], [true, true, false], [true, false, true]]);
+    expect(captureAttempts({ ...DEFAULT_PROCESSING, noiseSuppression: true })).toHaveLength(1);
+    expect(captureAttempts({ ...DEFAULT_PROCESSING, echoCancellation: true })).toHaveLength(1);
+  });
+
+  it('can leave out the format hints, or the channel count alone', () => {
+    expect(audioConstraints('', 2, DEFAULT_PROCESSING, false).audio).toEqual({ echoCancellation: false, noiseSuppression: false, autoGainControl: false });
+    expect(audioConstraints('', 'auto').audio).toEqual({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: { ideal: 48000 } });
+    expect(audioConstraints('mic', 1, DEFAULT_PROCESSING, false).audio).toMatchObject({ deviceId: { exact: 'mic' } });
   });
 });
