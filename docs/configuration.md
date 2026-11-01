@@ -20,6 +20,7 @@ cp .env.example .env
 | `NODE_ENV` | `development` | `development` or `production`. Set to `production` for internet-facing deployments. |
 | `PHOTON_URL` | project author's instance | Base URL of the [Photon](https://github.com/komoot/photon) geocoder used for reverse geocoding and place search. Venue coordinates are sent to this host: set it to your own instance or a public one (e.g. `https://photon.komoot.io`). |
 | `TRANSCRIPTION_PORT` | `8000` | Port the optional transcription service publishes (`docker compose --profile transcription up`). See [Audio notes](audio-notes.md). |
+| `TRANSCRIPTION_MODEL` | `Systran/faster-whisper-large-v3` | Model the optional transcription service installs on start. See [Audio notes](audio-notes.md). |
 | `DATA_DIR` | `<cwd>/data` | Directory for user data files (uploaded GPS tracks, note audio, etc.). Docker Compose pins this to `/app/data`, backed by the `./data/server` host directory. |
 
 ## Security hardening

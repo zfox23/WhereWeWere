@@ -94,7 +94,7 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
   return { text, language: typeof body.language === 'string' && body.language ? body.language : null, durationMs: duration, segments };
 }
 
-export interface HttpResult {
+interface HttpResult {
   status: number;
   body: string;
 }
@@ -145,33 +145,8 @@ async function postAudio(config: TranscriptionConfig, filePath: string, filename
   });
 }
 
-/** A server that doesn't have the configured model yet (Speaches answers 404 "... is not installed locally"). */
-export function isModelMissing(res: HttpResult): boolean {
-  return res.status === 404 && /not installed|not found/i.test(res.body) && /model/i.test(res.body);
-}
-
-/**
- * Ask the service to download the configured model (`POST {url}/models/{id}`,
- * which Speaches answers once the download finished). Slow the first time:
- * large-v3 is a few GB.
- */
-export async function installModel(config: TranscriptionConfig): Promise<void> {
-  const headers: Record<string, string> = { 'Content-Length': '0' };
-  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-  const url = new URL(`${config.apiUrl}/models/${config.model.split('/').map(encodeURIComponent).join('/')}`);
-  const res = await request(url, { method: 'POST', headers }, (req) => req.end());
-  // 200/201: installed now; 409: it was already there.
-  if (![200, 201, 409].includes(res.status)) {
-    throw new Error(`Could not install the model "${config.model}" (service returned ${res.status}: ${res.body.slice(0, 200)})`);
-  }
-}
-
 export async function transcribeFile(config: TranscriptionConfig, filePath: string, filename: string, mime: string): Promise<TranscriptionResult> {
-  let res = await postAudio(config, filePath, filename, mime);
-  if (isModelMissing(res)) {
-    await installModel(config);
-    res = await postAudio(config, filePath, filename, mime);
-  }
+  const res = await postAudio(config, filePath, filename, mime);
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`Transcription service returned ${res.status}: ${res.body.slice(0, 300)}`);
   }
@@ -200,7 +175,7 @@ export async function testTranscriptionConfig(config: Pick<TranscriptionConfig, 
     if (ids.length > 0 && !ids.includes(config.model)) {
       return {
         ok: true,
-        message: `Connected, but "${config.model}" is not installed on the service yet. It will be downloaded automatically when the first audio is transcribed (a large download that can take several minutes).`,
+        message: `Connected, but "${config.model}" is not installed on the service. The bundled service installs the model named by TRANSCRIPTION_MODEL when it starts; make sure the two match (see docs/audio-notes.md).`,
       };
     }
     return { ok: true, message: 'Connected.' };

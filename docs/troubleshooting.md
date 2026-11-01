@@ -67,4 +67,4 @@ Fix:
 
 ## Audio is stuck on "Waiting to be transcribed"
 
-No transcription endpoint is configured, or it is unreachable. Set it in **Settings → Integrations → Audio transcription** and use **Test connection**. For the bundled service, start it with `docker compose --profile transcription up -d` and check `docker compose logs transcription`. Waiting audio is processed automatically once the service answers.
+No transcription endpoint is configured, or it is unreachable. Set it in **Settings → Integrations → Audio transcription** and use **Test connection**. For the bundled service, start it with `docker compose --profile transcription up -d` and check `docker compose logs transcription`. The note shows the last error. "Model … is not installed locally" means the service has not finished installing `TRANSCRIPTION_MODEL` (the first start downloads it; follow `docker compose logs -f transcription`) or the model name in Settings differs from it. Waiting audio is processed automatically once the service answers.

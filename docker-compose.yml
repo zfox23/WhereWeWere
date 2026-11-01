@@ -49,17 +49,23 @@ services:
   # Optional local speech-to-text (faster-whisper behind an OpenAI-compatible
   # API). Not started by default; enable with:
   #   docker compose --profile transcription up -d
+  # On start it installs the model named by TRANSCRIPTION_MODEL (a few GB the
+  # first time, cached in ./data/whisper; set it empty to install nothing).
   # Then in the app: Settings -> Integrations -> Notes -> Audio transcription,
   # base URL http://transcription:8000/v1 (from the server container) or
-  # http://localhost:${TRANSCRIPTION_PORT:-8000}/v1. Requires an NVIDIA GPU and the
-  # NVIDIA Container Toolkit.
+  # http://localhost:${TRANSCRIPTION_PORT:-8000}/v1, and the same model name.
+  # Requires an NVIDIA GPU and the NVIDIA Container Toolkit.
   transcription:
     profiles: ["transcription"]
     image: ghcr.io/speaches-ai/speaches:latest-cuda
     restart: unless-stopped
+    command: ["sh", "/start.sh"]
+    environment:
+      TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL-Systran/faster-whisper-large-v3}
     ports:
       - "${TRANSCRIPTION_PORT:-8000}:8000"
     volumes:
+      - ./transcription/start.sh:/start.sh:ro
       - ./data/whisper:/home/ubuntu/.cache/huggingface/hub
     deploy:
       resources:

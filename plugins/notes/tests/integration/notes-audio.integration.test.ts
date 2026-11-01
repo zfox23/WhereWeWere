@@ -139,9 +139,8 @@ describe('notes audio: transcription queue', () => {
   let fakeUrl = '';
   let requests: { auth?: string; body: Buffer }[] = [];
   let respond: (res: http.ServerResponse) => void = () => {};
-  // Like Speaches: transcription 404s until the model has been installed via POST /v1/models/<id>.
+  // Like Speaches: transcription 404s until the model has been installed (by the service, not by us).
   let modelInstalled = true;
-  let installStatus = 201;
   let installs: string[] = [];
 
   beforeAll(async () => {
@@ -155,8 +154,7 @@ describe('notes audio: transcription queue', () => {
         }
         if (req.method === 'POST' && req.url?.includes('/models/')) {
           installs.push(decodeURIComponent(req.url));
-          if (installStatus < 300) modelInstalled = true;
-          res.statusCode = installStatus;
+          res.statusCode = 405;
           return res.end('{}');
         }
         requests.push({ auth: req.headers.authorization, body: Buffer.concat(parts) });
@@ -176,7 +174,6 @@ describe('notes audio: transcription queue', () => {
     requests = [];
     installs = [];
     modelInstalled = true;
-    installStatus = 201;
     respond = (res) => {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({
@@ -243,29 +240,15 @@ describe('notes audio: transcription queue', () => {
     expect(await state(id)).toMatchObject({ status: 'done' });
   });
 
-  it('installs a model the service does not have yet, then transcribes', async () => {
+  it('shows the service’s own error when the model is not installed, and keeps the audio queued', async () => {
     await configure();
     modelInstalled = false;
     const id = await uploadedAudio();
     await drainTranscriptionQueue();
-    expect(installs).toEqual(['/v1/models/fake-model']);
-    expect(requests).toHaveLength(2); // refused, installed, retried once
-    expect(await state(id)).toMatchObject({ status: 'done', transcript_text: 'Hello there. General Kenobi.' });
-    // Once installed, later audio doesn't trigger another install.
-    await uploadedAudio();
-    await drainTranscriptionQueue();
-    expect(installs).toHaveLength(1);
-  });
-
-  it('records why when the model cannot be installed, and keeps the audio queued', async () => {
-    await configure();
-    modelInstalled = false;
-    installStatus = 500;
-    const id = await uploadedAudio();
-    await drainTranscriptionQueue();
+    expect(installs).toEqual([]); // the app never installs models; the service does that from its own config
     const row = await state(id);
     expect(row).toMatchObject({ status: 'pending', attempts: 1 });
-    expect(row.error).toContain('Could not install the model "fake-model"');
+    expect(row.error).toContain('is not installed locally');
   });
 
   it('retries with backoff on failure, gives up after MAX_ATTEMPTS, and retranscribe resets', async () => {
@@ -290,7 +273,7 @@ describe('notes audio: transcription queue', () => {
     const ok = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'fake-model' });
     expect(ok.body).toEqual({ ok: true, message: 'Connected.' });
     const unknownModel = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'other' });
-    expect(unknownModel.body.message).toContain('not installed on the service yet');
+    expect(unknownModel.body.message).toContain('not installed on the service');
     const down = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: 'http://127.0.0.1:1/v1', model: 'x' });
     expect(down.body.ok).toBe(false);
     expect((await request(app).post('/api/v1/notes/transcription/test').send({})).status).toBe(400);

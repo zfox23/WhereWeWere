@@ -28,11 +28,7 @@ docker compose --profile transcription up -d
 
 Then open **Settings → Integrations → Audio transcription**, enter the URL (`http://transcription:8000/v1` from the server container), the model (for example `Systran/faster-whisper-large-v3`), optionally an API key and a language hint (blank detects the language), and use **Test connection**.
 
-The service starts with **no models installed**. The first time audio is transcribed, the app asks it to download the configured model (large-v3 is a few GB, so the first transcription can take several minutes). To do it up front instead:
-
-```bash
-curl -X POST http://localhost:${TRANSCRIPTION_PORT:-8000}/v1/models/Systran/faster-whisper-large-v3
-```
+The service ships with no models, so on start it installs the one named by `TRANSCRIPTION_MODEL` (default `Systran/faster-whisper-large-v3`, set in `.env`). The first start downloads it, which is a few GB and takes several minutes; watch `docker compose logs -f transcription`. It is cached in `./data/whisper`, so later starts only check that it is there. Use the same model name in **Settings → Integrations → Audio transcription**. The app never installs models itself: if the names don't match, waiting audio shows the service's "model is not installed" error.
 
 Any other OpenAI-compatible transcription server works if you point the URL at it. If audio stays on "Waiting to be transcribed", the note shows the last error; `docker compose logs transcription` has the service's side.
 
@@ -41,6 +37,7 @@ Audio waits (status "Waiting to be transcribed") until an endpoint is saved in S
 | Variable | Default | Description |
 | --- | --- | --- |
 | `TRANSCRIPTION_PORT` | `8000` | Host port the optional transcription service publishes. |
+| `TRANSCRIPTION_MODEL` | `Systran/faster-whisper-large-v3` | Model the transcription service installs when it starts. Empty installs nothing. |
 
 ## Limits
 
