@@ -29,9 +29,10 @@ export const DEVICE_PREFERENCE_KEYS: readonly string[] = [
   'system-dark-theme',
   'bg-pattern',
   'bg-gradient',
-  // Which microphone this device records with (an input device is a property
-  // of the device, not of the account).
+  // Which microphone this device records with, and in mono or stereo (input
+  // hardware is a property of the device, not of the account).
   'wwp:notes:audio-input',
+  'wwp:notes:audio-channels',
 ];
 
 /** IndexedDB databases that hold unsaved user work and must survive a wipe. */

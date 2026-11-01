@@ -17,7 +17,15 @@ import {
 } from './recordingStore';
 import { micErrorMessage } from './audioInput';
 
+export type Channels = 1 | 2;
+
+/** Opus bitrate: 256 kbps for stereo, and half that for mono, which is the same 128 kbps per channel. */
 export const AUDIO_BITS_PER_SECOND = 256_000;
+export const MONO_BITS_PER_SECOND = 128_000;
+
+export function bitrateFor(channels: Channels): number {
+  return channels === 1 ? MONO_BITS_PER_SECOND : AUDIO_BITS_PER_SECOND;
+}
 export const TIMESLICE_MS = 1000;
 
 const MIME_CANDIDATES = [
@@ -42,10 +50,15 @@ export function extensionForMime(mime: string): string {
   return '.audio';
 }
 
-export function audioConstraints(deviceId: string): MediaStreamConstraints {
+/**
+ * `channels` is a request, not a guarantee: a microphone that only has one
+ * channel stays mono whatever is asked (the recorder reports that).
+ */
+export function audioConstraints(deviceId: string, channels: Channels = 2): MediaStreamConstraints {
   return {
     audio: {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      channelCount: { ideal: channels },
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: false,
@@ -112,7 +125,7 @@ export class NoteRecorder {
   private finishing: Promise<StopResult> | null = null;
 
   constructor(
-    private readonly opts: { userId: string; deviceId: string; deviceLabel: string | null },
+    private readonly opts: { userId: string; deviceId: string; deviceLabel: string | null; channels?: Channels },
     private readonly events: RecorderEvents = {},
     private readonly deps: RecorderDeps = browserDeps(),
   ) {}
@@ -136,15 +149,16 @@ export class NoteRecorder {
 
   async start(): Promise<RecordingMeta> {
     if (this.state !== 'idle' && this.state !== 'interrupted') throw new Error('Already recording');
+    const channels: Channels = this.opts.channels === 1 ? 1 : 2;
     this.setState('starting');
     let stream: MediaStream;
     try {
-      stream = await this.deps.getUserMedia(audioConstraints(this.opts.deviceId));
+      stream = await this.deps.getUserMedia(audioConstraints(this.opts.deviceId, channels));
     } catch (err) {
       if (this.opts.deviceId && err instanceof Error && err.name === 'OverconstrainedError') {
         // The remembered microphone isn't plugged in: use the default instead of failing.
         try {
-          stream = await this.deps.getUserMedia(audioConstraints(''));
+          stream = await this.deps.getUserMedia(audioConstraints('', channels));
           this.events.onWarning?.('The selected microphone was not found; recording with the default one.');
         } catch (inner) {
           this.setState('idle');
@@ -186,7 +200,7 @@ export class NoteRecorder {
     this.finishing = null;
     this.elapsedBefore = 0;
 
-    const recorder = new this.deps.MediaRecorderCtor(stream, { mimeType: mime, audioBitsPerSecond: AUDIO_BITS_PER_SECOND });
+    const recorder = new this.deps.MediaRecorderCtor(stream, { mimeType: mime, audioBitsPerSecond: bitrateFor(channels) });
     this.recorder = recorder;
     recorder.ondataavailable = (e: BlobEvent) => {
       if (e.data && e.data.size > 0) this.enqueueWrite(e.data);
@@ -196,6 +210,15 @@ export class NoteRecorder {
       // A stop the user didn't ask for (the browser or OS ended the capture).
       if (!this.userStopped) void this.handleInterruption('The browser stopped the recording.');
     };
+    // Say so when the microphone can't do what was asked (e.g. stereo from a mono mic).
+    const actual = stream.getAudioTracks()[0]?.getSettings?.().channelCount;
+    if (typeof actual === 'number' && actual !== channels) {
+      this.events.onWarning?.(
+        actual === 1
+          ? 'This microphone only records in mono, so the recording will be mono.'
+          : 'This microphone records in stereo and the browser would not mix it down to mono.',
+      );
+    }
     for (const track of stream.getAudioTracks()) {
       track.addEventListener('ended', () => {
         if (!this.userStopped) void this.handleInterruption('The microphone was disconnected or taken by the system.');

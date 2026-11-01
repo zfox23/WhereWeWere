@@ -4,11 +4,15 @@ A note can carry any number of audio files. Record from a microphone you choose,
 
 ## Recording quality
 
-The browser's voice processing (noise suppression, echo cancellation, automatic gain) is **off**, 48 kHz is requested, and the audio is encoded as Opus at 256 kbps (Safari uses AAC in MP4 at its highest bitrate). The server stores exactly the bytes the browser produced; nothing is re-encoded.
+The browser's voice processing (noise suppression, echo cancellation, automatic gain) is **off**, 48 kHz is requested, and the audio is encoded as Opus at 256 kbps for stereo (Safari uses AAC in MP4 at its highest bitrate).
+
+Choose **Mono** or **Stereo** next to the microphone picker (stereo is the default; the choice is remembered per device). Mono is encoded at 128 kbps, the same per channel, so the file is half the size. The browser treats this as a request: a one-channel microphone stays mono under *Stereo*, and you are told when that happens. The server stores exactly the bytes the browser produced; nothing is re-encoded.
 
 Recording needs a **secure context**: HTTPS (see [Deployment](deployment.md#reverse-proxy-behavior)) or `localhost`. Over plain HTTP the browser refuses microphone access.
 
-The microphone you pick is remembered per browser/device and survives signing out.
+The microphone and channel choice are remembered per browser/device and survive signing out.
+
+While recording, **Blank screen** covers the app with solid black (handy for a phone on a table or an OLED screen). The recording and the wake lock carry on underneath; **double-tap** (or double-click) the black screen, or press Escape, to return. If the recording is interrupted while the screen is black, the app comes back on its own so you see why.
 
 ## What protects a recording
 

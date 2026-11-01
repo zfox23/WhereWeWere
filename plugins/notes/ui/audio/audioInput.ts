@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export const INPUT_KEY = 'wwp:notes:audio-input';
+export const CHANNELS_KEY = 'wwp:notes:audio-channels';
 
 export interface StoredInput {
   deviceId: string;
@@ -26,6 +27,23 @@ export function savePreferredInput(input: StoredInput | null): void {
   try {
     if (input) window.localStorage.setItem(INPUT_KEY, JSON.stringify(input));
     else window.localStorage.removeItem(INPUT_KEY);
+  } catch {
+    // storage blocked: the choice just isn't remembered
+  }
+}
+
+/** Mono or stereo, remembered per device like the microphone. Stereo is the default. */
+export function loadPreferredChannels(): 1 | 2 {
+  try {
+    return window.localStorage.getItem(CHANNELS_KEY) === '1' ? 1 : 2;
+  } catch {
+    return 2;
+  }
+}
+
+export function savePreferredChannels(channels: 1 | 2): void {
+  try {
+    window.localStorage.setItem(CHANNELS_KEY, String(channels));
   } catch {
     // storage blocked: the choice just isn't remembered
   }

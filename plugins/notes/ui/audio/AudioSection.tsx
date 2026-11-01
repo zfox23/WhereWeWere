@@ -8,11 +8,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, CloudUpload, Download, FileAudio, Loader2, Mic, Pause, Play, Square, Trash2, Plus } from 'lucide-react';
+import { AlertCircle, CheckCircle2, CloudUpload, Download, FileAudio, Loader2, Mic, MonitorOff, Pause, Play, Square, Trash2, Plus } from 'lucide-react';
 import { notes, type NoteAudio } from '../api';
-import { micErrorMessage, useAudioInputs } from './audioInput';
+import { micErrorMessage, loadPreferredChannels, savePreferredChannels, useAudioInputs } from './audioInput';
+import { BlackoutScreen } from './BlackoutScreen';
 import { AUDIO_FILE_ACCEPT, importAudioFile } from './importFile';
-import { NoteRecorder, browserDeps, type RecorderState } from './recorder';
+import { NoteRecorder, browserDeps, type Channels, type RecorderState } from './recorder';
 import {
   assembleBlob, deleteRecording, isOrphaned, listRecordings, onRecordingsChanged, recoverRecording, type RecordingMeta,
 } from './recordingStore';
@@ -118,6 +119,8 @@ export interface AudioSectionProps {
 
 export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onServerCount, onRecordingChange }: AudioSectionProps) {
   const inputs = useAudioInputs();
+  const [channels, setChannels] = useState<Channels>(() => loadPreferredChannels());
+  const [blank, setBlank] = useState(false);
   const recordings = useLocalRecordings(userId);
   const [serverAudio, setServerAudio] = useState<NoteAudio[]>([]);
   const [state, setState] = useState<RecorderState>('idle');
@@ -167,6 +170,11 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
     onRecordingChange(state === 'recording' || state === 'paused' || state === 'stopping');
   }, [state, onRecordingChange]);
 
+  // If the recording ends or is interrupted while the screen is black, bring the app back so the message is seen.
+  useEffect(() => {
+    if (state !== 'recording' && state !== 'paused') setBlank(false);
+  }, [state]);
+
   // Never close the tab on a live recording without a warning.
   useEffect(() => {
     if (state !== 'recording' && state !== 'paused') return;
@@ -193,7 +201,7 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
     setWarning(null);
     const device = inputs.devices.find((d) => d.deviceId === inputs.selectedId);
     const recorder = new NoteRecorder(
-      { userId, deviceId: inputs.selectedId, deviceLabel: device?.label || null },
+      { userId, deviceId: inputs.selectedId, deviceLabel: device?.label || null, channels },
       {
         onState: setState,
         onTick: setElapsed,
@@ -268,6 +276,10 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
   const inForm = recordings.filter((r) => localIds.includes(r.id));
   const leftovers = recordings.filter((r) => !localIds.includes(r.id) && !isOrphaned(r) && !(r.state === 'uploaded' && r.noteId));
   const live = state === 'recording' || state === 'paused';
+  const chooseChannels = (c: Channels) => {
+    setChannels(c);
+    savePreferredChannels(c);
+  };
 
   return (
     <div className="space-y-3">
@@ -290,6 +302,24 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
               ))}
             </select>
           </div>
+          <div>
+            <span id="audio-channels-label" className={labelClass}>Channels</span>
+            <div role="radiogroup" aria-labelledby="audio-channels-label" className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-0.5 text-xs">
+              {([[1, 'Mono'], [2, 'Stereo']] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={channels === value}
+                  disabled={live}
+                  onClick={() => chooseChannels(value)}
+                  className={`rounded-md px-3 py-1.5 font-medium disabled:opacity-60 ${channels === value ? 'bg-primary-600 text-white' : 'text-gray-600 dark:text-gray-300'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {inputs.needsPermission && !live && (
             <button type="button" onClick={() => void inputs.requestAccess()} className={smallBtn}>Show microphone names</button>
           )}
@@ -309,6 +339,9 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
               )}
               <button type="button" onClick={() => void stop()} className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
                 <Square size={14} /> Stop
+              </button>
+              <button type="button" onClick={() => setBlank(true)} className={smallBtn} title="Black out the screen. Double-tap to bring it back.">
+                <MonitorOff size={14} /> Blank screen
               </button>
               <span className="inline-flex items-center gap-2 text-sm tabular-nums text-gray-700 dark:text-gray-200" aria-live="off">
                 <span className={`h-2.5 w-2.5 rounded-full ${state === 'recording' ? 'animate-pulse bg-red-500' : 'bg-amber-400'}`} />
@@ -361,6 +394,7 @@ export function AudioSection({ userId, editId, localIds, onLocalIdsChange, onSer
           </ul>
         </div>
       )}
+      {blank && live && <BlackoutScreen onExit={() => setBlank(false)} />}
     </div>
   );
 }

@@ -1,11 +1,14 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NoteRecorder, audioConstraints, pickMimeType, TIMESLICE_MS, AUDIO_BITS_PER_SECOND, type RecorderDeps } from '../../ui/audio/recorder';
+import { NoteRecorder, audioConstraints, bitrateFor, pickMimeType, TIMESLICE_MS, AUDIO_BITS_PER_SECOND, MONO_BITS_PER_SECOND, type RecorderDeps } from '../../ui/audio/recorder';
 import * as store from '../../ui/audio/recordingStore';
 import { resolveInput } from '../../ui/audio/audioInput';
 
 class FakeTrack extends EventTarget {
   readyState = 'live';
+  /** What the browser reports it actually delivered. */
+  settings: MediaTrackSettings = {};
+  getSettings() { return this.settings; }
   stop = vi.fn(() => { this.readyState = 'ended'; });
 }
 class FakeStream {
@@ -64,11 +67,64 @@ describe('NoteRecorder', () => {
     const rec = new NoteRecorder(opts, {}, d);
     await rec.start();
     expect(d.getUserMedia).toHaveBeenCalledWith({
-      audio: { deviceId: { exact: 'mic-1' }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: { ideal: 48000 } },
+      audio: { deviceId: { exact: 'mic-1' }, channelCount: { ideal: 2 }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: { ideal: 48000 } },
     });
     expect(lastRecorder.options).toEqual({ mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: AUDIO_BITS_PER_SECOND });
     expect(lastRecorder.timeslice).toBe(TIMESLICE_MS);
     await rec.stop();
+  });
+
+  it('records mono when asked: requests one channel and halves the bitrate (same quality per channel)', async () => {
+    const d = deps();
+    const rec = new NoteRecorder({ ...opts, channels: 1 }, {}, d);
+    await rec.start();
+    expect(vi.mocked(d.getUserMedia).mock.calls[0][0]).toEqual(audioConstraints('mic-1', 1));
+    expect((vi.mocked(d.getUserMedia).mock.calls[0][0].audio as MediaTrackConstraints).channelCount).toEqual({ ideal: 1 });
+    expect(lastRecorder.options).toEqual({ mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: MONO_BITS_PER_SECOND });
+    expect(bitrateFor(1)).toBe(128_000);
+    expect(bitrateFor(2)).toBe(256_000);
+    await rec.stop();
+  });
+
+  it('defaults to stereo, which a mono microphone simply stays mono under', async () => {
+    const d = deps();
+    const rec = new NoteRecorder(opts, {}, d); // no channels given
+    await rec.start();
+    expect((vi.mocked(d.getUserMedia).mock.calls[0][0].audio as MediaTrackConstraints).channelCount).toEqual({ ideal: 2 });
+    await rec.stop();
+  });
+
+  it('says so when the microphone cannot give the channel layout that was chosen', async () => {
+    const monoMic = new FakeStream();
+    monoMic.track.settings = { channelCount: 1 };
+    const onWarning = vi.fn();
+    const rec = new NoteRecorder({ ...opts, channels: 2 }, { onWarning }, deps({ getUserMedia: vi.fn(async () => monoMic as unknown as MediaStream) }));
+    await rec.start();
+    expect(onWarning).toHaveBeenCalledWith(expect.stringContaining('only records in mono'));
+    await rec.stop();
+
+    const stereoMic = new FakeStream();
+    stereoMic.track.settings = { channelCount: 2 };
+    const onWarning2 = vi.fn();
+    const rec2 = new NoteRecorder({ ...opts, channels: 1 }, { onWarning: onWarning2 }, deps({ getUserMedia: vi.fn(async () => stereoMic as unknown as MediaStream) }));
+    await rec2.start();
+    expect(onWarning2).toHaveBeenCalledWith(expect.stringContaining('would not mix it down to mono'));
+    await rec2.stop();
+  });
+
+  it('stays quiet when the layout matches, or the browser does not report one', async () => {
+    const match = new FakeStream();
+    match.track.settings = { channelCount: 2 };
+    const onWarning = vi.fn();
+    const rec = new NoteRecorder(opts, { onWarning }, deps({ getUserMedia: vi.fn(async () => match as unknown as MediaStream) }));
+    await rec.start();
+    await rec.stop();
+    const onWarning2 = vi.fn();
+    const rec2 = new NoteRecorder(opts, { onWarning: onWarning2 }, deps()); // settings {} : unknown
+    await rec2.start();
+    await rec2.stop();
+    expect(onWarning).not.toHaveBeenCalled();
+    expect(onWarning2).not.toHaveBeenCalled();
   });
 
   it('writes every chunk to storage as it arrives, in order, before stop', async () => {
