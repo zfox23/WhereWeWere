@@ -849,3 +849,27 @@ describe('notes audio import: plan, create notes, reuse', () => {
     expect(res.body.id).not.toBe(done.body.id);
   });
 });
+
+describe('notes audio: library rows carry an audio count', () => {
+  beforeEach(resetIntegrationDatabase);
+
+  it('counts finished audio per note, not uploads in progress or other users’ audio', async () => {
+    const withAudio = await request(app).post('/api/v1/notes/checkins')
+      .send({ title: 'Has audio', body: 'x', checked_in_at: '2024-05-05T10:00:00Z', checkin_timezone: 'UTC' });
+    const plain = await request(app).post('/api/v1/notes/checkins')
+      .send({ title: 'Typed only', body: 'x', checked_in_at: '2024-05-04T10:00:00Z', checkin_timezone: 'UTC' });
+    const insert = async (status: string, noteId: string | null) => (await query(
+      `INSERT INTO note_audio (user_id, note_id, filename, mime, bytes, sha256, status) VALUES ($1, $2, 'a.webm', 'audio/webm', 1, $3, $4) RETURNING id`,
+      [DEFAULT_USER_ID, noteId, crypto.randomBytes(32).toString('hex'), status],
+    )).rows[0].id as string;
+    await insert('done', withAudio.body.id);
+    await insert('pending', withAudio.body.id);
+    await insert('uploading', withAudio.body.id); // still uploading: not counted
+    await insert('done', null); // unattached: belongs to no note
+
+    const res = await request(app).get('/api/v1/notes/library');
+    const byTitle = Object.fromEntries(res.body.notes.map((n: { title: string; audio_count: number }) => [n.title, n.audio_count]));
+    expect(byTitle).toEqual({ 'Has audio': 2, 'Typed only': 0 });
+    expect(plain.status).toBe(201);
+  });
+});

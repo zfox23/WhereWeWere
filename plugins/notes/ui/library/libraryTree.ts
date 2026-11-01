@@ -128,3 +128,12 @@ export function matchesFilter(note: LibraryNote, query: string): boolean {
   if (!q) return true;
   return (note.title ?? '').toLowerCase().includes(q) || note.excerpt.toLowerCase().includes(q);
 }
+
+/** Library filter on audio: every note, only notes with at least one audio file, or only notes with none. */
+export type AudioFilter = 'any' | 'with' | 'without';
+
+export function matchesAudio(note: Pick<LibraryNote, 'audio_count'>, mode: AudioFilter): boolean {
+  if (mode === 'with') return note.audio_count >= 1;
+  if (mode === 'without') return note.audio_count === 0;
+  return true;
+}

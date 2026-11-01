@@ -7,12 +7,12 @@
  */
 
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, CalendarDays, ChevronRight, Folder, FolderOpen, Library, Loader2, Search, Tags, Waypoints } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Asterisk, CalendarDays, ChevronRight, Folder, FolderOpen, Library, Loader2, Mic, MicOff, Search, Tags, Waypoints } from 'lucide-react';
 import { notes, type Library as LibraryData, type NoteGraph } from '../api';
 import { noteHeading } from '../RelatedNotes';
 import { TagDot } from '../TagChip';
 import { ReadingPane } from './ReadingPane';
-import { dateFolders, firstPath, matchesFilter, pathTo, tagFolders, type SortOrder, type TreeNode } from './libraryTree';
+import { dateFolders, firstPath, matchesAudio, matchesFilter, pathTo, tagFolders, type AudioFilter, type SortOrder, type TreeNode } from './libraryTree';
 
 const SimilarityWeb = lazy(() => import('./SimilarityWeb'));
 
@@ -22,6 +22,13 @@ const VIEWS: { id: View; label: string; icon: React.ReactNode }[] = [
   { id: 'date', label: 'Date', icon: <CalendarDays size={14} /> },
   { id: 'tag', label: 'Tag', icon: <Tags size={14} /> },
   { id: 'web', label: 'Similarity Web', icon: <Waypoints size={14} /> },
+];
+
+// Icon-only, so each option's meaning lives in its label (tooltip + screen readers).
+const AUDIO_FILTERS: { id: AudioFilter; label: string; icon: React.ReactNode }[] = [
+  { id: 'any', label: 'All notes', icon: <Asterisk size={14} /> },
+  { id: 'with', label: 'Notes with audio', icon: <Mic size={14} /> },
+  { id: 'without', label: 'Notes without audio', icon: <MicOff size={14} /> },
 ];
 
 function Tree({ nodes, open, toggle, selectedId, onSelect, depth = 0 }: {
@@ -82,6 +89,7 @@ export function NoteLibrary({ refreshKey = 0, similarityThreshold }: { refreshKe
   const [view, setView] = useState<View>('date');
   const [order, setOrder] = useState<SortOrder>('newest');
   const [filter, setFilter] = useState('');
+  const [audioFilter, setAudioFilter] = useState<AudioFilter>('any');
   const [library, setLibrary] = useState<LibraryData | null>(null);
   const [graph, setGraph] = useState<NoteGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,13 +108,15 @@ export function NoteLibrary({ refreshKey = 0, similarityThreshold }: { refreshKe
 
   const tree = useMemo<TreeNode[]>(() => {
     if (!library) return [];
-    const list = library.notes.filter((n) => matchesFilter(n, filter));
+    const list = library.notes.filter((n) => matchesFilter(n, filter) && matchesAudio(n, audioFilter));
     return view === 'tag' ? tagFolders(list, library.tags, order) : dateFolders(list, order);
-  }, [library, view, order, filter]);
+  }, [library, view, order, filter, audioFilter]);
+
+  const filtering = filter.trim() !== '' || audioFilter !== 'any';
 
   // Open the first branch on load / view change; while filtering, open everything that matched.
   useEffect(() => {
-    if (filter.trim()) {
+    if (filtering) {
       const keys: string[] = [];
       const walk = (nodes: TreeNode[]) => nodes.forEach((n) => {
         if (n.kind === 'folder') {
@@ -119,7 +129,7 @@ export function NoteLibrary({ refreshKey = 0, similarityThreshold }: { refreshKe
     } else {
       setOpen((prev) => (prev.size > 0 ? prev : new Set(firstPath(tree))));
     }
-  }, [tree, filter]);
+  }, [tree, filtering]);
 
   const toggle = (key: string) => setOpen((prev) => {
     const next = new Set(prev);
@@ -200,6 +210,22 @@ export function NoteLibrary({ refreshKey = 0, similarityThreshold }: { refreshKe
                   className="input pl-8 py-1.5 text-sm"
                 />
               </label>
+              <div role="radiogroup" aria-label="Filter by audio" className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-0.5">
+                {AUDIO_FILTERS.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={audioFilter === f.id}
+                    aria-label={f.label}
+                    title={f.label}
+                    onClick={() => setAudioFilter(f.id)}
+                    className={`rounded-md p-1.5 ${audioFilter === f.id ? 'bg-primary-600 text-white' : 'text-gray-500 hover:text-primary-600'}`}
+                  >
+                    {f.icon}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 onClick={() => setOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}

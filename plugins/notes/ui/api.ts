@@ -112,6 +112,8 @@ export interface LibraryNote {
   word_count: number;
   tag_ids: string[];
   theme_id: string | null;
+  /** Audio files attached to the note (finished uploads only). */
+  audio_count: number;
 }
 
 export interface Library {

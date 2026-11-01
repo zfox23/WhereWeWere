@@ -435,7 +435,8 @@ const LIBRARY_ROW_SQL = `
   SELECT n.id, n.title, left(n.body, 200) AS excerpt, n.checked_in_at, n.checkin_timezone,
          ${LOCAL_TS}::date::text AS local_date, n.word_count,
          COALESCE((SELECT array_agg(l.tag_id) FROM note_tag_links l WHERE l.note_id = n.id), '{}') AS tag_ids,
-         (SELECT m.theme_id FROM note_theme_members m WHERE m.note_id = n.id AND m.rank = 1) AS theme_id
+         (SELECT m.theme_id FROM note_theme_members m WHERE m.note_id = n.id AND m.rank = 1) AS theme_id,
+         (SELECT COUNT(*)::int FROM note_audio a WHERE a.note_id = n.id AND a.status <> 'uploading') AS audio_count
   FROM note_checkins n
   WHERE n.user_id = $1
   ORDER BY n.checked_in_at DESC`;

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { LibraryNote } from '../../ui/api';
-import { dateFolders, firstPath, matchesFilter, pathTo, tagFolders, type FolderNode, type TreeNode } from '../../ui/library/libraryTree';
+import { dateFolders, firstPath, matchesAudio, matchesFilter, pathTo, tagFolders, type FolderNode, type TreeNode } from '../../ui/library/libraryTree';
 
 function note(id: string, date: string, tagIds: string[] = [], title: string | null = id): LibraryNote {
   return {
     id, title, excerpt: `${id} body`, checked_in_at: `${date}T20:00:00Z`, checkin_timezone: 'UTC',
-    local_date: date, word_count: 10, tag_ids: tagIds, theme_id: null,
+    local_date: date, word_count: 10, tag_ids: tagIds, theme_id: null, audio_count: 0,
   };
 }
 
@@ -55,5 +55,14 @@ describe('libraryTree', () => {
     expect(matchesFilter(note('x', '2020-01-01', [], 'Night with Jason'), 'jason')).toBe(true);
     expect(matchesFilter(note('x', '2020-01-01', [], null), 'x body')).toBe(true);
     expect(matchesFilter(note('x', '2020-01-01'), 'nope')).toBe(false);
+  });
+});
+
+describe('matchesAudio', () => {
+  it('filters on having at least one audio file, having none, or either', () => {
+    const [none, one, many] = [0, 1, 3].map((audio_count) => ({ audio_count }));
+    expect([none, one, many].map((n) => matchesAudio(n, 'any'))).toEqual([true, true, true]);
+    expect([none, one, many].map((n) => matchesAudio(n, 'with'))).toEqual([false, true, true]);
+    expect([none, one, many].map((n) => matchesAudio(n, 'without'))).toEqual([true, false, false]);
   });
 });
