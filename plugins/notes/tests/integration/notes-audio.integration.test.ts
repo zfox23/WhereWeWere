@@ -229,6 +229,8 @@ describe('notes audio: transcription queue', () => {
     // The original bytes and the key reached the service.
     expect(requests[0].auth).toBe('Bearer sekret');
     expect(requests[0].body.includes(data)).toBe(true);
+    // Voice activity detection is always requested (it prevents loops; batched mode needs it).
+    expect(requests[0].body.toString('latin1')).toMatch(/name="vad_filter"\r\n\r\ntrue\r\n/);
   });
 
   it('parks audio without burning attempts when no endpoint is configured', async () => {

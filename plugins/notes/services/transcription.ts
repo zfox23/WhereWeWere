@@ -41,6 +41,8 @@ export interface TranscriptionResult {
   language: string | null;
   durationMs: number | null;
   segments: TranscriptSegment[];
+  /** Segments dropped by collapseRepeatedSegments (0 for a healthy transcript). */
+  collapsedRepeats: number;
 }
 
 export const MAX_ATTEMPTS = 8;
@@ -74,6 +76,38 @@ export function backoffMs(attempts: number): number {
   return Math.min(30_000 * 2 ** Math.max(attempts - 1, 0), 60 * 60 * 1000);
 }
 
+/** Identical consecutive segments in a row at which we treat them as a transcription loop, not speech. */
+export const LOOP_MIN_RUN = 4;
+
+function loopKey(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/**
+ * Whisper-family models sometimes get stuck and emit the same segment hundreds of
+ * times ("So. So. So. ..."), which would flood search and the similarity analysis
+ * with junk. A run of LOOP_MIN_RUN or more identical consecutive segments is folded
+ * into one segment covering the whole run. Genuine repetition rarely looks like this:
+ * speech is transcribed into varied sentences, not 600 copies of one.
+ */
+export function collapseRepeatedSegments(segments: TranscriptSegment[]): { segments: TranscriptSegment[]; collapsed: number } {
+  const out: TranscriptSegment[] = [];
+  let collapsed = 0;
+  for (let i = 0; i < segments.length; ) {
+    const key = loopKey(segments[i].text);
+    let j = i + 1;
+    while (key !== '' && j < segments.length && loopKey(segments[j].text) === key) j += 1;
+    if (j - i >= LOOP_MIN_RUN) {
+      out.push({ startMs: segments[i].startMs, endMs: segments[j - 1].endMs, text: segments[i].text });
+      collapsed += j - i - 1;
+    } else {
+      out.push(...segments.slice(i, j));
+    }
+    i = j;
+  }
+  return { segments: out, collapsed };
+}
+
 /** Normalize a verbose_json response (segments in seconds) into our shape. */
 export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
   const body = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -90,8 +124,16 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
   }
   let text = typeof body.text === 'string' ? body.text.trim() : '';
   if (segments.length === 0 && text) segments.push({ startMs: 0, endMs: duration ?? 0, text });
-  if (!text) text = segments.map((s) => s.text).join(' ');
-  return { text, language: typeof body.language === 'string' && body.language ? body.language : null, durationMs: duration, segments };
+  const folded = collapseRepeatedSegments(segments);
+  // The service's own `text` still contains every repeat, so rebuild it from the cleaned segments.
+  if (!text || folded.collapsed > 0) text = folded.segments.map((s) => s.text).join(' ');
+  return {
+    text,
+    language: typeof body.language === 'string' && body.language ? body.language : null,
+    durationMs: duration,
+    segments: folded.segments,
+    collapsedRepeats: folded.collapsed,
+  };
 }
 
 interface HttpResult {
@@ -122,6 +164,10 @@ async function postAudio(config: TranscriptionConfig, filePath: string, filename
     ['model', config.model],
     ['response_format', 'verbose_json'],
     ['timestamp_granularities[]', 'segment'],
+    // Voice activity detection drops the silence and noise where Whisper models start to
+    // hallucinate and loop, and is required by the service's batched mode (which stops a loop
+    // from carrying across chunks) for any audio longer than 30 s.
+    ['vad_filter', 'true'],
   ];
   if (config.language) fields.push(['language', config.language]);
   const safeName = filename.replace(/["\r\n]/g, '_');
@@ -255,6 +301,9 @@ async function processRow(row: AudioRow): Promise<void> {
       return;
     }
     const result = await transcribeFile(config, file, row.filename, row.mime);
+    if (result.collapsedRepeats > 0) {
+      console.warn(`Transcript of "${row.filename}" looped: folded ${result.collapsedRepeats} repeated segments. Check the transcription service's VAD / batched-mode settings.`);
+    }
     await saveTranscript(row.id, config.model, result);
   } catch (err) {
     const attempts = row.attempts + 1;

@@ -68,3 +68,14 @@ Fix:
 ## Audio is stuck on "Waiting to be transcribed"
 
 No transcription endpoint is configured, or it is unreachable. Set it in **Settings → Integrations → Audio transcription** and use **Test connection**. For the bundled service, start it with `docker compose --profile transcription up -d` and check `docker compose logs transcription`. The note shows the last error. "Model … is not installed locally" means the service has not finished installing `TRANSCRIPTION_MODEL` (the first start downloads it; follow `docker compose logs -f transcription`) or the model name in Settings differs from it. Waiting audio is processed automatically once the service answers.
+
+## A transcript repeats one word or phrase over and over
+
+Whisper-family models can get stuck in a loop, especially after silence or background noise, and by default each stretch of audio is fed the previous one's text, so the loop continues to the end of the recording. The bundled transcription service is set up to avoid this: the app always asks for voice-activity detection, and the service runs in batched mode (`TRANSCRIPTION_BATCHED_MODE=true`, the default), which transcribes each chunk of speech independently so a loop cannot carry on. As a safety net the app also folds a run of four or more identical segments into one.
+
+If you see it on audio transcribed before these settings:
+
+1. Recreate the service so it picks up batched mode: `docker compose --profile transcription up -d --force-recreate transcription`, and rebuild the server (`docker compose up -d --build server`).
+2. Open the note and press **Transcribe again** on the audio file (this replaces the transcript, including any corrections you made).
+
+Other things that help: set a **language hint** in Settings > Integrations > Audio transcription (a wrong automatic guess at the start of a noisy recording can derail the whole file), and make sure `TRANSCRIPTION_BATCHED_MODE` has not been set to `false`. A server log line `Transcript of "…" looped: folded N repeated segments` means the guard caught one.
