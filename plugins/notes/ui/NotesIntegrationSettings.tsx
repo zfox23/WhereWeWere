@@ -2,12 +2,14 @@
 
 import { EmbeddingSettings } from './EmbeddingSettings';
 import { TranscriptionSettings } from './TranscriptionSettings';
+import { DiarizationSettings } from './DiarizationSettings';
 
 export function NotesIntegrationSettings() {
   return (
     <>
       <EmbeddingSettings />
       <TranscriptionSettings />
+      <DiarizationSettings />
     </>
   );
 }

@@ -65,6 +65,27 @@ The time zone is taken from your check-ins around that date (so a trip is respec
 
 Files upload one at a time, straight from your disk, with the same resumable, checksummed upload as recordings. Transcription starts only when the whole import run has finished. If the page is closed mid-run, files already uploaded are kept; drop the folder again to finish (uploads that already completed are reused rather than sent again), and anything left waiting is released to the transcriber after an hour of inactivity. A file that fails stays in the list so you can retry it.
 
+## Speaker identification (optional)
+
+Whisper transcribes words but not who said them. The optional **diarization** service works out who is speaking when (pyannote 3.1), and the app then labels each part of a transcript with a speaker and splits a segment where the speaker changes. Each speaker gets a coloured label; click a label to rename it ("Speaker 1" becomes "Dad"). Names apply to that audio file only: Speaker 1 in one recording is not matched to anyone in another.
+
+**One-time setup** (the model is gated on Hugging Face):
+
+1. Create a free account at huggingface.co and a **read** access token (Settings > Access Tokens).
+2. While signed in to that account, open [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1) and [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0) and accept their terms.
+3. Put the token in `.env` as `HF_TOKEN=...` (never commit it).
+4. Start the service: `docker compose --profile diarization up -d --build diarization`. The first build and the first start download several GB. It uses your NVIDIA GPU. To run it alongside transcription: `docker compose --profile transcription --profile diarization up -d`.
+5. In **Settings → Integrations → Speaker identification** enter `http://diarization:8001`, optionally how many speakers to expect (the same number in both boxes means exactly that many; it usually helps), save, and use **Test connection**.
+
+From then on a new transcript gets speakers automatically. On an existing transcript press **Identify speakers**. Running it again starts again from the transcriber's original segments, so a second try with a different speaker count replaces the first. If you have corrected a transcript's text, identification labels whole segments instead of re-cutting them, so your corrections are never lost. The searchable text of a transcript is unchanged by speaker identification, and speakers and names are included in backups.
+
+It is a good guess, not a certainty: overlapping speech, similar voices, children, phone-quality audio and very short interjections are where it slips.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `HF_TOKEN` | (empty) | Hugging Face read token for the gated pyannote models. |
+| `DIARIZATION_PORT` | `8001` | Host port the diarization service publishes. |
+
 ## Limits
 
 - 1 GB per audio file (about 4 hours at 256 kbps).

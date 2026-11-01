@@ -22,6 +22,8 @@ cp .env.example .env
 | `TRANSCRIPTION_PORT` | `8000` | Port the optional transcription service publishes (`docker compose --profile transcription up`). See [Audio notes](audio-notes.md). |
 | `TRANSCRIPTION_MODEL` | `Systran/faster-whisper-large-v3` | Model the optional transcription service installs on start. See [Audio notes](audio-notes.md). |
 | `TRANSCRIPTION_BATCHED_MODE` | `false` | Batched decoding for the optional transcription service; stops looping but can drop quiet speech. See [Troubleshooting](troubleshooting.md). |
+| `HF_TOKEN` | — | Hugging Face read token for the optional speaker diarization service (gated pyannote models). See [Audio notes](audio-notes.md#speaker-identification-optional). |
+| `DIARIZATION_PORT` | `8001` | Port the optional diarization service publishes. |
 | `DATA_DIR` | `<cwd>/data` | Directory for user data files (uploaded GPS tracks, note audio, etc.). Docker Compose pins this to `/app/data`, backed by the `./data/server` host directory. |
 
 ## Security hardening

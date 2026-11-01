@@ -76,3 +76,15 @@ Whisper-family models can get stuck in a loop, especially after silence or backg
 To stop loops at the source you can turn on **batched mode** (`TRANSCRIPTION_BATCHED_MODE=true` in `.env`, then `docker compose --profile transcription up -d --force-recreate transcription`). It decodes each chunk of speech independently, so a loop can't carry on. The cost is real, which is why it is off by default: it requires voice-activity detection, which discards speech it takes for silence (quiet voices, children, singing: one test clip lost nearly all its words), and it returns one large segment per 30 seconds instead of sentences. If you turn it on, the app must also request voice-activity detection, which it currently does not, so long recordings would fail; do not enable it without that.
 
 Other things that help: set a **language hint** in Settings > Integrations > Audio transcription (a wrong automatic guess at the start of a noisy recording can derail the whole file), and press **Transcribe again** on an affected file.
+
+## Speaker identification fails or never starts
+
+Open **Settings > Integrations > Speaker identification** and press **Test connection**; the answer says what is wrong.
+
+- *The service is running but its model is not available: HF_TOKEN is not set* (or *Could not load pyannote/speaker-diarization-3.1*): the model is gated. Put a Hugging Face read token in `.env` as `HF_TOKEN`, make sure that account has accepted the terms of both `pyannote/speaker-diarization-3.1` and `pyannote/segmentation-3.0`, then `docker compose --profile diarization up -d --force-recreate diarization`.
+- *The model is still loading*: the first start downloads it; follow `docker compose logs -f diarization`. Waiting transcripts are picked up automatically.
+- *Could not reach the service*: start it (`docker compose --profile diarization up -d --build diarization`) and use `http://diarization:8001` as the URL (from the server container, not `localhost`).
+- A transcript shows **Speaker identification failed** with a reason: fix the cause and press **Identify speakers** on it.
+
+If everyone ends up as one speaker, set the number of speakers in the settings (for two people, 2 in both boxes) and run **Identify speakers again**.
+

@@ -26,6 +26,10 @@ export interface NoteAudio {
   language: string | null;
   model: string | null;
   created_at: string;
+  /** Names the user gave the speakers: { S1: "Dad" }. Unnamed ones read "Speaker 1". */
+  speakers: Record<string, string>;
+  diarization_status: 'none' | 'pending' | 'processing' | 'done' | 'failed';
+  diarization_error: string | null;
 }
 
 export interface TranscriptSegment {
@@ -35,6 +39,8 @@ export interface TranscriptSegment {
   text: string;
   /** Corrected by the user (a re-transcription replaces these). */
   edited: boolean;
+  /** 'S1', 'S2'... once speakers have been identified; null before, or when unknown. */
+  speaker: string | null;
 }
 
 export interface NoteAudioWithTranscript extends NoteAudio {
@@ -260,6 +266,11 @@ export const notes = {
   audioUrl: (audioId: string) => `/api/v1${BASE}/audio/${audioId}`,
   saveTranscript: (audioId: string, segments: { idx: number; text: string }[]) =>
     request<{ segments: TranscriptSegment[] }>(`${BASE}/audio/${audioId}/transcript`, { method: 'PUT', body: JSON.stringify({ segments }) }),
+  identifySpeakers: (audioId: string) => request<{ id: string }>(`${BASE}/audio/${audioId}/diarize`, { method: 'POST' }),
+  renameSpeakers: (audioId: string, names: Record<string, string>) =>
+    request<{ speakers: Record<string, string> }>(`${BASE}/audio/${audioId}/speakers`, { method: 'PUT', body: JSON.stringify({ names }) }),
+  testDiarization: (apiUrl: string) =>
+    request<{ ok: boolean; message: string }>(`${BASE}/diarization/test`, { method: 'POST', body: JSON.stringify({ api_url: apiUrl }) }),
   retranscribe: (audioId: string) => request<{ id: string }>(`${BASE}/audio/${audioId}/retranscribe`, { method: 'POST' }),
   removeAudio: (audioId: string) => request<{ id: string }>(`${BASE}/audio/${audioId}`, { method: 'DELETE' }),
   testTranscription: (data: { api_url: string; model: string; api_key: string }) =>

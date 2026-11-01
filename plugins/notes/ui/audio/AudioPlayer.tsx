@@ -1,14 +1,16 @@
 /**
  * Playback of one audio attachment on the note detail page, with its
  * transcript: timestamped segments you can click to jump to, the current
- * one highlighted while it plays, text you can correct, and a way to
- * transcribe again.
+ * one highlighted while it plays, text you can correct, who said it (when
+ * speakers have been identified; names are editable), and a way to transcribe
+ * or identify speakers again.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Loader2, Pencil, RefreshCw, Save, X } from 'lucide-react';
+import { AlertCircle, Loader2, Pencil, RefreshCw, Save, UserRound, Users, X } from 'lucide-react';
 import { notes, type NoteAudioWithTranscript, type TranscriptSegment } from '../api';
 import { formatDuration } from './AudioSection';
+import { speakerLabel, speakerStyle } from './speakerStyle';
 
 export const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 
@@ -43,6 +45,9 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const activeRef = useRef<HTMLButtonElement | null>(null);
+  // Which chip is being renamed: the speaker, and the segment whose chip was clicked (only that one shows the box).
+  const [renaming, setRenaming] = useState<{ id: string; idx: number } | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
 
   const segments = audio.segments;
   const active = useMemo(() => activeSegmentIndex(segments, now), [segments, now]);
@@ -97,6 +102,39 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
     }
   };
 
+  const identify = async () => {
+    const named = Object.keys(audio.speakers ?? {}).length > 0;
+    if (named && !window.confirm('Identifying speakers again replaces the speaker names you chose. Continue?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await notes.identifySpeakers(audio.id);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start speaker identification.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const beginRename = (id: string, idx: number) => {
+    setRenaming({ id, idx });
+    setNameDraft(audio.speakers?.[id] ?? '');
+  };
+
+  const saveRename = async () => {
+    const id = renaming?.id;
+    if (!id) return;
+    setRenaming(null);
+    try {
+      await notes.renameSpeakers(audio.id, { [id]: nameDraft });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not rename the speaker.');
+    }
+  };
+
+  const diarizing = audio.diarization_status === 'pending' || audio.diarization_status === 'processing';
   const status = STATUS[audio.status];
   const waiting = audio.status === 'processing' || audio.status === 'uploading' || (audio.status === 'pending' && !audio.error);
 
@@ -136,10 +174,54 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
         </p>
       )}
 
+      {audio.status === 'done' && diarizing && (
+        <p className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+          <Loader2 size={12} className="animate-spin" />
+          Identifying speakers…{audio.diarization_error ? ` (last attempt failed: ${audio.diarization_error})` : ''}
+        </p>
+      )}
+      {audio.status === 'done' && audio.diarization_status === 'failed' && (
+        <p className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
+          <AlertCircle size={12} /> Speaker identification failed{audio.diarization_error ? ` — ${audio.diarization_error}` : ''}
+        </p>
+      )}
+      {audio.status === 'done' && audio.diarization_status === 'done' && audio.diarization_error && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">{audio.diarization_error}</p>
+      )}
+
       {segments.length > 0 && (
         <ol className="max-h-72 overflow-y-auto rounded-lg bg-gray-50 dark:bg-gray-800/50 p-2 space-y-0.5" aria-label="Transcript">
           {segments.map((s, i) => (
-            <li key={s.idx}>
+            <li key={s.idx} className={s.speaker ? `border-l-2 pl-1.5 ${speakerStyle(s.speaker).bar}` : undefined}>
+              {s.speaker && (i === 0 || segments[i - 1].speaker !== s.speaker) && (
+                renaming?.idx === s.idx && !editing ? (
+                  <input
+                    autoFocus
+                    value={nameDraft}
+                    maxLength={60}
+                    aria-label={`Name for ${speakerLabel(s.speaker, audio.speakers)}`}
+                    placeholder={speakerLabel(s.speaker, {})}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onBlur={() => void saveRename()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void saveRename();
+                      if (e.key === 'Escape') setRenaming(null);
+                    }}
+                    className="input mt-1 mb-0.5 w-48 py-0.5 text-xs"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    disabled={editing}
+                    onClick={() => beginRename(s.speaker!, s.idx)}
+                    title="Click to rename this speaker"
+                    aria-label={`${speakerLabel(s.speaker, audio.speakers)} (rename)`}
+                    className={`mt-1 mb-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${speakerStyle(s.speaker).chip} disabled:cursor-default`}
+                  >
+                    <UserRound size={10} /> {speakerLabel(s.speaker, audio.speakers)}
+                  </button>
+                )
+              )}
               {editing ? (
                 <div className="flex items-start gap-2">
                   <span className="mt-1.5 w-10 shrink-0 text-right text-[11px] tabular-nums text-gray-400">{formatDuration(s.start_ms)}</span>
@@ -183,6 +265,11 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
             {segments.length > 0 && audio.status === 'done' && (
               <button type="button" onClick={beginEdit} className={iconBtn}><Pencil size={12} /> Edit transcript</button>
             )}
+            {segments.length > 0 && audio.status === 'done' && !diarizing && (
+              <button type="button" onClick={() => void identify()} disabled={busy} className={iconBtn}>
+                <Users size={12} /> {audio.diarization_status === 'done' ? 'Identify speakers again' : 'Identify speakers'}
+              </button>
+            )}
             {(audio.status === 'done' || audio.status === 'failed' || audio.status === 'pending') && (
               <button type="button" onClick={() => void retranscribe()} disabled={busy} className={iconBtn}>
                 <RefreshCw size={12} /> {audio.status === 'done' ? 'Transcribe again' : audio.status === 'failed' ? 'Retry' : 'Transcribe now'}
@@ -209,7 +296,7 @@ export function NoteAudioList({ noteId }: { noteId: string }) {
     void load();
   }, [load]);
 
-  const anyWaiting = audio.some((a) => a.status === 'pending' || a.status === 'processing');
+  const anyWaiting = audio.some((a) => a.status === 'pending' || a.status === 'processing' || a.diarization_status === 'pending' || a.diarization_status === 'processing');
   useEffect(() => {
     if (!anyWaiting) return;
     const timer = setInterval(() => void load(), 5000);
