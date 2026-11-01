@@ -160,6 +160,7 @@ export default function NoteCheckIn({ editId = null, dateParam = null, onCreated
       const chosen = user ? (await listRecordings(user.id)).filter((m) => localAudio.includes(m.id)) : [];
       const audioIds = chosen.flatMap((m) => (m.serverId ? [m.serverId] : []));
       if (audioIds.length > 0) input.audio_ids = audioIds;
+      if (chosen.some((m) => !m.serverId)) input.pending_audio = true;
       const saved = editId ? await notes.update(editId, input) : await notes.create(input);
       const id = editId ?? saved.id;
       for (const m of chosen) {

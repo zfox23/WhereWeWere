@@ -386,6 +386,17 @@ describe('notes audio: audio-only notes, transcript search, content hash', () =>
     expect((await request(app).delete(`/api/v1/notes/audio/${id}`)).status).toBe(409);
   });
 
+  it('saves an empty note whose recording has not started uploading, and attaches it when it lands', async () => {
+    // Saved right after Stop: the device has the recording but no server id for it yet.
+    const made = await create({ title: '', body: '', pending_audio: true });
+    expect(made.status).toBe(201);
+    // Only the literal flag counts.
+    expect((await create({ title: '', body: '', pending_audio: 'yes' })).status).toBe(400);
+    const id = await audioRow();
+    expect((await request(app).put(`/api/v1/notes/audio/${id}/attach`).send({ note_id: made.body.id })).status).toBe(200);
+    expect((await request(app).get(`/api/v1/notes/checkins/${made.body.id}/audio`)).body).toHaveLength(1);
+  });
+
   it('finds notes by what was said in their audio, and only the owner’s', async () => {
     const spoken = await create({ title: 'Walk', body: 'Went outside', audio_ids: [await audioRow('We saw a magnificent heron by the river')] });
     await create({ title: 'Other', body: 'Nothing relevant' });

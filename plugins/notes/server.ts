@@ -191,10 +191,18 @@ router.get('/checkins/:id', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * The form saved a recording whose upload hasn't started yet (it has no server id to send), so the
+ * note may be empty for now: the device keeps the audio and attaches it as soon as the upload lands.
+ */
+function awaitingAudio(body: unknown): boolean {
+  return (body as { pending_audio?: unknown } | null)?.pending_audio === true;
+}
+
 router.post('/checkins', async (req: Request, res: Response) => {
   try {
     const audioIds = parseAudioIds(req.body?.audio_ids);
-    const input = parseNoteInput(req.body ?? {}, audioIds.length > 0);
+    const input = parseNoteInput(req.body ?? {}, audioIds.length > 0 || awaitingAudio(req.body));
     const out = await withTransaction(async (client) => {
       const result = await client.query(
         `INSERT INTO note_checkins (user_id, title, body, checked_in_at, checkin_timezone)
@@ -220,7 +228,10 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
     const audioIds = parseAudioIds(req.body?.audio_ids);
     const out = await withTransaction(async (client) => {
       // An empty note is fine as long as audio stays attached to it.
-      const input = parseNoteInput(req.body ?? {}, audioIds.length > 0 || await noteHasAudio(client, currentUserId(), id));
+      const input = parseNoteInput(
+        req.body ?? {},
+        audioIds.length > 0 || awaitingAudio(req.body) || await noteHasAudio(client, currentUserId(), id),
+      );
       const result = await client.query(
         `UPDATE note_checkins SET title = $3, body = $4, checked_in_at = $5, checkin_timezone = $6
          WHERE id = $1 AND user_id = $2 RETURNING id`,

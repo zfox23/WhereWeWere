@@ -86,6 +86,8 @@ export interface NoteInput {
   companions: string[];
   /** Server-side audio ids (already uploaded or in progress) to attach to the note. */
   audio_ids?: string[];
+  /** Recordings are on their way but have no server id yet (their upload hasn't started): allow an otherwise empty note. */
+  pending_audio?: boolean;
 }
 
 export interface RelatedNote {
