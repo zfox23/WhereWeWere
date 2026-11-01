@@ -5,6 +5,7 @@
 
 import { isValidTimeZone } from 'wwp-shared';
 import { query } from '../../../server/src/db';
+import { isUuid } from '../../../server/src/services/batching';
 import { MAX_BODY_LENGTH, MAX_TAG_LENGTH, MAX_TITLE_LENGTH, TAG_PALETTE } from '../manifest';
 
 /** Anything with a pg-style `query` (the pool helper or a transaction client). */
@@ -104,7 +105,7 @@ export function normalizeBody(text: string): string {
   return text.replace(/^﻿/, '').replace(/\r\n?/g, '\n').replace(/\s+$/, '');
 }
 
-export function parseNoteInput(body: Record<string, unknown>): NoteInput {
+export function parseNoteInput(body: Record<string, unknown>, hasAudio = false): NoteInput {
   const rawTitle = body.title;
   if (rawTitle != null && typeof rawTitle !== 'string') throw new InputError('title must be a string');
   const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
@@ -114,7 +115,7 @@ export function parseNoteInput(body: Record<string, unknown>): NoteInput {
   if (typeof rawBody !== 'string') throw new InputError('body must be a string');
   const text = normalizeBody(rawBody);
   if (text.length > MAX_BODY_LENGTH) throw new InputError(`The note is too long (max ${MAX_BODY_LENGTH} characters)`);
-  if (!title && !/\S/.test(text)) throw new InputError('Write something, or at least give the note a title');
+  if (!title && !/\S/.test(text) && !hasAudio) throw new InputError('Write something, record audio, or at least give the note a title');
 
   let checkedInAt = new Date().toISOString();
   if (body.checked_in_at != null) {
@@ -203,4 +204,41 @@ export function firstLine(body: string, max = 140): string {
   const line = body.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? '';
   const plain = line.replace(/^(#{1,6}\s+|[-*+]\s+(\[[ xX]\]\s+)?|>\s*|\d+[.)]\s+)/, '');
   return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
+}
+
+// ---------------------------------------------------------------------------
+// Audio attachments
+// ---------------------------------------------------------------------------
+
+const MAX_AUDIO_PER_REQUEST = 50;
+
+/** The `audio_ids` a create/edit request wants attached (uuids, de-duplicated). */
+export function parseAudioIds(value: unknown): string[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new InputError('audio_ids must be an array');
+  if (value.length > MAX_AUDIO_PER_REQUEST) throw new InputError('Too many audio files');
+  const ids: string[] = [];
+  for (const v of value) {
+    if (typeof v !== 'string' || !isUuid(v)) throw new InputError('audio_ids must be uuids');
+    if (!ids.includes(v)) ids.push(v);
+  }
+  return ids;
+}
+
+/** Attach the user's own audio rows to a note (appended after any already there). */
+export async function attachAudio(executor: Queryable, userId: string, noteId: string, audioIds: string[]): Promise<void> {
+  if (audioIds.length === 0) return;
+  const result = await executor.query(
+    `UPDATE note_audio a SET note_id = $3,
+            position = (SELECT COALESCE(MAX(position) + 1, 0) FROM note_audio WHERE note_id = $3) + t.ord - 1
+       FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord)
+      WHERE a.id = t.id AND a.user_id = $1 AND (a.note_id IS NULL OR a.note_id = $3)`,
+    [userId, audioIds, noteId],
+  );
+  if ((result.rowCount ?? 0) !== audioIds.length) throw new InputError('Audio file not found');
+}
+
+export async function noteHasAudio(executor: Queryable, userId: string, noteId: string): Promise<boolean> {
+  const r = await executor.query('SELECT 1 FROM note_audio WHERE note_id = $1 AND user_id = $2 LIMIT 1', [noteId, userId]);
+  return (r.rowCount ?? 0) > 0;
 }

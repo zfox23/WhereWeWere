@@ -7,6 +7,7 @@ import { createApp } from '../../../../server/src/index';
 import { noteAudioDir } from '../../services/audioFiles';
 import { MAX_ATTEMPTS, drainTranscriptionQueue } from '../../services/transcription';
 import { query } from '../../../../server/src/db';
+import { NOTE_TEXT_SQL, PENDING_WHERE } from '../../services/analysis';
 import {
   DEFAULT_USER_ID,
   resetIntegrationDatabase,
@@ -234,5 +235,81 @@ describe('notes audio: transcription queue', () => {
     const down = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: 'http://127.0.0.1:1/v1', model: 'x' });
     expect(down.body.ok).toBe(false);
     expect((await request(app).post('/api/v1/notes/transcription/test').send({})).status).toBe(400);
+  });
+});
+
+describe('notes audio: audio-only notes, transcript search, content hash', () => {
+  beforeEach(resetIntegrationDatabase);
+
+  /** An audio row as the upload flow leaves it, optionally with a finished transcript. */
+  async function audioRow(transcript = ''): Promise<string> {
+    const r = await query(
+      `INSERT INTO note_audio (user_id, filename, mime, bytes, sha256, status, transcript_text)
+       VALUES ($1, 'a.webm', 'audio/webm', 10, $2, $3, $4) RETURNING id`,
+      [DEFAULT_USER_ID, 'a'.repeat(64), transcript ? 'done' : 'pending', transcript],
+    );
+    return r.rows[0].id as string;
+  }
+  const hash = async (noteId: string) => (await query('SELECT content_hash FROM note_checkins WHERE id = $1', [noteId])).rows[0].content_hash as string;
+  const create = (extra: Record<string, unknown>) =>
+    request(app).post('/api/v1/notes/checkins').send({ checked_in_at: '2024-02-02T10:00:00Z', checkin_timezone: 'UTC', ...extra });
+
+  it('allows a note that is only audio, and still rejects a truly empty one', async () => {
+    expect((await create({ title: '', body: '' })).status).toBe(400);
+    const id = await audioRow();
+    const made = await create({ title: '', body: '', audio_ids: [id] });
+    expect(made.status).toBe(201);
+    expect((await request(app).get(`/api/v1/notes/checkins/${made.body.id}/audio`)).body).toHaveLength(1);
+    // Editing keeps working while audio remains attached; unknown audio is rejected.
+    expect((await request(app).put(`/api/v1/notes/checkins/${made.body.id}`)
+      .send({ title: '', body: '', checked_in_at: '2024-02-02T10:00:00Z', checkin_timezone: 'UTC' })).status).toBe(200);
+    expect((await create({ body: 'x', audio_ids: ['00000000-0000-0000-0000-00000000dead'] })).status).toBe(400);
+    // The sole content of an otherwise empty note can't be deleted out from under it.
+    expect((await request(app).delete(`/api/v1/notes/audio/${id}`)).status).toBe(409);
+  });
+
+  it('finds notes by what was said in their audio, and only the owner’s', async () => {
+    const spoken = await create({ title: 'Walk', body: 'Went outside', audio_ids: [await audioRow('We saw a magnificent heron by the river')] });
+    await create({ title: 'Other', body: 'Nothing relevant' });
+    const search = async (q: string) =>
+      ((await request(app).get('/api/v1/timeline').query({ q })).body.checkins ?? (await request(app).get('/api/v1/timeline').query({ q })).body)
+        .map((c: { id: string }) => c.id);
+    expect(await search('heron')).toEqual([spoken.body.id]);
+    expect(await search('herons')).toEqual([spoken.body.id]); // stemmed like body text
+    expect(await search('platypus')).toEqual([]);
+    const other = await createTestUser('searcher');
+    const res = await request(app).get('/api/v1/timeline').query({ q: 'heron' }).set('Cookie', other.cookie);
+    expect(JSON.stringify(res.body)).not.toContain(spoken.body.id);
+  });
+
+  it('changes the note’s content hash when a transcript is saved, edited or removed', async () => {
+    const note = await create({ title: 'T', body: 'B' });
+    const noteId = note.body.id as string;
+    const plain = await hash(noteId);
+    expect(plain).toBe((await query(`SELECT md5('T' || E'\\n' || 'B') AS h`)).rows[0].h); // unchanged formula without audio
+
+    const audio = await audioRow();
+    await request(app).put(`/api/v1/notes/audio/${audio}/attach`).send({ note_id: noteId });
+    expect(await hash(noteId)).toBe(plain); // no transcript yet
+
+    await query(`UPDATE note_audio SET transcript_text = 'first words', status = 'done' WHERE id = $1`, [audio]);
+    const withFirst = await hash(noteId);
+    expect(withFirst).not.toBe(plain);
+    await query(`UPDATE note_audio SET transcript_text = 'second words' WHERE id = $1`, [audio]);
+    expect(await hash(noteId)).not.toBe(withFirst);
+    await query('DELETE FROM note_audio WHERE id = $1', [audio]);
+    expect(await hash(noteId)).toBe(plain);
+  });
+
+  it('queues a note for analysis once its transcript exists, and not before', async () => {
+    const made = await create({ title: '', body: '', audio_ids: [await audioRow()] });
+    const pending = async () => (await query(
+      `SELECT n.id FROM note_checkins n LEFT JOIN note_embeddings e ON e.note_id = n.id WHERE ${PENDING_WHERE}`,
+      [DEFAULT_USER_ID, 'm'],
+    )).rows.map((r) => r.id);
+    expect(await pending()).toEqual([]);
+    await query(`UPDATE note_audio SET transcript_text = 'something to analyse', status = 'done' WHERE note_id = $1`, [made.body.id]);
+    expect(await pending()).toEqual([made.body.id]);
+    expect((await query(`SELECT ${NOTE_TEXT_SQL} AS t FROM note_checkins n WHERE n.id = $1`, [made.body.id])).rows[0].t).toContain('something to analyse');
   });
 });

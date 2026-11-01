@@ -56,7 +56,15 @@ function checkCancelled(ctx: AnalysisContext) {
 }
 
 /** SQL: this user's notes whose embedding is missing or stale for `$2` (the model). */
-export const PENDING_WHERE = `n.user_id = $1 AND (e.note_id IS NULL OR e.content_hash <> n.content_hash OR e.model <> $2)`;
+/**
+ * A note's analysable text: its body plus the transcripts of its audio
+ * (the `note_transcripts` SQL function, migration 078).
+ */
+export const NOTE_TEXT_SQL = `(n.body || COALESCE(E'\\n\\n' || note_transcripts(n.id), ''))`;
+
+// A note with nothing to read yet (audio still being transcribed) has no embedding to make.
+export const PENDING_WHERE = `n.user_id = $1 AND (e.note_id IS NULL OR e.content_hash <> n.content_hash OR e.model <> $2)
+  AND (COALESCE(btrim(n.title), '') <> '' OR n.body ~ '\\S' OR note_transcripts(n.id) IS NOT NULL)`;
 
 /** SQL: this user's mood check-ins that have text (alias `mc`). */
 export const MOOD_WITH_TEXT = `mc.user_id = $1 AND btrim(COALESCE(mc.note, '')) <> ''`;
@@ -86,7 +94,7 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
   // ---- 1. embed ----------------------------------------------------------
   const includeMood = await includesMoodEntries(userId);
   const pending = await query(
-    `SELECT n.id, n.title, n.body, n.content_hash
+    `SELECT n.id, n.title, ${NOTE_TEXT_SQL} AS body, n.content_hash
      FROM note_checkins n LEFT JOIN note_embeddings e ON e.note_id = n.id
      WHERE ${PENDING_WHERE}
      ORDER BY n.checked_in_at ASC`,
@@ -154,7 +162,7 @@ export async function runSimilarityAnalysis(userId: string, ctx: AnalysisContext
   // ---- 2. link -----------------------------------------------------------
   checkCancelled(ctx);
   const rows = (await query(
-    `SELECT n.id, n.title, left(n.body, 1200) AS excerpt,
+    `SELECT n.id, n.title, left(${NOTE_TEXT_SQL}, 1200) AS excerpt,
             (n.checked_in_at AT TIME ZONE COALESCE(n.checkin_timezone, 'UTC'))::date::text AS date,
             COALESCE((SELECT array_agg(t.name ORDER BY lower(t.name))
                       FROM note_tag_links l JOIN note_tags t ON t.id = l.tag_id

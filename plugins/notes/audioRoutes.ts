@@ -256,6 +256,17 @@ export function registerAudioRoutes(router: Router): void {
     try {
       const id = String(req.params.id);
       if (!isUuid(id)) return res.status(404).json({ error: 'Audio not found' });
+      // Removing the only content of an otherwise empty note would leave a blank note.
+      const sole = await query(
+        `SELECT 1 FROM note_audio a JOIN note_checkins n ON n.id = a.note_id
+          WHERE a.id = $1 AND a.user_id = $2
+            AND COALESCE(btrim(n.title), '') = '' AND n.body !~ '\\S'
+            AND NOT EXISTS (SELECT 1 FROM note_audio o WHERE o.note_id = n.id AND o.id <> a.id)`,
+        [id, userId],
+      );
+      if ((sole.rowCount ?? 0) > 0) {
+        return res.status(409).json({ error: 'This is the only content of the note; delete the note instead' });
+      }
       const r = await query(
         `DELETE FROM note_audio WHERE id = $1 AND user_id = $2 RETURNING mime`,
         [id, userId],

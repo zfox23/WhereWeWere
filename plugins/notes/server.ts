@@ -58,6 +58,9 @@ import {
   NOTE_SELECT,
   NOTE_STORED_COLUMNS,
   addTagsToNotes,
+  attachAudio,
+  noteHasAudio,
+  parseAudioIds,
   db,
   loadNote,
   normalizeTagNames,
@@ -181,7 +184,8 @@ router.get('/checkins/:id', async (req: Request, res: Response) => {
 
 router.post('/checkins', async (req: Request, res: Response) => {
   try {
-    const input = parseNoteInput(req.body ?? {});
+    const audioIds = parseAudioIds(req.body?.audio_ids);
+    const input = parseNoteInput(req.body ?? {}, audioIds.length > 0);
     const out = await withTransaction(async (client) => {
       const result = await client.query(
         `INSERT INTO note_checkins (user_id, title, body, checked_in_at, checkin_timezone)
@@ -191,6 +195,7 @@ router.post('/checkins', async (req: Request, res: Response) => {
       const id = result.rows[0].id as string;
       await setNoteTags(client, id, await resolveTags(client, currentUserId(), input.tags));
       await insertCompanions('notes', id, req.body?.companions, client);
+      await attachAudio(client, currentUserId(), id, audioIds);
       return { row: (await loadNote(currentUserId(), id, client))!, companions: await getCompanions('notes', id, client) };
     });
     res.status(201).json({ ...out.row, companions: out.companions, themes: [] });
@@ -203,8 +208,10 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   if (!isUuid(id)) return res.status(404).json({ error: 'Note not found' });
   try {
-    const input = parseNoteInput(req.body ?? {});
+    const audioIds = parseAudioIds(req.body?.audio_ids);
     const out = await withTransaction(async (client) => {
+      // An empty note is fine as long as audio stays attached to it.
+      const input = parseNoteInput(req.body ?? {}, audioIds.length > 0 || await noteHasAudio(client, currentUserId(), id));
       const result = await client.query(
         `UPDATE note_checkins SET title = $3, body = $4, checked_in_at = $5, checkin_timezone = $6
          WHERE id = $1 AND user_id = $2 RETURNING id`,
@@ -213,6 +220,7 @@ router.put('/checkins/:id', async (req: Request, res: Response) => {
       if (result.rowCount === 0) return null;
       await setNoteTags(client, id, await resolveTags(client, currentUserId(), input.tags));
       const companions = await setCompanions('notes', id, req.body?.companions, client);
+      await attachAudio(client, currentUserId(), id, audioIds);
       return { row: (await loadNote(currentUserId(), id, client))!, companions };
     });
     if (!out) return res.status(404).json({ error: 'Note not found' });
@@ -846,16 +854,18 @@ export const server: CheckinTypeServerPlugin = {
       alias: 'n',
       timestampColumn: 'checked_in_at',
       timezoneColumn: 'checkin_timezone',
-      // Full-text over title + body (stemmed), plus substring matches on the
+      // Full-text over title + body + audio transcripts (stemmed), plus substring matches on the
       // title and tag names so partial words still find a note.
       search: (c, q) => {
         const like = `%${escapeLike(q)}%`;
         c.push(
           `(n.search_vector @@ plainto_tsquery('english', ?)
+            OR EXISTS (SELECT 1 FROM note_audio sa WHERE sa.note_id = n.id
+                       AND sa.transcript_vector @@ plainto_tsquery('english', ?))
             OR n.title ILIKE ?
             OR EXISTS (SELECT 1 FROM note_tag_links sl JOIN note_tags st ON st.id = sl.tag_id
                        WHERE sl.note_id = n.id AND st.name ILIKE ?))`,
-          q, like, like,
+          q, q, like, like,
         );
       },
     });
