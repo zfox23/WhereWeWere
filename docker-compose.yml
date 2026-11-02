@@ -46,33 +46,33 @@ services:
       retries: 10
       start_period: 30s
 
-  # Optional local speech-to-text (faster-whisper behind an OpenAI-compatible
-  # API). Not started by default; enable with:
+  # Optional local speech-to-text: whisper.cpp's server behind an OpenAI-compatible
+  # API. Not started by default; enable with:
   #   docker compose --profile transcription up -d
-  # On start it installs the model named by TRANSCRIPTION_MODEL (a few GB the
-  # first time, cached in the whisper_models volume; set it empty to install nothing).
+  # On the first start it downloads the model named by TRANSCRIPTION_MODEL (default
+  # large-v3, about 3 GB) into the whisper_cpp_models volume.
   # Then in the app: Settings -> Integrations -> Notes -> Audio transcription,
-  # base URL http://transcription:8000/v1 (from the server container) or
-  # http://localhost:${TRANSCRIPTION_PORT:-8000}/v1, and the same model name.
+  # URL http://transcription:8000/v1 (from the server container); no model name is needed.
   # Requires an NVIDIA GPU and the NVIDIA Container Toolkit.
   transcription:
     profiles: ["transcription"]
-    image: ghcr.io/speaches-ai/speaches:latest-cuda
+    image: ghcr.io/ggml-org/whisper.cpp:main-cuda
     restart: unless-stopped
-    command: ["sh", "/start.sh"]
+    entrypoint: ["sh", "/start.sh"]
     environment:
-      TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL-Systran/faster-whisper-large-v3}
-      # Off by default. Batched mode stops a transcript looping on one phrase, but it only works with
-      # voice-activity detection, which discards quiet speech (children, singing, distant voices), and
-      # it returns one segment per 30 s chunk instead of sentences. See docs/audio-notes.md.
-      WHISPER__USE_BATCHED_MODE: ${TRANSCRIPTION_BATCHED_MODE-false}
+      TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL:-large-v3}
     ports:
       - "${TRANSCRIPTION_PORT:-8000}:8000"
     volumes:
       - ./transcription/start.sh:/start.sh:ro
-      # A named volume, not ./data/whisper: Docker would create a missing host directory
-      # owned by root, and the container (user ubuntu) could not write the model into it.
-      - whisper_models:/home/ubuntu/.cache/huggingface/hub
+      - whisper_cpp_models:/models
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/v1/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # The first start downloads the model.
+      start_period: 600s
     deploy:
       resources:
         reservations:
@@ -127,5 +127,5 @@ services:
 
 volumes:
   postgres_data:
-  whisper_models:
+  whisper_cpp_models:
   diarization_models:

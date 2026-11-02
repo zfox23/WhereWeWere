@@ -26,27 +26,28 @@ While recording, **Blank screen** covers the app with solid black (handy for a p
 
 ## Transcription (optional)
 
-Transcription runs on your own machine through an OpenAI-compatible `/audio/transcriptions` endpoint. Docker Compose ships an optional service for it (faster-whisper, NVIDIA GPU) that is **not started by default**:
+Transcription runs on your own machine through an OpenAI-compatible `/audio/transcriptions` endpoint. Docker Compose ships an optional service for it ([whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s server, NVIDIA GPU) that is **not started by default**:
 
 ```bash
 docker compose --profile transcription up -d
 ```
 
-Then open **Settings → Integrations → Audio transcription**, enter the URL (`http://transcription:8000/v1` from the server container), the model (for example `Systran/faster-whisper-large-v3`), optionally an API key and a language hint (blank detects the language), and use **Test connection**.
+Then open **Settings → Integrations → Audio transcription**, enter the URL (`http://transcription:8000/v1` from the server container), optionally a language hint (blank detects the language), and use **Test connection**. The bundled service serves one model, so the model field can stay empty.
 
-The service ships with no models, so on start it installs the one named by `TRANSCRIPTION_MODEL` (default `Systran/faster-whisper-large-v3`, set in `.env`). The first start downloads it, which is a few GB and takes several minutes; watch `docker compose logs -f transcription`. It is cached in the `whisper_models` Docker volume, so later starts only check that it is there (`docker volume rm wherewewere_whisper_models` frees the space). Use the same model name in **Settings → Integrations → Audio transcription**. The app never installs models itself: if the names don't match, waiting audio shows the service's "model is not installed" error.
+On its first start the service downloads the model named by `TRANSCRIPTION_MODEL` (default `large-v3`, about 3 GB, set in `.env`); watch `docker compose logs -f transcription`. Any whisper.cpp model name works (`large-v3-turbo` is faster, `medium` or `small.en` smaller); the file is `ggml-<name>.bin` from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main). It is kept in the `whisper_cpp_models` Docker volume, so later starts reuse it. Changing `TRANSCRIPTION_MODEL` downloads the new one on the next start; remove an old file with `docker run --rm -v wherewewere_whisper_cpp_models:/m alpine rm /m/ggml-<name>.bin`.
 
-Any other OpenAI-compatible transcription server works if you point the URL at it. If audio stays on "Waiting to be transcribed", the note shows the last error; `docker compose logs transcription` has the service's side.
+The service is started so that a transcript can't get stuck repeating one phrase: each 30-second window is decoded without the previous window's text as a prompt (`--max-context 0`), and a window that comes out repetitive is decoded again at a higher temperature. Voice-activity detection stays off, so quiet speech (children, singing, distant voices) is kept.
 
-The app folds any run of four or more identical segments into one, as a safety net against a model looping on a phrase. See [Troubleshooting](troubleshooting.md#a-transcript-repeats-one-word-or-phrase-over-and-over) for the batched-mode option and its trade-offs.
+Any other OpenAI-compatible transcription server works if you point the URL at it (set the model field if it hosts several). If audio stays on "Waiting to be transcribed", the note shows the last error; `docker compose logs transcription` has the service's side.
+
+As a further safety net, the app folds any run of four or more identical segments into one. See [Troubleshooting](troubleshooting.md#a-transcript-repeats-one-word-or-phrase-over-and-over).
 
 Audio waits (status "Waiting to be transcribed") until an endpoint is saved in Settings (the connection test uses what is typed in the form, saved or not); nothing is lost, and it is picked up within a minute of saving. While the service is down, restarting or still installing its model, audio waits and is retried every couple of minutes, however long that takes. Audio the service refuses (it can't decode it, or it's too large) fails straight away. Other failures retry with growing delays and then show **Retry**; files that failed that way are queued again automatically the next time a transcription succeeds. **Transcribe again** replaces a transcript, including your corrections. Transcripts also feed the notes similarity analysis.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `TRANSCRIPTION_PORT` | `8000` | Host port the optional transcription service publishes. |
-| `TRANSCRIPTION_MODEL` | `Systran/faster-whisper-large-v3` | Model the transcription service installs when it starts. Empty installs nothing. |
-| `TRANSCRIPTION_BATCHED_MODE` | `false` | Batched decoding stops looping transcripts but needs voice-activity detection (which drops quiet speech) and gives 30-second segments. Leave off unless loops are your main problem. |
+| `TRANSCRIPTION_MODEL` | `large-v3` | whisper.cpp model the transcription service downloads on its first start (`ggml-<name>.bin`). |
 
 ## Importing audio files
 
