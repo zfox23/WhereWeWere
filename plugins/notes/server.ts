@@ -1065,7 +1065,7 @@ export const server: CheckinTypeServerPlugin = {
     { name: 'embedding_model', type: 'string', label: 'Embedding model' },
     { name: 'embedding_api_key', type: 'string', label: 'Embedding API key' },
     { name: 'transcription_api_url', type: 'string', label: 'Transcription API URL' },
-    { name: 'transcription_model', type: 'string', label: 'Transcription model' },
+    { name: 'transcription_model', type: 'string', label: 'Transcription model (optional)' },
     { name: 'transcription_api_key', type: 'string', label: 'Transcription API key' },
     { name: 'transcription_language', type: 'string', label: 'Transcription language hint' },
     { name: 'diarization_api_url', type: 'string', label: 'Speaker identification service URL' },

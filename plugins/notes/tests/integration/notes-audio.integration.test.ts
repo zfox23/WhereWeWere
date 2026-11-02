@@ -178,6 +178,8 @@ describe('notes audio: transcription queue', () => {
   let respond: (res: http.ServerResponse) => void = () => {};
   // Like Speaches: transcription 404s until the model has been installed (by the service, not by us).
   let modelInstalled = true;
+  // Like whisper.cpp: one model, no /models listing, a /health endpoint instead.
+  let singleModelServer = false;
   let installs: string[] = [];
 
   beforeAll(async () => {
@@ -185,6 +187,10 @@ describe('notes audio: transcription queue', () => {
       const parts: Buffer[] = [];
       req.on('data', (c: Buffer) => parts.push(c));
       req.on('end', () => {
+        if (singleModelServer && req.method === 'GET') {
+          res.statusCode = req.url?.endsWith('/health') ? 200 : 404;
+          return res.end(req.url?.endsWith('/health') ? '{"status":"ok"}' : 'Not Found');
+        }
         if (req.url?.endsWith('/models')) {
           res.setHeader('Content-Type', 'application/json');
           return res.end(JSON.stringify({ data: [{ id: 'fake-model' }] }));
@@ -211,6 +217,7 @@ describe('notes audio: transcription queue', () => {
     requests = [];
     installs = [];
     modelInstalled = true;
+    singleModelServer = false;
     respond = (res) => {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({
@@ -449,10 +456,27 @@ describe('notes audio: transcription queue', () => {
     const ok = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'fake-model' });
     expect(ok.body).toEqual({ ok: true, message: 'Connected.' });
     const unknownModel = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl, model: 'other' });
-    expect(unknownModel.body.message).toContain('not installed on the service');
+    expect(unknownModel.body.message).toContain(`doesn't list a model named "other"`);
     const down = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: 'http://127.0.0.1:1/v1', model: 'x' });
     expect(down.body.ok).toBe(false);
     expect((await request(app).post('/api/v1/notes/transcription/test').send({})).status).toBe(400);
+  });
+
+  it('connects to a single-model server (whisper.cpp) through /health, with no model name', async () => {
+    singleModelServer = true;
+    const ok = await request(app).post('/api/v1/notes/transcription/test').send({ api_url: fakeUrl });
+    expect(ok.body).toEqual({ ok: true, message: 'Connected.' });
+  });
+
+  it('transcribes with only a URL set, sending a default model name', async () => {
+    await query(
+      `INSERT INTO plugin_settings (user_id, plugin_id, key, value) VALUES ($1, 'notes', 'transcription_api_url', $2::jsonb)`,
+      [DEFAULT_USER_ID, JSON.stringify(fakeUrl)],
+    );
+    const id = await uploadedAudio();
+    expect(await drainTranscriptionQueue()).toBe(1);
+    expect(await state(id)).toMatchObject({ status: 'done', transcript_text: 'Hello there. General Kenobi.' });
+    expect(requests[0].body.toString('latin1')).toMatch(/name="model"\r\n\r\nwhisper-1\r\n/);
   });
 });
 

@@ -11,7 +11,6 @@ import { plugins } from '../../../client/src/plugins/api';
 import { notes } from './api';
 
 const DEFAULT_URL = 'http://transcription:8000/v1';
-const DEFAULT_MODEL = 'Systran/faster-whisper-large-v3';
 
 export function TranscriptionSettings() {
   const [url, setUrl] = useState('');
@@ -49,9 +48,9 @@ export function TranscriptionSettings() {
       });
       setMsg({
         type: 'success',
-        text: url.trim() && model.trim()
+        text: url.trim()
           ? 'Saved. Audio waiting for a transcript is picked up within a minute.'
-          : 'Saved. Add a URL and model to turn transcription on.',
+          : 'Saved. Add a URL to turn transcription on.',
       });
     } catch (err) {
       setMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save.' });
@@ -82,7 +81,7 @@ export function TranscriptionSettings() {
         <Mic size={16} className="text-rose-500" /> Audio transcription
       </h3>
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        An OpenAI-compatible <code>/audio/transcriptions</code> endpoint (faster-whisper). Start the bundled one with
+        An OpenAI-compatible <code>/audio/transcriptions</code> endpoint. Start the bundled one (whisper.cpp) with
         {' '}<code>docker compose --profile transcription up -d</code>, then use <code>{DEFAULT_URL}</code>. Audio you attach to a
         note is transcribed in the background; the language is detected automatically unless you set a hint.
       </p>
@@ -92,8 +91,8 @@ export function TranscriptionSettings() {
           <input id="tx-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={DEFAULT_URL} className={inputClass} />
         </div>
         <div>
-          <label htmlFor="tx-model" className={labelClass}>Transcription model</label>
-          <input id="tx-model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder={DEFAULT_MODEL} className={inputClass} />
+          <label htmlFor="tx-model" className={labelClass}>Model (optional; the bundled service has one)</label>
+          <input id="tx-model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="whisper-1" className={inputClass} />
         </div>
         <div>
           <label htmlFor="tx-key" className={labelClass}>API key (optional)</label>

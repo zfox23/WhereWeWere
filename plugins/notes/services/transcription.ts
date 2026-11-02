@@ -2,7 +2,7 @@
  * Notes plugin — speech-to-text for attached audio.
  *
  * Talks to an OpenAI-compatible `/audio/transcriptions` endpoint (the optional
- * `transcription` compose service runs faster-whisper behind one). The
+ * `transcription` compose service runs whisper.cpp's server behind one). The
  * original file is sent as-is: the server decodes whatever the browser
  * recorded (webm/opus, mp4/aac, ...), so nothing is transcoded on our side.
  *
@@ -26,6 +26,7 @@ import { audioExtForMime, noteAudioDir, noteAudioPath } from './audioFiles';
 import { postMultipartFile, request } from './httpClient';
 import { DiarizationError, diarizeAudio, getDiarizationConfig } from './diarization';
 import { labelSpeakers, restoreOriginalSegments, type SpeakerSegment, type TimedWord, type Turn } from './speakers';
+import { languageCode } from './whisperLanguages';
 
 export interface TranscriptionConfig {
   apiUrl: string;
@@ -78,10 +79,12 @@ const UNREACHABLE_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EH
 /** Classify a non-2xx answer from the transcription service. */
 export function classifyTranscriptionStatus(status: number, body: string): TranscriptionError['kind'] {
   if (status === 503) return 'unavailable';
-  // The bundled service (Speaches) answers 404 "... is not installed locally" while it is still
-  // downloading the model on its first start.
+  // Speaches (an OpenAI-compatible server, bundled here before whisper.cpp) answers 404
+  // "... is not installed locally" while it is still downloading its model.
   if (status === 404 && /not installed/i.test(body)) return 'unavailable';
   if (status === 400 || status === 413 || status === 415 || status === 422) return 'rejected';
+  // whisper.cpp answers 500 when ffmpeg can't decode the file: that is the audio, not the service.
+  if (status === 500 && /ffmpeg conversion failed/i.test(body)) return 'rejected';
   return 'failed';
 }
 const POLL_INTERVAL_MS = 30 * 1000;
@@ -89,6 +92,12 @@ const POLL_INTERVAL_MS = 30 * 1000;
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/+$/, '');
 }
+
+/**
+ * Sent when no model is set. A server that hosts one model (the bundled whisper.cpp) ignores the
+ * field; OpenAI's own API knows this name.
+ */
+export const DEFAULT_MODEL = 'whisper-1';
 
 export async function getTranscriptionConfig(userId: string): Promise<TranscriptionConfig | null> {
   const result = await query(
@@ -101,9 +110,8 @@ export async function getTranscriptionConfig(userId: string): Promise<Transcript
   for (const row of result.rows) v[row.key] = row.value;
   const str = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim() : '');
   const apiUrl = normalizeUrl(str(v.transcription_api_url));
-  const model = str(v.transcription_model);
-  if (!apiUrl || !model) return null;
-  return { apiUrl, model, apiKey: str(v.transcription_api_key) || null, language: str(v.transcription_language) || null };
+  if (!apiUrl) return null;
+  return { apiUrl, model: str(v.transcription_model) || DEFAULT_MODEL, apiKey: str(v.transcription_api_key) || null, language: str(v.transcription_language) || null };
 }
 
 /** Delay before retry number `attempts` (1-based): 30 s, 1 m, 2 m ... capped at 1 h. */
@@ -143,14 +151,34 @@ export function collapseRepeatedSegments(segments: TranscriptSegment[]): { segme
   return { segments: out, collapsed };
 }
 
-/** `{ word, start, end }` entries (seconds) -> timings in milliseconds; anything malformed is skipped. */
-function parseWords(raw: unknown): TimedWord[] {
+/**
+ * `{ word, start, end }` entries (seconds) -> word timings in milliseconds; anything malformed is skipped.
+ *
+ * Servers disagree on what an entry is. faster-whisper and OpenAI give whole words; whisper.cpp gives
+ * Whisper's sub-word tokens (" Rom", "antic", "."), where an entry without a leading space continues
+ * the word before it. The entries are joined back into words only when they really are pieces of
+ * `text` (the segment they belong to): glued together as-is they spell it exactly. Whole words never
+ * do, because the spaces between them are missing.
+ */
+export function parseWords(raw: unknown, text?: string): TimedWord[] {
   if (!Array.isArray(raw)) return [];
-  const out: TimedWord[] = [];
+  const entries: { text: string; startMs: number; endMs: number }[] = [];
   for (const w of raw as Record<string, unknown>[]) {
-    const text = typeof w?.word === 'string' ? w.word : typeof w?.text === 'string' ? w.text : '';
-    if (!text.trim() || typeof w.start !== 'number' || typeof w.end !== 'number') continue;
-    out.push({ startMs: Math.max(Math.round(w.start * 1000), 0), endMs: Math.max(Math.round(w.end * 1000), 0), text: text.startsWith(' ') ? text : ` ${text}` });
+    const t = typeof w?.word === 'string' ? w.word : typeof w?.text === 'string' ? w.text : '';
+    if (!t || typeof w.start !== 'number' || typeof w.end !== 'number') continue;
+    entries.push({ text: t, startMs: Math.max(Math.round(w.start * 1000), 0), endMs: Math.max(Math.round(w.end * 1000), 0) });
+  }
+  const pieces = text !== undefined && entries.length > 1 && entries.map((e) => e.text).join('').trim() === text.trim();
+  const out: TimedWord[] = [];
+  for (const e of entries) {
+    const prev = out[out.length - 1];
+    if (pieces && prev && !/^\s/.test(e.text)) {
+      prev.text += e.text;
+      prev.endMs = Math.max(prev.endMs, e.endMs);
+      continue;
+    }
+    if (!e.text.trim()) continue;
+    out.push({ startMs: e.startMs, endMs: e.endMs, text: ` ${e.text.trimStart()}` });
   }
   return out;
 }
@@ -166,7 +194,7 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
       if (!text) continue;
       const start = typeof s.start === 'number' ? s.start : 0;
       const end = typeof s.end === 'number' ? s.end : start;
-      const segWords = parseWords(s.words);
+      const segWords = parseWords(s.words, typeof s.text === 'string' ? s.text : undefined);
       segments.push({
         startMs: Math.max(Math.round(start * 1000), 0),
         endMs: Math.max(Math.round(end * 1000), 0),
@@ -193,7 +221,7 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResult {
   if (!text || folded.collapsed > 0) text = folded.segments.map((s) => s.text).join(' ');
   return {
     text,
-    language: typeof body.language === 'string' && body.language ? body.language : null,
+    language: languageCode(body.language),
     durationMs: duration,
     segments: folded.segments,
     collapsedRepeats: folded.collapsed,
@@ -248,19 +276,24 @@ export async function testTranscriptionConfig(config: Pick<TranscriptionConfig, 
   try {
     const headers: Record<string, string> = {};
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-    const res = await request(new URL(`${normalizeUrl(config.apiUrl)}/models`), { method: 'GET', headers }, (req) => req.end());
+    const get = (p: string) => request(new URL(`${normalizeUrl(config.apiUrl)}${p}`), { method: 'GET', headers }, (req) => req.end());
+    const res = await get('/models');
     if (res.status === 401 || res.status === 403) return { ok: false, message: 'The service rejected the API key.' };
+    if (res.status === 404) {
+      // A single-model server (the bundled whisper.cpp) lists no models; it answers /health instead.
+      const health = await get('/health');
+      if (health.status === 503) return { ok: true, message: 'Connected. The model is still loading; try again shortly.' };
+      if (health.status >= 200 && health.status < 300) return { ok: true, message: 'Connected.' };
+      return { ok: false, message: `The service answered ${res.status} for /models and ${health.status} for /health. Check the URL (it usually ends in /v1).` };
+    }
     if (res.status < 200 || res.status >= 300) return { ok: false, message: `The service answered ${res.status} for /models.` };
     let ids: string[] = [];
     try {
       const data = (JSON.parse(res.body) as { data?: { id?: string }[] }).data;
       ids = Array.isArray(data) ? data.map((m) => String(m.id)) : [];
     } catch { /* not every server lists models */ }
-    if (ids.length > 0 && !ids.includes(config.model)) {
-      return {
-        ok: true,
-        message: `Connected, but "${config.model}" is not installed on the service. The bundled service installs the model named by TRANSCRIPTION_MODEL when it starts; make sure the two match (see docs/audio-notes.md).`,
-      };
+    if (config.model && ids.length > 0 && !ids.includes(config.model)) {
+      return { ok: true, message: `Connected, but the service doesn't list a model named "${config.model}". Check the model name.` };
     }
     return { ok: true, message: 'Connected.' };
   } catch (err) {
@@ -283,10 +316,10 @@ async function claimNext(): Promise<AudioRow | null> {
                    WHERE status = 'pending' AND next_attempt_at <= NOW()
                      -- Audio of a user with no endpoint set up just waits; it is picked
                      -- up on the next poll once they save one, with no delay to unwind.
-                     AND (SELECT COUNT(*) FROM plugin_settings ps
-                           WHERE ps.user_id = note_audio.user_id AND ps.plugin_id = 'notes'
-                             AND ps.key IN ('transcription_api_url', 'transcription_model')
-                             AND jsonb_typeof(ps.value) = 'string' AND btrim(ps.value #>> '{}') <> '') = 2
+                     AND EXISTS (SELECT 1 FROM plugin_settings ps
+                                  WHERE ps.user_id = note_audio.user_id AND ps.plugin_id = 'notes'
+                                    AND ps.key = 'transcription_api_url'
+                                    AND jsonb_typeof(ps.value) = 'string' AND btrim(ps.value #>> '{}') <> '')
                    ORDER BY next_attempt_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING id, user_id, filename, mime, attempts`,
   );
@@ -351,7 +384,7 @@ async function processRow(row: AudioRow): Promise<void> {
     const diarization = await getDiarizationConfig(row.user_id);
     const result = await transcribeFile({ ...config, wordTimestamps: diarization !== null }, file, row.filename, row.mime);
     if (result.collapsedRepeats > 0) {
-      console.warn(`Transcript of "${row.filename}" looped: folded ${result.collapsedRepeats} repeated segments. Check the transcription service's VAD / batched-mode settings.`);
+      console.warn(`Transcript of "${row.filename}" looped: folded ${result.collapsedRepeats} repeated segments. Check that the transcription service doesn't condition on previous text (see docs/troubleshooting.md).`);
     }
     await saveTranscript(row.id, config.model, result, diarization !== null);
     transcribed = true;

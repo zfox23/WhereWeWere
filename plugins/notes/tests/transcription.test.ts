@@ -95,5 +95,50 @@ describe('classifyTranscriptionStatus', () => {
     expect(classifyTranscriptionStatus(404, 'Not Found')).toBe('failed');
     for (const s of [400, 413, 415, 422]) expect(classifyTranscriptionStatus(s, '')).toBe('rejected');
     for (const s of [401, 403, 500, 502, 504]) expect(classifyTranscriptionStatus(s, '')).toBe('failed');
+    expect(classifyTranscriptionStatus(500, '{"error":"FFmpeg conversion failed."}')).toBe('rejected'); // whisper.cpp: undecodable file
+  });
+});
+
+describe('whisper.cpp responses', () => {
+  // Shaped like whisper.cpp's verbose_json: sub-word tokens as "words", the language as a full name.
+  const whisperCpp = {
+    task: 'transcribe', language: 'english', duration: 14.0, text: ' Jazz and Romantic. Yay!',
+    segments: [
+      {
+        id: 0, start: 12.0, end: 14.0, text: ' Jazz and Romantic.',
+        words: [
+          { word: ' Jazz', start: 12.37, end: 12.53 }, { word: ' and', start: 12.53, end: 12.93 },
+          { word: ' Rom', start: 12.93, end: 13.23 }, { word: 'antic', start: 13.29, end: 14.0 }, { word: '.', start: 14.0, end: 14.0 },
+        ],
+      },
+      { id: 1, start: 14.0, end: 15.0, text: ' Yay!', words: [{ word: ' Y', start: 14.0, end: 14.2 }, { word: 'ay', start: 14.2, end: 14.5 }, { word: '!', start: 14.5, end: 14.6 }] },
+    ],
+  };
+
+  it('joins sub-word tokens back into whole words, timed from first piece to last', () => {
+    const r = parseTranscriptionResponse(whisperCpp);
+    expect(r.segments[0].words).toEqual([
+      { startMs: 12370, endMs: 12530, text: ' Jazz' },
+      { startMs: 12530, endMs: 12930, text: ' and' },
+      { startMs: 12930, endMs: 14000, text: ' Romantic.' },
+    ]);
+    expect(r.segments[1].words?.map((w) => w.text)).toEqual([' Yay!']);
+    // Speaker splitting rebuilds text from words: it must read the same.
+    expect(r.segments[0].words?.map((w) => w.text).join('').trim()).toBe(r.segments[0].text);
+  });
+
+  it('stores the detected language as a code', () => {
+    expect(parseTranscriptionResponse(whisperCpp).language).toBe('en');
+    expect(parseTranscriptionResponse({ ...whisperCpp, language: 'haitian creole' }).language).toBe('ht');
+    expect(parseTranscriptionResponse({ ...whisperCpp, language: 'nn' }).language).toBe('nn');
+    expect(parseTranscriptionResponse({ ...whisperCpp, language: '' }).language).toBeNull();
+  });
+
+  it('leaves whole words alone, even ones without a leading space (OpenAI style)', () => {
+    const r = parseTranscriptionResponse({
+      text: 'Hello there.',
+      segments: [{ start: 0, end: 1, text: 'Hello there.', words: [{ word: 'Hello', start: 0, end: 0.4 }, { word: 'there.', start: 0.5, end: 0.9 }] }],
+    });
+    expect(r.segments[0].words?.map((w) => w.text)).toEqual([' Hello', ' there.']);
   });
 });
