@@ -33,7 +33,8 @@ function JobStatusIcon({ status }: { status: Job['status'] }) {
 
 export function JobsSection({ refreshKey }: { refreshKey: number }) {
   const [jobList, setJobList] = useState<Job[]>([]);
-  const [starting, setStarting] = useState(false);
+  // The job type being started, so only its button shows the spinner.
+  const [starting, setStarting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadJobs = async () => {
@@ -57,7 +58,7 @@ export function JobsSection({ refreshKey }: { refreshKey: number }) {
   }, [jobList]);
 
   const startJob = async (type: string) => {
-    setStarting(true);
+    setStarting(type);
     setError(null);
     try {
       await jobs.start(type);
@@ -65,7 +66,7 @@ export function JobsSection({ refreshKey }: { refreshKey: number }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start job');
     } finally {
-      setStarting(false);
+      setStarting(null);
     }
   };
 
@@ -122,10 +123,10 @@ export function JobsSection({ refreshKey }: { refreshKey: number }) {
         <div className='flex flex-col'>
           <button
             onClick={() => startJob('backfill')}
-            disabled={starting || hasActiveJob}
+            disabled={starting !== null || hasActiveJob}
             className="btn-primary"
           >
-            {starting ? (
+            {starting === 'backfill' ? (
               <>
                 <Loader2 size={16} className="animate-spin mr-2" />
                 Starting...
@@ -138,6 +139,32 @@ export function JobsSection({ refreshKey }: { refreshKey: number }) {
             )}
           </button>
           <p className="text-xs text-gray-400 mt-1">Reverse geocode and categorize venues</p>
+        </div>
+        <div className='flex flex-col'>
+          <button
+            onClick={() => {
+              if (!window.confirm(
+                'Look up every venue in OpenStreetMap and replace its category with the OSM one? ' +
+                'Venues with no OSM match keep their category, and Amusement Ride venues are never changed. This cannot be undone.'
+              )) return;
+              void startJob('recategorize');
+            }}
+            disabled={starting !== null || hasActiveJob}
+            className="btn-secondary"
+          >
+            {starting === 'recategorize' ? (
+              <>
+                <Loader2 size={16} className="animate-spin mr-2" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <Play size={16} className="mr-2" />
+                Recategorize All Venues
+              </>
+            )}
+          </button>
+          <p className="text-xs text-gray-400 mt-1">Replace every venue's category with its OpenStreetMap one (Amusement Rides are kept)</p>
         </div>
       </div>
 

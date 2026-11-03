@@ -2889,11 +2889,26 @@ async function geocodeBatch(jobId: string, attempted: string[]) {
   };
 }
 
-async function categorizeBatch(jobId: string, attempted: string[]) {
+// Venues in this category are never recategorized: the Coasterpedia lookup
+// keys off it, and OSM would relabel rides as e.g. "Attraction".
+const PROTECTED_CATEGORY = 'Amusement Ride';
+
+// Which venues a categorize pass looks at. The default only fills in missing
+// categories; overwrite also replaces existing ones, except protected ones.
+function categorizeCandidateCondition(overwrite: boolean): string {
+  return overwrite
+    ? `(v.category_id IS NULL OR v.category_id NOT IN
+         (SELECT id FROM venue_categories WHERE name = '${PROTECTED_CATEGORY}'))`
+    : 'v.category_id IS NULL';
+}
+
+async function categorizeBatch(jobId: string, attempted: string[], overwrite = false) {
+  const condition = categorizeCandidateCondition(overwrite);
   const result = await query(
-    `SELECT id, name, latitude, longitude FROM venues
-     WHERE category_id IS NULL
-       AND id <> ALL($1::uuid[])
+    `SELECT v.id, v.name, v.latitude, v.longitude, v.category_id FROM venues v
+     WHERE ${condition}
+       AND v.id <> ALL($1::uuid[])
+     ORDER BY v.id
      LIMIT 20`,
     [attempted]
   );
@@ -2924,14 +2939,20 @@ async function categorizeBatch(jobId: string, attempted: string[]) {
             [match.category]
           );
         }
-        await query(
-          'UPDATE venues SET category_id = $1 WHERE id = $2',
-          [catResult.rows[0].id, venue.id]
-        );
-        updated++;
+        // No match leaves the existing category alone (overwrite never clears).
+        if (catResult.rows[0].id !== venue.category_id) {
+          await query(
+            'UPDATE venues SET category_id = $1 WHERE id = $2',
+            [catResult.rows[0].id, venue.id]
+          );
+          updated++;
+        }
       }
 
-      await new Promise((r) => setTimeout(r, 1100));
+      // Lookups go to Photon (PHOTON_URL), usually our own instance; a short
+      // pause keeps a full-library run from hammering it. (This was 1.1 s
+      // when categorization used the rate-limited public Overpass API.)
+      await new Promise((r) => setTimeout(r, 100));
     } catch (venueErr) {
       console.error(`Failed to categorize venue ${venue.id}:`, venueErr);
     }
@@ -2939,7 +2960,7 @@ async function categorizeBatch(jobId: string, attempted: string[]) {
 
   const attemptedNow = [...attempted, ...result.rows.map((r: { id: string }) => r.id)];
   const remaining = await query(
-    'SELECT COUNT(*)::int AS count FROM venues WHERE category_id IS NULL AND id <> ALL($1::uuid[])',
+    `SELECT COUNT(*)::int AS count FROM venues v WHERE ${condition} AND v.id <> ALL($1::uuid[])`,
     [attemptedNow]
   );
 
@@ -2998,8 +3019,51 @@ async function weatherBackfillHandler(ctx: PluginJobContext): Promise<void> {
 }
 
 /**
+ * Categorize venues in batches until every candidate has been tried once.
+ * Returns how many venues got a new category.
+ */
+async function runCategorizePhase(ctx: PluginJobContext, overwrite: boolean): Promise<number> {
+  let totalUpdated = 0;
+  const remainingInit = await query(
+    `SELECT COUNT(*)::int AS count FROM venues v WHERE ${categorizeCandidateCondition(overwrite)}`
+  );
+  let remaining = remainingInit.rows[0].count;
+  const attempted: string[] = [];
+  while (remaining > 0) {
+    if (ctx.isCancelled()) throw new Error('cancelled');
+    const batch = await categorizeBatch(ctx.jobId, attempted, overwrite);
+    attempted.push(...batch.attemptedIds);
+    totalUpdated += batch.updated;
+    remaining = batch.remaining;
+    await ctx.updateProgress({
+      phase: 'categorize',
+      message: `${overwrite ? 'Recategorized' : 'Categorized'} ${totalUpdated} venues (${attempted.length} checked)...`,
+      updated: totalUpdated,
+      remaining,
+    });
+    if (batch.attemptedIds.length === 0) break;
+  }
+  return totalUpdated;
+}
+
+/**
+ * The "Recategorize Venues" job: look every venue up in OSM (via Photon) and
+ * replace its category with the OSM one. Venues with no OSM match keep their
+ * category, and "Amusement Ride" venues are never touched.
+ */
+async function venueRecategorizeHandler(ctx: PluginJobContext): Promise<void> {
+  await ctx.updateProgress({ phase: 'categorize', message: 'Starting venue recategorization...' });
+  const updated = await runCategorizePhase(ctx, true);
+  await ctx.updateProgress({
+    phase: 'done',
+    message: `Complete. Recategorized ${updated} venues.`,
+    categorized: updated,
+  });
+}
+
+/**
  * The "Backfill Venues" job: reverse-geocode venues missing country data,
- * then categorize uncategorized venues using Overpass. Runs in the
+ * then categorize uncategorized venues using OSM data (Photon). Runs in the
  * background; cancellation is observed between batches.
  */
 async function venueBackfillHandler(ctx: PluginJobContext): Promise<void> {
@@ -3040,26 +3104,7 @@ async function venueBackfillHandler(ctx: PluginJobContext): Promise<void> {
   });
 
   // Phase 2: Categorize (batched until no uncategorized venues remain)
-  let totalCatUpdated = 0;
-  const catRemainingInit = await query(
-    `SELECT COUNT(*)::int AS count FROM venues WHERE category_id IS NULL`
-  );
-  let catRemaining = catRemainingInit.rows[0].count;
-  const catAttempted: string[] = [];
-  while (catRemaining > 0) {
-    if (ctx.isCancelled()) throw new Error('cancelled');
-    const batch = await categorizeBatch(ctx.jobId, catAttempted);
-    catAttempted.push(...batch.attemptedIds);
-    totalCatUpdated += batch.updated;
-    catRemaining = batch.remaining;
-    await ctx.updateProgress({
-      phase: 'categorize',
-      message: `Categorized ${totalCatUpdated} venues...`,
-      updated: totalCatUpdated,
-      remaining: catRemaining,
-    });
-    if (batch.attemptedIds.length === 0) break;
-  }
+  const totalCatUpdated = await runCategorizePhase(ctx, false);
 
   await ctx.updateProgress({
     phase: 'done',
@@ -3841,6 +3886,12 @@ export const server: CheckinTypeServerPlugin = {
       jobType: 'backfill',
       handler: async (ctx) => {
         await venueBackfillHandler(ctx);
+      },
+    },
+    {
+      jobType: 'recategorize',
+      handler: async (ctx) => {
+        await venueRecategorizeHandler(ctx);
       },
     },
     {

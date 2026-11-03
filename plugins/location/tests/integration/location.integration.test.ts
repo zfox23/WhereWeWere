@@ -107,6 +107,72 @@ describe('Location plugin API (integration)', () => {
     });
   });
 
+  describe('recategorize job', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    async function insertCategorized(name: string, category: string | null) {
+      let categoryId: string | null = null;
+      if (category) {
+        const c = await query(
+          `INSERT INTO venue_categories (name) VALUES ($1)
+           ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+          [category]
+        );
+        categoryId = c.rows[0].id;
+      }
+      const r = await query(
+        `INSERT INTO venues (name, latitude, longitude, category_id) VALUES ($1, 39.28, -76.59, $2) RETURNING id`,
+        [name, categoryId]
+      );
+      return r.rows[0].id as string;
+    }
+
+    async function categoryOf(venueId: string) {
+      const r = await query(
+        `SELECT vc.name FROM venues v LEFT JOIN venue_categories vc ON vc.id = v.category_id WHERE v.id = $1`,
+        [venueId]
+      );
+      return r.rows[0].name as string | null;
+    }
+
+    it('replaces categories from OSM, but keeps Amusement Rides and venues with no match', async () => {
+      clearVenueSearchCache();
+      // Photon "knows" every venue below except "Mystery Spot".
+      const osm: Record<string, [string, string]> = {
+        'The Bar': ['amenity', 'bar'],
+        'Big Coaster': ['tourism', 'attraction'],
+        'Corner Cafe': ['amenity', 'cafe'],
+      };
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        const q = new URL(url).searchParams.get('q') ?? '';
+        const tag = osm[q];
+        const features = tag
+          ? [{ geometry: { coordinates: [-76.59, 39.28] }, properties: { name: q, osm_type: 'N', osm_id: q.length, osm_key: tag[0], osm_value: tag[1] } }]
+          : [];
+        return new Response(JSON.stringify({ features }));
+      }));
+
+      const bar = await insertCategorized('The Bar', 'Restaurant');
+      const ride = await insertCategorized('Big Coaster', 'Amusement Ride');
+      const mystery = await insertCategorized('Mystery Spot', 'Park');
+      const cafe = await insertCategorized('Corner Cafe', null);
+
+      const started = await request(app).post('/api/v1/jobs').send({ type: 'recategorize' });
+      expect(started.status).toBe(201);
+      let job = started.body;
+      for (let i = 0; i < 400 && ['pending', 'running'].includes(job.status); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        job = (await request(app).get(`/api/v1/jobs/${started.body.id}`)).body;
+      }
+      expect(job.status).toBe('completed');
+
+      expect(await categoryOf(bar)).toBe('Bar');
+      expect(await categoryOf(ride)).toBe('Amusement Ride');
+      expect(await categoryOf(mystery)).toBe('Park');
+      expect(await categoryOf(cafe)).toBe('Cafe');
+    });
+  });
+
   describe('findBestVenueMatch', () => {
     it('matches a same-named venue within the radius and ignores distant ones', async () => {
       const id = await insertVenue('Blue Bottle Coffee', 37.7749, -122.4194);
