@@ -69,7 +69,8 @@ import {
 } from '../../server/src/services/companions';
 import { currentUserId, preserveUserContext } from '../../server/src/auth/context';
 import { reverseGeocode, searchPlacesByName } from './services/nominatim';
-import { searchNearbyVenues, findEnclosingVenue } from './services/overpass';
+import { findEnclosingVenue } from './services/overpass';
+import { searchNearbyVenues } from './services/photonVenues';
 import { findOrReuseVenue } from './services/venueMerge';
 
 // ---------------------------------------------------------------------------
@@ -1489,7 +1490,7 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
       );
     }
 
-    // Also query Overpass API (skipped for source=local so that request stays fast)
+    // Also search OSM via Photon (skipped for source=local so that request stays fast)
     let osmVenues: Array<Record<string, unknown>> = [];
     if (source !== 'local') {
       try {
@@ -1509,8 +1510,13 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
           source: 'osm',
         }));
       } catch (osmErr) {
-        // If Overpass fails, just return local results
-        console.error('Overpass API error (non-fatal):', osmErr);
+        console.error('OSM venue search failed:', osmErr instanceof Error ? osmErr.message : osmErr);
+        // An OSM-only request has nothing else to show: report the failure so
+        // the client can say "OSM search unavailable" instead of "no venues".
+        // Mixed requests still return their local results.
+        if (source === 'osm') {
+          return res.status(502).json({ error: 'OSM venue search is unavailable right now' });
+        }
       }
     }
 
@@ -2505,7 +2511,7 @@ venuesRouter.post('/geocode', async (_req: Request, res: Response) => {
   }
 });
 
-// POST /categorize - categorize uncategorized venues using Overpass
+// POST /categorize - categorize uncategorized venues using OSM data (Photon)
 venuesRouter.post('/categorize', async (_req: Request, res: Response) => {
   try {
     const result = await query(

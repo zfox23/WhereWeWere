@@ -41,6 +41,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMoreResults, setHasMoreResults] = useState(false);
   const [osmLoading, setOsmLoading] = useState(false);
+  const [osmError, setOsmError] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const heading = useDeviceHeading();
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
@@ -181,6 +182,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           setLoading(true);
         }
         setOsmLoading(true);
+        setOsmError(false);
         osmCountRef.current = 0;
         osmHasMoreRef.current = false;
         if (!opts.localResults) {
@@ -235,6 +237,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         .nearby({ ...baseParams, offset: osmOffset.toString(), source: 'osm' })
         .then((data) => {
           if (requestId !== requestIdRef.current) return;
+          setOsmError(false);
           osmCountRef.current += data.length;
           osmHasMoreRef.current = data.length === NEARBY_PAGE_SIZE;
           if (data.length > 0) {
@@ -244,6 +247,8 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         })
         .catch(() => {
           if (requestId !== requestIdRef.current) return;
+          // Without this the list just looks empty, as if OSM had no venues here.
+          setOsmError(true);
           osmHasMoreRef.current = false;
           setHasMoreResults(localHasMoreRef.current || osmHasMoreRef.current);
         })
@@ -804,6 +809,12 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
             </li>
           )}
         </ul>
+      )}
+
+      {!loading && !osmLoading && osmError && coords && (
+        <p className="text-xs text-amber-600 dark:text-amber-400 text-center py-2">
+          OSM venue search is unavailable right now, so only your saved venues are shown.
+        </p>
       )}
 
       {!loading && !osmLoading && results.length === 0 && coords && query && (

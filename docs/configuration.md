@@ -18,7 +18,7 @@ cp .env.example .env
 | `SERVER_PORT` | `3001` | Port the API server publishes (Docker Compose). |
 | `CLIENT_PORT` | `5173` | Port the client (Nginx) publishes (Docker Compose). |
 | `NODE_ENV` | `development` | `development` or `production`. Set to `production` for internet-facing deployments. |
-| `PHOTON_URL` | project author's instance | Base URL of the [Photon](https://github.com/komoot/photon) geocoder used for reverse geocoding and place search. Venue coordinates are sent to this host: set it to your own instance or a public one (e.g. `https://photon.komoot.io`). |
+| `PHOTON_URL` | project author's instance | Base URL of the [Photon](https://github.com/komoot/photon) geocoder used for reverse geocoding, place search, and the OSM venue search in the check-in flow. Your location, search text and venue coordinates are sent to this host: set it to your own instance or a public one (e.g. `https://photon.komoot.io`). |
 | `TRANSCRIPTION_PORT` | `8000` | Port the optional transcription service publishes (`docker compose --profile transcription up`). See [Audio notes](audio-notes.md). |
 | `TRANSCRIPTION_MODEL` | `large-v3` | whisper.cpp model the optional transcription service downloads on its first start. See [Audio notes](audio-notes.md). |
 | `HF_TOKEN` | — | Hugging Face read token for the optional speaker diarization service (gated pyannote models). See [Audio notes](audio-notes.md#speaker-identification-optional). |

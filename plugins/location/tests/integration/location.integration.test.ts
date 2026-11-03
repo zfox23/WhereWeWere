@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { describe, expect, beforeAll, beforeEach, afterAll, it } from 'vitest';
+import { describe, expect, beforeAll, beforeEach, afterAll, afterEach, it, vi } from 'vitest';
 import { createApp } from '../../../../server/src/index';
 import { query } from '../../../../server/src/db';
 import {
@@ -9,6 +9,7 @@ import {
   teardownIntegrationDatabase,
 } from '../../../../server/tests/helpers/testDb';
 import { findBestVenueMatch } from '../../services/venueMerge';
+import { clearVenueSearchCache } from '../../services/photonVenues';
 
 const app = createApp();
 
@@ -60,6 +61,49 @@ describe('Location plugin API (integration)', () => {
       const names = res.body.map((v: { name: string }) => v.name);
       expect(names).toContain('Near');
       expect(names).not.toContain('Far');
+    });
+
+    describe('OSM results (Photon)', () => {
+      const photonFeature = (osmId: number, name: string, lon: number, lat: number) => ({
+        geometry: { coordinates: [lon, lat] },
+        properties: { name, osm_type: 'N', osm_id: osmId, osm_key: 'amenity', osm_value: 'cafe' },
+      });
+      beforeEach(() => clearVenueSearchCache());
+      afterEach(() => vi.unstubAllGlobals());
+
+      it('returns Photon venues for source=osm, minus ones already imported locally', async () => {
+        await query(
+          `INSERT INTO venues (name, latitude, longitude, osm_id) VALUES ('Imported Cafe', 39.28, -76.59, 'node/1')`
+        );
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+          features: [photonFeature(1, 'Imported Cafe', -76.59, 39.28), photonFeature(2, 'New Cafe', -76.591, 39.281)],
+        }))));
+        const res = await request(app)
+          .get('/api/v1/venues/nearby')
+          .query({ lat: '39.28', lon: '-76.59', source: 'osm', radius: '2500' });
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual([
+          expect.objectContaining({ name: 'New Cafe', category: 'Cafe', osm_id: 'node/2', source: 'osm' }),
+        ]);
+      });
+
+      it('reports a failed OSM search as 502 instead of an empty list', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+        const res = await request(app)
+          .get('/api/v1/venues/nearby')
+          .query({ lat: '39.28', lon: '-76.59', source: 'osm' });
+        expect(res.status).toBe(502);
+      });
+
+      it('still returns local venues in mixed mode when the OSM search fails', async () => {
+        await insertVenue('Local Spot', 39.28, -76.59);
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+        const res = await request(app)
+          .get('/api/v1/venues/nearby')
+          .query({ lat: '39.28', lon: '-76.59' });
+        expect(res.status).toBe(200);
+        expect(res.body.map((v: { name: string }) => v.name)).toEqual(['Local Spot']);
+      });
     });
   });
 
