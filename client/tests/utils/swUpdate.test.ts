@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isUserEditing, reloadWhenIdle } from '../../src/utils/swUpdate';
+import {
+  entryScriptPathFromHtml,
+  isUserEditing,
+  reloadWhenIdle,
+  shouldReloadForBuild,
+} from '../../src/utils/swUpdate';
 
 describe('isUserEditing', () => {
   it('is true on check-in form pages and edit URLs', () => {
@@ -52,5 +57,45 @@ describe('reloadWhenIdle', () => {
     cancel();
     vi.advanceTimersByTime(5000);
     expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe('entryScriptPathFromHtml', () => {
+  const origin = 'https://app.example';
+
+  it('finds the hashed module entry script', () => {
+    const html =
+      '<!doctype html><html><head><script>var x=1</script>' +
+      '<script type="module" crossorigin src="/assets/index-fd-6EJid.js"></script></head></html>';
+    expect(entryScriptPathFromHtml(html, origin)).toBe('/assets/index-fd-6EJid.js');
+  });
+
+  it('normalises absolute URLs to a path', () => {
+    const html = '<script type="module" src="https://app.example/assets/index-1.js"></script>';
+    expect(entryScriptPathFromHtml(html, origin)).toBe('/assets/index-1.js');
+  });
+
+  it('is null when there is no module script', () => {
+    expect(entryScriptPathFromHtml('<p>Bad gateway</p>', origin)).toBeNull();
+  });
+});
+
+describe('shouldReloadForBuild', () => {
+  it('reloads when the server has a different build', () => {
+    expect(shouldReloadForBuild('/assets/a.js', '/assets/b.js', null)).toBe(true);
+  });
+
+  it('does not reload when already current', () => {
+    expect(shouldReloadForBuild('/assets/a.js', '/assets/a.js', null)).toBe(false);
+  });
+
+  it('does not reload when either build is unknown', () => {
+    expect(shouldReloadForBuild(null, '/assets/b.js', null)).toBe(false);
+    expect(shouldReloadForBuild('/assets/a.js', null, null)).toBe(false);
+  });
+
+  it('does not retry a build a previous reload failed to reach', () => {
+    expect(shouldReloadForBuild('/assets/a.js', '/assets/b.js', '/assets/b.js')).toBe(false);
+    expect(shouldReloadForBuild('/assets/a.js', '/assets/c.js', '/assets/b.js')).toBe(true);
   });
 });

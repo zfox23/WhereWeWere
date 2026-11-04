@@ -1,26 +1,57 @@
 /// <reference lib="webworker" />
+import { clientsClaim } from 'workbox-core';
 import { createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
+import type { RouteHandlerCallback } from 'workbox-core';
 import { CacheFirst, NetworkFirst } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 
 declare const self: ServiceWorkerGlobalScope;
 
 // When a new build's service worker is installed, take over all open tabs
-// immediately instead of waiting for the next navigation. Combined with
-// registerSW()'s auto-update handling in main.tsx, this makes the page
-// reload automatically after a deployment so users never see a stale UI.
+// immediately instead of waiting for the next navigation. main.tsx then moves
+// open pages onto the new build (see checkForNewBuild there).
 self.skipWaiting();
-self.clients.claim();
+clientsClaim();
 
 // Precache static assets injected by vite-plugin-pwa
 precacheAndRoute(self.__WB_MANIFEST);
 
-// Serve the precached app shell for SPA navigations (deep links, reloads) so
-// they work offline; API calls and real files are left to the network.
+// SPA navigations (deep links, reloads) go to the network first, so a reload
+// always gets the deployed build even before this worker has updated. The
+// precached shell is the fallback when offline, slow, or the server is
+// restarting (5xx from a proxy). API calls and real files aren't navigations.
+const NAVIGATION_TIMEOUT_MS = 4000;
+const precachedShell = createHandlerBoundToURL('index.html');
+
+const networkFirstShell: RouteHandlerCallback = async (options) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NAVIGATION_TIMEOUT_MS);
+  try {
+    const response = await fetch(options.request, { signal: controller.signal });
+    if (response.type === 'opaqueredirect' || response.status < 500) return response;
+  } catch {
+    // Offline or timed out.
+  } finally {
+    clearTimeout(timer);
+  }
+  return precachedShell(options);
+};
+
 registerRoute(
-  new NavigationRoute(createHandlerBoundToURL('index.html'), {
+  new NavigationRoute(networkFirstShell, {
     denylist: [/^\/api\//, /^\/healthz/, /\/[^/?]+\.[^/]+$/],
+  })
+);
+
+// Font files aren't precached (the optional typography choices ship ~100 of
+// them, which would make every update download slowly and fail more often).
+// Cache each one the first time it is used; hashed names never change.
+registerRoute(
+  ({ url }) => url.origin === self.location.origin && /^\/assets\/.+\.woff2?$/.test(url.pathname),
+  new CacheFirst({
+    cacheName: 'fonts',
+    plugins: [new ExpirationPlugin({ maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 365 })],
   })
 );
 

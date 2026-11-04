@@ -52,7 +52,8 @@ export default defineConfig({
         ],
       },
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Fonts are cached at runtime instead (see sw-custom.ts).
+        globPatterns: ['**/*.{js,css,html,svg,png}'],
       },
     }),
   ],
