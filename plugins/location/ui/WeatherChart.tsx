@@ -3,7 +3,7 @@ import { Sunrise, Sunset } from 'lucide-react';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
 import type { DistanceUnit } from './geo';
 import { describeWeather, formatClock, formatPrecip, formatTemp, formatWind, type WeatherHour } from './weatherFormat';
-import { hourLabel, localHours, monotonePath, niceScale } from './weatherChart';
+import { hourLabel, localHours, monotonePath, niceScale } from './weatherChartHelpers';
 import { useChartColors } from '../../../client/src/hooks/useChartColors';
 
 interface Props {

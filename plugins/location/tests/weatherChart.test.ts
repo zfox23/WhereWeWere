@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hourLabel, localHours, monotonePath, niceScale } from '../ui/weatherChart';
+import { hourLabel, localHours, monotonePath, niceScale } from '../ui/weatherChartHelpers';
 
 describe('weather chart helpers', () => {
   it('reads local hours from the ISO text, without time zone shifts', () => {
