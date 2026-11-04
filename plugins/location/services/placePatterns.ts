@@ -42,6 +42,16 @@ const MYPLACES_TTL_MS = 24 * 60 * 60 * 1000;
 const STREETS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Most recent visits joined by lines (older history is dots only). */
 const MAX_PATH_VISITS = 600;
+/**
+ * Streets covers at most this radius: the road network of a whole metro
+ * area is hundreds of thousands of ways (too much for Overpass and for a
+ * full-page mask), and at page scale only a neighbourhood reads as streets.
+ */
+export const STREETS_MAX_RADIUS_KM = 2.5;
+/** After a failed Overpass fetch, wait this long before asking again. */
+const STREETS_RETRY_MS = 60 * 60 * 1000;
+/** Largest Streets SVG kept; denser areas fall back to major roads only. */
+export const MAX_STREETS_SVG_BYTES = 1.5 * 1024 * 1024;
 
 const KM_PER_DEG_LAT = 111.32;
 
@@ -147,8 +157,9 @@ export function renderMyPlacesSvg(points: VenuePoint[], visits: { lat: number; l
 /** OSM highway classes drawn, with their stroke widths. */
 const ROAD_WIDTHS: Record<string, number> = {
   motorway: 5, trunk: 4.5, primary: 4, secondary: 3.2, tertiary: 2.6,
-  residential: 1.8, unclassified: 1.8, living_street: 1.4, pedestrian: 1.4, service: 1,
+  residential: 1.8, unclassified: 1.8, living_street: 1.4, pedestrian: 1.4,
 };
+const MAJOR_ROADS = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary']);
 
 export interface Road {
   highway: string;
@@ -156,6 +167,17 @@ export interface Road {
 }
 
 export function renderStreetsSvg(roads: Road[], region: Region): string {
+  const full = renderRoads(roads, region);
+  if (full.length <= MAX_STREETS_SVG_BYTES) return full;
+  return renderRoads(roads.filter((r) => MAJOR_ROADS.has(r.highway)), region);
+}
+
+/** The region Streets draws: the home area, capped to a neighbourhood. */
+export function streetsRegion(region: Region): Region {
+  return { ...region, radiusKm: Math.min(region.radiusKm, STREETS_MAX_RADIUS_KM) };
+}
+
+function renderRoads(roads: Road[], region: Region): string {
   const project = projector(region);
   // One path per width keeps the file small.
   const byWidth = new Map<number, string[]>();
@@ -178,18 +200,36 @@ export function renderStreetsSvg(roads: Road[], region: Region): string {
   return svgDocument(parts.join(''));
 }
 
-/** Roads within the region's drawn area, from Overpass. */
-async function fetchRoads(region: Region): Promise<Road[]> {
-  const halfLat = (region.radiusKm * 1.7) / KM_PER_DEG_LAT; // 16:10 view, a little overscan
-  const halfLon = halfLat * 1.7 / Math.cos(region.centerLat * (Math.PI / 180));
-  const s = region.centerLat - halfLat;
-  const n = region.centerLat + halfLat;
-  const w = region.centerLon - halfLon;
-  const e = region.centerLon + halfLon;
+/** The Overpass bounding box (s, w, n, e) for the drawn 16:10 view, plus 10%. */
+export function streetsBbox(region: Region): [number, number, number, number] {
+  const halfLat = (region.radiusKm * 1.1) / KM_PER_DEG_LAT;
+  const halfLon = (region.radiusKm * 1.6 * 1.1) / (KM_PER_DEG_LAT * Math.cos(region.centerLat * (Math.PI / 180)));
+  return [
+    region.centerLat - halfLat,
+    region.centerLon - halfLon,
+    region.centerLat + halfLat,
+    region.centerLon + halfLon,
+  ];
+}
+
+/**
+ * Roads within the region's drawn area, from Overpass. Throws on an
+ * incomplete answer: Overpass reports a timeout or memory limit as HTTP 200
+ * with a `remark` and partial (or no) elements, which must not be cached.
+ */
+export async function fetchRoads(
+  region: Region,
+  query: (body: string) => Promise<Response> = queryOverpass,
+): Promise<Road[]> {
+  const [s, w, n, e] = streetsBbox(region);
   const classes = Object.keys(ROAD_WIDTHS).join('|');
   const q = `[out:json][timeout:25];way["highway"~"^(${classes})$"](${s},${w},${n},${e});out geom qt;`;
-  const res = await queryOverpass(`data=${encodeURIComponent(q)}`);
-  const json = (await res.json()) as { elements?: { tags?: { highway?: string }; geometry?: { lat: number; lon: number }[] }[] };
+  const res = await query(`data=${encodeURIComponent(q)}`);
+  const json = (await res.json()) as {
+    remark?: string;
+    elements?: { tags?: { highway?: string }; geometry?: { lat: number; lon: number }[] }[];
+  };
+  if (json.remark) throw new Error(`Overpass returned an incomplete result: ${json.remark}`);
   return (json.elements ?? [])
     .filter((el) => el.tags?.highway && Array.isArray(el.geometry))
     .map((el) => ({ highway: el.tags!.highway!, points: el.geometry! }));
@@ -252,12 +292,27 @@ export async function getPlacePattern(userId: string, kind: PlacePatternKind): P
     if (kind === 'myplaces') {
       svg = renderMyPlacesSvg(points, visits, region);
     } else {
+      // Back off after a failure so page loads don't keep hammering Overpass.
+      const failedMarker = `${file}.failed`;
       try {
-        svg = renderStreetsSvg(await fetchRoads(region), region);
+        const failed = await fs.stat(failedMarker);
+        if (Date.now() - failed.mtimeMs < STREETS_RETRY_MS) {
+          if (stale) return stale;
+          throw new Error('Street data is temporarily unavailable');
+        }
       } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+      const area = streetsRegion(region);
+      try {
+        svg = renderStreetsSvg(await fetchRoads(area), area);
+      } catch (err) {
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(failedMarker, String(err instanceof Error ? err.message : err));
         if (stale) return stale;
         throw err;
       }
+      await fs.rm(failedMarker, { force: true });
     }
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, svg);
@@ -275,5 +330,6 @@ export async function getPlacePattern(userId: string, kind: PlacePatternKind): P
 export async function clearPlacePatterns(userId: string): Promise<void> {
   for (const kind of PLACE_PATTERN_KINDS) {
     await fs.rm(cachePath(userId, kind), { force: true });
+    await fs.rm(`${cachePath(userId, kind)}.failed`, { force: true });
   }
 }

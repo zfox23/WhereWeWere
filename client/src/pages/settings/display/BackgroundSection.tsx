@@ -57,6 +57,13 @@ export function BackgroundSection() {
         })}
       </div>
 
+      {appearance.bgPattern === 'streets' && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Streets asks OpenStreetMap's Overpass service for the roads around your home area (it sees that
+          area, not your check-ins). The drawing is refreshed monthly.
+        </p>
+      )}
+
       <h3 className="text-sm font-semibold font-sans tracking-normal text-gray-700 dark:text-gray-300">Gradient</h3>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {BG_GRADIENT_OPTIONS.map((option) => {
