@@ -8,7 +8,6 @@ import { AppBackdrop } from './AppBackdrop';
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/profile', label: 'Profile', icon: User },
-  { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 function isActive(pathname: string, to: string) {
@@ -16,7 +15,7 @@ function isActive(pathname: string, to: string) {
   return pathname === to || pathname.startsWith(to + '/');
 }
 
-/** Signed-in user's name with a menu holding Account settings and Sign out. */
+/** Signed-in user's name with a menu holding Settings and Sign out. */
 function UserMenu() {
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
@@ -67,11 +66,11 @@ function UserMenu() {
           </div>
           <Link
             role="menuitem"
-            to="/settings?tab=account"
+            to="/settings"
             className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100/70 dark:hover:bg-gray-800/70"
           >
             <Settings size={15} />
-            Account settings
+            Settings
           </Link>
           <button
             type="button"
@@ -134,7 +133,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
 
       {/* Bottom nav (mobile) — glass */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/70 dark:bg-gray-900/70 border-t border-white/40 dark:border-gray-700/40 z-60">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/70 dark:bg-gray-900/70 border-t backdrop-blur-sm border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 z-60">
         <div className="flex justify-around">
           {navItems.map(({ to, label, icon: Icon }) => (
             <Link
