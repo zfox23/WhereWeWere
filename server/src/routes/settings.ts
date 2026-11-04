@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { pool, query } from '../db';
 import {
   applyReconciliationUpdate,
@@ -8,7 +8,16 @@ import {
 } from '../services/timestampReconciliation';
 
 import { validateAppearancePatch } from 'wwp-shared';
-import { currentUserId } from '../auth/context';
+import { currentUserId, preserveUserContext } from '../auth/context';
+import {
+  MAX_WALLPAPER_BYTES,
+  WALLPAPER_CONTENT_TYPES,
+  deleteWallpaper,
+  findWallpaper,
+  saveWallpaper,
+  sniffImageType,
+  wallpaperContentType,
+} from '../services/wallpaper';
 
 // The signed-in user's own settings. Username/display name changes live at
 // PUT /api/v1/auth/profile.
@@ -223,6 +232,60 @@ router.post('/timestamp-reconciliation/apply', async (req: Request, res: Respons
     res.status(500).json({ error: 'Failed to apply timestamp reconciliation updates' });
   } finally {
     client.release();
+  }
+});
+
+// --- Photo wallpaper (Settings > Display > Background) ----------------------
+// The file only; whether it's shown is the `wallpaper` appearance knob.
+
+router.get('/wallpaper', async (_req: Request, res: Response) => {
+  try {
+    const found = await findWallpaper(currentUserId());
+    if (!found) return res.status(404).json({ error: 'No wallpaper' });
+    res.setHeader('Content-Type', wallpaperContentType(found.ext));
+    // Private (it's this user's photo) and revalidated on every load, so a
+    // wallpaper changed on another device shows up; unchanged it's a 304.
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.sendFile(found.path, (err) => {
+      if (err && !res.headersSent) res.status(500).json({ error: 'Failed to read wallpaper' });
+    });
+  } catch (err) {
+    console.error('Error reading wallpaper:', err);
+    res.status(500).json({ error: 'Failed to read wallpaper' });
+  }
+});
+
+// The image is the raw request body (Content-Type: image/jpeg, png, webp or
+// avif). Too large → 413 from the app's error handler.
+router.put(
+  '/wallpaper',
+  preserveUserContext(express.raw({ type: [...WALLPAPER_CONTENT_TYPES], limit: MAX_WALLPAPER_BYTES })),
+  async (req: Request, res: Response) => {
+    try {
+      const body = req.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        return res.status(400).json({ error: 'Send a JPEG, PNG, WebP or AVIF image as the request body' });
+      }
+      const ext = sniffImageType(body);
+      if (!ext) {
+        return res.status(400).json({ error: 'Wallpaper must be a JPEG, PNG, WebP or AVIF image' });
+      }
+      await saveWallpaper(currentUserId(), body, ext);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('Error saving wallpaper:', err);
+      res.status(500).json({ error: 'Failed to save wallpaper' });
+    }
+  }
+);
+
+router.delete('/wallpaper', async (_req: Request, res: Response) => {
+  try {
+    const removed = await deleteWallpaper(currentUserId());
+    res.json({ removed });
+  } catch (err) {
+    console.error('Error deleting wallpaper:', err);
+    res.status(500).json({ error: 'Failed to delete wallpaper' });
   }
 });
 

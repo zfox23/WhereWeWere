@@ -3,11 +3,13 @@ import { AlertCircle, Loader2, LogIn } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { usePageTitle } from '../utils/pageTitle';
+import { AppBackdrop } from '../components/AppBackdrop';
 
 /** Full-screen centered card used by the sign-in and choose-password screens. */
 export function AuthScreen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return (
     <div className="app-shell min-h-screen flex items-center justify-center px-4 py-10">
+      <AppBackdrop personal={false} />
       <div className="w-full max-w-sm bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-5">
         <div className="text-center space-y-1">
           <div className="font-display text-3xl tracking-wide text-[#ea580c]">WhereWeWere</div>

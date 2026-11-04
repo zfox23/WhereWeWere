@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import Login, { AuthScreen, FormError } from '../pages/Login';
 import { PasswordChangeForm } from './PasswordChangeForm';
 import { usePageTitle } from '../utils/pageTitle';
+import { AppBackdrop } from './AppBackdrop';
 
 /** Blocks the app until the user replaces a temporary password. */
 function ChoosePassword() {
@@ -38,6 +39,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (status === 'loading') {
     return (
       <div className="app-shell min-h-screen flex items-center justify-center" aria-busy="true">
+        <AppBackdrop personal={false} />
         <Loader2 className="animate-spin text-primary-600" size={32} aria-label="Loading" />
       </div>
     );

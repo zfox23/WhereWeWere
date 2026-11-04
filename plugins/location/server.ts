@@ -70,6 +70,7 @@ import {
 import { currentUserId, preserveUserContext } from '../../server/src/auth/context';
 import { reverseGeocode, searchPlacesByName } from './services/nominatim';
 import { findEnclosingVenue } from './services/overpass';
+import { PLACE_PATTERN_KINDS, clearPlacePatterns, getPlacePattern, type PlacePatternKind } from './services/placePatterns';
 import { searchNearbyVenues } from './services/photonVenues';
 import { findOrReuseVenue } from './services/venueMerge';
 
@@ -3136,6 +3137,30 @@ const USER_VENUES_CTE = `WITH RECURSIVE user_venues(id) AS (
             WHERE v.parent_venue_id IS NOT NULL
          )`;
 
+// --- Place-based background patterns (Settings > Display > Background) ------
+// GET /place-patterns/:kind.svg → black-on-transparent SVG used as a CSS mask.
+const placePatternsRouter = Router();
+placePatternsRouter.get('/:file', async (req: Request, res: Response) => {
+  const file = String(req.params.file);
+  const kind = file.replace(/\.svg$/, '') as PlacePatternKind;
+  if (!file.endsWith('.svg') || !PLACE_PATTERN_KINDS.includes(kind)) {
+    return res.status(404).json({ error: 'Unknown pattern' });
+  }
+  try {
+    const svg = await getPlacePattern(currentUserId(), kind);
+    if (!svg) return res.status(404).json({ error: 'No check-ins to draw yet' });
+    res.setHeader('Content-Type', 'image/svg+xml');
+    // Drawn from this user's check-ins: private. Short-lived so new
+    // check-ins appear, though the server only re-renders daily anyway.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+    res.send(svg);
+  } catch (err) {
+    console.error('Error rendering place pattern:', err);
+    res.status(502).json({ error: 'Failed to draw the pattern' });
+  }
+});
+
 export const server: CheckinTypeServerPlugin = {
   storage: 'custom',
 
@@ -3145,6 +3170,7 @@ export const server: CheckinTypeServerPlugin = {
     { mount: '/weather', router: weatherRouter },
     { mount: '/search', router: searchRouter },
     { mount: '/import/swarm', router: swarmImportRouter },
+    { mount: '/place-patterns', router: placePatternsRouter },
   ],
 
   buildTimelineSelect: () => {
@@ -3661,6 +3687,9 @@ export const server: CheckinTypeServerPlugin = {
 
     // The user's Coasterpedia lookups (the venues they describe are kept).
     await run('DELETE FROM venue_coasterpedia WHERE user_id = $1', [user_id]);
+
+    // Background patterns drawn from those check-ins.
+    await clearPlacePatterns(user_id);
 
     return result.rowCount ?? 0;
   },

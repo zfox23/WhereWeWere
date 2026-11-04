@@ -74,6 +74,68 @@ html[data-bg-pattern="linen"] {
   --_bg-p-sz: auto, auto,;
 }
 
+html[data-bg-pattern="waves"] {
+  --_bg-p:
+    radial-gradient(circle at 50% 100%, transparent 13px, rgb(var(--app-fg) / 0.05) 14px, rgb(var(--app-fg) / 0.05) 15px, transparent 16px),
+    radial-gradient(circle at 0% 0%, transparent 13px, rgb(var(--app-fg) / 0.05) 14px, rgb(var(--app-fg) / 0.05) 15px, transparent 16px),
+    radial-gradient(circle at 100% 0%, transparent 13px, rgb(var(--app-fg) / 0.05) 14px, rgb(var(--app-fg) / 0.05) 15px, transparent 16px),;
+  --_bg-p-sz: 32px 16px, 32px 16px, 32px 16px,;
+}
+
+html[data-bg-pattern="hexagons"] {
+  --_bg-p:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cpath fill='none' stroke='%23000' stroke-opacity='0.06' d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/svg%3E"),;
+  --_bg-p-sz: 28px 49px,;
+}
+html.dark[data-bg-pattern="hexagons"] {
+  --_bg-p:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cpath fill='none' stroke='%23fff' stroke-opacity='0.06' d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/svg%3E"),;
+}
+
+html[data-bg-pattern="terrazzo"] {
+  --_bg-p:
+    radial-gradient(ellipse 3px 2px at 20% 30%, rgb(var(--app-glow) / 0.28) 98%, transparent),
+    radial-gradient(ellipse 2px 3px at 70% 60%, rgb(var(--app-glow-secondary) / 0.3) 98%, transparent),
+    radial-gradient(circle 1.5px at 45% 80%, rgb(var(--app-fg) / 0.16) 98%, transparent),
+    radial-gradient(ellipse 4px 2.5px at 85% 15%, rgb(var(--app-fg) / 0.08) 98%, transparent),
+    radial-gradient(circle 2.5px at 10% 75%, rgb(var(--app-glow) / 0.18) 98%, transparent),;
+  --_bg-p-sz: 97px 89px, 71px 83px, 53px 61px, 113px 107px, 79px 67px,;
+}
+
+html[data-bg-pattern="grain"] {
+  --_bg-p: var(--app-paper-grain),;
+  --_bg-p-sz: 140px 140px,;
+}
+
+html[data-bg-pattern="plaid"] {
+  --_bg-p:
+    repeating-linear-gradient(0deg, transparent 0 22px, rgb(var(--app-glow) / 0.06) 22px 30px, transparent 30px 34px, rgb(var(--app-fg) / 0.025) 34px 36px, transparent 36px 56px),
+    repeating-linear-gradient(90deg, transparent 0 22px, rgb(var(--app-glow) / 0.06) 22px 30px, transparent 30px 34px, rgb(var(--app-fg) / 0.025) 34px 36px, transparent 36px 56px),;
+  --_bg-p-sz: auto, auto,;
+}
+
+html[data-bg-pattern="pinstripe"] {
+  --_bg-p:
+    repeating-linear-gradient(135deg, transparent 0 11px, rgb(var(--app-fg) / 0.045) 11px 12px),;
+  --_bg-p-sz: auto,;
+}
+
+html[data-bg-pattern="stars"] {
+  --_bg-p:
+    radial-gradient(circle 1px at 20% 30%, rgb(var(--app-fg) / 0.22) 98%, transparent),
+    radial-gradient(circle 1.5px at 70% 65%, rgb(var(--app-glow) / 0.3) 98%, transparent),
+    radial-gradient(circle 0.8px at 45% 10%, rgb(var(--app-fg) / 0.18) 98%, transparent),
+    radial-gradient(circle 1.2px at 85% 85%, rgb(var(--app-glow-secondary) / 0.3) 98%, transparent),;
+  --_bg-p-sz: 137px 131px, 211px 197px, 89px 97px, 173px 163px,;
+}
+
+/* Place patterns are drawn by the .app-places layer, not the shell. */
+html[data-bg-pattern="myplaces"],
+html[data-bg-pattern="streets"] {
+  --_bg-p: ;
+  --_bg-p-sz: ;
+}
+
 html[data-bg-pattern="none"] {
   --_bg-p: ;
   --_bg-p-sz: ;
@@ -260,6 +322,163 @@ html[data-reduce-motion="on"] .app-shell::after {
   animation: none;
   transform: none;
   opacity: 0.45;
+}
+
+/* ── Backdrop layers (components/AppBackdrop.tsx) ──
+   Fixed, behind content inside the isolated .app-shell; hidden unless an
+   appearance knob turns them on. */
+.app-wallpaper,
+.app-places,
+.app-motion {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ── Photo wallpaper (html[data-wallpaper]) ──
+   ::before holds the (blurred) photo, ::after the theme wash and pattern
+   on top, unblurred. Below the shell's glow layers (z-index -2). */
+html[data-wallpaper="on"] .app-wallpaper {
+  display: block;
+  z-index: -2;
+  overflow: hidden;
+  isolation: isolate;
+}
+.app-wallpaper::before,
+.app-wallpaper::after {
+  content: '';
+  position: absolute;
+}
+.app-wallpaper::before {
+  /* Overscan so the blur doesn't fade the edges. */
+  inset: calc(-2 * var(--app-wallpaper-blur, 8px));
+  background-image: var(--app-wallpaper-url, url('/api/v1/settings/wallpaper'));
+  background-size: cover;
+  background-position: center;
+  filter: blur(var(--app-wallpaper-blur, 8px));
+}
+.app-wallpaper::after {
+  inset: 0;
+  background-color: rgb(var(--app-bg-mid) / var(--app-wallpaper-dim, 0.35));
+  background-image: var(--_bg-p) linear-gradient(transparent, transparent);
+  background-size: var(--_bg-p-sz) auto;
+}
+/* Tint: the photo's light and shade over the theme's glow color. */
+html[data-wallpaper-tint="on"] .app-wallpaper {
+  background-color: rgb(var(--app-glow));
+}
+html[data-wallpaper-tint="on"] .app-wallpaper::before {
+  mix-blend-mode: luminosity;
+}
+
+/* ── Place patterns (html[data-bg-pattern=myplaces|streets]) ──
+   The server draws black-on-transparent SVG from the user's check-ins;
+   used as a mask so the theme picks the color. */
+html[data-bg-pattern="myplaces"] .app-places,
+html[data-bg-pattern="streets"] .app-places {
+  display: block;
+  -webkit-mask-size: cover;
+  mask-size: cover;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+html[data-bg-pattern="myplaces"] .app-places {
+  background-color: rgb(var(--app-glow) / 0.32);
+  -webkit-mask-image: url('/api/v1/place-patterns/myplaces.svg');
+  mask-image: url('/api/v1/place-patterns/myplaces.svg');
+}
+html[data-bg-pattern="streets"] .app-places {
+  background-color: rgb(var(--app-fg) / 0.09);
+  -webkit-mask-image: url('/api/v1/place-patterns/streets.svg');
+  mask-image: url('/api/v1/place-patterns/streets.svg');
+}
+
+/* ── Background motion (html[data-bg-motion]) ──
+   transform/opacity-only animations on one oversized layer. */
+html:not([data-bg-motion="none"]) .app-motion {
+  display: block;
+}
+html[data-bg-motion="aurora"] .app-motion {
+  inset: -30%;
+  background:
+    radial-gradient(ellipse 45% 22% at 30% 35%, rgb(var(--app-glow) / 0.22), transparent 70%),
+    radial-gradient(ellipse 40% 18% at 65% 55%, rgb(var(--app-glow-secondary) / 0.2), transparent 70%),
+    radial-gradient(ellipse 35% 15% at 45% 70%, rgb(var(--app-glow) / 0.14), transparent 70%);
+  filter: blur(30px);
+  animation: app-aurora 38s ease-in-out infinite alternate;
+}
+@keyframes app-aurora {
+  0% { transform: translate3d(-6%, -3%, 0) rotate(-4deg) scale(1); opacity: 0.75; }
+  50% { transform: translate3d(4%, 2%, 0) rotate(3deg) scale(1.08); opacity: 1; }
+  100% { transform: translate3d(7%, -2%, 0) rotate(6deg) scale(1.02); opacity: 0.8; }
+}
+
+html[data-bg-motion="starfield"] .app-motion {
+  inset: -100% 0 0 0;
+  background-image:
+    radial-gradient(circle 1px at 20% 30%, rgb(var(--app-fg) / 0.35) 98%, transparent),
+    radial-gradient(circle 1.5px at 70% 65%, rgb(var(--app-glow) / 0.45) 98%, transparent),
+    radial-gradient(circle 0.8px at 45% 10%, rgb(var(--app-fg) / 0.28) 98%, transparent),
+    radial-gradient(circle 1.2px at 85% 85%, rgb(var(--app-glow-secondary) / 0.45) 98%, transparent);
+  background-size: 137px 131px, 211px 197px, 89px 97px, 173px 163px;
+  animation:
+    app-star-drift 120s linear infinite,
+    app-star-twinkle 6s ease-in-out infinite alternate;
+}
+@keyframes app-star-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, 50%, 0); }
+}
+@keyframes app-star-twinkle {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
+html[data-bg-motion="bokeh"] .app-motion {
+  inset: -20%;
+  background:
+    radial-gradient(circle 90px at 15% 25%, rgb(var(--app-glow) / 0.16), transparent 70%),
+    radial-gradient(circle 140px at 80% 20%, rgb(var(--app-glow-secondary) / 0.14), transparent 70%),
+    radial-gradient(circle 70px at 60% 75%, rgb(var(--app-glow) / 0.18), transparent 70%),
+    radial-gradient(circle 110px at 25% 80%, rgb(var(--app-glow-secondary) / 0.12), transparent 70%),
+    radial-gradient(circle 60px at 45% 45%, rgb(var(--app-fg) / 0.05), transparent 70%);
+  animation: app-bokeh 45s ease-in-out infinite alternate;
+}
+@keyframes app-bokeh {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  33% { transform: translate3d(3%, -4%, 0) scale(1.05); }
+  66% { transform: translate3d(-3%, 2%, 0) scale(0.97); }
+  100% { transform: translate3d(2%, 4%, 0) scale(1.04); }
+}
+
+html[data-bg-motion="grain"] .app-motion {
+  inset: -10%;
+  background-image: var(--app-paper-grain);
+  background-size: 140px 140px;
+  opacity: 0.7;
+  animation: app-grain 0.9s steps(6) infinite;
+}
+@keyframes app-grain {
+  0% { transform: translate3d(0, 0, 0); }
+  20% { transform: translate3d(-3%, 2%, 0); }
+  40% { transform: translate3d(2%, -3%, 0); }
+  60% { transform: translate3d(-2%, -1%, 0); }
+  80% { transform: translate3d(3%, 3%, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+/* Reduced motion: keep the look, freeze it. */
+@media (prefers-reduced-motion: reduce) {
+  .app-motion {
+    animation: none !important;
+  }
+}
+html[data-reduce-motion="on"] .app-motion {
+  animation: none !important;
 }
 
 @layer base {

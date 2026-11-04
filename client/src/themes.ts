@@ -1,4 +1,9 @@
-import { APPEARANCE_KEYS, DEFAULT_APPEARANCE, type Appearance } from 'wwp-shared';
+import {
+  APPEARANCE_ENUM_KEYS,
+  DEFAULT_APPEARANCE,
+  type Appearance,
+  type AppearanceRangeKey,
+} from 'wwp-shared';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -1268,6 +1273,8 @@ export const DEFAULT_BG_GRADIENT: BgGradientId = DEFAULT_APPEARANCE.bgGradient;
 export interface BgPatternOption {
   id: BgPatternId;
   label: string;
+  /** Shown under the label (only patterns that need explaining). */
+  description?: string;
   // Preview style uses hardcoded colors (not CSS vars) for small swatches in Settings
   previewStyle: {
     backgroundImage: string;
@@ -1336,10 +1343,107 @@ export const BG_PATTERN_OPTIONS: BgPatternOption[] = [
     },
   },
   {
+    id: 'waves',
+    label: 'Waves',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(circle at 50% 100%, transparent 6px, rgba(0,0,0,0.16) 7px, transparent 8px)',
+        'radial-gradient(circle at 0% 0%, transparent 6px, rgba(0,0,0,0.16) 7px, transparent 8px)',
+        'radial-gradient(circle at 100% 0%, transparent 6px, rgba(0,0,0,0.16) 7px, transparent 8px)',
+      ].join(', '),
+      backgroundSize: '16px 8px, 16px 8px, 16px 8px',
+    },
+  },
+  {
+    id: 'hexagons',
+    label: 'Hexagons',
+    previewStyle: {
+      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cpath fill='none' stroke='%23000' stroke-opacity='0.18' d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/svg%3E")`,
+      backgroundSize: '14px 24.5px',
+    },
+  },
+  {
+    id: 'terrazzo',
+    label: 'Terrazzo',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(ellipse 2.5px 1.5px at 20% 30%, rgba(251,146,60,0.6) 98%, transparent)',
+        'radial-gradient(ellipse 1.5px 2.5px at 70% 60%, rgba(252,211,77,0.7) 98%, transparent)',
+        'radial-gradient(circle 1.2px at 45% 80%, rgba(0,0,0,0.3) 98%, transparent)',
+      ].join(', '),
+      backgroundSize: '29px 27px, 21px 25px, 16px 18px',
+    },
+  },
+  {
+    id: 'grain',
+    label: 'Paper Grain',
+    previewStyle: {
+      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.3 0 0 0 0 0.25 0 0 0 0.2 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+      backgroundSize: '140px 140px',
+    },
+  },
+  {
+    id: 'plaid',
+    label: 'Plaid',
+    previewStyle: {
+      backgroundImage: [
+        'repeating-linear-gradient(0deg, transparent 0 8px, rgba(251,146,60,0.18) 8px 11px, transparent 11px 18px)',
+        'repeating-linear-gradient(90deg, transparent 0 8px, rgba(251,146,60,0.18) 8px 11px, transparent 11px 18px)',
+      ].join(', '),
+    },
+  },
+  {
+    id: 'pinstripe',
+    label: 'Pinstripe',
+    previewStyle: {
+      backgroundImage: 'repeating-linear-gradient(135deg, transparent 0 5px, rgba(0,0,0,0.12) 5px 6px)',
+    },
+  },
+  {
+    id: 'stars',
+    label: 'Stars',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(circle 0.8px at 20% 30%, rgba(0,0,0,0.45) 98%, transparent)',
+        'radial-gradient(circle 1.2px at 70% 65%, rgba(251,146,60,0.7) 98%, transparent)',
+        'radial-gradient(circle 0.6px at 45% 10%, rgba(0,0,0,0.35) 98%, transparent)',
+      ].join(', '),
+      backgroundSize: '27px 25px, 41px 37px, 17px 19px',
+    },
+  },
+  {
+    id: 'myplaces',
+    label: 'My Places',
+    description: 'Your most-visited spots, joined in the order you went',
+    previewStyle: {
+      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Cpath d='M8 30L26 12L44 22L63 8L84 26L104 14' fill='none' stroke='%23000' stroke-opacity='0.25'/%3E%3Cg fill='rgb(234,88,12)' fill-opacity='0.7'%3E%3Ccircle cx='8' cy='30' r='2'/%3E%3Ccircle cx='26' cy='12' r='3.2'/%3E%3Ccircle cx='44' cy='22' r='2.2'/%3E%3Ccircle cx='63' cy='8' r='4'/%3E%3Ccircle cx='84' cy='26' r='2.6'/%3E%3Ccircle cx='104' cy='14' r='2'/%3E%3C/g%3E%3C/svg%3E")`,
+      backgroundSize: 'cover',
+    },
+  },
+  {
+    id: 'streets',
+    label: 'Streets',
+    description: 'The roads around your home area, from OpenStreetMap',
+    previewStyle: {
+      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Cg fill='none' stroke='%23000' stroke-opacity='0.3' stroke-linecap='round'%3E%3Cpath stroke-width='2.5' d='M0 24C30 20 60 30 120 18'/%3E%3Cpath stroke-width='1.2' d='M20 0L28 40M56 0L50 40M88 0L96 40M0 8L120 6M0 36L120 33'/%3E%3C/g%3E%3C/svg%3E")`,
+      backgroundSize: 'cover',
+    },
+  },
+  {
     id: 'none',
     label: 'None',
     previewStyle: { backgroundImage: 'none' },
   },
+];
+
+export type BgMotionId = Appearance['bgMotion'];
+
+export const BG_MOTION_OPTIONS: { id: BgMotionId; label: string; description: string }[] = [
+  { id: 'none', label: 'Still', description: 'No animation' },
+  { id: 'aurora', label: 'Aurora', description: 'Slow drifting bands of light' },
+  { id: 'starfield', label: 'Starfield', description: 'Twinkling stars drifting by' },
+  { id: 'bokeh', label: 'Bokeh', description: 'Soft out-of-focus lights' },
+  { id: 'grain', label: 'Film Grain', description: 'Flickering analog texture' },
 ];
 
 export const BG_GRADIENT_OPTIONS: BgGradientOption[] = [
@@ -1362,21 +1466,31 @@ export const BG_GRADIENT_PREVIEWS: Record<BgGradientId, string> = {
   flat: 'linear-gradient(175deg, rgb(255,247,237), rgb(255,255,255) 40%, rgb(255,251,235))',
 };
 
+/** Numeric knobs become CSS variables on <html> (value → CSS value). */
+export const APPEARANCE_CSS_VARS: Record<AppearanceRangeKey, { name: string; format: (value: number) => string }> = {
+  wallpaperBlur: { name: '--app-wallpaper-blur', format: (v) => `${v}px` },
+  wallpaperDim: { name: '--app-wallpaper-dim', format: (v) => String(v / 100) },
+};
+
 /**
- * Expose every appearance knob as a data attribute on <html> (bgPattern →
- * data-bg-pattern) so index.css can style it. The pre-paint script in
- * index.html restores these from the theme snapshot.
+ * Expose appearance knobs on <html> for index.css: list knobs as data
+ * attributes (bgPattern → data-bg-pattern), numeric ones as CSS variables.
+ * The pre-paint script in index.html restores both from the theme snapshot
+ * (attributes from `attrs`, variables as part of the inline style).
  */
 export function applyAppearanceToRoot(root: HTMLElement, appearance: Appearance) {
-  for (const key of APPEARANCE_KEYS) {
+  for (const key of APPEARANCE_ENUM_KEYS) {
     root.dataset[key] = String(appearance[key]);
+  }
+  for (const [key, cssVar] of Object.entries(APPEARANCE_CSS_VARS) as [AppearanceRangeKey, { name: string; format: (v: number) => string }][]) {
+    root.style.setProperty(cssVar.name, cssVar.format(appearance[key]));
   }
 }
 
 /** The data-* attributes applyAppearanceToRoot manages, for the snapshot. */
 export function readAppearanceAttrs(root: HTMLElement): Record<string, string> {
   const attrs: Record<string, string> = {};
-  for (const key of APPEARANCE_KEYS) {
+  for (const key of APPEARANCE_ENUM_KEYS) {
     const value = root.dataset[key];
     if (value) attrs[key] = value;
   }

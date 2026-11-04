@@ -10,8 +10,19 @@
 
 export const APPEARANCE_SPEC = {
   bgPattern: {
-    values: ['dots', 'grid', 'crosshatch', 'topographic', 'linen', 'none'],
+    values: [
+      'dots', 'grid', 'crosshatch', 'topographic', 'linen',
+      'waves', 'hexagons', 'terrazzo', 'grain', 'plaid', 'pinstripe', 'stars',
+      // Drawn from the user's check-ins (location plugin, /place-patterns).
+      'myplaces', 'streets',
+      'none',
+    ],
     default: 'dots',
+  },
+  /** Animated layer over the background (off under reduced motion). */
+  bgMotion: {
+    values: ['none', 'aurora', 'starfield', 'bokeh', 'grain'],
+    default: 'none',
   },
   bgGradient: {
     values: ['soft', 'radial', 'flat'],
@@ -54,22 +65,70 @@ export const APPEARANCE_SPEC = {
     values: ['system', 'on'],
     default: 'system',
   },
+  /** Photo wallpaper behind the app (the image itself: GET /settings/wallpaper). */
+  wallpaper: {
+    values: ['off', 'on'],
+    default: 'off',
+  },
+  /** Wallpaper blur in px. */
+  wallpaperBlur: {
+    min: 0,
+    max: 30,
+    default: 8,
+  },
+  /** How much the theme background washes over the wallpaper, in %. */
+  wallpaperDim: {
+    min: 0,
+    max: 80,
+    default: 35,
+  },
+  /** Recolor the wallpaper toward the theme's glow color. */
+  wallpaperTint: {
+    values: ['off', 'on'],
+    default: 'off',
+  },
 } as const;
 
-export type AppearanceKey = keyof typeof APPEARANCE_SPEC;
+type AppearanceSpec = typeof APPEARANCE_SPEC;
+
+export type AppearanceKey = keyof AppearanceSpec;
+
+/** Knobs with a fixed list of values (exposed as html data-* attributes). */
+export type AppearanceEnumKey = {
+  [K in AppearanceKey]: AppearanceSpec[K] extends { values: readonly string[] } ? K : never;
+}[AppearanceKey];
+
+/** Knobs holding an integer in [min, max] (exposed as CSS variables). */
+export type AppearanceRangeKey = Exclude<AppearanceKey, AppearanceEnumKey>;
 
 export type Appearance = {
-  [K in AppearanceKey]: (typeof APPEARANCE_SPEC)[K]['values'][number];
+  [K in AppearanceKey]: AppearanceSpec[K] extends { values: readonly (infer V)[] } ? V : number;
 };
 
 export const APPEARANCE_KEYS = Object.keys(APPEARANCE_SPEC) as AppearanceKey[];
+
+export function isAppearanceRangeKey(key: AppearanceKey): key is AppearanceRangeKey {
+  return !('values' in APPEARANCE_SPEC[key]);
+}
+
+export const APPEARANCE_ENUM_KEYS = APPEARANCE_KEYS.filter(
+  (key): key is AppearanceEnumKey => !isAppearanceRangeKey(key),
+);
+export const APPEARANCE_RANGE_KEYS = APPEARANCE_KEYS.filter(isAppearanceRangeKey);
 
 export const DEFAULT_APPEARANCE: Appearance = Object.fromEntries(
   APPEARANCE_KEYS.map((key) => [key, APPEARANCE_SPEC[key].default]),
 ) as Appearance;
 
 export function isAppearanceValue<K extends AppearanceKey>(key: K, value: unknown): value is Appearance[K] {
-  return (APPEARANCE_SPEC[key].values as readonly unknown[]).includes(value);
+  const spec = APPEARANCE_SPEC[key] as { values?: readonly unknown[]; min?: number; max?: number };
+  if (spec.values) return spec.values.includes(value);
+  return typeof value === 'number' && Number.isInteger(value) && value >= spec.min! && value <= spec.max!;
+}
+
+function describeAllowed(key: AppearanceKey): string {
+  const spec = APPEARANCE_SPEC[key] as { values?: readonly string[]; min?: number; max?: number };
+  return spec.values ? `one of: ${spec.values.join(', ')}` : `an integer from ${spec.min} to ${spec.max}`;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -95,7 +154,7 @@ export function validateAppearancePatch(
     if (!isAppearanceValue(k, raw)) {
       return {
         ok: false,
-        error: `appearance.${key} must be one of: ${APPEARANCE_SPEC[k].values.join(', ')}`,
+        error: `appearance.${key} must be ${describeAllowed(k)}`,
       };
     }
     value[k] = raw;

@@ -491,8 +491,22 @@ export const adminUsers = {
 };
 
 // Settings
+/** Image types the wallpaper upload accepts (the server checks the bytes). */
+export const WALLPAPER_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'] as const;
+/** Server-side upload cap (MAX_WALLPAPER_BYTES). */
+export const MAX_WALLPAPER_BYTES = 15 * 1024 * 1024;
+
 export const settings = {
   get: () => request<any>('/settings'),
+  /** The signed-in user's photo wallpaper (404 when there is none). */
+  wallpaperUrl: `${API_BASE}/settings/wallpaper`,
+  uploadWallpaper: (image: Blob) =>
+    request<{ ok: true }>('/settings/wallpaper', {
+      method: 'PUT',
+      body: image,
+      headers: { 'Content-Type': image.type },
+    }),
+  deleteWallpaper: () => request<{ removed: boolean }>('/settings/wallpaper', { method: 'DELETE' }),
   update: async (data: any) => {
     const result = await request<any>('/settings', { method: 'PUT', body: JSON.stringify(data) });
     // Memoized settings readers (Immich enabled, distance unit) re-read now.

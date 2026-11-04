@@ -1,6 +1,8 @@
 import { Layers } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { BG_PATTERN_OPTIONS, BG_GRADIENT_OPTIONS, BG_GRADIENT_PREVIEWS } from '../../../themes';
+import { BG_PATTERN_OPTIONS, BG_GRADIENT_OPTIONS, BG_GRADIENT_PREVIEWS, BG_MOTION_OPTIONS } from '../../../themes';
+import { OptionPicker } from './OptionPicker';
+import { WallpaperControls } from './WallpaperControls';
 import { DisplaySection } from './DisplaySection';
 
 const selectedClass = 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm';
@@ -10,14 +12,19 @@ export function BackgroundSection() {
   const { appearance, setAppearance } = useTheme();
   const patternLabel = BG_PATTERN_OPTIONS.find((o) => o.id === appearance.bgPattern)?.label;
   const gradientLabel = BG_GRADIENT_OPTIONS.find((o) => o.id === appearance.bgGradient)?.label;
+  const motionLabel = appearance.bgMotion === 'none'
+    ? undefined
+    : BG_MOTION_OPTIONS.find((o) => o.id === appearance.bgMotion)?.label;
 
   return (
     <DisplaySection
       id="background"
       title="Background"
       icon={Layers}
-      summary={[patternLabel, gradientLabel].filter(Boolean).join(' · ')}
+      summary={[appearance.wallpaper === 'on' ? 'Photo' : undefined, patternLabel, gradientLabel, motionLabel].filter(Boolean).join(' · ')}
     >
+      <WallpaperControls />
+
       <h3 className="text-sm font-semibold font-sans tracking-normal text-gray-700 dark:text-gray-300">Pattern</h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {BG_PATTERN_OPTIONS.map((option) => {
@@ -42,6 +49,9 @@ export function BackgroundSection() {
               <div className={`text-xs font-semibold ${isSelected ? 'text-primary-700 dark:text-primary-400' : 'text-gray-700 dark:text-gray-200'}`}>
                 {option.label}
               </div>
+              {option.description && (
+                <div className="text-[11px] leading-tight text-gray-400 dark:text-gray-500">{option.description}</div>
+              )}
             </button>
           );
         })}
@@ -76,6 +86,17 @@ export function BackgroundSection() {
           );
         })}
       </div>
+
+      <OptionPicker
+        label="Motion"
+        hint={appearance.reduceMotion === 'on'
+          ? 'Reduce motion is on (Comfort), so this stays still.'
+          : 'Gentle animation behind everything. Stays still when your device asks for reduced motion.'}
+        options={BG_MOTION_OPTIONS}
+        value={appearance.bgMotion}
+        onChange={(bgMotion) => setAppearance({ bgMotion })}
+        columns={3}
+      />
     </DisplaySection>
   );
 }

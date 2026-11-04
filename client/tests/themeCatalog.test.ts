@@ -8,6 +8,7 @@ import {
 } from 'wwp-shared';
 import {
   BG_GRADIENT_OPTIONS,
+  BG_MOTION_OPTIONS,
   BG_PATTERN_OPTIONS,
   DEFAULT_THEME_BY_MODE,
   THEME_DEFINITIONS,
@@ -105,6 +106,7 @@ describe('appearance', () => {
   it('offers a labelled option for exactly the values the server accepts', () => {
     expect(BG_PATTERN_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.bgPattern.values]);
     expect(BG_GRADIENT_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.bgGradient.values]);
+    expect(BG_MOTION_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.bgMotion.values]);
   });
 
   it('offers a labelled option for every typography and surface value', () => {
@@ -131,7 +133,16 @@ describe('appearance', () => {
     expect(root.getAttribute('data-bg-pattern')).toBe('grid');
     expect(root.getAttribute('data-bg-gradient')).toBe('flat');
     expect(root.getAttribute('data-text-size')).toBe('m');
-    expect(readAppearanceAttrs(root)).toEqual({ ...DEFAULT_APPEARANCE, bgPattern: 'grid', bgGradient: 'flat' });
+    const { wallpaperBlur: _blur, wallpaperDim: _dim, ...enumDefaults } = DEFAULT_APPEARANCE;
+    expect(readAppearanceAttrs(root)).toEqual({ ...enumDefaults, bgPattern: 'grid', bgGradient: 'flat' });
+  });
+
+  it('exposes numeric knobs as CSS variables', () => {
+    const root = document.documentElement;
+    applyAppearanceToRoot(root, { ...DEFAULT_APPEARANCE, wallpaperBlur: 12, wallpaperDim: 40 });
+    expect(root.style.getPropertyValue('--app-wallpaper-blur')).toBe('12px');
+    expect(root.style.getPropertyValue('--app-wallpaper-dim')).toBe('0.4');
+    expect(root.dataset.wallpaperBlur).toBeUndefined();
   });
 
   it('rejects unknown keys and values in an update', () => {
@@ -139,6 +150,10 @@ describe('appearance', () => {
     expect(validateAppearancePatch({ bgPattern: 'plaid-ish' }).ok).toBe(false);
     expect(validateAppearancePatch({ sparkles: true }).ok).toBe(false);
     expect(validateAppearancePatch(['grid']).ok).toBe(false);
+    expect(validateAppearancePatch({ wallpaperDim: 50 }).ok).toBe(true);
+    expect(validateAppearancePatch({ wallpaperDim: 81 }).ok).toBe(false);
+    expect(validateAppearancePatch({ wallpaperDim: 2.5 }).ok).toBe(false);
+    expect(validateAppearancePatch({ wallpaperDim: '50' }).ok).toBe(false);
   });
 
   it('reads stored values leniently, filling defaults', () => {

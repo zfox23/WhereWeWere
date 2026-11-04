@@ -8,6 +8,7 @@
  *   postcards.json            "Postcard From Your Past" history (Profile > Reflect)
  *   plugins/<id>.json         one PluginBackupEntry per plugin
  *   plugins/<id>/files/...    optional plugin-owned files (e.g. tracks GPX)
+ *   appearance/wallpaper.<ext> optional photo wallpaper (Settings > Display)
  */
 
 import fs from 'fs';
@@ -67,6 +68,8 @@ export function buildBackupZip(
   companions?: unknown,
   postcards?: unknown,
   onProgress?: (progress: BackupZipProgress) => void,
+  /** Core-owned files: `name` is the full path inside the ZIP. */
+  coreFiles: { absPath: string; name: string }[] = [],
 ): Promise<string> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wwb-export-'));
   const zipPath = path.join(dir, 'backup.zip');
@@ -103,6 +106,11 @@ export function buildBackupZip(
     }
     for (const [pluginId, entry] of Object.entries(pluginsPayload)) {
       archive.append(JSON.stringify(entry, null, 2), { name: `plugins/${pluginId}.json` });
+    }
+    for (const file of coreFiles) {
+      if (!fs.existsSync(file.absPath)) continue;
+      // Images are already compressed: store, don't deflate.
+      archive.file(file.absPath, { name: file.name, ...({ store: true } as object) });
     }
     for (const file of files) {
       if (!fs.existsSync(file.absPath)) continue; // row already fell back to inline

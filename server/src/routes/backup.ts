@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { pickValidAppearance } from 'wwp-shared';
+import { deleteWallpaper, findWallpaper, restoreWallpaperFromBackup } from '../services/wallpaper';
 import multer from 'multer';
 import { pool, query } from '../db';
 import {
@@ -509,6 +510,7 @@ async function buildExport(
     // (e.g. tracks generates a GPX for rows whose original is missing).
     const { files: pluginFiles, tempDirs } = await exportPluginFiles(userId);
     fileTempDirs = tempDirs;
+    const wallpaper = await findWallpaper(userId);
 
     const manifest: import('../services/backupArchive').BackupManifest = {
       format: BACKUP_FORMAT,
@@ -526,6 +528,7 @@ async function buildExport(
       companionsResult.rows,
       postcardsResult.rows,
       (p) => onProgress({ stage: 'zipping', ...p }),
+      wallpaper ? [{ absPath: wallpaper.path, name: `appearance/wallpaper.${wallpaper.ext}` }] : [],
     );
     const day = new Date().toISOString().slice(0, 10);
     return { zipPath, fileName: `wherewewere-backup-v${LATEST_BACKUP_SCHEMA_VERSION}-${day}.zip` };
@@ -662,6 +665,10 @@ router.post('/import', preserveUserContext(upload.single('file')), async (req: R
     const counts = await withTransaction(client, (tx) =>
       runRestore(tx, userId, { ...backup, tempRoot: tempRoot }, errors)
     );
+    // Files after the data commits (a file can't roll back with it).
+    if (tempRoot && await restoreWallpaperFromBackup(userId, tempRoot, errors)) {
+      counts.wallpaper = { inserted: 1, skipped: 0 };
+    }
 
     res.json({
       message: 'Backup import complete',
@@ -849,6 +856,8 @@ router.post('/start-over', async (req: Request, res: Response) => {
         [userId]
       );
       counts.user_settings_account_reset = accountSettingsResult.rowCount ?? 0;
+      // The wallpaper image goes with the appearance it belonged to.
+      if (await deleteWallpaper(userId)) counts.wallpaper_removed = 1;
     }
 
     await client.query('COMMIT');

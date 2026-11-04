@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Home, User, Settings, CircleUser, LogOut, ChevronDown } from 'lucide-react';
 import { accountLabel, useAuth } from '../contexts/AuthContext';
 import { startBackgroundTasks } from '../plugins/backgroundTasks';
+import { AppBackdrop } from './AppBackdrop';
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
@@ -98,6 +99,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell min-h-screen pb-16 md:pb-0 flex flex-col">
+      <AppBackdrop />
       {/* Top nav — glass header */}
       <header className="sticky top-0 z-60 bg-white/70 dark:bg-gray-900/70 border-b backdrop-blur-sm border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">

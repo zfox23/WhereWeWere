@@ -155,6 +155,14 @@ async function fetchWithRetry(
 }
 
 /**
+ * POST a form-encoded Overpass request (`data=<query>`), retrying rate limits
+ * and gateway errors. For other location features (e.g. place patterns).
+ */
+export function queryOverpass(body: string, retries = 2): Promise<Response> {
+  return fetchWithRetry(body, retries);
+}
+
+/**
  * Find the most relevant enclosing venue for a given point (e.g. the airport
  * that contains a terminal). Uses the Overpass `is_in` operator for true
  * spatial containment rather than radius-based proximity.

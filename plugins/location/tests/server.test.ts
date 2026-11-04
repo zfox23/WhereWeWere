@@ -206,7 +206,7 @@ describe('location plugin — core SQL hooks', () => {
 });
 
 describe('location plugin — plugin shape', () => {
-  it('declares custom storage and its five stable API mounts', () => {
+  it('declares custom storage and its six stable API mounts', () => {
     expect(server.storage).toBe('custom');
     const mounts = Array.isArray(server.api) ? server.api : [server.api as any];
     expect(mounts.map((m: any) => m.mount)).toEqual([
@@ -215,6 +215,7 @@ describe('location plugin — plugin shape', () => {
       '/weather',
       '/search',
       '/import/swarm',
+      '/place-patterns',
     ]);
     for (const mount of mounts) {
       expect(typeof mount.router).toBe('function');
