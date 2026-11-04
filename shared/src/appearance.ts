@@ -17,6 +17,43 @@ export const APPEARANCE_SPEC = {
     values: ['soft', 'radial', 'flat'],
     default: 'soft',
   },
+  /** Body + heading font pairing. */
+  font: {
+    values: ['classic', 'editorial', 'friendly', 'technical', 'journal', 'system'],
+    default: 'classic',
+  },
+  /** Scales the root font size, so rem-based text and spacing follow. */
+  textSize: {
+    values: ['s', 'm', 'l', 'xl'],
+    default: 'm',
+  },
+  radius: {
+    values: ['sharp', 'subtle', 'default', 'pillowy'],
+    default: 'default',
+  },
+  /** How cards and panels are drawn. */
+  surface: {
+    values: ['frosted', 'solid', 'outlined', 'paper'],
+    default: 'frosted',
+  },
+  blur: {
+    values: ['off', 'light', 'default', 'heavy'],
+    default: 'default',
+  },
+  shadow: {
+    values: ['flat', 'soft', 'lifted'],
+    default: 'soft',
+  },
+  /** Opaque panels and no backdrop blur, whatever the surface style. */
+  reduceTransparency: {
+    values: ['off', 'on'],
+    default: 'off',
+  },
+  /** 'system' follows the OS setting; 'on' stops animations regardless. */
+  reduceMotion: {
+    values: ['system', 'on'],
+    default: 'system',
+  },
 } as const;
 
 export type AppearanceKey = keyof typeof APPEARANCE_SPEC;

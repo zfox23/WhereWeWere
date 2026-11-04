@@ -13,9 +13,11 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Lato', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        // Variables so Settings > Display can swap the pairing (index.css,
+        // html[data-font]); defaults there are Lato / Bebas Neue.
+        sans: ['var(--app-font-sans)'],
         mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
-        display: ['"Bebas Neue"', 'Impact', 'ui-sans-serif', 'sans-serif'],
+        display: ['var(--app-font-display)'],
       },
       colors: {
         primary: {

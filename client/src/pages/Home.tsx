@@ -14,6 +14,7 @@ import WeatherBadge from '../../../plugins/location/ui/WeatherBadge';
 import WeatherModal from '../../../plugins/location/ui/WeatherModal';
 import type { WeatherSummary } from '../../../plugins/location/ui/weatherFormat';
 import { dedupeListening } from '../utils/listening';
+import { prefersReducedMotion } from '../appearance';
 
 const PAGE_SIZE = 20;
 
@@ -653,8 +654,7 @@ export default function Home() {
     const cards = Array.from(feed.querySelectorAll<HTMLElement>('[data-home-reveal]'));
     if (cards.length === 0) return;
 
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReducedMotion) {
+    if (prefersReducedMotion()) {
       cards.forEach((card) => card.classList.add('is-visible'));
       return;
     }

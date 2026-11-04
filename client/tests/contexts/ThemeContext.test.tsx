@@ -91,7 +91,7 @@ describe('ThemeProvider', () => {
     act(() => themeApi.setAppearance({ bgPattern: 'grid' }));
     await waitFor(() => {
       const snap = JSON.parse(localStorage.getItem('theme-snapshot')!);
-      expect(snap.attrs).toMatchObject({ bgPattern: 'grid', bgGradient: 'soft' });
+      expect(snap.attrs).toMatchObject({ bgPattern: 'grid', bgGradient: 'soft', font: 'classic', surface: 'frosted' });
     });
     expect(document.documentElement.dataset.bgPattern).toBe('grid');
   });

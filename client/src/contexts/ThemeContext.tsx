@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useState, useEffect, useMemo, u
 import { DEFAULT_APPEARANCE, normalizeAppearance, pickValidAppearance, type Appearance } from 'wwp-shared';
 import { settings } from '../api/client';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../utils/storage';
+import { loadFontPairing } from '../appearance';
 import {
   DEFAULT_THEME_BY_MODE,
   SYSTEM_THEME_ID,
@@ -204,6 +205,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyAppearanceToRoot(document.documentElement, appearance);
   }, [appearance]);
+
+  // Download the chosen font pairing (only Classic ships in the bundle).
+  useEffect(() => {
+    void loadFontPairing(appearance.font);
+  }, [appearance.font]);
 
   // Remember what was applied so the inline script in index.html can restore
   // it before first paint on the next load (no light flash for dark themes).

@@ -5,6 +5,9 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { AppearancePreview } from './display/AppearancePreview';
 import { ThemesSection } from './display/ThemesSection';
 import { BackgroundSection } from './display/BackgroundSection';
+import { TypographySection } from './display/TypographySection';
+import { SurfacesSection } from './display/SurfacesSection';
+import { AccessibilitySection } from './display/AccessibilitySection';
 
 interface DisplayTabProps {
   initialDistanceUnit: 'metric' | 'imperial';
@@ -32,7 +35,7 @@ export function DisplayTab({ initialDistanceUnit, onSaved }: DisplayTabProps) {
   };
 
   const confirmReset = () => {
-    if (window.confirm('Reset the background and other appearance options to their defaults? Your theme stays as it is.')) {
+    if (window.confirm('Reset fonts, text size, shapes, surfaces, background and comfort options to their defaults? Your theme stays as it is.')) {
       resetAppearance();
     }
   };
@@ -44,7 +47,10 @@ export function DisplayTab({ initialDistanceUnit, onSaved }: DisplayTabProps) {
       </div>
 
       <ThemesSection />
+      <TypographySection />
+      <SurfacesSection />
       <BackgroundSection />
+      <AccessibilitySection />
 
       <div className="flex justify-end">
         <button type="button" onClick={confirmReset} className="btn-secondary gap-2">

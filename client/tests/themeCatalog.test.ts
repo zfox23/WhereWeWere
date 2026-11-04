@@ -21,6 +21,15 @@ import {
   resolveAppThemeId,
   resolveThemePreference,
 } from '../src/themes';
+import {
+  BLUR_OPTIONS,
+  FONT_OPTIONS,
+  RADIUS_OPTIONS,
+  SHADOW_OPTIONS,
+  SURFACE_OPTIONS,
+  TEXT_SIZE_OPTIONS,
+  prefersReducedMotion,
+} from '../src/appearance';
 
 describe('theme catalog', () => {
   it('maps legacy light and dark values to the default presets', () => {
@@ -98,12 +107,31 @@ describe('appearance', () => {
     expect(BG_GRADIENT_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.bgGradient.values]);
   });
 
+  it('offers a labelled option for every typography and surface value', () => {
+    expect(FONT_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.font.values]);
+    expect(TEXT_SIZE_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.textSize.values]);
+    expect(RADIUS_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.radius.values]);
+    expect(SURFACE_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.surface.values]);
+    expect(BLUR_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.blur.values]);
+    expect(SHADOW_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.shadow.values]);
+  });
+
+  it('honours the in-app reduce motion switch', () => {
+    const root = document.documentElement;
+    applyAppearanceToRoot(root, { ...DEFAULT_APPEARANCE, reduceMotion: 'on' });
+    expect(prefersReducedMotion()).toBe(true);
+    applyAppearanceToRoot(root, DEFAULT_APPEARANCE);
+    window.matchMedia = ((q: string) => ({ matches: false, media: q })) as unknown as typeof window.matchMedia;
+    expect(prefersReducedMotion()).toBe(false);
+  });
+
   it('applies each knob as a data attribute and reads them back', () => {
     const root = document.documentElement;
     applyAppearanceToRoot(root, { ...DEFAULT_APPEARANCE, bgPattern: 'grid', bgGradient: 'flat' });
     expect(root.getAttribute('data-bg-pattern')).toBe('grid');
     expect(root.getAttribute('data-bg-gradient')).toBe('flat');
-    expect(readAppearanceAttrs(root)).toEqual({ bgPattern: 'grid', bgGradient: 'flat' });
+    expect(root.getAttribute('data-text-size')).toBe('m');
+    expect(readAppearanceAttrs(root)).toEqual({ ...DEFAULT_APPEARANCE, bgPattern: 'grid', bgGradient: 'flat' });
   });
 
   it('rejects unknown keys and values in an update', () => {
