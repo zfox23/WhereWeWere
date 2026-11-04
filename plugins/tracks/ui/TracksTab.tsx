@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { CircleMarker, MapContainer, Marker, Polyline, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Clock, Gauge, Heart, Map as MapIcon, Mountain, Route, TrendingUp } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
@@ -16,7 +16,6 @@ import { settings } from '../../../client/src/api/client';
 import { tracks } from './api';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
 import { getThemeDefinition } from '../../../client/src/themes';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../location/ui/geo';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
 import {
@@ -37,6 +36,8 @@ import {
 import { NO_ACTIVITY_TYPE } from '../constants';
 import type { TrackEntry, TrackMapEntry } from './types';
 import { clusterTracks } from './trackClustering';
+import { ThemedTileLayer } from '../../location/ui/ThemedTileLayer';
+import { useChartColors } from '../../../client/src/hooks/useChartColors';
 
 const PAGE_SIZE = 500;
 
@@ -223,6 +224,9 @@ function ClusteredTrackLayer({
   const map = useMap();
   const { resolvedThemeId } = useTheme();
   const accent = getThemeDefinition(resolvedThemeId).palette['500'];
+  // Classic keeps the original 18-color rainbow; other palettes cycle theirs.
+  const { colors: chartColors, palette } = useChartColors();
+  const trackColors = palette === 'classic' ? TRACK_COLORS : chartColors;
   const [zoom, setZoom] = useState(() => map.getZoom());
   useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
 
@@ -262,7 +266,7 @@ function ClusteredTrackLayer({
             />
           );
         }
-        const color = TRACK_COLORS[item.index % TRACK_COLORS.length];
+        const color = trackColors[item.index % trackColors.length];
         const popup = (
           <Popup>
             <TrackInfoPopup track={item.track} color={color} distanceUnit={distanceUnit} />
@@ -307,8 +311,6 @@ function TracksMap({
    *  the activity filter does, so checkbox toggles don't re-fit the map. */
   fitKey: string;
 }) {
-  const { resolvedTheme } = useTheme();
-
   const drawTracks = tracks.filter((t) => t.coordinates.length >= 2 && t.bounds);
 
   const initialCenter = useMemo<[number, number]>(() => {
@@ -337,14 +339,7 @@ function TracksMap({
         className="w-full h-full"
         style={{ minHeight: '420px', height: '100%' }}
       >
-        <TileLayer
-          key={resolvedTheme}
-          attribution={TILE_ATTRIBUTION}
-          // CORS-enabled tile requests: opaque (no-cors) responses can't be cached
-          // by the service worker's tile cache.
-          crossOrigin="anonymous"
-          url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
-        />
+        <ThemedTileLayer />
         <ClusteredTrackLayer tracks={drawTracks} distanceUnit={distanceUnit} />
         <FitToAllTracks tracks={drawTracks} fitKey={fitKey} />
         {onBoundsChange && <BoundsReporter onBounds={onBoundsChange} />}

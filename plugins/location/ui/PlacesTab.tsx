@@ -15,7 +15,7 @@ import {
   Library,
   List,
 } from 'lucide-react';
-import { CircleMarker, FeatureGroup, MapContainer, Marker, Polyline, Popup as LeafletPopup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { CircleMarker, FeatureGroup, MapContainer, Marker, Polyline, Popup as LeafletPopup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { stats } from '../../../client/src/api/client';
@@ -43,11 +43,12 @@ import type {
   TopVenue,
 } from '../../../client/src/types';
 import { formatDate } from '../../../client/src/utils/checkin';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from './geo';
 import '../../../client/src/utils/smoothLeafletZoom';
 import { VenuesLibrarySection } from './VenuesLibrarySection';
 import { CheckinListsSection } from './CheckinListsSection';
 import { VenueListsSection } from './VenueListsSection';
+import { ThemedTileLayer } from './ThemedTileLayer';
+import { useChartColors } from '../../../client/src/hooks/useChartColors';
 
 type ClusteredVenueItem =
   | {
@@ -87,6 +88,9 @@ const TIME_COLORS: Record<string, string> = {
   Evening: 'bg-indigo-400',
   Night: 'bg-slate-500',
 };
+
+/** Chart palette slots for the time-of-day bars when not Classic: sun, primary, extra, cool. */
+const TIME_COLOR_SLOTS: Record<string, number> = { Morning: 4, Afternoon: 0, Evening: 5, Night: 1 };
 
 // Pin icons only vary by badge text, size bucket and theme colors. Reusing the
 // same DivIcon instance keeps react-leaflet from calling setIcon (rebuilding
@@ -657,14 +661,7 @@ function VenuePinsMap({
             className="w-full h-full"
             style={{ height: '100%' }}
           >
-            <TileLayer
-              key={resolvedTheme}
-              attribution={TILE_ATTRIBUTION}
-          // CORS-enabled tile requests: opaque (no-cors) responses can't be cached
-          // by the service worker's tile cache.
-          crossOrigin="anonymous"
-              url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
-            />
+            <ThemedTileLayer />
             <MapBoundsController data={data} />
             <VenueMapMarkers data={data} />
           </MapContainer>
@@ -702,6 +699,10 @@ function DayOfWeekChart({ data }: { data: DayOfWeekData[] }) {
 
 function TimeOfDayChart({ data }: { data: TimeOfDayData[] }) {
   const total = data.reduce((sum, d) => sum + d.count, 0) || 1;
+  const { colors: chartColors, palette } = useChartColors();
+  // Classic keeps the original Tailwind colors; other palettes use their slots.
+  const barColor = (period: string) =>
+    palette === 'classic' || TIME_COLOR_SLOTS[period] === undefined ? undefined : chartColors[TIME_COLOR_SLOTS[period]];
   return (
     <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 mb-3">
@@ -718,7 +719,10 @@ function TimeOfDayChart({ data }: { data: TimeOfDayData[] }) {
               <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{d.period}</p>
               <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{pct}%</p>
               <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                <div className={`${TIME_COLORS[d.period] || 'bg-gray-400'} h-full rounded-full`} style={{ width: `${pct}%` }} />
+                <div
+                  className={`${barColor(d.period) ? '' : TIME_COLORS[d.period] || 'bg-gray-400'} h-full rounded-full`}
+                  style={{ width: `${pct}%`, backgroundColor: barColor(d.period) }}
+                />
               </div>
               <p className="text-[10px] text-gray-400 mt-0.5">{d.count} check-in{d.count !== 1 ? 's' : ''}</p>
             </div>

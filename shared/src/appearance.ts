@@ -87,6 +87,19 @@ export const APPEARANCE_SPEC = {
     values: ['off', 'on'],
     default: 'off',
   },
+  /**
+   * Map tiles. standard/tinted/vintage are OpenStreetMap (tinted and vintage
+   * are CSS filters); muted loads CARTO tiles and satellite Esri imagery.
+   */
+  mapStyle: {
+    values: ['standard', 'tinted', 'vintage', 'muted', 'satellite'],
+    default: 'standard',
+  },
+  /** Series colors for charts and track lines. */
+  chartPalette: {
+    values: ['classic', 'theme', 'vivid', 'pastel', 'colorblind', 'mono'],
+    default: 'classic',
+  },
 } as const;
 
 type AppearanceSpec = typeof APPEARANCE_SPEC;

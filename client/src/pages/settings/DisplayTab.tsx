@@ -8,6 +8,7 @@ import { BackgroundSection } from './display/BackgroundSection';
 import { TypographySection } from './display/TypographySection';
 import { SurfacesSection } from './display/SurfacesSection';
 import { AccessibilitySection } from './display/AccessibilitySection';
+import { MapChartSection } from './display/MapChartSection';
 
 interface DisplayTabProps {
   initialDistanceUnit: 'metric' | 'imperial';
@@ -35,7 +36,7 @@ export function DisplayTab({ initialDistanceUnit, onSaved }: DisplayTabProps) {
   };
 
   const confirmReset = () => {
-    if (window.confirm('Reset fonts, text size, shapes, surfaces, background and comfort options to their defaults? Your theme stays as it is.')) {
+    if (window.confirm('Reset fonts, text size, shapes, surfaces, background, map, chart and comfort options to their defaults? Your theme stays as it is, and a wallpaper photo is kept but hidden.')) {
       resetAppearance();
     }
   };
@@ -50,6 +51,7 @@ export function DisplayTab({ initialDistanceUnit, onSaved }: DisplayTabProps) {
       <TypographySection />
       <SurfacesSection />
       <BackgroundSection />
+      <MapChartSection />
       <AccessibilitySection />
 
       <div className="flex justify-end">

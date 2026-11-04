@@ -734,6 +734,23 @@ html[data-reduce-motion="on"] .app-motion {
   }
 }
 
+/* ── Map styles (plugins/location/ui/ThemedTileLayer.tsx) ──
+   Filters on the tile layer only; markers, lines and popups keep their colors.
+   Tinted: grayscale → sepia (hue ≈ 35°) → rotated to the theme's glow hue
+   (--app-map-hue, set with the theme); inverted first in dark mode. */
+.wwp-tiles-tinted {
+  filter: grayscale(1) sepia(0.55) hue-rotate(var(--app-map-hue, 0deg)) saturate(1.5) brightness(1.03) contrast(0.95);
+}
+.dark .wwp-tiles-tinted {
+  filter: grayscale(1) invert(0.92) sepia(0.45) hue-rotate(var(--app-map-hue, 0deg)) saturate(1.7) brightness(0.92) contrast(0.92);
+}
+.wwp-tiles-vintage {
+  filter: sepia(0.6) saturate(0.85) contrast(0.92) brightness(1.02);
+}
+.dark .wwp-tiles-vintage {
+  filter: invert(0.9) hue-rotate(180deg) sepia(0.55) saturate(0.9) brightness(0.88) contrast(0.95);
+}
+
 .leaflet-popup-content-wrapper {
   background: transparent !important;
 }

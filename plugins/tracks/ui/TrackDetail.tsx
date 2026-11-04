@@ -28,7 +28,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { MapContainer, Polyline, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { tracks } from './api';
@@ -39,10 +39,9 @@ import DualRangeSlider from '../../../client/src/components/DualRangeSlider';
 import { BackButton } from '../../../client/src/components/BackButton';
 import CompanionChipInput from '../../../client/src/components/CompanionChipInput';
 import { formatDistance, formatSpeed, type DistanceUnit } from '../../location/ui/geo';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from '../../location/ui/geo';
-import { useTheme } from '../../../client/src/contexts/ThemeContext';
 import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
+import { ThemedTileLayer } from '../../location/ui/ThemedTileLayer';
 
 // Fix Leaflet's default icon paths (broken by bundlers)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -194,7 +193,6 @@ function TrackMap({
   coordinates: [number, number][];
   hoverPosition: [number, number] | null;
 }) {
-  const { resolvedTheme } = useTheme();
   const center = useMemo<[number, number]>(() => {
     if (coordinates.length > 0) {
       const first = coordinates[0];
@@ -225,14 +223,7 @@ function TrackMap({
         className="w-full h-full"
         style={{ minHeight: '360px', height: '100%' }}
       >
-        <TileLayer
-          key={resolvedTheme}
-          attribution={TILE_ATTRIBUTION}
-          // CORS-enabled tile requests: opaque (no-cors) responses can't be cached
-          // by the service worker's tile cache.
-          crossOrigin="anonymous"
-          url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
-        />
+        <ThemedTileLayer />
         <Polyline
           positions={coordinates.map(([lng, lat]) => [lat, lng] as [number, number])}
           pathOptions={{ color: '#ef4444', weight: 5, opacity: 0.9 }}

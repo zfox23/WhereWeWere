@@ -4,6 +4,7 @@ import { useTheme } from '../../../client/src/contexts/ThemeContext';
 import type { DistanceUnit } from './geo';
 import { describeWeather, formatClock, formatPrecip, formatTemp, formatWind, type WeatherHour } from './weatherFormat';
 import { hourLabel, localHours, monotonePath, niceScale } from './weatherChart';
+import { useChartColors } from '../../../client/src/hooks/useChartColors';
 
 interface Props {
   hourly: WeatherHour[];
@@ -53,6 +54,7 @@ const toPrecip = (mm: number, unit: DistanceUnit) => (unit === 'imperial' ? mm /
 export default function WeatherChart({ hourly, sunrise, sunset, unit }: Props) {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === 'dark';
+  const { colors: chartColors } = useChartColors();
   const horizontal = useIsWide();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -110,12 +112,13 @@ export default function WeatherChart({ hourly, sunrise, sunset, unit }: Props) {
   if (hours.length === 0) return null;
 
   const colors = {
-    temp: '#ea580c',
-    precip: dark ? '#3b82f6' : '#2563eb',
+    // Chart palette slots (Settings > Display): primary, cool, sun.
+    temp: chartColors[0],
+    precip: chartColors[1],
     axis: dark ? '#9ca3af' : '#6b7280',
     grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
     night: dark ? 'rgba(148,163,184,0.12)' : 'rgba(100,116,139,0.10)',
-    sun: dark ? '#fbbf24' : '#d97706',
+    sun: chartColors[4],
     surface: dark ? '#111827' : '#ffffff',
   };
 

@@ -16,17 +16,23 @@ import {
 } from '../../location/ui/geo';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
 import type { TrackPoint } from './types';
+import { useChartColors } from '../../../client/src/hooks/useChartColors';
 
 export type TrackGraphXAxis = 'distance' | 'time';
 export type TrackGraphSeriesKey = 'speed' | 'elevation' | 'heartRate';
 
 const SERIES_META: Record<
   TrackGraphSeriesKey,
-  { label: string; color: string; icon: React.ComponentType<{ size?: number; className?: string }> }
+  {
+    label: string;
+    /** Slot in the chart palette (useChartColors): cool, green, warm red. */
+    colorSlot: number;
+    icon: React.ComponentType<{ size?: number; className?: string }>;
+  }
 > = {
-  speed: { label: 'Speed', color: '#3b82f6', icon: Route },
-  elevation: { label: 'Elevation', color: '#10b981', icon: Mountain },
-  heartRate: { label: 'Heart Rate', color: '#f43f5e', icon: Heart },
+  speed: { label: 'Speed', colorSlot: 1, icon: Route },
+  elevation: { label: 'Elevation', colorSlot: 2, icon: Mountain },
+  heartRate: { label: 'Heart Rate', colorSlot: 3, icon: Heart },
 };
 
 const SERIES_ORDER: TrackGraphSeriesKey[] = ['speed', 'elevation', 'heartRate'];
@@ -143,6 +149,8 @@ export default function TrackGraph({
   onHoverPoint,
 }: TrackGraphProps) {
   const { resolvedTheme } = useTheme();
+  const { colors: chartColors } = useChartColors();
+  const seriesColor = (key: TrackGraphSeriesKey) => chartColors[SERIES_META[key].colorSlot];
   const dark = resolvedTheme === 'dark';
 
   const data = useMemo(
@@ -398,7 +406,7 @@ export default function TrackGraph({
                   y={y + 3.5}
                   textAnchor="start"
                   fontSize={10}
-                  fill={SERIES_META[selected[1]].color}
+                  fill={seriesColor(selected[1])}
                 >
                   {formatTick(t, selected[1], distanceUnit)}
                 </text>
@@ -425,7 +433,7 @@ export default function TrackGraph({
               key={key}
               d={geometry.paths[key]}
               fill="none"
-              stroke={SERIES_META[key].color}
+              stroke={seriesColor(key)}
               strokeWidth={2}
               strokeLinejoin="round"
               strokeLinecap="round"
@@ -455,7 +463,7 @@ export default function TrackGraph({
                     cx={hoverX}
                     cy={y}
                     r={4}
-                    fill={SERIES_META[key].color}
+                    fill={seriesColor(key)}
                     stroke={dark ? '#111827' : '#ffffff'}
                     strokeWidth={1.5}
                   />
@@ -498,7 +506,7 @@ export default function TrackGraph({
                 <div key={key} className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
                   <span
                     className="w-2 h-2 rounded-full inline-block"
-                    style={{ backgroundColor: SERIES_META[key].color }}
+                    style={{ backgroundColor: seriesColor(key) }}
                   />
                   <span>
                     {SERIES_META[key].label}:{' '}
@@ -561,7 +569,7 @@ export default function TrackGraph({
                     ? 'border-transparent text-white'
                     : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
-                style={active ? { backgroundColor: meta.color } : undefined}
+                style={active ? { backgroundColor: seriesColor(key) } : undefined}
               >
                 <meta.icon size={13} />
                 {meta.label}

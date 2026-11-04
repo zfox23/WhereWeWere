@@ -53,7 +53,7 @@ export type StoredThemePreference = ThemePreference | 'light' | 'dark';
 
 type PaletteStep = '50' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900' | '950';
 
-interface ThemeDefinition {
+export interface ThemeDefinition {
   id: AppThemeId;
   label: string;
   mode: ThemeMode;
@@ -1497,6 +1497,20 @@ export function readAppearanceAttrs(root: HTMLElement): Record<string, string> {
   return attrs;
 }
 
+/** Hue in degrees (0–360) of an "r g b" color string. */
+export function rgbHue(rgb: string): number {
+  const [r, g, b] = rgb.split(' ').map((v) => Number(v) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d === 0) return 0;
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+
 export function applyThemeToRoot(root: HTMLElement, themeId: AppThemeId) {
   const theme = getThemeDefinition(themeId);
 
@@ -1513,4 +1527,6 @@ export function applyThemeToRoot(root: HTMLElement, themeId: AppThemeId) {
   root.style.setProperty('--app-glow', theme.background.glow);
   root.style.setProperty('--app-glow-secondary', theme.background.glowSecondary);
   root.style.setProperty('--app-fg', theme.background.foreground);
+  // Theme-tinted map tiles: sepia (hue ≈ 35°) rotated to the glow's hue.
+  root.style.setProperty('--app-map-hue', `${Math.round(rgbHue(theme.background.glow) - 35)}deg`);
 }

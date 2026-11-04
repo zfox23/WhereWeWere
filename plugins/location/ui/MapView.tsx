@@ -1,10 +1,10 @@
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Popup, useMap } from 'react-leaflet';
 import { useEffect, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useTheme } from '../../../client/src/contexts/ThemeContext';
-import { DARK_TILE_URL, LIGHT_TILE_URL, TILE_ATTRIBUTION } from './geo';
 import '../../../client/src/utils/smoothLeafletZoom';
+import { ThemedTileLayer } from './ThemedTileLayer';
 
 // Fix Leaflet's default icon paths (broken by bundlers)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -157,14 +157,7 @@ export default function MapView({
         className="w-full h-full"
         style={{ minHeight: '300px', height: '100%' }}
       >
-        <TileLayer
-          key={resolvedTheme}
-          attribution={TILE_ATTRIBUTION}
-          // CORS-enabled tile requests: opaque (no-cors) responses can't be cached
-          // by the service worker's tile cache.
-          crossOrigin="anonymous"
-          url={resolvedTheme === 'dark' ? DARK_TILE_URL : LIGHT_TILE_URL}
-        />
+        <ThemedTileLayer />
         <RecenterMap center={center} />
         {markers.map((marker, i) => (
           <Marker

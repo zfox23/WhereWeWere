@@ -156,3 +156,77 @@ export function prefersReducedMotion(): boolean {
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
+
+// ─── Map style ───────────────────────────────────────────────────────────────
+
+export interface MapStyleOption extends AppearanceOption<Appearance['mapStyle']> {
+  /** Third-party tile host, shown so the user knows where tiles come from. */
+  provider?: string;
+}
+
+export const MAP_STYLE_OPTIONS: MapStyleOption[] = [
+  { id: 'standard', label: 'Standard', description: 'OpenStreetMap as drawn' },
+  { id: 'tinted', label: 'Theme-tinted', description: 'Recolored to your theme; dark with dark themes' },
+  { id: 'vintage', label: 'Vintage', description: 'Warm, faded, like an old atlas' },
+  { id: 'muted', label: 'Muted', description: 'Quiet light or dark basemap', provider: 'CARTO' },
+  { id: 'satellite', label: 'Satellite', description: 'Aerial imagery', provider: 'Esri' },
+];
+
+// ─── Chart palette ───────────────────────────────────────────────────────────
+//
+// Eight series colors per palette. Slots carry meaning where charts have it:
+// 0 primary (temperature), 1 cool (rain, speed), 2 green (elevation),
+// 3 warm red (heart rate), 4 sun, 5–7 extras.
+
+export const CHART_PALETTE_OPTIONS: AppearanceOption<Appearance['chartPalette']>[] = [
+  { id: 'classic', label: 'Classic', description: 'The original colors' },
+  { id: 'theme', label: 'Theme', description: 'Led by your theme’s accent' },
+  { id: 'vivid', label: 'Vivid', description: 'Bold and saturated' },
+  { id: 'pastel', label: 'Pastel', description: 'Soft and light' },
+  { id: 'colorblind', label: 'Colorblind-safe', description: 'Okabe–Ito, distinct for all color vision' },
+  { id: 'mono', label: 'Monochrome', description: 'Shades of your accent' },
+];
+
+interface ThemeColors {
+  mode: 'light' | 'dark';
+  palette: Record<string, string>;
+  background: { glow: string; glowSecondary: string };
+}
+
+const CLASSIC = {
+  light: ['#ea580c', '#2563eb', '#10b981', '#f43f5e', '#d97706', '#8b5cf6', '#06b6d4', '#84cc16'],
+  dark: ['#ea580c', '#3b82f6', '#10b981', '#f43f5e', '#fbbf24', '#a78bfa', '#22d3ee', '#a3e635'],
+};
+
+function hex(rgb: string): string {
+  return `#${rgb.split(' ').map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** The palette's eight series colors (hex) for a theme. */
+export function chartColors(palette: Appearance['chartPalette'], theme: ThemeColors): string[] {
+  const dark = theme.mode === 'dark';
+  const p = (step: string) => hex(theme.palette[step]);
+  const classic = dark ? CLASSIC.dark : CLASSIC.light;
+  switch (palette) {
+    case 'theme':
+      return [
+        p(dark ? '400' : '600'),
+        hex(theme.background.glowSecondary),
+        p(dark ? '200' : '800'),
+        ...classic.slice(3),
+      ];
+    case 'vivid':
+      return ['#ff3d00', '#2979ff', '#00c853', '#ff1744', '#ffc400', '#d500f9', '#00b8d4', '#64dd17'];
+    case 'pastel':
+      return ['#f4a582', '#92c5de', '#a6dba0', '#f1b6da', '#fdd49e', '#c2a5cf', '#9edae5', '#d9ef8b'];
+    case 'colorblind':
+      return ['#e69f00', dark ? '#56b4e9' : '#0072b2', '#009e73', '#d55e00', '#f0e442', '#cc79a7', dark ? '#0072b2' : '#56b4e9', dark ? '#ffffff' : '#000000'];
+    case 'mono':
+      return dark
+        ? [p('400'), p('200'), p('600'), p('300'), p('100'), p('500'), p('700'), p('50')]
+        : [p('600'), p('400'), p('800'), p('500'), p('300'), p('700'), p('900'), p('200')];
+    case 'classic':
+    default:
+      return classic;
+  }
+}
