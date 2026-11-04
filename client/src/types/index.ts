@@ -355,6 +355,8 @@ export interface UserSettings {
   system_dark_theme: AppThemeId;
   distance_unit: 'metric' | 'imperial';
   timeline_density: 'comfortable' | 'compact';
+  /** Display knobs (shared/src/appearance.ts); may hold stale/unknown keys. */
+  appearance: Record<string, unknown>;
 }
 
 export interface ImmichAsset {

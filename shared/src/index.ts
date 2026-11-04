@@ -10,3 +10,4 @@ export * from './fields';
 export * from './timeline';
 export * from './plugin';
 export * from './timezones';
+export * from './appearance';

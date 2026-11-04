@@ -1,25 +1,56 @@
-import { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import { DEFAULT_APPEARANCE, normalizeAppearance, pickValidAppearance, type Appearance } from 'wwp-shared';
 import { settings } from '../api/client';
-import { safeGetItem, safeSetItem } from '../utils/storage';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '../utils/storage';
 import {
   DEFAULT_THEME_BY_MODE,
   SYSTEM_THEME_ID,
   applyThemeToRoot,
-  applyBgToRoot,
+  applyAppearanceToRoot,
+  readAppearanceAttrs,
   getResolvedThemeMode,
   resolveAppThemeId,
   normalizeThemePreference,
   resolveThemePreference,
-  BG_PATTERN_OPTIONS,
-  BG_GRADIENT_OPTIONS,
-  DEFAULT_BG_PATTERN,
-  DEFAULT_BG_GRADIENT,
   type AppThemeId,
   type ThemeMode,
   type ThemePreference,
-  type BgPatternId,
-  type BgGradientId,
 } from '../themes';
+
+/** How long appearance changes are batched before being saved to the server. */
+export const APPEARANCE_SYNC_DELAY_MS = 400;
+
+const APPEARANCE_STORAGE_KEY = 'appearance';
+// Before appearance synced to the account, these two lived only in the browser.
+const LEGACY_BG_PATTERN_KEY = 'bg-pattern';
+const LEGACY_BG_GRADIENT_KEY = 'bg-gradient';
+
+function dropLegacyAppearanceKeys() {
+  safeRemoveItem(LEGACY_BG_PATTERN_KEY);
+  safeRemoveItem(LEGACY_BG_GRADIENT_KEY);
+}
+
+/**
+ * Appearance remembered by this browser, used until the account's copy
+ * loads: the cached synced copy, or else the legacy browser-only background
+ * keys. `legacy` holds only the latter: the values to move up to the account.
+ */
+function readLocalAppearance(): { appearance: Appearance; legacy: Partial<Appearance> } {
+  let parsed: unknown = null;
+  try {
+    const raw = safeGetItem(APPEARANCE_STORAGE_KEY);
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  const cached = pickValidAppearance(parsed);
+  const legacy = pickValidAppearance({
+    bgPattern: safeGetItem(LEGACY_BG_PATTERN_KEY),
+    bgGradient: safeGetItem(LEGACY_BG_GRADIENT_KEY),
+  });
+  const appearance = normalizeAppearance(Object.keys(cached).length > 0 ? cached : legacy);
+  return { appearance, legacy };
+}
 
 interface ThemeContextValue {
   theme: ThemePreference;
@@ -27,10 +58,11 @@ interface ThemeContextValue {
   systemThemeSelection: Record<ThemeMode, AppThemeId>;
   resolvedTheme: ThemeMode;
   resolvedThemeId: AppThemeId;
-  bgPattern: BgPatternId;
-  setBgPattern: (pattern: BgPatternId) => void;
-  bgGradient: BgGradientId;
-  setBgGradient: (gradient: BgGradientId) => void;
+  /** Display knobs other than the palette theme; synced to the account. */
+  appearance: Appearance;
+  setAppearance: (patch: Partial<Appearance>) => void;
+  /** Restore every appearance knob to its default (the theme is kept). */
+  resetAppearance: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
@@ -39,10 +71,9 @@ const ThemeContext = createContext<ThemeContextValue>({
   systemThemeSelection: DEFAULT_THEME_BY_MODE,
   resolvedTheme: 'light',
   resolvedThemeId: DEFAULT_THEME_BY_MODE.light,
-  bgPattern: DEFAULT_BG_PATTERN,
-  setBgPattern: () => {},
-  bgGradient: DEFAULT_BG_GRADIENT,
-  setBgGradient: () => {},
+  appearance: DEFAULT_APPEARANCE,
+  setAppearance: () => {},
+  resetAppearance: () => {},
 });
 
 export function useTheme() {
@@ -67,14 +98,41 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }));
   const [systemTheme, setSystemTheme] = useState<ThemeMode>(getSystemTheme);
 
-  const [bgPattern, setBgPatternState] = useState<BgPatternId>(() => {
-    const stored = safeGetItem('bg-pattern') as BgPatternId | null;
-    return BG_PATTERN_OPTIONS.some(p => p.id === stored) ? stored! : DEFAULT_BG_PATTERN;
-  });
-  const [bgGradient, setBgGradientState] = useState<BgGradientId>(() => {
-    const stored = safeGetItem('bg-gradient') as BgGradientId | null;
-    return BG_GRADIENT_OPTIONS.some(g => g.id === stored) ? stored! : DEFAULT_BG_GRADIENT;
-  });
+  const [initialLocal] = useState(readLocalAppearance);
+  const [appearance, setAppearanceState] = useState<Appearance>(initialLocal.appearance);
+  // Changes not yet sent to the server, flushed after APPEARANCE_SYNC_DELAY_MS.
+  const pendingAppearance = useRef<Partial<Appearance>>({});
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set once the user changes something here, so a slow initial server load
+  // can't overwrite a choice they just made.
+  const appearanceTouched = useRef(false);
+
+  const flushAppearance = useCallback(() => {
+    if (syncTimer.current) {
+      clearTimeout(syncTimer.current);
+      syncTimer.current = null;
+    }
+    const patch = pendingAppearance.current;
+    pendingAppearance.current = {};
+    if (Object.keys(patch).length > 0) {
+      settings.update({ appearance: patch }).catch(() => {});
+    }
+  }, []);
+
+  const queueAppearanceSync = useCallback((patch: Partial<Appearance>) => {
+    pendingAppearance.current = { ...pendingAppearance.current, ...patch };
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(flushAppearance, APPEARANCE_SYNC_DELAY_MS);
+  }, [flushAppearance]);
+
+  // Don't drop a pending change when the page closes or the provider unmounts.
+  useEffect(() => {
+    window.addEventListener('pagehide', flushAppearance);
+    return () => {
+      window.removeEventListener('pagehide', flushAppearance);
+      flushAppearance();
+    };
+  }, [flushAppearance]);
 
   // Listen for system theme changes
   useEffect(() => {
@@ -101,7 +159,31 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setSystemThemeSelectionState(nextSystemThemeSelection);
       safeSetItem('system-light-theme', nextSystemThemeSelection.light);
       safeSetItem('system-dark-theme', nextSystemThemeSelection.dark);
+
+      if (appearanceTouched.current) return;
+      const fromServer = pickValidAppearance(s.appearance);
+      if (Object.keys(fromServer).length === 0 && Object.keys(initialLocal.legacy).length > 0) {
+        // One-time move of browser-only choices (from before appearance
+        // synced) up to the account, so other devices pick them up. Only the
+        // legacy keys: an empty account appearance otherwise means defaults
+        // (e.g. after Start Over), which a cached copy must not undo.
+        const next = normalizeAppearance(initialLocal.legacy);
+        setAppearanceState(next);
+        safeSetItem(APPEARANCE_STORAGE_KEY, JSON.stringify(next));
+        // Keep the legacy keys until the account has them, so a failed save
+        // is retried on the next load.
+        settings.update({ appearance: initialLocal.legacy }).then(dropLegacyAppearanceKeys, () => {});
+      } else {
+        // The account's appearance wins over whatever this browser cached.
+        const next = normalizeAppearance(fromServer);
+        setAppearanceState(next);
+        safeSetItem(APPEARANCE_STORAGE_KEY, JSON.stringify(next));
+        // Any legacy keys are stale now (the account already decided).
+        dropLegacyAppearanceKeys();
+      }
     }).catch(() => {});
+    // Runs once on mount; initialLocal never changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const resolvedThemeId = resolveThemePreference(theme, systemTheme, systemThemeSelection);
@@ -118,10 +200,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [resolvedTheme, resolvedThemeId]);
 
-  // Apply background pattern and gradient data attributes.
+  // Apply appearance knobs as data attributes on <html>.
   useEffect(() => {
-    applyBgToRoot(document.documentElement, bgPattern, bgGradient);
-  }, [bgPattern, bgGradient]);
+    applyAppearanceToRoot(document.documentElement, appearance);
+  }, [appearance]);
 
   // Remember what was applied so the inline script in index.html can restore
   // it before first paint on the next load (no light flash for dark themes).
@@ -134,11 +216,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         dark: root.classList.contains('dark'),
         style: root.getAttribute('style') || '',
         theme: root.dataset.theme || '',
-        bgPattern: root.dataset.bgPattern || '',
-        bgGradient: root.dataset.bgGradient || '',
+        attrs: readAppearanceAttrs(root),
       })
     );
-  }, [resolvedTheme, resolvedThemeId, bgPattern, bgGradient]);
+  }, [resolvedTheme, resolvedThemeId, appearance]);
 
   const setTheme = (newTheme: ThemePreference) => {
     const nextSystemThemeSelection = newTheme === SYSTEM_THEME_ID
@@ -162,23 +243,27 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   };
 
-  const setBgPattern = (pattern: BgPatternId) => {
-    setBgPatternState(pattern);
-    safeSetItem('bg-pattern', pattern);
-  };
+  const setAppearance = useCallback((patch: Partial<Appearance>) => {
+    appearanceTouched.current = true;
+    setAppearanceState((prev) => {
+      const next = { ...prev, ...patch };
+      safeSetItem(APPEARANCE_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+    queueAppearanceSync(patch);
+  }, [queueAppearanceSync]);
 
-  const setBgGradient = (gradient: BgGradientId) => {
-    setBgGradientState(gradient);
-    safeSetItem('bg-gradient', gradient);
-  };
+  const resetAppearance = useCallback(() => {
+    setAppearance(DEFAULT_APPEARANCE);
+  }, [setAppearance]);
 
   // Stable identity between renders so context consumers only re-render when
   // a theme value actually changes.
   const value = useMemo(
-    () => ({ theme, setTheme, systemThemeSelection, resolvedTheme, resolvedThemeId, bgPattern, setBgPattern, bgGradient, setBgGradient }),
-    // setTheme/setBgPattern/setBgGradient close over state already listed here.
+    () => ({ theme, setTheme, systemThemeSelection, resolvedTheme, resolvedThemeId, appearance, setAppearance, resetAppearance }),
+    // setTheme closes over state already listed here; the others are stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [theme, systemThemeSelection, resolvedTheme, resolvedThemeId, bgPattern, bgGradient]
+    [theme, systemThemeSelection, resolvedTheme, resolvedThemeId, appearance]
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

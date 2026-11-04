@@ -27,6 +27,10 @@ export const DEVICE_PREFERENCE_KEYS: readonly string[] = [
   'theme',
   'system-light-theme',
   'system-dark-theme',
+  // Appearance knobs (background etc.); synced to the account, cached here
+  // so the login screen and first paint use them.
+  'appearance',
+  // Pre-account-sync background keys, kept until moved to the account.
   'bg-pattern',
   'bg-gradient',
   // Which microphone this device records with, in mono or stereo, and each microphone's

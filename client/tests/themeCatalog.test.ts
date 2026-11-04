@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  APPEARANCE_SPEC,
+  DEFAULT_APPEARANCE,
+  normalizeAppearance,
+  validateAppearancePatch,
+} from 'wwp-shared';
+import {
+  BG_GRADIENT_OPTIONS,
+  BG_PATTERN_OPTIONS,
   DEFAULT_THEME_BY_MODE,
+  THEME_DEFINITIONS,
+  THEME_GROUPS,
+  applyAppearanceToRoot,
+  readAppearanceAttrs,
+  type AppThemeId,
   applyThemeToRoot,
   getResolvedThemeMode,
   normalizeThemePreference,
@@ -36,5 +49,75 @@ describe('theme catalog', () => {
     expect(root.style.getPropertyValue('--app-glow')).toBe('34 211 238');
     expect(root.style.getPropertyValue('--app-glow-secondary')).toBe('45 212 191');
     expect(root.style.colorScheme).toBe('dark');
+  });
+});
+describe('theme catalog completeness', () => {
+  const ids = Object.keys(THEME_DEFINITIONS) as AppThemeId[];
+  const rgb = /^\d{1,3} \d{1,3} \d{1,3}$/;
+
+  it('defines every palette step and background color for every theme', () => {
+    for (const id of ids) {
+      const def = THEME_DEFINITIONS[id];
+      expect(def.id).toBe(id);
+      expect(['light', 'dark']).toContain(def.mode);
+      for (const step of ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'] as const) {
+        expect(def.palette[step], `${id} ${step}`).toMatch(rgb);
+      }
+      for (const value of [...def.preview, ...Object.values(def.background)]) {
+        expect(value, id).toMatch(rgb);
+      }
+    }
+  });
+
+  it('keeps theme ids within the 20-character theme columns', () => {
+    for (const id of ids) expect(id.length, id).toBeLessThanOrEqual(20);
+  });
+
+  it('lists every theme in exactly one picker group', () => {
+    const grouped = THEME_GROUPS.flatMap((g) => g.themes.map((t) => t.id));
+    expect([...grouped].sort()).toEqual([...ids].sort());
+    expect(new Set(grouped).size).toBe(grouped.length);
+  });
+
+  it('keeps light and dark groups to their mode', () => {
+    for (const group of THEME_GROUPS) {
+      if (group.id === 'seasonal') continue;
+      for (const t of group.themes) expect(t.mode, t.id).toBe(group.id);
+    }
+  });
+
+  it('lets seasonal themes act as Follow System pairings', () => {
+    expect(resolveThemePreference('system', 'dark', { light: 'springbloom', dark: 'midwinter' })).toBe('midwinter');
+    expect(resolveThemePreference('system', 'light', { light: 'springbloom', dark: 'midwinter' })).toBe('springbloom');
+  });
+});
+
+describe('appearance', () => {
+  it('offers a labelled option for exactly the values the server accepts', () => {
+    expect(BG_PATTERN_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.bgPattern.values]);
+    expect(BG_GRADIENT_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.bgGradient.values]);
+  });
+
+  it('applies each knob as a data attribute and reads them back', () => {
+    const root = document.documentElement;
+    applyAppearanceToRoot(root, { ...DEFAULT_APPEARANCE, bgPattern: 'grid', bgGradient: 'flat' });
+    expect(root.getAttribute('data-bg-pattern')).toBe('grid');
+    expect(root.getAttribute('data-bg-gradient')).toBe('flat');
+    expect(readAppearanceAttrs(root)).toEqual({ bgPattern: 'grid', bgGradient: 'flat' });
+  });
+
+  it('rejects unknown keys and values in an update', () => {
+    expect(validateAppearancePatch({ bgPattern: 'grid' })).toEqual({ ok: true, value: { bgPattern: 'grid' } });
+    expect(validateAppearancePatch({ bgPattern: 'plaid-ish' }).ok).toBe(false);
+    expect(validateAppearancePatch({ sparkles: true }).ok).toBe(false);
+    expect(validateAppearancePatch(['grid']).ok).toBe(false);
+  });
+
+  it('reads stored values leniently, filling defaults', () => {
+    expect(normalizeAppearance({ bgPattern: 'linen', bgGradient: 'nope', extra: 1 })).toEqual({
+      ...DEFAULT_APPEARANCE,
+      bgPattern: 'linen',
+    });
+    expect(normalizeAppearance(null)).toEqual(DEFAULT_APPEARANCE);
   });
 });

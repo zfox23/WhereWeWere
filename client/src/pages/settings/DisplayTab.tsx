@@ -1,15 +1,10 @@
 import { useState } from 'react';
-import { Sun, Moon, Monitor, Ruler, Check, AlertCircle, Loader2, Layers, Blend } from 'lucide-react';
+import { Ruler, Check, AlertCircle, Loader2, RotateCcw } from 'lucide-react';
 import { settings } from '../../api/client';
 import { useTheme } from '../../contexts/ThemeContext';
-import {
-  SYSTEM_THEME_ID,
-  THEME_GROUPS,
-  getThemeDefinition,
-  BG_PATTERN_OPTIONS,
-  BG_GRADIENT_OPTIONS,
-  BG_GRADIENT_PREVIEWS,
-} from '../../themes';
+import { AppearancePreview } from './display/AppearancePreview';
+import { ThemesSection } from './display/ThemesSection';
+import { BackgroundSection } from './display/BackgroundSection';
 
 interface DisplayTabProps {
   initialDistanceUnit: 'metric' | 'imperial';
@@ -17,15 +12,7 @@ interface DisplayTabProps {
 }
 
 export function DisplayTab({ initialDistanceUnit, onSaved }: DisplayTabProps) {
-  const {
-    theme: currentTheme,
-    setTheme,
-    systemThemeSelection,
-    bgPattern,
-    setBgPattern,
-    bgGradient,
-    setBgGradient,
-  } = useTheme();
+  const { resetAppearance } = useTheme();
   const [distanceUnit, setDistanceUnit] = useState(initialDistanceUnit);
   const [displaySaving, setDisplaySaving] = useState(false);
   const [displayMsg, setDisplayMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -44,162 +31,26 @@ export function DisplayTab({ initialDistanceUnit, onSaved }: DisplayTabProps) {
     }
   };
 
+  const confirmReset = () => {
+    if (window.confirm('Reset the background and other appearance options to their defaults? Your theme stays as it is.')) {
+      resetAppearance();
+    }
+  };
+
   return (
     <>
-      {/* Appearance Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Sun size={20} className="text-primary-600" />
-          Appearance
-        </h2>
-        <button
-          onClick={() => setTheme(SYSTEM_THEME_ID)}
-          className={`w-full rounded-2xl border p-4 text-left transition-all ${currentTheme === SYSTEM_THEME_ID
-            ? 'bg-primary-50/80 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
-            : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-            }`}
-          aria-pressed={currentTheme === SYSTEM_THEME_ID}
-          aria-label="System Theme"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                <Monitor size={18} className="text-primary-600 dark:text-primary-400" />
-                Follow System
-              </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Uses {getThemeDefinition(systemThemeSelection.light).label} for light mode and {getThemeDefinition(systemThemeSelection.dark).label} for dark mode.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 rounded-full border border-white/50 dark:border-gray-700/60 bg-white/70 dark:bg-gray-900/60 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300">
-              <Sun size={14} />
-              <span className="h-1.5 w-1.5 rounded-full bg-gray-300 dark:bg-gray-600" />
-              <Moon size={14} />
-            </div>
-          </div>
+      <div className="z-10 sm:sticky sm:top-[4.25rem]">
+        <AppearancePreview />
+      </div>
+
+      <ThemesSection />
+      <BackgroundSection />
+
+      <div className="flex justify-end">
+        <button type="button" onClick={confirmReset} className="btn-secondary gap-2">
+          <RotateCcw size={16} />
+          Reset appearance
         </button>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {THEME_GROUPS.map(({ mode, label, themes }) => (
-            <div key={mode} className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  {mode === 'light' ? <Sun size={16} className="text-amber-500" /> : <Moon size={16} className="text-primary-400" />}
-                  {label}
-                </div>
-              </div>
-              <div className="space-y-2">
-                {themes.map((themeOption) => {
-                  const isSelected = currentTheme === themeOption.id;
-                  return (
-                    <button
-                      key={themeOption.id}
-                      onClick={() => setTheme(themeOption.id)}
-                      className={`w-full rounded-2xl border p-2 text-left transition-all ${isSelected
-                        ? 'bg-primary-50/80 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
-                        : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                        }`}
-                      aria-pressed={isSelected}
-                      aria-label={`${themeOption.label} Theme`}
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {themeOption.label}
-                        </div>
-                        <div className="flex items-center gap-1 rounded-full border border-white/50 dark:border-gray-700/60 bg-white/70 dark:bg-gray-900/60 px-2.5 py-1.5">
-                          {themeOption.preview.map((swatch, index) => (
-                            <span
-                              key={index}
-                              className="h-5 w-5 rounded-full border border-black/5 dark:border-white/10"
-                              style={{ backgroundColor: `rgb(${swatch})` }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Background Pattern Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Layers size={20} className="text-primary-600" />
-          Background Pattern
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {BG_PATTERN_OPTIONS.map((option) => {
-            const isSelected = bgPattern === option.id;
-            return (
-              <button
-                key={option.id}
-                onClick={() => setBgPattern(option.id)}
-                className={`flex flex-col items-start gap-2 p-3 rounded-xl border transition-all text-left ${
-                  isSelected
-                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
-                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                }`}
-              >
-                {/* Pattern preview swatch */}
-                <div
-                  className="w-full h-10 rounded-lg border border-black/5 dark:border-white/10"
-                  style={{
-                    backgroundColor: 'rgb(255 250 246)',
-                    backgroundImage: option.previewStyle.backgroundImage,
-                    backgroundSize: option.previewStyle.backgroundSize,
-                  }}
-                />
-                <div className="space-y-0.5">
-                  <div className={`text-xs font-semibold ${isSelected ? 'text-primary-700 dark:text-primary-400' : 'text-gray-700 dark:text-gray-200'}`}>
-                    {option.label}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Background Gradient Section */}
-      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <Blend size={20} className="text-primary-600" />
-          Background Gradient
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          {BG_GRADIENT_OPTIONS.map((option) => {
-            const isSelected = bgGradient === option.id;
-            return (
-              <button
-                key={option.id}
-                onClick={() => setBgGradient(option.id)}
-                className={`flex flex-col items-start gap-2 p-3 rounded-xl border transition-all text-left ${
-                  isSelected
-                    ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
-                    : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/60 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                }`}
-              >
-                {/* Gradient preview swatch */}
-                <div
-                  className="w-full h-12 rounded-lg border border-black/5 dark:border-white/10"
-                  style={{ backgroundImage: BG_GRADIENT_PREVIEWS[option.id] }}
-                />
-                <div className="space-y-0.5">
-                  <div className={`text-xs font-semibold ${isSelected ? 'text-primary-700 dark:text-primary-400' : 'text-gray-700 dark:text-gray-200'}`}>
-                    {option.label}
-                  </div>
-                  <div className="text-[11px] text-gray-400 dark:text-gray-500 leading-tight">
-                    {option.description}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* Distance Units Section */}

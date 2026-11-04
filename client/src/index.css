@@ -192,6 +192,14 @@ html[data-bg-gradient="flat"] {
     background-attachment: fixed;
   }
 
+  /* Settings > Display live preview: the app background in miniature. */
+  .appearance-preview {
+    background-color: rgb(var(--app-bg-mid));
+    background-image: var(--_bg-p) var(--_bg-g);
+    background-size: var(--_bg-p-sz) var(--_bg-g-sz);
+    color: rgb(var(--app-fg));
+  }
+
   .app-shell::before,
   .app-shell::after {
     content: '';

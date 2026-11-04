@@ -7,6 +7,7 @@ import {
   type TimestampReconciliationUpdate,
 } from '../services/timestampReconciliation';
 
+import { validateAppearancePatch } from 'wwp-shared';
 import { currentUserId } from '../auth/context';
 
 // The signed-in user's own settings. Username/display name changes live at
@@ -31,7 +32,8 @@ router.get('/', async (_req: Request, res: Response) => {
                     COALESCE(us.system_light_theme, $2) AS system_light_theme,
                     COALESCE(us.system_dark_theme, $3) AS system_dark_theme,
                     COALESCE(us.distance_unit, 'metric') AS distance_unit,
-              COALESCE(us.timeline_density, 'comfortable') AS timeline_density
+              COALESCE(us.timeline_density, 'comfortable') AS timeline_density,
+              COALESCE(us.appearance, '{}'::jsonb) AS appearance
        FROM users u
        LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.id = $1`,
@@ -75,7 +77,18 @@ router.put('/', async (req: Request, res: Response) => {
       distance_unit,
       timeline_density,
       llm_api_url, llm_model, llm_reasoning_level, llm_context_window, llm_image_support,
+      appearance,
     } = req.body;
+
+    // Partial appearance patch, merged into the stored object below.
+    let appearancePatch: string | null = null;
+    if (typeof appearance !== 'undefined' && appearance !== null) {
+      const validated = validateAppearancePatch(appearance);
+      if (!validated.ok) {
+        return res.status(400).json({ error: validated.error });
+      }
+      appearancePatch = JSON.stringify(validated.value);
+    }
 
     if (typeof distance_unit !== 'undefined' && !DISTANCE_UNITS.has(distance_unit)) {
       return res.status(400).json({ error: 'distance_unit must be either "metric" or "imperial"' });
@@ -112,10 +125,12 @@ router.put('/', async (req: Request, res: Response) => {
         llm_model,
         llm_reasoning_level,
         llm_context_window,
-        llm_image_support)
+        llm_image_support,
+        appearance)
        VALUES ($1, $2, $3, $4, $5,
                $6, COALESCE($7, $16), COALESCE($8, $17), $9,
-               $10, $11, $12, $13, $14, $15)
+               $10, $11, $12, $13, $14, $15,
+               COALESCE($24::jsonb, '{}'::jsonb))
        ON CONFLICT (user_id) DO UPDATE SET
          dawarich_url = CASE WHEN $18::boolean THEN $2 ELSE user_settings.dawarich_url END,
          dawarich_api_key = CASE WHEN $19::boolean THEN $3 ELSE user_settings.dawarich_api_key END,
@@ -131,6 +146,7 @@ router.put('/', async (req: Request, res: Response) => {
          llm_reasoning_level = COALESCE($13, user_settings.llm_reasoning_level),
          llm_context_window = COALESCE($14, user_settings.llm_context_window),
          llm_image_support = COALESCE($15, user_settings.llm_image_support),
+         appearance = COALESCE(user_settings.appearance, '{}'::jsonb) || COALESCE($24::jsonb, '{}'::jsonb),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -154,6 +170,8 @@ router.put('/', async (req: Request, res: Response) => {
         // $18..$23: for the integration text fields an explicit null/'' in the
         // body clears the stored value; an absent key keeps it.
         ...CLEARABLE_SETTINGS.map((key) => key in req.body),
+        // $24: validated appearance patch (JSON) or null to leave it alone.
+        appearancePatch,
       ]
     );
 

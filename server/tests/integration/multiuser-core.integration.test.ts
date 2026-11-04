@@ -347,6 +347,33 @@ describe('Multi-user isolation (core)', () => {
       const users = await query('SELECT username FROM users WHERE id = $1', [b.id]);
       expect(users.rows[0].username).toBe('other');
     });
+
+    it('merges appearance patches per user and rejects unknown knobs', async () => {
+      const fresh = await request(app).get('/api/v1/settings');
+      expect(fresh.body.appearance).toEqual({});
+
+      await request(app).put('/api/v1/settings').send({ appearance: { bgPattern: 'grid' } }).expect(200);
+      // A later patch keeps earlier keys.
+      await request(app).put('/api/v1/settings').send({ appearance: { bgGradient: 'flat' } }).expect(200);
+      // Saving other settings leaves appearance alone.
+      await request(app).put('/api/v1/settings').send({ distance_unit: 'imperial' }).expect(200);
+
+      const aGet = await request(app).get('/api/v1/settings');
+      expect(aGet.body.appearance).toEqual({ bgPattern: 'grid', bgGradient: 'flat' });
+
+      const bGet = await request(app).get('/api/v1/settings').set('Cookie', b.cookie);
+      expect(bGet.body.appearance).toEqual({});
+
+      const badValue = await request(app).put('/api/v1/settings').send({ appearance: { bgPattern: 'sparkles' } });
+      expect(badValue.status).toBe(400);
+      const badKey = await request(app).put('/api/v1/settings').send({ appearance: { confetti: 'on' } });
+      expect(badKey.status).toBe(400);
+      const notObject = await request(app).put('/api/v1/settings').send({ appearance: 'grid' });
+      expect(notObject.status).toBe(400);
+
+      const after = await request(app).get('/api/v1/settings');
+      expect(after.body.appearance).toEqual({ bgPattern: 'grid', bgGradient: 'flat' });
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -479,6 +506,20 @@ describe('Multi-user isolation (core)', () => {
       } finally {
         removeBackupTempDir(root);
       }
+    });
+
+    it('carries appearance through export and restore', async () => {
+      await request(app).put('/api/v1/settings').send({ appearance: { bgPattern: 'linen' } }).expect(200);
+      const zip = await exportZip();
+
+      const res = await request(app)
+        .post('/api/v1/backup/import')
+        .set('Cookie', b.cookie)
+        .attach('file', zip, { filename: 'backup.zip', contentType: 'application/zip' });
+      expect(res.status).toBe(200);
+
+      const bGet = await request(app).get('/api/v1/settings').set('Cookie', b.cookie);
+      expect(bGet.body.appearance).toEqual({ bgPattern: 'linen' });
     });
 
     it("restoring A's export as B never touches or links to A's rows", async () => {
@@ -618,6 +659,8 @@ describe('Multi-user isolation (core)', () => {
         .set('Cookie', b.cookie)
         .send({ demo: 'b-value' })
         .expect(200);
+      await request(app).put('/api/v1/settings').set('Cookie', b.cookie).send({ appearance: { bgPattern: 'grid' } }).expect(200);
+      await request(app).put('/api/v1/settings').send({ appearance: { bgPattern: 'linen' } }).expect(200);
       const before = await snapshotA();
 
       const res = await request(app)
@@ -645,6 +688,11 @@ describe('Multi-user isolation (core)', () => {
       expect(await snapshotA()).toEqual(before);
       const aSettings = await query('SELECT immich_url, immich_api_key, theme FROM user_settings WHERE user_id = $1', [A]);
       expect(aSettings.rows[0]).toEqual({ immich_url: 'http://a', immich_api_key: 'a-key', theme: 'dark' });
+      // Account reset clears appearance too, for B only.
+      const appearance = await query('SELECT user_id, appearance FROM user_settings WHERE user_id = ANY($1)', [[A, b.id]]);
+      const byUser = Object.fromEntries(appearance.rows.map((r: any) => [r.user_id, r.appearance]));
+      expect(byUser[b.id]).toEqual({});
+      expect(byUser[A]).toEqual({ bgPattern: 'linen' });
     });
   });
 });

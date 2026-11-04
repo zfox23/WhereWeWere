@@ -19,3 +19,11 @@ export function safeSetItem(key: string, value: string): void {
     // storage unavailable or full: the preference just won't persist locally
   }
 }
+
+export function safeRemoveItem(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // storage unavailable: nothing to remove
+  }
+}

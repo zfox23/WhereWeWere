@@ -1,3 +1,5 @@
+import { APPEARANCE_KEYS, DEFAULT_APPEARANCE, type Appearance } from 'wwp-shared';
+
 export type ThemeMode = 'light' | 'dark';
 
 export type AppThemeId =
@@ -20,7 +22,27 @@ export type AppThemeId =
   | 'arctic'
   | 'coralreef'
   | 'mocha'
-  | 'sunset';
+  | 'sunset'
+  | 'matcha'
+  | 'peach'
+  | 'terracotta'
+  | 'seafoam'
+  | 'lilacmist'
+  | 'nebula'
+  | 'obsidiangold'
+  | 'deepsea'
+  | 'velvet'
+  | 'mossstone'
+  | 'contrastlight'
+  | 'contrastdark'
+  | 'springbloom'
+  | 'midsummer'
+  | 'harvest'
+  | 'autumnember'
+  | 'winterfrost'
+  | 'midwinter'
+  | 'spooky'
+  | 'festive';
 export type ThemePreference = 'system' | AppThemeId;
 export type StoredThemePreference = ThemePreference | 'light' | 'dark';
 
@@ -52,6 +74,546 @@ export const DEFAULT_THEME_BY_MODE: Record<ThemeMode, AppThemeId> = {
 export const SYSTEM_THEME_ID = 'system' as const;
 
 export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
+  matcha: {
+    id: 'matcha',
+    label: 'Matcha',
+    mode: 'light',
+    palette: {
+      '50': '244 249 238',
+      '100': '230 242 219',
+      '200': '208 229 188',
+      '300': '179 212 149',
+      '400': '146 188 107',
+      '500': '114 161 72',
+      '600': '81 127 38',
+      '700': '64 107 27',
+      '800': '51 89 22',
+      '900': '39 71 18',
+      '950': '23 45 10',
+    },
+    preview: ['242 250 233', '114 161 72', '64 107 27'],
+    background: {
+      start: '242 250 233',
+      mid: '252 254 250',
+      end: '223 247 229',
+      glow: '146 188 107',
+      glowSecondary: '204 183 102',
+      foreground: '26 35 13',
+    },
+  },
+  peach: {
+    id: 'peach',
+    label: 'Peach',
+    mode: 'light',
+    palette: {
+      '50': '254 244 240',
+      '100': '255 231 221',
+      '200': '255 209 190',
+      '300': '255 178 148',
+      '400': '243 141 102',
+      '500': '219 108 66',
+      '600': '181 74 31',
+      '700': '155 58 21',
+      '800': '129 47 18',
+      '900': '104 37 15',
+      '950': '68 22 8',
+    },
+    preview: ['254 244 240', '219 108 66', '155 58 21'],
+    background: {
+      start: '254 244 240',
+      mid: '254 253 253',
+      end: '255 237 218',
+      glow: '243 141 102',
+      glowSecondary: '250 150 159',
+      foreground: '47 25 15',
+    },
+  },
+  terracotta: {
+    id: 'terracotta',
+    label: 'Terracotta',
+    mode: 'light',
+    palette: {
+      '50': '255 244 241',
+      '100': '255 231 224',
+      '200': '254 209 196',
+      '300': '248 180 162',
+      '400': '232 147 125',
+      '500': '207 116 93',
+      '600': '170 83 62',
+      '700': '145 67 49',
+      '800': '121 54 41',
+      '900': '97 43 32',
+      '950': '63 26 19',
+    },
+    preview: ['254 245 238', '207 116 93', '145 67 49'],
+    background: {
+      start: '254 245 238',
+      mid: '255 253 251',
+      end: '249 239 219',
+      glow: '232 147 125',
+      glowSecondary: '223 173 114',
+      foreground: '45 26 10',
+    },
+  },
+  seafoam: {
+    id: 'seafoam',
+    label: 'Seafoam',
+    mode: 'light',
+    palette: {
+      '50': '238 250 246',
+      '100': '219 243 235',
+      '200': '187 232 218',
+      '300': '144 216 197',
+      '400': '94 193 171',
+      '500': '42 166 145',
+      '600': '7 130 113',
+      '700': '7 109 96',
+      '800': '4 90 80',
+      '900': '3 72 64',
+      '950': '1 46 41',
+    },
+    preview: ['233 252 245', '42 166 145', '7 109 96'],
+    background: {
+      start: '233 252 245',
+      mid: '250 255 253',
+      end: '217 247 247',
+      glow: '94 193 171',
+      glowSecondary: '109 200 210',
+      foreground: '6 37 29',
+    },
+  },
+  lilacmist: {
+    id: 'lilacmist',
+    label: 'Lilac Mist',
+    mode: 'light',
+    palette: {
+      '50': '249 245 255',
+      '100': '241 232 254',
+      '200': '227 212 251',
+      '300': '209 187 245',
+      '400': '184 156 230',
+      '500': '156 127 207',
+      '600': '122 94 172',
+      '700': '102 78 147',
+      '800': '83 64 123',
+      '900': '65 51 99',
+      '950': '41 32 64',
+    },
+    preview: ['249 245 255', '156 127 207', '102 78 147'],
+    background: {
+      start: '249 245 255',
+      mid: '253 253 254',
+      end: '252 234 249',
+      glow: '184 156 230',
+      glowSecondary: '219 161 213',
+      foreground: '36 26 46',
+    },
+  },
+  nebula: {
+    id: 'nebula',
+    label: 'Nebula',
+    mode: 'dark',
+    palette: {
+      '50': '248 245 254',
+      '100': '239 233 254',
+      '200': '222 214 254',
+      '300': '201 189 255',
+      '400': '172 156 254',
+      '500': '141 119 254',
+      '600': '106 84 221',
+      '700': '84 69 192',
+      '800': '65 58 160',
+      '900': '48 47 130',
+      '950': '26 30 86',
+    },
+    preview: ['18 15 43', '141 119 254', '201 189 255'],
+    background: {
+      start: '8 5 28',
+      mid: '18 15 43',
+      end: '36 19 53',
+      glow: '172 156 254',
+      glowSecondary: '7 208 216',
+      foreground: '240 241 252',
+    },
+  },
+  obsidiangold: {
+    id: 'obsidiangold',
+    label: 'Obsidian Gold',
+    mode: 'dark',
+    palette: {
+      '50': '253 246 234',
+      '100': '249 235 211',
+      '200': '243 216 174',
+      '300': '235 192 125',
+      '400': '218 160 70',
+      '500': '193 130 2',
+      '600': '152 99 0',
+      '700': '129 82 1',
+      '800': '108 67 2',
+      '900': '87 52 2',
+      '950': '57 32 0',
+    },
+    preview: ['22 19 16', '193 130 2', '235 192 125'],
+    background: {
+      start: '11 9 6',
+      mid: '22 19 16',
+      end: '31 29 23',
+      glow: '218 160 70',
+      glowSecondary: '236 166 107',
+      foreground: '249 240 231',
+    },
+  },
+  deepsea: {
+    id: 'deepsea',
+    label: 'Deep Sea',
+    mode: 'dark',
+    palette: {
+      '50': '237 249 254',
+      '100': '213 243 254',
+      '200': '174 231 249',
+      '300': '119 215 241',
+      '400': '34 192 222',
+      '500': '3 162 185',
+      '600': '1 126 142',
+      '700': '7 106 117',
+      '800': '5 88 95',
+      '900': '0 70 75',
+      '950': '0 45 47',
+    },
+    preview: ['0 22 35', '3 162 185', '119 215 241'],
+    background: {
+      start: '0 11 19',
+      mid: '0 22 35',
+      end: '7 29 56',
+      glow: '34 192 222',
+      glowSecondary: '87 207 186',
+      foreground: '233 244 251',
+    },
+  },
+  velvet: {
+    id: 'velvet',
+    label: 'Velvet',
+    mode: 'dark',
+    palette: {
+      '50': '255 244 245',
+      '100': '254 230 233',
+      '200': '255 206 214',
+      '300': '255 172 190',
+      '400': '250 127 161',
+      '500': '225 92 136',
+      '600': '186 56 106',
+      '700': '158 42 91',
+      '800': '131 34 77',
+      '900': '105 27 62',
+      '950': '68 15 40',
+    },
+    preview: ['36 9 21', '225 92 136', '255 172 190'],
+    background: {
+      start: '22 2 10',
+      mid: '36 9 21',
+      end: '51 15 20',
+      glow: '250 127 161',
+      glowSecondary: '241 147 211',
+      foreground: '251 238 242',
+    },
+  },
+  mossstone: {
+    id: 'mossstone',
+    label: 'Moss & Stone',
+    mode: 'dark',
+    palette: {
+      '50': '243 249 241',
+      '100': '229 241 225',
+      '200': '206 228 199',
+      '300': '178 211 166',
+      '400': '147 186 129',
+      '500': '118 158 95',
+      '600': '87 125 62',
+      '700': '73 104 47',
+      '800': '60 86 37',
+      '900': '48 68 28',
+      '950': '30 43 15',
+    },
+    preview: ['20 20 14', '118 158 95', '178 211 166'],
+    background: {
+      start: '9 10 5',
+      mid: '20 20 14',
+      end: '26 30 23',
+      glow: '147 186 129',
+      glowSecondary: '199 183 124',
+      foreground: '242 243 232',
+    },
+  },
+  contrastlight: {
+    id: 'contrastlight',
+    label: 'High Contrast Light',
+    mode: 'light',
+    palette: {
+      '50': '245 249 254',
+      '100': '231 239 254',
+      '200': '200 220 254',
+      '300': '155 190 255',
+      '400': '93 148 255',
+      '500': '44 107 231',
+      '600': '14 78 200',
+      '700': '1 58 168',
+      '800': '0 45 135',
+      '900': '0 32 103',
+      '950': '0 16 63',
+    },
+    preview: ['255 255 255', '44 107 231', '1 58 168'],
+    background: {
+      start: '255 255 255',
+      mid: '255 255 255',
+      end: '250 250 250',
+      glow: '93 148 255',
+      glowSecondary: '145 183 254',
+      foreground: '0 0 0',
+    },
+  },
+  contrastdark: {
+    id: 'contrastdark',
+    label: 'High Contrast Dark',
+    mode: 'dark',
+    palette: {
+      '50': '244 249 255',
+      '100': '227 240 254',
+      '200': '192 222 255',
+      '300': '137 195 254',
+      '400': '57 156 247',
+      '500': '1 119 204',
+      '600': '2 93 161',
+      '700': '2 73 129',
+      '800': '0 57 103',
+      '900': '1 42 77',
+      '950': '0 23 46',
+    },
+    preview: ['0 0 0', '1 119 204', '137 195 254'],
+    background: {
+      start: '0 0 0',
+      mid: '0 0 0',
+      end: '10 10 10',
+      glow: '57 156 247',
+      glowSecondary: '7 208 216',
+      foreground: '255 255 255',
+    },
+  },
+  springbloom: {
+    id: 'springbloom',
+    label: 'Spring Bloom',
+    mode: 'light',
+    palette: {
+      '50': '255 243 248',
+      '100': '254 229 239',
+      '200': '253 205 223',
+      '300': '248 175 201',
+      '400': '232 140 172',
+      '500': '207 108 141',
+      '600': '171 75 106',
+      '700': '146 60 86',
+      '800': '122 49 68',
+      '900': '98 38 52',
+      '950': '64 23 31',
+    },
+    preview: ['241 251 233', '207 108 141', '146 60 86'],
+    background: {
+      start: '241 251 233',
+      mid: '252 254 250',
+      end: '223 248 230',
+      glow: '232 140 172',
+      glowSecondary: '161 197 125',
+      foreground: '25 35 14',
+    },
+  },
+  midsummer: {
+    id: 'midsummer',
+    label: 'Midsummer',
+    mode: 'light',
+    palette: {
+      '50': '239 249 254',
+      '100': '217 241 254',
+      '200': '180 228 254',
+      '300': '131 211 253',
+      '400': '76 185 240',
+      '500': '6 156 216',
+      '600': '5 121 170',
+      '700': '0 101 145',
+      '800': '3 83 121',
+      '900': '0 66 99',
+      '950': '0 42 65',
+    },
+    preview: ['255 246 225', '6 156 216', '0 101 145'],
+    background: {
+      start: '255 246 225',
+      mid: '255 253 249',
+      end: '238 245 203',
+      glow: '76 185 240',
+      glowSecondary: '211 180 94',
+      foreground: '39 30 6',
+    },
+  },
+  harvest: {
+    id: 'harvest',
+    label: 'Harvest',
+    mode: 'light',
+    palette: {
+      '50': '254 245 237',
+      '100': '255 232 213',
+      '200': '252 212 179',
+      '300': '247 184 134',
+      '400': '232 151 87',
+      '500': '208 118 46',
+      '600': '172 84 1',
+      '700': '147 68 1',
+      '800': '124 54 1',
+      '900': '100 42 5',
+      '950': '65 25 4',
+    },
+    preview: ['254 246 231', '208 118 46', '147 68 1'],
+    background: {
+      start: '254 246 231',
+      mid: '254 253 251',
+      end: '244 243 205',
+      glow: '232 151 87',
+      glowSecondary: '246 157 134',
+      foreground: '41 29 7',
+    },
+  },
+  autumnember: {
+    id: 'autumnember',
+    label: 'Autumn Ember',
+    mode: 'dark',
+    palette: {
+      '50': '254 245 241',
+      '100': '254 231 222',
+      '200': '254 209 192',
+      '300': '254 178 153',
+      '400': '249 137 104',
+      '500': '225 102 72',
+      '600': '187 66 43',
+      '700': '160 51 35',
+      '800': '133 41 32',
+      '900': '107 31 27',
+      '950': '70 18 17',
+    },
+    preview: ['32 14 8', '225 102 72', '254 178 153'],
+    background: {
+      start: '19 5 2',
+      mid: '32 14 8',
+      end: '42 24 9',
+      glow: '249 137 104',
+      glowSecondary: '226 174 77',
+      foreground: '251 239 234',
+    },
+  },
+  winterfrost: {
+    id: 'winterfrost',
+    label: 'Winter Frost',
+    mode: 'light',
+    palette: {
+      '50': '241 248 253',
+      '100': '224 239 251',
+      '200': '198 224 246',
+      '300': '165 205 238',
+      '400': '130 178 221',
+      '500': '98 150 197',
+      '600': '68 116 162',
+      '700': '55 96 139',
+      '800': '46 79 115',
+      '900': '37 62 93',
+      '950': '23 39 60',
+    },
+    preview: ['237 249 255', '98 150 197', '55 96 139'],
+    background: {
+      start: '237 249 255',
+      mid: '252 254 254',
+      end: '230 242 254',
+      glow: '130 178 221',
+      glowSecondary: '126 198 201',
+      foreground: '5 35 45',
+    },
+  },
+  midwinter: {
+    id: 'midwinter',
+    label: 'Midwinter Night',
+    mode: 'dark',
+    palette: {
+      '50': '241 248 255',
+      '100': '225 238 254',
+      '200': '200 223 250',
+      '300': '168 203 244',
+      '400': '133 176 229',
+      '500': '102 147 205',
+      '600': '71 113 169',
+      '700': '58 94 145',
+      '800': '48 77 120',
+      '900': '39 61 97',
+      '950': '24 38 63',
+    },
+    preview: ['5 20 39', '102 147 205', '168 203 244'],
+    background: {
+      start: '1 9 25',
+      mid: '5 20 39',
+      end: '22 26 53',
+      glow: '133 176 229',
+      glowSecondary: '119 200 195',
+      foreground: '235 243 252',
+    },
+  },
+  spooky: {
+    id: 'spooky',
+    label: 'Spooky',
+    mode: 'dark',
+    palette: {
+      '50': '254 245 239',
+      '100': '255 232 219',
+      '200': '255 210 185',
+      '300': '254 179 139',
+      '400': '249 139 78',
+      '500': '225 105 29',
+      '600': '180 76 3',
+      '700': '153 61 2',
+      '800': '129 48 0',
+      '900': '104 37 1',
+      '950': '69 21 0',
+    },
+    preview: ['23 14 38', '225 105 29', '254 179 139'],
+    background: {
+      start: '12 5 25',
+      mid: '23 14 38',
+      end: '41 18 46',
+      glow: '249 139 78',
+      glowSecondary: '135 205 119',
+      foreground: '243 240 251',
+    },
+  },
+  festive: {
+    id: 'festive',
+    label: 'Festive',
+    mode: 'dark',
+    palette: {
+      '50': '255 244 243',
+      '100': '255 230 228',
+      '200': '254 207 203',
+      '300': '255 175 170',
+      '400': '255 129 126',
+      '500': '234 89 91',
+      '600': '195 51 61',
+      '700': '167 36 49',
+      '800': '139 29 40',
+      '900': '112 22 32',
+      '950': '73 12 19',
+    },
+    preview: ['1 25 11', '234 89 91', '255 175 170'],
+    background: {
+      start: '0 13 4',
+      mid: '1 25 11',
+      end: '1 35 28',
+      glow: '255 129 126',
+      glowSecondary: '212 182 53',
+      foreground: '234 245 237',
+    },
+  },
   blossom: {
     id: 'blossom',
     label: 'Blossom',
@@ -606,6 +1168,12 @@ export const LIGHT_THEMES = [
   THEME_DEFINITIONS.sandstone,
   THEME_DEFINITIONS.arctic,
   THEME_DEFINITIONS.coralreef,
+  THEME_DEFINITIONS.matcha,
+  THEME_DEFINITIONS.peach,
+  THEME_DEFINITIONS.terracotta,
+  THEME_DEFINITIONS.seafoam,
+  THEME_DEFINITIONS.lilacmist,
+  THEME_DEFINITIONS.contrastlight,
 ] as const;
 
 
@@ -620,12 +1188,34 @@ export const DARK_THEMES = [
   THEME_DEFINITIONS.forest,
   THEME_DEFINITIONS.mocha,
   THEME_DEFINITIONS.sunset,
+  THEME_DEFINITIONS.nebula,
+  THEME_DEFINITIONS.obsidiangold,
+  THEME_DEFINITIONS.deepsea,
+  THEME_DEFINITIONS.velvet,
+  THEME_DEFINITIONS.mossstone,
+  THEME_DEFINITIONS.contrastdark,
 ] as const;
 
-export const THEME_GROUPS = [
-  { mode: 'light' as const, label: 'Light', themes: LIGHT_THEMES },
-  { mode: 'dark' as const, label: 'Dark', themes: DARK_THEMES },
+// Picked by hand like any other theme (no automatic switching). Each still
+// has a light/dark mode, so it can be a Follow System pairing.
+export const SEASONAL_THEMES = [
+  THEME_DEFINITIONS.springbloom,
+  THEME_DEFINITIONS.midsummer,
+  THEME_DEFINITIONS.harvest,
+  THEME_DEFINITIONS.autumnember,
+  THEME_DEFINITIONS.spooky,
+  THEME_DEFINITIONS.winterfrost,
+  THEME_DEFINITIONS.midwinter,
+  THEME_DEFINITIONS.festive,
 ] as const;
+
+export type ThemeGroupId = 'light' | 'dark' | 'seasonal';
+
+export const THEME_GROUPS: ReadonlyArray<{ id: ThemeGroupId; label: string; themes: ReadonlyArray<ThemeDefinition> }> = [
+  { id: 'light', label: 'Light', themes: LIGHT_THEMES },
+  { id: 'dark', label: 'Dark', themes: DARK_THEMES },
+  { id: 'seasonal', label: 'Seasonal', themes: SEASONAL_THEMES },
+];
 
 export function getThemeDefinition(themeId: AppThemeId): ThemeDefinition {
   return THEME_DEFINITIONS[themeId];
@@ -667,11 +1257,13 @@ export function getResolvedThemeMode(themeId: AppThemeId): ThemeMode {
 
 // ─── Background pattern & gradient ───────────────────────────────────────────
 
-export type BgPatternId = 'dots' | 'grid' | 'crosshatch' | 'topographic' | 'linen' | 'none';
-export type BgGradientId = 'soft' | 'radial' | 'flat';
+// Allowed values come from the shared appearance spec (also validated by the
+// server); the option lists below add labels and previews.
+export type BgPatternId = Appearance['bgPattern'];
+export type BgGradientId = Appearance['bgGradient'];
 
-export const DEFAULT_BG_PATTERN: BgPatternId = 'dots';
-export const DEFAULT_BG_GRADIENT: BgGradientId = 'soft';
+export const DEFAULT_BG_PATTERN: BgPatternId = DEFAULT_APPEARANCE.bgPattern;
+export const DEFAULT_BG_GRADIENT: BgGradientId = DEFAULT_APPEARANCE.bgGradient;
 
 export interface BgPatternOption {
   id: BgPatternId;
@@ -770,9 +1362,25 @@ export const BG_GRADIENT_PREVIEWS: Record<BgGradientId, string> = {
   flat: 'linear-gradient(175deg, rgb(255,247,237), rgb(255,255,255) 40%, rgb(255,251,235))',
 };
 
-export function applyBgToRoot(root: HTMLElement, pattern: BgPatternId, gradient: BgGradientId) {
-  root.dataset.bgPattern = pattern;
-  root.dataset.bgGradient = gradient;
+/**
+ * Expose every appearance knob as a data attribute on <html> (bgPattern →
+ * data-bg-pattern) so index.css can style it. The pre-paint script in
+ * index.html restores these from the theme snapshot.
+ */
+export function applyAppearanceToRoot(root: HTMLElement, appearance: Appearance) {
+  for (const key of APPEARANCE_KEYS) {
+    root.dataset[key] = String(appearance[key]);
+  }
+}
+
+/** The data-* attributes applyAppearanceToRoot manages, for the snapshot. */
+export function readAppearanceAttrs(root: HTMLElement): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  for (const key of APPEARANCE_KEYS) {
+    const value = root.dataset[key];
+    if (value) attrs[key] = value;
+  }
+  return attrs;
 }
 
 export function applyThemeToRoot(root: HTMLElement, themeId: AppThemeId) {

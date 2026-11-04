@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { pickValidAppearance } from 'wwp-shared';
 import multer from 'multer';
 import { pool, query } from '../db';
 import {
@@ -77,6 +78,8 @@ interface BackupSettings {
   system_light_theme: string | null;
   system_dark_theme: string | null;
   distance_unit: string | null;
+  /** Display knobs (shared/src/appearance.ts); absent in older backups. */
+  appearance?: unknown;
   created_at?: string;
   updated_at?: string;
 }
@@ -274,9 +277,9 @@ async function runRestore(
          user_id, dawarich_url, dawarich_api_key,
          immich_url, immich_api_key,
          theme, system_light_theme, system_dark_theme,
-         distance_unit
+         distance_unit, appearance
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::jsonb, '{}'::jsonb))
         ON CONFLICT (user_id) DO UPDATE SET
           dawarich_url = COALESCE(EXCLUDED.dawarich_url, user_settings.dawarich_url),
           dawarich_api_key = COALESCE(EXCLUDED.dawarich_api_key, user_settings.dawarich_api_key),
@@ -286,6 +289,8 @@ async function runRestore(
           system_light_theme = COALESCE(EXCLUDED.system_light_theme, user_settings.system_light_theme),
           system_dark_theme = COALESCE(EXCLUDED.system_dark_theme, user_settings.system_dark_theme),
           distance_unit = COALESCE(EXCLUDED.distance_unit, user_settings.distance_unit),
+          appearance = CASE WHEN $10::jsonb IS NULL THEN user_settings.appearance
+                            ELSE user_settings.appearance || $10::jsonb END,
           updated_at = NOW()`,
       [
         userId,
@@ -297,6 +302,9 @@ async function runRestore(
         toStringOrNull(s.system_light_theme),
         toStringOrNull(s.system_dark_theme),
         toStringOrNull(s.distance_unit),
+        // Lenient: keep only valid known knobs so a backup from another app
+        // version can't store junk; null leaves the current appearance alone.
+        s.appearance === undefined ? null : JSON.stringify(pickValidAppearance(s.appearance)),
       ]
     );
 
@@ -467,6 +475,7 @@ async function buildExport(
                   system_light_theme,
                   system_dark_theme,
                   distance_unit,
+                  appearance,
                   created_at,
                   updated_at
            FROM user_settings
@@ -835,6 +844,7 @@ router.post('/start-over', async (req: Request, res: Response) => {
            system_light_theme = 'sunrise',
            system_dark_theme = 'midnight',
            distance_unit = 'metric',
+           appearance = '{}'::jsonb,
            updated_at = NOW()`,
         [userId]
       );
