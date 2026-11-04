@@ -18,6 +18,11 @@ vi.mock('../ui/audio/uploader', () => ({ uploadBlob: vi.fn() }));
 vi.mock('../ui/audio/sha256', () => ({
   sha256Blob: async (b: File) => `${b.name.length}${b.size}`.padEnd(64, 'f').slice(0, 64),
 }));
+// The fallback timezone defaults to the device's; pin it so the test doesn't depend on the machine's TZ.
+vi.mock('../../../client/src/utils/slugify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../client/src/utils/slugify')>()),
+  deviceTimezone: () => 'UTC',
+}));
 vi.mock('../ui/TimezoneInput', () => ({ TimezoneInput: ({ id }: { id: string }) => <input id={id} defaultValue="UTC" readOnly /> }));
 vi.mock('../ui/TagChipInput', () => ({
   default: ({ onChange }: { onChange: (v: string[]) => void }) => <button onClick={() => onChange(['Voice Memos'])}>add tag</button>,
