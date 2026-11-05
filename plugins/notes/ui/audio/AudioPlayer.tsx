@@ -11,6 +11,8 @@ import { AlertCircle, Loader2, Pencil, RefreshCw, Save, UserRound, Users, X } fr
 import { notes, type NoteAudioWithTranscript, type TranscriptSegment } from '../api';
 import { formatDuration } from './AudioSection';
 import { speakerLabel, speakerStyle } from './speakerStyle';
+import { CopyMarkdownButton } from '../../../../client/src/components/CopyMarkdownButton';
+import { transcriptToMarkdown } from '../noteMarkdown';
 
 export const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 
@@ -276,6 +278,14 @@ export function AudioPlayer({ audio, onChanged }: { audio: NoteAudioWithTranscri
           <>
             {segments.length > 0 && audio.status === 'done' && !diarizing && (
               <button type="button" onClick={beginEdit} className={iconBtn}><Pencil size={12} /> Edit transcript</button>
+            )}
+            {segments.length > 0 && (
+              <CopyMarkdownButton
+                className={iconBtn}
+                iconSize={12}
+                ariaLabel="Copy transcript as markdown"
+                getMarkdown={() => transcriptToMarkdown(audio)}
+              />
             )}
             {segments.length > 0 && audio.status === 'done' && !diarizing && (
               <button type="button" onClick={() => void identify()} disabled={busy} className={iconBtn}>

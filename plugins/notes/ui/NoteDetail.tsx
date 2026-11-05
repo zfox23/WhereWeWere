@@ -11,8 +11,10 @@ import { MarkdownNote } from '../../../client/src/components/checkin-card/Markdo
 import { CompanionName } from '../../../client/src/components/CompanionName';
 import { formatDate, formatTime, localDateKey, normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
+import { CopyMarkdownButton } from '../../../client/src/components/CopyMarkdownButton';
 import { notes, type Note } from './api';
 import { NoteAudioList } from './audio/AudioPlayer';
+import { noteToMarkdown } from './noteMarkdown';
 import { RelatedNotes } from './RelatedNotes';
 import { TagChip, tagTimelinePath } from './TagChip';
 
@@ -113,7 +115,7 @@ export default function NoteDetail() {
           </p>
         )}
 
-        <div className="flex items-center gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
           <Link
             to={`/note-check-in?edit=${row.id}`}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -127,6 +129,12 @@ export default function NoteDetail() {
           >
             <Trash2 size={14} /> {deleting ? 'Deleting...' : 'Delete'}
           </button>
+          <span className="ml-auto">
+            <CopyMarkdownButton
+              ariaLabel="Copy note as markdown"
+              getMarkdown={() => noteToMarkdown(row, `${formatDate(row.checked_in_at, tz)} · ${formatTime(row.checked_in_at, tz)} ${tz}`)}
+            />
+          </span>
         </div>
       </article>
 

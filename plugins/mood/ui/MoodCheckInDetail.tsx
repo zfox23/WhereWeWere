@@ -8,6 +8,8 @@ import { MoodIcon, MOOD_LABELS, MOOD_COLORS, MOOD_BG_COLORS } from './MoodIcons'
 import { resolveActivityIcon } from '../../../client/src/utils/icons';
 import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
+import { CopyMarkdownButton } from '../../../client/src/components/CopyMarkdownButton';
+import { moodToMarkdown } from './moodMarkdown';
 
 function formatDate(dateStr: string, timeZone?: string | null): string {
   const date = new Date(dateStr);
@@ -151,7 +153,7 @@ export default function MoodCheckInDetail() {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
           <Link
             to={`/mood-check-in?edit=${checkin.id}`}
             className="btn-secondary flex items-center gap-2 text-sm"
@@ -166,6 +168,15 @@ export default function MoodCheckInDetail() {
             {deleting ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
             Delete
           </button>
+          <CopyMarkdownButton
+            className="btn-secondary flex items-center gap-2 text-sm ml-auto"
+            ariaLabel="Copy mood check-in as markdown"
+            getMarkdown={() => moodToMarkdown(
+              checkin,
+              MOOD_LABELS[mood] ?? 'Mood',
+              formatDate(checkin.checked_in_at, checkin.mood_timezone),
+            )}
+          />
         </div>
       </div>
     </div>
