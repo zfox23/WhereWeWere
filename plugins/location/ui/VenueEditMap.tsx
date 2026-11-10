@@ -194,7 +194,10 @@ function SyncedView({ center }: { center: [number, number] | null }) {
   // (and undo the user's pan) on every parent render.
   useEffect(() => {
     if (lat == null || lng == null) return;
-    map.setView([lat, lng]);
+    const current = map.getCenter();
+    if (Math.abs(current.lat - lat) > 0.00001 || Math.abs(current.lng - lng) > 0.00001) {
+      map.setView([lat, lng]);
+    }
   }, [map, lat, lng]);
   return null;
 }

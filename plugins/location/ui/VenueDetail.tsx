@@ -648,8 +648,14 @@ export default function VenueDetail() {
               </div>
             </div>
             <div className="h-56 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-              <VenueEditMap initialCenter={[safeEditLat, safeEditLng]} viewCenter={[safeEditLat, safeEditLng]} zoom={15}
-                onChange={(lat, lng) => { setEditLat(lat); setEditLng(lng); }} className="h-56 w-full" />
+              <VenueEditMap
+                initialCenter={[safeEditLat, safeEditLng]}
+                viewCenter={[safeEditLat, safeEditLng]}
+                zoom={15}
+                onChange={(lat, lng) => { setEditLat(lat); setEditLng(lng); }}
+                onMapClick={(lat, lng) => { setEditLat(lat); setEditLng(lng); }}
+                className="h-56 w-full"
+              />
             </div>
           </div>
           {editError && (
