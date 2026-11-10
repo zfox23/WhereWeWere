@@ -89,16 +89,18 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
     nameText || categoryText || selectedListId
   );
 
-  const headerCell = (key: SortKey, label: string) => (
+  const headerCell = (key: SortKey, label: string, extraClass = '') => (
     <th
       scope="col"
       aria-sort={sortBy === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className="py-2 pr-3 font-semibold first:pl-0"
+      className={`py-2 pr-3 font-semibold first:pl-0 ${extraClass}`}
     >
       <button
         type="button"
         onClick={() => handleSort(key)}
-        className="inline-flex items-center gap-1 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+        className={`inline-flex items-center gap-1 hover:text-gray-800 dark:hover:text-gray-200 transition-colors ${
+          extraClass.includes('text-right') ? 'justify-end w-full' : ''
+        }`}
       >
         {label}
         {sortBy === key && (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
@@ -212,7 +214,7 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
               <tr className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {headerCell('name', 'Venue')}
                 {headerCell('rating', 'Rating')}
-                {headerCell('checkin_count', 'Check-ins')}
+                {headerCell('checkin_count', 'Check-ins', 'text-right')}
                 {headerCell('last_checkin', 'Last check-in')}
               </tr>
             </thead>
@@ -238,6 +240,18 @@ export function VenuesLibrarySection({ from, to }: VenuesLibrarySectionProps) {
                       <p className="text-xs text-gray-400 truncate">
                         {[item.city, item.country].filter(Boolean).join(', ')}
                       </p>
+                    )}
+                    {item.lists && item.lists.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {item.lists.map((listName) => (
+                          <span
+                            key={listName}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300 border border-primary-200 dark:border-primary-800"
+                          >
+                            {listName}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </td>
                   <td className="py-2.5 pr-3">

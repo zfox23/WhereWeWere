@@ -103,6 +103,11 @@ describe('VenuesLibrarySection (table)', () => {
     expect(screen.getByText('Bravo')).toBeTruthy();
     expect(screen.getByText('Charlie')).toBeTruthy();
     expect(screen.getByText('Showing 3 of 3')).toBeTruthy();
+    // Verify right-aligned Check-ins column header and list tags
+    const checkinsHeader = screen.getByRole('columnheader', { name: /Check-ins/i });
+    expect(checkinsHeader).toHaveClass('text-right');
+    const tripBadges = screen.getAllByText('Trips');
+    expect(tripBadges.length).toBeGreaterThan(0);
   });
 
   it('asks the server for the newest check-ins first by default', async () => {
