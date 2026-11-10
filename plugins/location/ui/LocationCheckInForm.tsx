@@ -41,6 +41,7 @@ interface CheckInFormProps {
   initialRating?: number | null;
   initialCompanions?: string[];
   initialListIds?: string[];
+  hideVenueCard?: boolean;
 }
 
 export default function CheckInForm({
@@ -56,6 +57,7 @@ export default function CheckInForm({
   initialRating,
   initialCompanions,
   initialListIds,
+  hideVenueCard = false,
 }: CheckInFormProps) {
   const navigate = useNavigate();
   const [venueId, setVenueId] = useState(initialVenueId || '');
@@ -261,8 +263,8 @@ export default function CheckInForm({
 
   return (
     <form onSubmit={handleSubmit} className={`space-y-5 ${isEditMode ? 'pb-56 md:pb-44' : 'pb-40 md:pb-24'}`}>
-      {/* Venue selection (hidden in edit mode) */}
-      {!isEditMode && (
+      {/* Venue selection (hidden in edit mode or when parent renders venue card) */}
+      {!isEditMode && !hideVenueCard && (
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
             Venue

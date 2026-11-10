@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, MapPin, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, MapPin, Loader2, AlertCircle, Trash2 } from 'lucide-react';
 import VenueSearch from './VenueSearch';
 import type { SelectedVenue } from './VenueSearch';
 import CheckInForm from './LocationCheckInForm';
@@ -32,6 +32,12 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
   const [selectedVenue, setSelectedVenue] = useState<SelectedVenue | null>(null);
   const [selectedVenueCoords, setSelectedVenueCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedVenueCoordsLoading, setSelectedVenueCoordsLoading] = useState(false);
+  const [selectedVenueDetails, setSelectedVenueDetails] = useState<{
+    category_name?: string | null;
+    address?: string | null;
+    checkin_count?: number | null;
+  } | null>(null);
+  const [deletingVenue, setDeletingVenue] = useState(false);
   const [editCheckin, setEditCheckin] = useState<CheckInType | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -91,11 +97,29 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
   const handleChangeVenue = () => {
     setSelectedVenue(null);
     setSelectedVenueCoords(null);
+    setSelectedVenueDetails(null);
+  };
+
+  const handleDeleteVenue = async () => {
+    if (!selectedVenue?.id || deletingVenue) return;
+    if (!window.confirm(`Delete venue "${selectedVenue.name}"? This cannot be undone.`)) {
+      return;
+    }
+    setDeletingVenue(true);
+    try {
+      await venues.delete(selectedVenue.id);
+      handleChangeVenue();
+    } catch (err) {
+      console.error('Failed to delete venue:', err);
+    } finally {
+      setDeletingVenue(false);
+    }
   };
 
   useEffect(() => {
     if (!selectedVenue?.id) {
       setSelectedVenueCoords(null);
+      setSelectedVenueDetails(null);
       return;
     }
 
@@ -111,10 +135,17 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
         } else {
           setSelectedVenueCoords(null);
         }
+        const addr = [venue.address, venue.city, venue.state, venue.postal_code, venue.country].filter(Boolean).join(', ');
+        setSelectedVenueDetails({
+          category_name: venue.category_name ?? null,
+          address: addr || null,
+          checkin_count: venue.checkin_count ?? 0,
+        });
       })
       .catch(() => {
         if (!active) return;
         setSelectedVenueCoords(null);
+        setSelectedVenueDetails(null);
       })
       .finally(() => {
         if (!active) return;
@@ -205,19 +236,56 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
                     </span>
                   )}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {editId ? 'Venue' : 'Selected venue'}
-                </p>
+                {(selectedVenueDetails?.category_name || selectedVenueDetails?.address) && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {[selectedVenueDetails.category_name, selectedVenueDetails.address].filter(Boolean).join(' • ')}
+                  </p>
+                )}
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <p className="text-xs text-gray-400">
+                    {editId ? 'Venue' : 'Selected venue'}
+                  </p>
+                  {selectedVenueDetails?.checkin_count != null && (
+                    <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
+                      • {selectedVenueDetails.checkin_count > 0
+                        ? `${selectedVenueDetails.checkin_count} check-in${selectedVenueDetails.checkin_count === 1 ? '' : 's'}`
+                        : 'New venue'}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             {!editId && (
-              <button
-                onClick={handleChangeVenue}
-                className="inline-flex items-center gap-1.5 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
-              >
-                <ArrowLeft size={14} />
-                Change venue
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedVenueDetails?.checkin_count === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteVenue}
+                    disabled={deletingVenue}
+                    className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30"
+                  >
+                    {deletingVenue ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 size={12} />
+                        Delete venue
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleChangeVenue}
+                  className="inline-flex items-center gap-1.5 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
+                >
+                  <ArrowLeft size={14} />
+                  Change venue
+                </button>
+              </div>
             )}
           </div>
 
@@ -254,6 +322,7 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
             parentVenueName={selectedVenue.parent_venue_name}
             onSuccess={handleSuccess}
             onDeleteVenue={handleChangeVenue}
+            hideVenueCard={true}
             editCheckinId={editId || undefined}
             initialNotes={editCheckin?.notes || ''}
             initialCheckedInAt={editCheckin?.checked_in_at || (prefillsDate ? applyDateToIsoString(dateParam) : undefined)}

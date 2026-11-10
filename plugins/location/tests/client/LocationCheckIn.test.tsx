@@ -25,6 +25,8 @@ vi.mock('../../../../client/src/api/client', () => ({
   },
   venues: {
     get: apiMocks.venuesGet,
+    categories: () => Promise.resolve([]),
+    nearby: () => Promise.resolve([]),
   },
   checkinLists: {
     list: apiMocks.checkinListsList,
@@ -117,5 +119,31 @@ describe('LocationCheckIn (edit redirect)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('current-location').textContent).toBe('/location-checkins/c1');
     });
+  });
+
+  it('renders single consolidated venue card and form when venue is selected', async () => {
+    apiMocks.venuesGet.mockResolvedValue({
+      id: 'v1',
+      name: 'Fillmore',
+      category_name: 'Music Venue',
+      address: '1805 Geary Blvd',
+      checkin_count: 5,
+      latitude: 37.784,
+      longitude: -122.433,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/location-check-in?venueId=v1&venueName=Fillmore']}>
+        <Routes>
+          <Route path="/location-check-in" element={<LocationCheckIn />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Fillmore')).toBeInTheDocument();
+    expect(await screen.findByText('Music Venue • 1805 Geary Blvd')).toBeInTheDocument();
+    expect(screen.getByText('• 5 check-ins')).toBeInTheDocument();
+    expect(screen.getByText('Change venue')).toBeInTheDocument();
+    expect(screen.getAllByText('Fillmore')).toHaveLength(1);
   });
 });
