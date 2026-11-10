@@ -2078,7 +2078,7 @@ venuesRouter.put('/:id', async (req: Request, res: Response) => {
       push('latitude = $n', parseFloat(String(body.latitude)));
       push('longitude = $n', parseFloat(String(body.longitude)));
     }
-    if (body.osm_id !== undefined) push('osm_id = COALESCE($n, osm_id)', body.osm_id || null);
+    if (body.osm_id !== undefined) push('osm_id = $n', body.osm_id || null);
 
     // Explicit columns: created_by (who added the shared venue) stays private.
     // A rating-only save leaves the shared venue row untouched.
