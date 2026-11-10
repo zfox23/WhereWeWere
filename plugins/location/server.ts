@@ -1544,8 +1544,7 @@ venuesRouter.get('/nearby', async (req: Request, res: Response) => {
 
     // Single-source pagination (source=local / source=osm)
     if (source !== 'mixed') {
-      const list = (source === 'local' ? localWithDistance : osmWithDistance)
-        .slice(offsetNum, offsetNum + limitNum)
+      const list = (source === 'local' ? localWithDistance : osmWithDistance.slice(offsetNum, offsetNum + limitNum))
         .map(({ distance, ...venue }) => venue);
       return res.json(list);
     }
