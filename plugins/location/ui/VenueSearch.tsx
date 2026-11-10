@@ -675,7 +675,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               onMarkerSelect={handleMapMarkerSelect}
               onMarkerClick={handleMapMarkerConfirm}
               onMapClick={handleMapClick}
-              className="h-96 w-full"
+              className="h-80 w-full"
             />
           </div>
         ) : null}
