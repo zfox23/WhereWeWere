@@ -34,6 +34,7 @@ interface CheckInFormProps {
   parentVenueId?: string | null;
   parentVenueName?: string | null;
   onSuccess?: (id: string) => void;
+  onDeleteVenue?: () => void;
   editCheckinId?: string;
   initialNotes?: string;
   initialCheckedInAt?: string;
@@ -48,6 +49,7 @@ export default function CheckInForm({
   parentVenueId,
   parentVenueName,
   onSuccess,
+  onDeleteVenue,
   editCheckinId,
   initialNotes,
   initialCheckedInAt,
@@ -184,7 +186,11 @@ export default function CheckInForm({
       setVenueCheckinCount(null);
       setVenueCategoryName(null);
       setVenueAddress(null);
-      navigate('/location-check-in');
+      if (onDeleteVenue) {
+        onDeleteVenue();
+      } else {
+        navigate('/location-check-in');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete venue.');
     } finally {

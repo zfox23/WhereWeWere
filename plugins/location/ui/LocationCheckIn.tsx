@@ -260,6 +260,7 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
             parentVenueId={selectedVenue.parent_venue_id}
             parentVenueName={selectedVenue.parent_venue_name}
             onSuccess={handleSuccess}
+            onDeleteVenue={handleChangeVenue}
             editCheckinId={editId || undefined}
             initialNotes={editCheckin?.notes || ''}
             initialCheckedInAt={editCheckin?.checked_in_at || (prefillsDate ? applyDateToIsoString(dateParam) : undefined)}
