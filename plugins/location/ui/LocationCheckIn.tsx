@@ -7,7 +7,6 @@ import CheckInForm from './LocationCheckInForm';
 import MapView from './MapView';
 import { venues, checkins } from '../../../client/src/api/client';
 import type { CheckIn as CheckInType } from '../../../client/src/types';
-import { useLocation as useCurrentLocation } from './LocationContext';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -22,7 +21,6 @@ function applyDateToIsoString(date: string, fallbackIso?: string): string {
 export default function CheckIn(props: { editId?: string | null; dateParam?: string | null } = {}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { refetch } = useCurrentLocation();
 
   // editId/dateParam are passed by the plugin route wrapper; the raw query
   // params are kept as a fallback for direct deep links.
@@ -37,11 +35,6 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
   const [editCheckin, setEditCheckin] = useState<CheckInType | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (editId) return;
-    void refetch();
-  }, [editId, refetch]);
 
   // Edit mode: fetch existing check-in
   useEffect(() => {
