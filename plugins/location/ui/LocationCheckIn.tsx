@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, MapPin, Loader2 } from 'lucide-react';
+import { ArrowLeft, MapPin, Loader2, AlertCircle } from 'lucide-react';
 import VenueSearch from './VenueSearch';
 import type { SelectedVenue } from './VenueSearch';
 import CheckInForm from './LocationCheckInForm';
@@ -36,6 +36,7 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
   const [selectedVenueCoordsLoading, setSelectedVenueCoordsLoading] = useState(false);
   const [editCheckin, setEditCheckin] = useState<CheckInType | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     if (editId) return;
@@ -46,6 +47,7 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
   useEffect(() => {
     if (!editId) return;
     setEditLoading(true);
+    setEditError(null);
     checkins.get(editId).then((data) => {
       setEditCheckin(data);
       setSelectedVenue({
@@ -56,6 +58,7 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
       });
     }).catch((err) => {
       console.error('Failed to load check-in for editing:', err);
+      setEditError(err instanceof Error ? err.message : 'Failed to load check-in for editing');
     }).finally(() => setEditLoading(false));
   }, [editId]);
 
@@ -134,6 +137,46 @@ export default function CheckIn(props: { editId?: string | null; dateParam?: str
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="animate-spin text-primary-600" size={32} />
+      </div>
+    );
+  }
+
+  if (editError) {
+    return (
+      <div className="text-center py-20 space-y-4">
+        <AlertCircle size={40} className="mx-auto text-red-500 mb-2" />
+        <p className="text-red-600 dark:text-red-400 font-medium">{editError}</p>
+        <div className="flex items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              if (!editId) return;
+              setEditLoading(true);
+              setEditError(null);
+              checkins.get(editId).then((data) => {
+                setEditCheckin(data);
+                setSelectedVenue({
+                  id: data.venue_id,
+                  name: data.venue_name || 'Unknown Venue',
+                  parent_venue_id: data.parent_venue_id ?? null,
+                  parent_venue_name: data.parent_venue_name ?? null,
+                });
+              }).catch((err) => {
+                setEditError(err instanceof Error ? err.message : 'Failed to load check-in for editing');
+              }).finally(() => setEditLoading(false));
+            }}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium transition-colors"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            Back to Home
+          </button>
+        </div>
       </div>
     );
   }
