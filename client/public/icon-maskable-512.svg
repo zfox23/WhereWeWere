@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGradMask" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="45%" stop-color="#ea580c"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </linearGradient>
+    <linearGradient id="pinGradMask" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fff7ed"/>
+    </linearGradient>
+    <radialGradient id="beaconGlowMask" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="50%" stop-color="#fef08a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </radialGradient>
+    <filter id="pinShadowMask" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#431407" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+  <!-- Full bleed background for adaptive icon masking -->
+  <rect width="512" height="512" fill="url(#bgGradMask)"/>
+
+  <!-- Centered pin scaled inside 80% safe circle -->
+  <g transform="translate(256, 256) scale(0.88) translate(-256, -256)" filter="url(#pinShadowMask)">
+    <path d="M 256 92
+             C 178 92, 116 154, 116 234
+             C 116 306, 186 380, 244 420
+             C 251 425, 261 425, 268 420
+             C 326 380, 396 306, 396 234
+             C 396 154, 334 92, 256 92 Z"
+          fill="url(#pinGradMask)"/>
+    <circle cx="256" cy="230" r="68" fill="#ea580c"/>
+    <circle cx="256" cy="230" r="38" fill="url(#beaconGlowMask)"/>
+    <circle cx="256" cy="230" r="14" fill="#ffffff"/>
+  </g>
+</svg>

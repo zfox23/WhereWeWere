@@ -1,7 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
-  <rect width="192" height="192" rx="32" fill="#4f46e5"/>
-  <g transform="translate(96,88)" fill="none" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M0-40 C22-40 40-22 40 0 C40 28-40 64-40 64 S-40 28-40 0 C-40-22-22-40 0-40Z"/>
-    <circle cx="0" cy="-4" r="12" fill="white"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="45%" stop-color="#ea580c"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </linearGradient>
+    <linearGradient id="pinGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fff7ed"/>
+    </linearGradient>
+    <radialGradient id="beaconGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="50%" stop-color="#fef08a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </radialGradient>
+    <filter id="pinShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#431407" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+  <!-- Background Squircle -->
+  <rect width="512" height="512" rx="116" fill="url(#bgGrad)"/>
+  <rect x="6" y="6" width="500" height="500" rx="110" fill="none" stroke="white" stroke-opacity="0.25" stroke-width="3"/>
+
+  <!-- Pin Mark with Warm Beacon Core -->
+  <g filter="url(#pinShadow)">
+    <path d="M 256 92
+             C 178 92, 116 154, 116 234
+             C 116 306, 186 380, 244 420
+             C 251 425, 261 425, 268 420
+             C 326 380, 396 306, 396 234
+             C 396 154, 334 92, 256 92 Z"
+          fill="url(#pinGrad)"/>
+    <!-- Outer aperture ring (deep warm orange) -->
+    <circle cx="256" cy="230" r="68" fill="#ea580c"/>
+    <!-- Glowing beacon sun (golden radial gradient) -->
+    <circle cx="256" cy="230" r="38" fill="url(#beaconGlow)"/>
+    <!-- Pinpoint center spark -->
+    <circle cx="256" cy="230" r="14" fill="#ffffff"/>
   </g>
 </svg>
