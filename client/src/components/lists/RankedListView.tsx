@@ -399,6 +399,7 @@ export function RankedListView<T>({
 
   const headerCell = (key: string, label: string, extraClass = '') => (
     <th
+      key={key}
       scope="col"
       aria-sort={sortBy === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
       className={`py-2 pr-3 font-semibold ${extraClass}`}
