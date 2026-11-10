@@ -574,6 +574,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const sql = `
       SELECT c.id, c.user_id, c.venue_id, c.notes, c.rating,
+              (${companionNamesSql('location', 'c.id')}) AS companions,
               c.checked_in_at, c.checkin_timezone AS venue_timezone, c.created_at, c.updated_at,
               v.name AS venue_name, v.latitude AS venue_latitude, v.longitude AS venue_longitude,
               vc.name AS venue_category,
@@ -588,7 +589,10 @@ router.get('/', async (req: Request, res: Response) => {
     `;
 
     const result = await query(sql, params);
-    res.json(result.rows.map(addTimezone));
+    res.json(result.rows.map((row) => ({
+      ...addTimezone(row),
+      companions: Array.isArray(row.companions) ? row.companions : [],
+    })));
   } catch (err) {
     console.error('Error listing check-ins:', err);
     res.status(500).json({ error: 'Failed to list check-ins' });
