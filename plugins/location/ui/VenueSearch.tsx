@@ -46,6 +46,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
   const heading = useDeviceHeading();
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createCustomError, setCreateCustomError] = useState<string | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [mapSearchLoading, setMapSearchLoading] = useState(false);
@@ -513,7 +514,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
         parent_venue_name: imported.parent_venue_name || null,
       });
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to import venue');
+      setLocationError(err instanceof Error ? err.message : 'Failed to import venue');
     } finally {
       setImporting(null);
     }
@@ -541,6 +542,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
     e.preventDefault();
     if (!customName.trim() || customLat == null || customLng == null) return;
     setCreatingCustom(true);
+    setCreateCustomError(null);
     try {
       const created = await venues.create({
         name: customName.trim(),
@@ -551,7 +553,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
       });
       onSelect({ id: created.id, name: created.name });
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to create venue');
+      setCreateCustomError(err instanceof Error ? err.message : 'Failed to create venue');
     } finally {
       setCreatingCustom(false);
     }
@@ -832,6 +834,7 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
           type="button"
           onClick={() => {
             setShowCreateForm(true);
+            setCreateCustomError(null);
             // Pre-fill the venue name with the current search query, so a
             // venue that wasn't found via search can be created without
             // re-typing its name.
@@ -946,6 +949,11 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
               </div>
             </div>
           )}
+          {createCustomError && (
+            <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-md px-3 py-2">
+              {createCustomError}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <button
               type="submit"
@@ -956,7 +964,10 @@ export default function VenueSearch({ onSelect, initialLat, initialLon }: VenueS
             </button>
             <button
               type="button"
-              onClick={() => setShowCreateForm(false)}
+              onClick={() => {
+                setShowCreateForm(false);
+                setCreateCustomError(null);
+              }}
               className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
             >
               Cancel
