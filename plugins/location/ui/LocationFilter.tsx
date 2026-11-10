@@ -78,14 +78,16 @@ export default function LocationFilter({
             if (!match && category) onSetCategory('');
           }}
           onBlur={() => {
-            if (!categoryInput.trim()) return;
-            const match = findExactOption(categoryInput, categoryOptions);
+            const trimmed = categoryInput.trim();
+            if (!trimmed) {
+              setCategoryInput('');
+              if (category) onSetCategory('');
+              return;
+            }
+            const match = findExactOption(trimmed, categoryOptions);
             if (match) {
               setCategoryInput(match);
               if (category !== match) onSetCategory(match);
-            } else {
-              setCategoryInput('');
-              if (category) onSetCategory('');
             }
           }}
           className="input disabled:cursor-not-allowed disabled:opacity-60"
@@ -112,14 +114,16 @@ export default function LocationFilter({
             if (!match && country) onSetCountry('');
           }}
           onBlur={() => {
-            if (!countryInput.trim()) return;
-            const match = findExactOption(countryInput, countryOptions);
+            const trimmed = countryInput.trim();
+            if (!trimmed) {
+              setCountryInput('');
+              if (country) onSetCountry('');
+              return;
+            }
+            const match = findExactOption(trimmed, countryOptions);
             if (match) {
               setCountryInput(match);
               if (country !== match) onSetCountry(match);
-            } else {
-              setCountryInput('');
-              if (country) onSetCountry('');
             }
           }}
           className="input disabled:cursor-not-allowed disabled:opacity-60"
