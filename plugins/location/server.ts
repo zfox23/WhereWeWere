@@ -859,12 +859,13 @@ weatherRouter.get('/:date', async (req: Request, res: Response) => {
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'No weather for that day' });
     const row = result.rows[0];
-    // The row stores the venue's exact coordinates, so the place name comes
-    // from the venue at those coordinates (null once that venue is gone).
+    // The row stores the venue's coordinates. Look up the venue with a small
+    // delta tolerance to account for floating-point / numeric representation differences.
     const venue = await query(
       `SELECT name, city, state, country FROM venues
-        WHERE latitude = $1 AND longitude = $2 ORDER BY created_at LIMIT 1`,
-      [row.latitude, row.longitude],
+        WHERE abs(latitude - $1) < 0.0001 AND abs(longitude - $2) < 0.0001
+        ORDER BY (abs(latitude - $1) + abs(longitude - $2)) ASC, created_at ASC LIMIT 1`,
+      [Number(row.latitude), Number(row.longitude)],
     );
     const place = venue.rows[0]
       ? { name: venue.rows[0].name, city: venue.rows[0].city, state: venue.rows[0].state, country: venue.rows[0].country }
