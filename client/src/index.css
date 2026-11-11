@@ -394,7 +394,6 @@ html[data-reduce-motion="on"] :is(.motion-safe-reveal, .motion-safe-reveal.is-vi
   opacity: 1;
   transform: none;
 }
-html[data-reduce-motion="on"] .app-shell::before,
 html[data-reduce-motion="on"] .app-shell::after {
   animation: none;
   transform: none;
@@ -706,18 +705,12 @@ html[data-reduce-motion="on"] .app-motion {
     position: relative;
     isolation: isolate;
     /*
-     * Use `overflow: clip` instead of `overflow: hidden`. Both clip the
-     * oversize decorative ::before/::after backgrounds identically, but
-     * `hidden` turns the element into a scroll container, which breaks
-     * smooth `scrollIntoView` (Chrome scrolls the hidden-overflow box
-     * instead of the viewport, leaving the page stuck with its top
-     * content unreachable). `clip` is not a scroll container.
+     * Use `overflow: clip` instead of `overflow: hidden`. Both clip
+     * oversize content identically, but `hidden` turns the element into
+     * a scroll container, which breaks smooth `scrollIntoView`.
      */
     overflow: clip;
-    background-color: rgb(var(--app-bg-mid));
-    background-image: var(--_bg-p) var(--_bg-g);
-    background-size: var(--_bg-p-sz) var(--_bg-g-sz);
-    background-attachment: fixed;
+    background-color: transparent;
   }
 
   /* Settings > Display live preview: the app background in miniature. */
@@ -728,32 +721,38 @@ html[data-reduce-motion="on"] .app-motion {
     color: rgb(var(--app-fg));
   }
 
+  /*
+   * Static viewport-anchored background layers. Pinned to the viewport so the
+   * background colors, gradients, and ambient glows never shift as the user
+   * scrolls or when the document height expands during infinite scrolling.
+   */
   .app-shell::before,
   .app-shell::after {
     content: '';
-    position: absolute;
-    inset: -18%;
+    position: fixed;
+    inset: 0;
     pointer-events: none;
-    z-index: -1;
-    opacity: 0.7;
-    will-change: transform, opacity, background-position;
+    will-change: opacity;
   }
 
+  /* Base theme background: solid mid color, pattern, and gradient wash. */
   .app-shell::before {
+    z-index: -3;
+    background-color: rgb(var(--app-bg-mid));
+    background-image: var(--_bg-p) var(--_bg-g);
+    background-size: var(--_bg-p-sz) var(--_bg-g-sz);
+  }
+
+  /* Accent glows and ambient screen highlights pinned to the viewport. */
+  .app-shell::after {
+    z-index: -1;
+    opacity: 0.7;
     background:
       radial-gradient(circle at 22% 24%, rgb(var(--app-glow) / 0.22), transparent 0 28%),
       radial-gradient(circle at 72% 28%, rgb(var(--app-glow-secondary) / 0.16), transparent 0 24%),
-      radial-gradient(circle at 55% 78%, rgb(var(--app-glow) / 0.12), transparent 0 30%);
-  }
-
-  .app-shell::after {
-    inset: -35%;
-    opacity: 0.35;
-    background:
-      linear-gradient(115deg, transparent 22%, rgb(255 255 255 / 0.12) 38%, transparent 54%),
-      linear-gradient(300deg, transparent 30%, rgb(var(--app-glow-secondary) / 0.1) 48%, transparent 66%);
-    background-size: 180% 180%, 160% 160%;
-    mix-blend-mode: screen;
+      radial-gradient(circle at 55% 78%, rgb(var(--app-glow) / 0.12), transparent 0 30%),
+      linear-gradient(115deg, transparent 22%, rgb(255 255 255 / 0.08) 38%, transparent 54%),
+      linear-gradient(300deg, transparent 30%, rgb(var(--app-glow-secondary) / 0.07) 48%, transparent 66%);
   }
 
   /* Dark mode overrides */
@@ -873,7 +872,6 @@ html[data-reduce-motion="on"] .app-motion {
     filter: none;
   }
 
-  .app-shell::before,
   .app-shell::after {
     animation: none;
     transform: none;
