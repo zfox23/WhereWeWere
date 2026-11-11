@@ -13,6 +13,7 @@ export const APPEARANCE_SPEC = {
     values: [
       'dots', 'grid', 'crosshatch', 'topographic', 'linen',
       'waves', 'hexagons', 'terrazzo', 'grain', 'plaid', 'pinstripe', 'stars',
+      'blueprint', 'constellations', 'contour', 'moroccan',
       // Drawn from the user's check-ins (location plugin, /place-patterns).
       'myplaces', 'streets',
       'none',
@@ -21,7 +22,7 @@ export const APPEARANCE_SPEC = {
   },
   /** Animated layer over the background (off under reduced motion). */
   bgMotion: {
-    values: ['none', 'aurora', 'starfield', 'bokeh', 'grain'],
+    values: ['none', 'aurora', 'starfield', 'bokeh', 'grain', 'embers', 'mist', 'pulse', 'horizon'],
     default: 'none',
   },
   bgGradient: {
@@ -30,7 +31,7 @@ export const APPEARANCE_SPEC = {
   },
   /** Body + heading font pairing. */
   font: {
-    values: ['classic', 'editorial', 'friendly', 'technical', 'journal', 'system'],
+    values: ['classic', 'editorial', 'friendly', 'technical', 'journal', 'system', 'modern', 'artisan'],
     default: 'classic',
   },
   /** Scales the root font size, so rem-based text and spacing follow. */
@@ -44,7 +45,7 @@ export const APPEARANCE_SPEC = {
   },
   /** How cards and panels are drawn. */
   surface: {
-    values: ['frosted', 'solid', 'outlined', 'paper'],
+    values: ['frosted', 'solid', 'outlined', 'paper', 'luminous', 'tinted'],
     default: 'frosted',
   },
   blur: {

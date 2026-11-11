@@ -100,6 +100,22 @@ describe('theme catalog completeness', () => {
     expect(resolveThemePreference('system', 'dark', { light: 'springbloom', dark: 'midwinter' })).toBe('midwinter');
     expect(resolveThemePreference('system', 'light', { light: 'springbloom', dark: 'midwinter' })).toBe('springbloom');
   });
+
+  it('includes the new display theme additions in their appropriate mode groups', () => {
+    const lightIds = THEME_GROUPS.find((g) => g.id === 'light')?.themes.map((t) => t.id) ?? [];
+    const darkIds = THEME_GROUPS.find((g) => g.id === 'dark')?.themes.map((t) => t.id) ?? [];
+
+    expect(lightIds).toContain('sage');
+    expect(lightIds).toContain('solarflare');
+    expect(lightIds).toContain('parchment');
+    expect(lightIds).toContain('nordicfrost');
+
+    expect(darkIds).toContain('pitchblack');
+    expect(darkIds).toContain('glaciernight');
+    expect(darkIds).toContain('canyonclay');
+    expect(darkIds).toContain('tokyoneon');
+    expect(darkIds).toContain('biolum');
+  });
 });
 
 describe('appearance', () => {
@@ -116,6 +132,14 @@ describe('appearance', () => {
     expect(SURFACE_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.surface.values]);
     expect(BLUR_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.blur.values]);
     expect(SHADOW_OPTIONS.map((o) => o.id)).toEqual([...APPEARANCE_SPEC.shadow.values]);
+
+    // Verify new surface additions
+    expect(SURFACE_OPTIONS.map((o) => o.id)).toContain('luminous');
+    expect(SURFACE_OPTIONS.map((o) => o.id)).toContain('tinted');
+
+    // Verify new font additions
+    expect(FONT_OPTIONS.map((o) => o.id)).toContain('modern');
+    expect(FONT_OPTIONS.map((o) => o.id)).toContain('artisan');
   });
 
   it('honours the in-app reduce motion switch', () => {

@@ -129,6 +129,45 @@ html[data-bg-pattern="stars"] {
   --_bg-p-sz: 137px 131px, 211px 197px, 89px 97px, 173px 163px,;
 }
 
+html[data-bg-pattern="blueprint"] {
+  --_bg-p:
+    linear-gradient(rgb(var(--app-glow) / 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--app-glow) / 0.12) 1px, transparent 1px),
+    linear-gradient(rgb(var(--app-fg) / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--app-fg) / 0.035) 1px, transparent 1px),;
+  --_bg-p-sz: 80px 80px, 80px 80px, 16px 16px, 16px 16px,;
+}
+
+html[data-bg-pattern="constellations"] {
+  --_bg-p:
+    radial-gradient(circle 1.5px at 15% 25%, rgb(var(--app-glow) / 0.45) 98%, transparent),
+    radial-gradient(circle 1px at 35% 45%, rgb(var(--app-fg) / 0.3) 98%, transparent),
+    radial-gradient(circle 2px at 75% 20%, rgb(var(--app-glow-secondary) / 0.45) 98%, transparent),
+    radial-gradient(circle 1.2px at 85% 70%, rgb(var(--app-glow) / 0.35) 98%, transparent),
+    radial-gradient(circle 1px at 50% 85%, rgb(var(--app-fg) / 0.25) 98%, transparent),
+    linear-gradient(65deg, transparent 49.5%, rgb(var(--app-glow) / 0.04) 49.5% 50.5%, transparent 50.5%),
+    linear-gradient(-35deg, transparent 49.5%, rgb(var(--app-fg) / 0.03) 49.5% 50.5%, transparent 50.5%),;
+  --_bg-p-sz: 180px 180px, 180px 180px, 180px 180px, 180px 180px, 180px 180px, 180px 180px, 180px 180px,;
+}
+
+html[data-bg-pattern="contour"] {
+  --_bg-p:
+    radial-gradient(ellipse 120px 80px at 20% 30%, transparent 68px, rgb(var(--app-glow) / 0.09) 69px 70px, transparent 71px),
+    radial-gradient(ellipse 180px 130px at 20% 30%, transparent 118px, rgb(var(--app-fg) / 0.06) 119px 120px, transparent 121px),
+    radial-gradient(ellipse 100px 70px at 75% 65%, transparent 58px, rgb(var(--app-glow-secondary) / 0.1) 59px 60px, transparent 61px),
+    radial-gradient(ellipse 160px 110px at 75% 65%, transparent 108px, rgb(var(--app-fg) / 0.05) 109px 110px, transparent 111px),;
+  --_bg-p-sz: 240px 220px, 240px 220px, 240px 220px, 240px 220px,;
+}
+
+html[data-bg-pattern="moroccan"] {
+  --_bg-p:
+    radial-gradient(circle at 0% 50%, rgb(var(--app-fg) / 0.045) 8px, transparent 9px),
+    radial-gradient(circle at 100% 50%, rgb(var(--app-fg) / 0.045) 8px, transparent 9px),
+    radial-gradient(circle at 50% 0%, rgb(var(--app-glow) / 0.055) 8px, transparent 9px),
+    radial-gradient(circle at 50% 100%, rgb(var(--app-glow) / 0.055) 8px, transparent 9px),;
+  --_bg-p-sz: 32px 32px, 32px 32px, 32px 32px, 32px 32px,;
+}
+
 /* Place patterns are drawn by the .app-places layer, not the shell. */
 html[data-bg-pattern="myplaces"],
 html[data-bg-pattern="streets"] {
@@ -201,6 +240,18 @@ html[data-font="system"] {
   --app-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --app-heading-weight: 700;
   --app-heading-tracking: -0.01em;
+}
+html[data-font="modern"] {
+  --app-font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --app-font-display: "Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --app-heading-weight: 700;
+  --app-heading-tracking: -0.025em;
+}
+html[data-font="artisan"] {
+  --app-font-sans: Charter, "Bitstream Charter", "Sitka Text", Cambria, serif;
+  --app-font-display: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace;
+  --app-heading-weight: 600;
+  --app-heading-tracking: 0.02em;
 }
 
 /* Root size: rem-based text and spacing scale with it. */
@@ -302,6 +353,32 @@ html.dark[data-surface="paper"]
   border-color: rgb(var(--app-fg) / 0.08);
   box-shadow: 0 3px 10px -3px rgb(0 0 0 / 0.5);
   backdrop-filter: none;
+}
+
+html[data-surface="luminous"]:not([data-reduce-transparency="on"]):not(.dark)
+  :is(.bg-white\/60, .bg-white\/70, .card, .glass, .glass-subtle) {
+  background-color: rgb(255 255 255 / 0.75);
+  border-color: rgb(var(--app-glow) / 0.45);
+  box-shadow: 0 0 0 1px rgb(var(--app-glow) / 0.15), 0 0 18px -4px rgb(var(--app-glow) / 0.25), 0 4px 14px -3px rgb(0 0 0 / 0.06);
+}
+html.dark[data-surface="luminous"]:not([data-reduce-transparency="on"])
+  :is(.dark\:bg-gray-900\/60, .dark\:bg-gray-900\/70, .card, .glass, .glass-subtle) {
+  background-color: rgb(17 24 39 / 0.7);
+  border-color: rgb(var(--app-glow) / 0.5);
+  box-shadow: 0 0 0 1px rgb(var(--app-glow) / 0.2), 0 0 22px -3px rgb(var(--app-glow) / 0.35), 0 8px 24px -6px rgb(0 0 0 / 0.5);
+}
+
+html[data-surface="tinted"]:not([data-reduce-transparency="on"]):not(.dark)
+  :is(.bg-white\/60, .bg-white\/70, .card, .glass, .glass-subtle) {
+  background-color: color-mix(in srgb, rgb(var(--app-bg-start)) 35%, rgb(255 255 255 / 0.7));
+  border-color: rgb(var(--color-primary-300) / 0.45);
+  box-shadow: 0 4px 12px -2px rgb(var(--app-glow) / 0.12);
+}
+html.dark[data-surface="tinted"]:not([data-reduce-transparency="on"])
+  :is(.dark\:bg-gray-900\/60, .dark\:bg-gray-900\/70, .card, .glass, .glass-subtle) {
+  background-color: color-mix(in srgb, rgb(var(--app-bg-start)) 45%, rgb(17 24 39 / 0.75));
+  border-color: rgb(var(--color-primary-500) / 0.35);
+  box-shadow: 0 4px 16px -2px rgb(var(--app-glow) / 0.15);
 }
 
 /* ── Accessibility: in-app reduce motion (mirrors the OS media query) ── */
@@ -469,6 +546,76 @@ html[data-bg-motion="grain"] .app-motion {
   60% { transform: translate3d(-2%, -1%, 0); }
   80% { transform: translate3d(3%, 3%, 0); }
   100% { transform: translate3d(0, 0, 0); }
+}
+
+html[data-bg-motion="embers"] .app-motion {
+  inset: -40% 0 0 0;
+  background-image:
+    radial-gradient(circle 1.5px at 15% 90%, rgb(var(--app-glow) / 0.65) 98%, transparent),
+    radial-gradient(circle 2px at 38% 80%, rgb(var(--app-glow-secondary) / 0.7) 98%, transparent),
+    radial-gradient(circle 1.2px at 62% 85%, rgb(var(--app-glow) / 0.55) 98%, transparent),
+    radial-gradient(circle 2.5px at 82% 95%, rgb(var(--app-glow-secondary) / 0.65) 98%, transparent),
+    radial-gradient(circle 1px at 50% 70%, rgb(var(--app-glow) / 0.5) 98%, transparent),
+    radial-gradient(circle 1.8px at 25% 60%, rgb(var(--app-glow-secondary) / 0.6) 98%, transparent);
+  background-size: 160px 160px, 220px 220px, 190px 190px, 260px 260px, 140px 140px, 210px 210px;
+  animation:
+    app-embers-rise 45s linear infinite,
+    app-embers-flicker 4s ease-in-out infinite alternate;
+}
+@keyframes app-embers-rise {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(2%, -33.3%, 0); }
+}
+@keyframes app-embers-flicker {
+  0% { opacity: 0.4; }
+  50% { opacity: 0.9; }
+  100% { opacity: 0.5; }
+}
+
+html[data-bg-motion="mist"] .app-motion {
+  inset: -30%;
+  background:
+    radial-gradient(ellipse 65% 30% at 20% 40%, rgb(var(--app-glow) / 0.14), transparent 75%),
+    radial-gradient(ellipse 70% 35% at 80% 60%, rgb(var(--app-glow-secondary) / 0.12), transparent 75%),
+    radial-gradient(ellipse 55% 25% at 50% 80%, rgb(var(--app-fg) / 0.04), transparent 70%);
+  filter: blur(40px);
+  animation: app-mist 50s ease-in-out infinite alternate;
+}
+@keyframes app-mist {
+  0% { transform: translate3d(-5%, -4%, 0) scale(1); opacity: 0.6; }
+  50% { transform: translate3d(6%, 3%, 0) scale(1.08); opacity: 0.9; }
+  100% { transform: translate3d(-2%, 5%, 0) scale(1.03); opacity: 0.7; }
+}
+
+html[data-bg-motion="pulse"] .app-motion {
+  inset: -20%;
+  background:
+    radial-gradient(circle 280px at 25% 30%, rgb(var(--app-glow) / 0.22), transparent 70%),
+    radial-gradient(circle 320px at 75% 70%, rgb(var(--app-glow-secondary) / 0.18), transparent 70%);
+  filter: blur(35px);
+  animation: app-pulse 14s ease-in-out infinite alternate;
+}
+@keyframes app-pulse {
+  0% { transform: scale(0.92); opacity: 0.45; }
+  50% { transform: scale(1.08) translate3d(1%, 2%, 0); opacity: 0.9; }
+  100% { transform: scale(0.96) translate3d(-1%, -1%, 0); opacity: 0.5; }
+}
+
+html[data-bg-motion="horizon"] .app-motion {
+  inset: 35% 0 0 0;
+  background-image:
+    linear-gradient(rgb(var(--app-glow) / 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--app-glow) / 0.14) 1px, transparent 1px);
+  background-size: 100% 24px, 48px 100%;
+  transform: perspective(300px) rotateX(65deg);
+  transform-origin: 50% 100%;
+  mask-image: linear-gradient(to top, black 20%, transparent 95%);
+  -webkit-mask-image: linear-gradient(to top, black 20%, transparent 95%);
+  animation: app-horizon-drift 18s linear infinite;
+}
+@keyframes app-horizon-drift {
+  from { background-position: 0 0; }
+  to { background-position: 0 240px; }
 }
 
 /* Reduced motion: keep the look, freeze it. */

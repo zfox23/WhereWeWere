@@ -47,7 +47,16 @@ export type AppThemeId =
   | 'winterfrost'
   | 'midwinter'
   | 'spooky'
-  | 'festive';
+  | 'festive'
+  | 'pitchblack'
+  | 'glaciernight'
+  | 'sage'
+  | 'canyonclay'
+  | 'tokyoneon'
+  | 'biolum'
+  | 'solarflare'
+  | 'parchment'
+  | 'nordicfrost';
 export type ThemePreference = 'system' | AppThemeId;
 export type StoredThemePreference = ThemePreference | 'light' | 'dark';
 
@@ -1159,8 +1168,250 @@ export const THEME_DEFINITIONS: Record<AppThemeId, ThemeDefinition> = {
       foreground: '253 244 255',
     },
   },
+  pitchblack: {
+    id: 'pitchblack',
+    label: 'Pitch Black (OLED)',
+    mode: 'dark',
+    palette: {
+      '50': '250 250 250',
+      '100': '244 244 245',
+      '200': '228 228 231',
+      '300': '212 212 216',
+      '400': '161 161 170',
+      '500': '113 113 122',
+      '600': '82 82 91',
+      '700': '63 63 70',
+      '800': '39 39 42',
+      '900': '24 24 27',
+      '950': '9 9 11',
+    },
+    preview: ['0 0 0', '161 161 170', '56 189 248'],
+    background: {
+      start: '0 0 0',
+      mid: '0 0 0',
+      end: '5 5 5',
+      glow: '56 189 248',
+      glowSecondary: '161 161 170',
+      foreground: '244 244 245',
+    },
+  },
+  glaciernight: {
+    id: 'glaciernight',
+    label: 'Glacier Night',
+    mode: 'dark',
+    palette: {
+      '50': '238 250 254',
+      '100': '219 245 254',
+      '200': '186 237 253',
+      '300': '125 221 251',
+      '400': '56 199 245',
+      '500': '14 175 233',
+      '600': '2 140 199',
+      '700': '3 110 161',
+      '800': '7 92 133',
+      '900': '12 76 110',
+      '950': '8 48 73',
+    },
+    preview: ['4 18 32', '14 175 233', '186 237 253'],
+    background: {
+      start: '2 10 20',
+      mid: '4 18 32',
+      end: '10 28 48',
+      glow: '56 199 245',
+      glowSecondary: '147 197 253',
+      foreground: '240 249 255',
+    },
+  },
+  sage: {
+    id: 'sage',
+    label: 'Sage & Eucalyptus',
+    mode: 'light',
+    palette: {
+      '50': '243 247 244',
+      '100': '230 239 233',
+      '200': '206 223 212',
+      '300': '173 202 182',
+      '400': '136 174 149',
+      '500': '104 147 119',
+      '600': '79 119 93',
+      '700': '63 96 75',
+      '800': '51 77 61',
+      '900': '42 63 51',
+      '950': '22 36 28',
+    },
+    preview: ['245 248 245', '104 147 119', '63 96 75'],
+    background: {
+      start: '245 248 245',
+      mid: '252 254 252',
+      end: '235 242 236',
+      glow: '136 174 149',
+      glowSecondary: '188 206 182',
+      foreground: '24 38 30',
+    },
+  },
+  canyonclay: {
+    id: 'canyonclay',
+    label: 'Canyon Clay',
+    mode: 'dark',
+    palette: {
+      '50': '255 245 242',
+      '100': '255 233 226',
+      '200': '254 213 201',
+      '300': '251 179 160',
+      '400': '243 134 107',
+      '500': '226 95 65',
+      '600': '197 70 41',
+      '700': '165 54 31',
+      '800': '138 46 29',
+      '900': '113 41 28',
+      '950': '62 19 12',
+    },
+    preview: ['36 18 14', '226 95 65', '251 179 160'],
+    background: {
+      start: '22 10 8',
+      mid: '36 18 14',
+      end: '50 24 16',
+      glow: '243 134 107',
+      glowSecondary: '234 179 8',
+      foreground: '253 242 238',
+    },
+  },
+  tokyoneon: {
+    id: 'tokyoneon',
+    label: 'Tokyo Neon',
+    mode: 'dark',
+    palette: {
+      '50': '254 242 248',
+      '100': '253 226 241',
+      '200': '252 198 228',
+      '300': '249 152 205',
+      '400': '244 95 174',
+      '500': '232 46 138',
+      '600': '206 20 108',
+      '700': '173 11 86',
+      '800': '141 12 70',
+      '900': '118 14 60',
+      '950': '74 3 34',
+    },
+    preview: ['14 10 26', '232 46 138', '0 240 255'],
+    background: {
+      start: '8 5 18',
+      mid: '14 10 26',
+      end: '24 12 36',
+      glow: '244 95 174',
+      glowSecondary: '0 240 255',
+      foreground: '253 244 252',
+    },
+  },
+  biolum: {
+    id: 'biolum',
+    label: 'Bioluminescence',
+    mode: 'dark',
+    palette: {
+      '50': '234 255 251',
+      '100': '204 254 245',
+      '200': '155 253 236',
+      '300': '88 247 223',
+      '400': '24 230 200',
+      '500': '0 204 173',
+      '600': '0 166 142',
+      '700': '0 131 114',
+      '800': '0 104 92',
+      '900': '0 85 76',
+      '950': '0 50 46',
+    },
+    preview: ['3 18 24', '0 204 173', '88 247 223'],
+    background: {
+      start: '1 10 16',
+      mid: '3 18 24',
+      end: '5 26 36',
+      glow: '24 230 200',
+      glowSecondary: '56 189 248',
+      foreground: '232 253 249',
+    },
+  },
+  solarflare: {
+    id: 'solarflare',
+    label: 'Solar Flare',
+    mode: 'light',
+    palette: {
+      '50': '255 251 235',
+      '100': '254 243 199',
+      '200': '253 230 138',
+      '300': '252 211 77',
+      '400': '251 191 36',
+      '500': '245 158 11',
+      '600': '217 119 6',
+      '700': '180 83 9',
+      '800': '146 64 14',
+      '900': '120 53 15',
+      '950': '69 26 3',
+    },
+    preview: ['255 252 242', '245 158 11', '180 83 9'],
+    background: {
+      start: '255 252 242',
+      mid: '255 255 255',
+      end: '254 245 220',
+      glow: '251 191 36',
+      glowSecondary: '249 115 22',
+      foreground: '46 28 8',
+    },
+  },
+  parchment: {
+    id: 'parchment',
+    label: 'Parchment & Ink',
+    mode: 'light',
+    palette: {
+      '50': '253 250 245',
+      '100': '249 243 232',
+      '200': '240 228 208',
+      '300': '228 207 175',
+      '400': '211 180 137',
+      '500': '184 146 98',
+      '600': '155 117 73',
+      '700': '126 92 59',
+      '800': '103 74 51',
+      '900': '86 62 45',
+      '950': '47 32 23',
+    },
+    preview: ['248 243 233', '184 146 98', '126 92 59'],
+    background: {
+      start: '248 243 233',
+      mid: '254 252 248',
+      end: '241 233 217',
+      glow: '211 180 137',
+      glowSecondary: '228 175 120',
+      foreground: '38 27 18',
+    },
+  },
+  nordicfrost: {
+    id: 'nordicfrost',
+    label: 'Nordic Frost',
+    mode: 'light',
+    palette: {
+      '50': '244 247 250',
+      '100': '232 239 245',
+      '200': '212 224 235',
+      '300': '181 202 219',
+      '400': '141 173 198',
+      '500': '101 143 173',
+      '600': '75 115 144',
+      '700': '61 93 118',
+      '800': '53 78 98',
+      '900': '46 66 82',
+      '950': '29 42 53',
+    },
+    preview: ['246 249 251', '101 143 173', '61 93 118'],
+    background: {
+      start: '246 249 251',
+      mid: '253 254 255',
+      end: '237 243 248',
+      glow: '141 173 198',
+      glowSecondary: '165 210 225',
+      foreground: '23 37 49',
+    },
+  },
 };
-
 
 export const LIGHT_THEMES = [
   THEME_DEFINITIONS.sunrise,
@@ -1179,8 +1430,11 @@ export const LIGHT_THEMES = [
   THEME_DEFINITIONS.seafoam,
   THEME_DEFINITIONS.lilacmist,
   THEME_DEFINITIONS.contrastlight,
+  THEME_DEFINITIONS.sage,
+  THEME_DEFINITIONS.solarflare,
+  THEME_DEFINITIONS.parchment,
+  THEME_DEFINITIONS.nordicfrost,
 ] as const;
-
 
 export const DARK_THEMES = [
   THEME_DEFINITIONS.midnight,
@@ -1199,6 +1453,11 @@ export const DARK_THEMES = [
   THEME_DEFINITIONS.velvet,
   THEME_DEFINITIONS.mossstone,
   THEME_DEFINITIONS.contrastdark,
+  THEME_DEFINITIONS.pitchblack,
+  THEME_DEFINITIONS.glaciernight,
+  THEME_DEFINITIONS.canyonclay,
+  THEME_DEFINITIONS.tokyoneon,
+  THEME_DEFINITIONS.biolum,
 ] as const;
 
 // Picked by hand like any other theme (no automatic switching). Each still
@@ -1412,6 +1671,60 @@ export const BG_PATTERN_OPTIONS: BgPatternOption[] = [
     },
   },
   {
+    id: 'blueprint',
+    label: 'Blueprint',
+    description: 'Technical grid with coordinates and alignment markers',
+    previewStyle: {
+      backgroundImage: [
+        'linear-gradient(rgba(56, 189, 248, 0.25) 1px, transparent 1px)',
+        'linear-gradient(90deg, rgba(56, 189, 248, 0.25) 1px, transparent 1px)',
+        'linear-gradient(rgba(0, 0, 0, 0.08) 1px, transparent 1px)',
+        'linear-gradient(90deg, rgba(0, 0, 0, 0.08) 1px, transparent 1px)',
+      ].join(', '),
+      backgroundSize: '24px 24px, 24px 24px, 6px 6px, 6px 6px',
+    },
+  },
+  {
+    id: 'constellations',
+    label: 'Constellations',
+    description: 'Star clusters connected by delicate geometric links',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(circle 1.5px at 20% 30%, rgba(251,146,60,0.8) 98%, transparent)',
+        'radial-gradient(circle 1.2px at 75% 40%, rgba(0,0,0,0.5) 98%, transparent)',
+        'radial-gradient(circle 1px at 50% 80%, rgba(251,146,60,0.6) 98%, transparent)',
+        'linear-gradient(45deg, transparent 48%, rgba(0,0,0,0.12) 49% 51%, transparent 52%)',
+      ].join(', '),
+      backgroundSize: '36px 36px, 36px 36px, 36px 36px, 36px 36px',
+    },
+  },
+  {
+    id: 'contour',
+    label: 'Contour Lines',
+    description: 'Topographic elevation bands winding across the land',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(ellipse 18px 12px at 30% 40%, transparent 8px, rgba(0,0,0,0.15) 9px, transparent 10px)',
+        'radial-gradient(ellipse 30px 20px at 30% 40%, transparent 16px, rgba(251,146,60,0.3) 17px, transparent 18px)',
+      ].join(', '),
+      backgroundSize: '40px 40px, 40px 40px',
+    },
+  },
+  {
+    id: 'moroccan',
+    label: 'Moroccan Tile',
+    description: 'Interlocking geometric quatrefoil arabesque',
+    previewStyle: {
+      backgroundImage: [
+        'radial-gradient(circle at 0% 50%, rgba(0,0,0,0.12) 5px, transparent 6px)',
+        'radial-gradient(circle at 100% 50%, rgba(0,0,0,0.12) 5px, transparent 6px)',
+        'radial-gradient(circle at 50% 0%, rgba(251,146,60,0.25) 5px, transparent 6px)',
+        'radial-gradient(circle at 50% 100%, rgba(251,146,60,0.25) 5px, transparent 6px)',
+      ].join(', '),
+      backgroundSize: '16px 16px, 16px 16px, 16px 16px, 16px 16px',
+    },
+  },
+  {
     id: 'myplaces',
     label: 'My Places',
     description: 'Your most-visited spots, joined in the order you went',
@@ -1444,6 +1757,10 @@ export const BG_MOTION_OPTIONS: { id: BgMotionId; label: string; description: st
   { id: 'starfield', label: 'Starfield', description: 'Twinkling stars drifting by' },
   { id: 'bokeh', label: 'Bokeh', description: 'Soft out-of-focus lights' },
   { id: 'grain', label: 'Film Grain', description: 'Flickering analog texture' },
+  { id: 'embers', label: 'Fireflies', description: 'Warm glowing specks drifting upward' },
+  { id: 'mist', label: 'Drifting Mist', description: 'Soft rolling atmospheric fog' },
+  { id: 'pulse', label: 'Solar Pulse', description: 'Gentle rhythmic ambient breathing glow' },
+  { id: 'horizon', label: 'Horizon Grid', description: 'Subtle perspective grid drifting forward' },
 ];
 
 export const BG_GRADIENT_OPTIONS: BgGradientOption[] = [

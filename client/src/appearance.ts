@@ -68,6 +68,22 @@ export const FONT_OPTIONS: FontOption[] = [
     heading: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     headingWeight: 700,
   },
+  {
+    id: 'modern',
+    label: 'Modern',
+    description: 'Inter with Plus Jakarta Sans headings',
+    body: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    heading: '"Plus Jakarta Sans", Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+    headingWeight: 700,
+  },
+  {
+    id: 'artisan',
+    label: 'Artisan',
+    description: 'Charter serif with typewriter headings',
+    body: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, serif',
+    heading: 'ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace',
+    headingWeight: 600,
+  },
 ];
 
 /**
@@ -77,6 +93,8 @@ export const FONT_OPTIONS: FontOption[] = [
 const FONT_LOADERS: Record<Appearance['font'], () => Promise<unknown>> = {
   classic: () => Promise.resolve(),
   system: () => Promise.resolve(),
+  modern: () => Promise.resolve(),
+  artisan: () => Promise.resolve(),
   editorial: () => Promise.all([
     import('@fontsource/source-serif-4/400.css'),
     import('@fontsource/source-serif-4/400-italic.css'),
@@ -128,6 +146,8 @@ export const SURFACE_OPTIONS: AppearanceOption<Appearance['surface']>[] = [
   { id: 'solid', label: 'Solid', description: 'Opaque panels, crisp and calm' },
   { id: 'outlined', label: 'Outlined', description: 'Clear panels with a defined edge' },
   { id: 'paper', label: 'Paper', description: 'Warm, grainy, like a notebook page' },
+  { id: 'luminous', label: 'Luminous', description: 'Soft glow along card edges tinted with your theme' },
+  { id: 'tinted', label: 'Tinted Glass', description: 'Glass softly colored with your theme palette' },
 ];
 
 export const BLUR_OPTIONS: AppearanceOption<Appearance['blur']>[] = [

@@ -24,6 +24,8 @@ const SURFACE_CSS: Record<string, CSSProperties> = {
   solid: { backgroundColor: 'rgb(255 255 255)', border: '1px solid rgb(0 0 0 / 0.06)' },
   outlined: { backgroundColor: 'rgb(255 255 255 / 0.15)', border: '1px solid rgb(0 0 0 / 0.25)' },
   paper: { backgroundColor: 'rgb(253 248 238)', border: '1px solid rgb(0 0 0 / 0.08)', boxShadow: '0 2px 5px -2px rgb(60 40 20 / 0.3)' },
+  luminous: { backgroundColor: 'rgb(255 255 255 / 0.7)', border: '1.5px solid rgb(var(--color-primary-400))', boxShadow: '0 0 10px rgb(var(--color-primary-500) / 0.45)', backdropFilter: 'blur(6px)' },
+  tinted: { backgroundColor: 'rgb(var(--color-primary-100) / 0.65)', border: '1px solid rgb(var(--color-primary-300) / 0.7)', backdropFilter: 'blur(6px)' },
 };
 
 const previewBackdrop: CSSProperties = {
