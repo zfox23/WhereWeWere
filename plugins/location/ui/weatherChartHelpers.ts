@@ -44,10 +44,9 @@ export function niceScale(min: number, max: number, count = 4): { min: number; m
 /**
  * SVG path through the points as a monotone cubic (Fritsch–Carlson), which
  * stays smooth without overshooting past the actual highs and lows. `null`
- * points break the line. Points must be sorted by their first coordinate;
- * `swap` emits (y, x) pairs so the same curve can run vertically.
+ * points break the line. Points must be sorted by their first coordinate.
  */
-export function monotonePath(points: ([number, number] | null)[], swap = false): string {
+export function monotonePath(points: ([number, number] | null)[]): string {
   const segments: [number, number][][] = [];
   let cur: [number, number][] = [];
   for (const p of points) {
@@ -56,7 +55,7 @@ export function monotonePath(points: ([number, number] | null)[], swap = false):
   }
   if (cur.length) segments.push(cur);
 
-  const fmt = (x: number, y: number) => (swap ? `${y.toFixed(1)},${x.toFixed(1)}` : `${x.toFixed(1)},${y.toFixed(1)}`);
+  const fmt = (x: number, y: number) => `${x.toFixed(1)},${y.toFixed(1)}`;
   let d = '';
   for (const seg of segments) {
     const n = seg.length;

@@ -33,8 +33,4 @@ describe('weather chart helpers', () => {
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
     expect(Math.max(...ys)).toBeLessThanOrEqual(10);
   });
-
-  it('swaps coordinates for a vertical curve', () => {
-    expect(monotonePath([[0, 5], [10, 5]], true)).toBe('M5.0,0.0C5.0,3.3 5.0,6.7 5.0,10.0');
-  });
 });

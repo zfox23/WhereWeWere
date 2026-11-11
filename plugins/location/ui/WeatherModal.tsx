@@ -34,6 +34,13 @@ export default function WeatherModal({ date, dateLabel, unit, onClose }: Props) 
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Keep the page behind the modal from scrolling.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const summary = day ? describeWeather(day.code) : null;
   const stats: [string, string][] = day
     ? [
@@ -51,7 +58,7 @@ export default function WeatherModal({ date, dateLabel, unit, onClose }: Props) 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4 overscroll-contain"
       onClick={onClose}
     >
       <div
@@ -59,7 +66,7 @@ export default function WeatherModal({ date, dateLabel, unit, onClose }: Props) 
         aria-modal="true"
         aria-label={`Weather for ${dateLabel}`}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md sm:max-w-2xl max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-5"
+        className="w-full max-w-md sm:max-w-2xl max-h-[80vh] max-h-[80dvh] overflow-y-auto overscroll-contain bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-4 sm:p-5"
       >
         <div className="flex items-start justify-between mb-3">
           <div>
