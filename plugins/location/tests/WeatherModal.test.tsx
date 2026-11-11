@@ -61,7 +61,8 @@ describe('WeatherModal', () => {
     render(<WeatherModal date="2025-06-01" dateLabel="Sunday, June 1" unit="imperial" onClose={() => {}} />);
     const hits = await screen.findAllByTestId('hour-hit');
     expect(hits).toHaveLength(24);
-    fireEvent.pointerDown(hits[15]);
+    fireEvent.pointerDown(hits[15], { pointerType: 'mouse' });
+    fireEvent.pointerUp(hits[15], { pointerType: 'mouse' });
     const popup = screen.getByRole('status');
     expect(popup).toHaveTextContent('3:00 PM');
     expect(popup).toHaveTextContent('64° · Rain');
@@ -83,6 +84,9 @@ describe('WeatherModal', () => {
     // A touch that is not pressed does not move the selection.
     fireEvent.pointerMove(chart, { pointerType: 'touch', buttons: 0, clientX: 112 });
     expect(screen.getByRole('status')).toHaveTextContent('3:00 PM');
+    // Lifting the finger clears it.
+    fireEvent.pointerUp(hits[3], { pointerType: 'touch' });
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('locks page scrolling while open', async () => {

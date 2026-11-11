@@ -175,6 +175,9 @@ export default function WeatherChart({ hourly, sunrise, sunset, unit }: Props) {
           onBlur={() => setActive(null)}
           onPointerMove={onPointerMove}
           onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActive(null); }}
+          // Touch and pen show an hour only while pressed.
+          onPointerUp={(e) => { if (e.pointerType !== 'mouse') setActive(null); }}
+          onPointerCancel={(e) => { if (e.pointerType !== 'mouse') setActive(null); }}
           style={{ touchAction: 'pan-y' }}
         >
           {/* Night */}
