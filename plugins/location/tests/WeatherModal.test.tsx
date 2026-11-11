@@ -70,6 +70,29 @@ describe('WeatherModal', () => {
     expect(popup).toHaveTextContent('Wind 7 mph');
   });
 
+  it('follows a finger sliding along the chart', async () => {
+    dayMock.mockResolvedValue(day);
+    render(<WeatherModal date="2025-06-01" dateLabel="Sunday, June 1" unit="metric" onClose={() => {}} />);
+    const hits = await screen.findAllByTestId('hour-hit');
+    const chart = screen.getByRole('img', { name: /hourly temperature and precipitation/i });
+    fireEvent.pointerDown(hits[3], { pointerType: 'touch' });
+    expect(screen.getByRole('status')).toHaveTextContent('3:00 AM');
+    // Default 600px width: 24 hour bands span x = 36..560.
+    fireEvent.pointerMove(chart, { pointerType: 'touch', buttons: 1, clientX: 374 });
+    expect(screen.getByRole('status')).toHaveTextContent('3:00 PM');
+    // A touch that is not pressed does not move the selection.
+    fireEvent.pointerMove(chart, { pointerType: 'touch', buttons: 0, clientX: 112 });
+    expect(screen.getByRole('status')).toHaveTextContent('3:00 PM');
+  });
+
+  it('locks page scrolling while open', async () => {
+    dayMock.mockResolvedValue(day);
+    const { unmount } = render(<WeatherModal date="2025-06-01" dateLabel="Sunday, June 1" unit="metric" onClose={() => {}} />);
+    expect(document.body.style.overflow).toBe('hidden');
+    unmount();
+    expect(document.body.style.overflow).not.toBe('hidden');
+  });
+
   it('lists sun times when there is no hourly data to chart', async () => {
     dayMock.mockResolvedValue({ ...day, hourly: [] });
     render(<WeatherModal date="2025-06-01" dateLabel="Sunday, June 1" unit="metric" onClose={() => {}} />);

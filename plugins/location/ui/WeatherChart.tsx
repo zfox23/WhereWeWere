@@ -116,6 +116,21 @@ export default function WeatherChart({ hourly, sunrise, sunset, unit }: Props) {
 
   const fmtPrecipTick = (v: number) => String(Number(v.toFixed(2)));
   const select = (i: number | null) => setActive(i == null ? null : Math.max(0, Math.min(hours.length - 1, i)));
+  /** The hour nearest a pointer's x position, so a finger can slide along the chart. */
+  const hourAt = (e: React.PointerEvent<SVGSVGElement>): number | null => {
+    const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+    if (x < g.tStart || x > g.tEnd) return null;
+    const t = T0 + ((x - g.tStart) / (g.tEnd - g.tStart)) * (T1 - T0);
+    let best = 0;
+    hours.forEach((h, i) => { if (Math.abs(h.t - t) < Math.abs(hours[best].t - t)) best = i; });
+    return best;
+  };
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    // Mouse hovers; touch and pen follow only while pressed.
+    if (e.pointerType !== 'mouse' && e.buttons === 0) return;
+    const i = hourAt(e);
+    if (i != null) setActive(i);
+  };
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowLeft') { e.preventDefault(); select((active ?? 1) - 1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); select((active ?? -1) + 1); }
@@ -158,6 +173,8 @@ export default function WeatherChart({ hourly, sunrise, sunset, unit }: Props) {
           tabIndex={0}
           onKeyDown={onKeyDown}
           onBlur={() => setActive(null)}
+          onPointerMove={onPointerMove}
+          onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActive(null); }}
           style={{ touchAction: 'pan-y' }}
         >
           {/* Night */}
@@ -244,7 +261,7 @@ export default function WeatherChart({ hourly, sunrise, sunset, unit }: Props) {
           )}
 
           {/* Hit targets: one band per hour */}
-          <g onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActive(null); }}>
+          <g>
             {hours.map((h, i) => (
               <rect
                 key={`hit-${h.time}`}
@@ -252,7 +269,6 @@ export default function WeatherChart({ hourly, sunrise, sunset, unit }: Props) {
                 {...timeRect(h.t - 0.5, h.t + 0.5)}
                 fill="transparent"
                 style={{ cursor: 'crosshair' }}
-                onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActive(i); }}
                 onPointerDown={() => setActive(i)}
               />
             ))}
