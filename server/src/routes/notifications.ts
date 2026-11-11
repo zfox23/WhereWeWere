@@ -10,8 +10,9 @@
  *   push endpoint: a browser re-subscribed under another account moves to
  *   this one. With `refreshOnly` (the app re-posts on every open, which keeps
  *   `timezone` following the device) only a row this user already owns is
- *   updated; `{ subscribed: false }` tells the app this browser isn't opted
- *   in for the signed-in account. `oldEndpoint` (the service worker's
+ *   updated; `{ subscribed: false, owner }` tells the app this browser isn't
+ *   opted in for the signed-in account (`owner: 'other'` when another
+ *   account holds it). `oldEndpoint` (the service worker's
  *   pushsubscriptionchange) removes the user's superseded row.
  *
  * DELETE /api/v1/notifications/subscriptions   { endpoint }
@@ -81,7 +82,12 @@ router.post('/subscriptions', async (req: Request, res: Response) => {
        RETURNING timezone`,
       [userId, endpoint, p256dh, auth, timezone, userAgent],
     );
-    if (!refreshed.rows[0]) return res.json({ subscribed: false });
+    if (!refreshed.rows[0]) {
+      // 'other': another account owns this browser's subscription (the app
+      // drops it); 'none': not registered (yet), left alone.
+      const held = await query('SELECT 1 FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
+      return res.json({ subscribed: false, owner: held.rows.length > 0 ? 'other' : 'none' });
+    }
     return res.json({ subscribed: true, timezone: refreshed.rows[0].timezone });
   }
   const oldEndpoint = str(req.body?.oldEndpoint);

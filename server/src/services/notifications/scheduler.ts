@@ -53,8 +53,11 @@ export async function runNotificationTick(now = Date.now()): Promise<{ sent: num
     try {
       if (plugins.length > 0) {
         const subs = await query(
-          `SELECT id, user_id, endpoint, p256dh, auth, timezone, created_at
-           FROM push_subscriptions ORDER BY user_id, created_at`,
+          `SELECT s.id, s.user_id, s.endpoint, s.p256dh, s.auth, s.timezone, s.created_at
+           FROM push_subscriptions s
+           JOIN users u ON u.id = s.user_id
+           WHERE u.disabled_at IS NULL
+           ORDER BY s.user_id, s.created_at`,
         );
         const byUser = new Map<string, PushSubscriptionRow[]>();
         for (const row of subs.rows as PushSubscriptionRow[]) {

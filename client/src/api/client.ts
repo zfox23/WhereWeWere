@@ -611,7 +611,7 @@ export interface PluginNotificationsInfo {
 export const notificationsApi = {
   vapidPublicKey: () => request<{ publicKey: string }>('/notifications/vapid-public-key'),
   subscribe: (subscription: PushSubscriptionJSON, timezone: string, opts: { refreshOnly?: boolean } = {}) =>
-    request<{ subscribed: boolean; timezone?: string }>('/notifications/subscriptions', {
+    request<{ subscribed: boolean; timezone?: string; owner?: 'none' | 'other' }>('/notifications/subscriptions', {
       method: 'POST',
       body: JSON.stringify({ subscription, timezone, refreshOnly: opts.refreshOnly === true }),
     }),

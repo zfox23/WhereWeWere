@@ -120,10 +120,13 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(data.title || 'WhereWeWere', {
       body: data.body || '',
       icon: '/icon-192.png',
-      badge: '/icon-192.png',
       tag: data.tag,
+      // Without renotify, a reminder replacing an undismissed one with the
+      // same tag arrives silently (no sound, vibration, or heads-up).
+      renotify: !!data.tag,
       data: { url: safeNotificationPath(data.url) },
-    })
+      // renotify is supported by Chromium but missing from TS's DOM types.
+    } as NotificationOptions)
   );
 });
 

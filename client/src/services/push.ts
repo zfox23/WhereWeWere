@@ -53,14 +53,34 @@ export function pushSupport(): PushSupport {
   return 'unsupported';
 }
 
-async function registration(): Promise<ServiceWorkerRegistration> {
-  return navigator.serviceWorker.ready;
+const READY_TIMEOUT_MS = 10_000;
+
+/**
+ * The active service worker registration, waiting for it to activate. Only
+ * for turning notifications on: `serviceWorker.ready` never settles when no
+ * worker activates (private windows, failed registration), so it is raced
+ * against a timeout.
+ */
+async function readyRegistration(): Promise<ServiceWorkerRegistration> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('The app is still installing. Reload the page and try again.')),
+      READY_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([navigator.serviceWorker.ready, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
+/** This browser's push subscription, if any (never waits on activation). */
 async function currentSubscription(): Promise<PushSubscription | null> {
   if (pushSupport() !== 'supported') return null;
-  const reg = await registration();
-  return reg.pushManager.getSubscription();
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
 }
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
@@ -91,7 +111,7 @@ export async function enablePushOnThisDevice(): Promise<DevicePushState> {
   if (permission !== 'granted') {
     return { support: 'supported', permission, subscribed: false, endpoint: null };
   }
-  const reg = await registration();
+  const reg = await readyRegistration();
   const { publicKey } = await notificationsApi.vapidPublicKey();
   const applicationServerKey = urlBase64ToUint8Array(publicKey);
   let sub = await reg.pushManager.getSubscription();
@@ -126,15 +146,17 @@ export async function disablePushOnThisDevice(): Promise<void> {
 
 /**
  * On app open: refresh this device's registration (timezone, keys). A
- * subscription the signed-in account doesn't own (left by a previous account
- * whose session expired) is dropped so this account never gets its prompts.
+ * subscription another account owns (left by a previous account whose
+ * session expired) is dropped so this account never gets its prompts. One
+ * the server has no row for is left alone: it may be mid-registration (an
+ * enable whose POST hasn't landed yet).
  */
 export async function syncPushSubscription(): Promise<void> {
   try {
     const sub = await currentSubscription();
     if (!sub) return;
-    const { subscribed } = await notificationsApi.subscribe(sub.toJSON(), deviceTimeZone(), { refreshOnly: true });
-    if (!subscribed) await sub.unsubscribe().catch(() => {});
+    const result = await notificationsApi.subscribe(sub.toJSON(), deviceTimeZone(), { refreshOnly: true });
+    if (!result.subscribed && result.owner === 'other') await sub.unsubscribe().catch(() => {});
   } catch {
     // Offline or signed out: try again next time.
   }

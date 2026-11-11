@@ -103,7 +103,12 @@ describe('Notifications', () => {
       .post('/api/v1/notifications/subscriptions')
       .set('Cookie', b.cookie)
       .send({ subscription: subscription(), timezone: 'UTC', refreshOnly: true });
-    expect(refresh.body).toEqual({ subscribed: false });
+    expect(refresh.body).toEqual({ subscribed: false, owner: 'other' });
+    const unknown = await request(app)
+      .post('/api/v1/notifications/subscriptions')
+      .set('Cookie', b.cookie)
+      .send({ subscription: subscription('https://push.example.test/send/unknown'), timezone: 'UTC', refreshOnly: true });
+    expect(unknown.body).toEqual({ subscribed: false, owner: 'none' });
     expect(await subscriptionOwner()).toBe(A);
 
     // B can't delete A's device.
@@ -196,6 +201,18 @@ describe('Notifications', () => {
       // The reminder time is UTC wall-clock; in Tokyo that moment is 9h later.
       await query(`UPDATE push_subscriptions SET timezone = 'Asia/Tokyo'`);
       expect(await runNotificationTick(now)).toEqual({ sent: 0, failed: 0 });
+    });
+
+    it('skips accounts an admin disabled', async () => {
+      await setUpReminder();
+      await query('UPDATE users SET disabled_at = NOW() WHERE id = $1', [A]);
+      expect(await runNotificationTick(now)).toEqual({ sent: 0, failed: 0 });
+    });
+
+    it('passes a request timeout to the push service call', async () => {
+      await setUpReminder();
+      await runNotificationTick(now);
+      expect(sendNotification.mock.calls[0][2]).toMatchObject({ timeout: 10_000 });
     });
 
     it('deletes a subscription the push service reports gone', async () => {

@@ -30,9 +30,10 @@ export type SendResult = 'sent' | 'gone' | 'failed';
 /**
  * Push messages are high urgency so Android delivers them promptly instead of
  * holding them for a Doze maintenance window; after an hour a reminder is no
- * longer worth showing, so the push service may drop it.
+ * longer worth showing, so the push service may drop it. The request timeout
+ * keeps one stalled push service connection from stalling the scheduler.
  */
-const PUSH_OPTIONS = { TTL: 60 * 60, urgency: 'high' as const };
+const PUSH_OPTIONS = { TTL: 60 * 60, urgency: 'high' as const, timeout: 10_000 };
 
 /** Only same-origin, app-relative URLs are allowed (the service worker checks too). */
 export function safeAppPath(url: unknown): string {
@@ -78,8 +79,11 @@ export async function sendToSubscription(
 
 export async function listSubscriptions(userId: string): Promise<PushSubscriptionRow[]> {
   const result = await query(
-    `SELECT id, user_id, endpoint, p256dh, auth, timezone, created_at
-     FROM push_subscriptions WHERE user_id = $1 ORDER BY created_at`,
+    `SELECT s.id, s.user_id, s.endpoint, s.p256dh, s.auth, s.timezone, s.created_at
+     FROM push_subscriptions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.user_id = $1 AND u.disabled_at IS NULL
+     ORDER BY s.created_at`,
     [userId],
   );
   return result.rows;
