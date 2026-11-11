@@ -137,17 +137,15 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const existing = windows.find((c) => new URL(c.url).origin === self.location.origin);
-      if (existing) {
-        const focused = await existing.focus().catch(() => existing);
-        try {
-          await focused.navigate(target);
-        } catch {
-          // navigate() fails for uncontrolled clients; let the page route itself.
-          focused.postMessage({ type: 'notification-click', url: path });
-        }
+      const already = windows.find((c) => c.url === target);
+      if (already) {
+        await already.focus();
         return;
       }
+      // openWindow is the only call that hands the URL to Android: focus()
+      // on the installed app relaunches it at its start URL (Home), which
+      // overrode a following navigate(). With the app already running,
+      // Android reuses its window and loads the URL there.
       await self.clients.openWindow(target);
     })()
   );

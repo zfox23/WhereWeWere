@@ -16,7 +16,6 @@ import {
   reloadWhenIdle,
   shouldReloadForBuild,
 } from './utils/swUpdate';
-import { safeNotificationPath } from './utils/notificationPath';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -132,13 +131,3 @@ if ('serviceWorker' in navigator && !import.meta.env.DEV) {
 // An old page that lazy-loads a chunk removed by a newer deployment gets a 404
 // for it. Move to the new build instead of leaving a broken screen.
 window.addEventListener('vite:preloadError', () => void checkForNewBuild());
-
-// A notification was tapped while the app was open but the service worker
-// couldn't navigate this window itself.
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('message', (event) => {
-    if (event.data?.type !== 'notification-click') return;
-    const path = safeNotificationPath(event.data.url);
-    if (`${window.location.pathname}${window.location.search}` !== path) window.location.assign(path);
-  });
-}
