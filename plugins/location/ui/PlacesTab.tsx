@@ -649,7 +649,7 @@ function VenuePinsMap({
           No venue check-ins in this time period.
         </div>
       ) : (
-        <div className="h-[500px]">
+        <div className="relative z-0 h-[500px]">
           <MapContainer
             center={center}
             zoom={4}
