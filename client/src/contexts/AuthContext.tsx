@@ -3,6 +3,7 @@ import { ApiError, auth, type Account } from '../api/client';
 import { onAuthFailure } from '../utils/authEvents';
 import { wipeLocalUserData } from '../utils/localData';
 import { runSignOutGuards } from '../utils/signOutGuards';
+import { disablePushOnThisDevice, syncPushSubscription } from '../services/push';
 
 /**
  * Page navigation used after signing out. A full page load (not a router
@@ -159,9 +160,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return account;
   }, []);
 
+  // Keep this device's push registration current (timezone follows the
+  // device) whenever the app opens or comes back to the foreground.
+  useEffect(() => {
+    if (status !== 'signed-in') return;
+    void syncPushSubscription();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void syncPushSubscription();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [status]);
+
   const signOut = useCallback(async () => {
     // A plugin may hold this back (unsent recordings), asking the user first.
     if (user && !(await runSignOutGuards(user.id))) return;
+    // The next person on this device must not get this account's notifications.
+    await disablePushOnThisDevice().catch(() => {});
     try {
       await auth.logout();
     } catch {
@@ -172,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOutEverywhere = useCallback(async () => {
     if (user && !(await runSignOutGuards(user.id))) return;
+    await disablePushOnThisDevice().catch(() => {});
     await auth.signOutEverywhere();
     await leave('home');
   }, [leave, user]);

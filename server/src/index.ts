@@ -13,6 +13,7 @@ import { importYamtrackRouter } from './routes/import-yamtrack';
 import { companionsRouter } from './routes/companions';
 import { authRouter } from './routes/auth';
 import { usersRouter } from './routes/users';
+import { notificationsRouter } from './routes/notifications';
 import { requireAuth } from './auth/middleware';
 import { runMigrations } from './db/runMigrations';
 import { isUuid } from './services/batching';
@@ -123,6 +124,7 @@ export function createApp() {
   app.use('/api/v1/plugins', pluginsRouter);
   app.use('/api/v1/companions', companionsRouter);
   app.use('/api/v1/admin/users', usersRouter);
+  app.use('/api/v1/notifications', notificationsRouter);
 
   // Plugin-owned API routes (custom-storage plugins mount their own CRUD).
   for (const plugin of allPlugins()) {
@@ -185,6 +187,9 @@ export async function startServer() {
       console.error(`Plugin ${plugin.id} failed to start:`, err);
     }
   }
+
+  const { startNotificationScheduler } = await import('./services/notifications/scheduler');
+  startNotificationScheduler();
 
   app.listen(config.port, () => {
     console.log(`WhereWeWere server listening on port ${config.port}`);

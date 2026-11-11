@@ -599,3 +599,33 @@ export const llm = {
         }
     >(`/llm/summarize/${encodeURIComponent(taskId)}`),
 };
+
+// Notifications (Web Push)
+export interface PluginNotificationsInfo {
+  id: string;
+  title: string;
+  triggers: { key: string; label: string; description?: string }[];
+  enabled: boolean;
+}
+
+export const notificationsApi = {
+  vapidPublicKey: () => request<{ publicKey: string }>('/notifications/vapid-public-key'),
+  subscribe: (subscription: PushSubscriptionJSON, timezone: string, opts: { refreshOnly?: boolean } = {}) =>
+    request<{ subscribed: boolean; timezone?: string }>('/notifications/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify({ subscription, timezone, refreshOnly: opts.refreshOnly === true }),
+    }),
+  unsubscribe: (endpoint: string) =>
+    request<{ subscribed: false }>('/notifications/subscriptions', {
+      method: 'DELETE',
+      body: JSON.stringify({ endpoint }),
+    }),
+  plugins: () => request<PluginNotificationsInfo[]>('/notifications/plugins'),
+  setPluginEnabled: (pluginId: string, enabled: boolean) =>
+    request<{ id: string; enabled: boolean }>(`/notifications/plugins/${encodeURIComponent(pluginId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
+  test: (endpoint: string) =>
+    request<{ result: 'sent' }>('/notifications/test', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+};

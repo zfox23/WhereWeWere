@@ -20,7 +20,7 @@ import type {
   CheckinTypeServerPlugin,
   PluginTimelineContext,
 } from 'wwp-shared';
-import { isValidTimeZone } from 'wwp-shared';
+import { dailyTimeOccurrences, isValidTimeZone, validateDailyTimes } from 'wwp-shared';
 import { query, pool } from '../../server/src/db';
 import { escapeLike, pagination, parseYear } from '../../server/src/services/queryParams';
 import { timelineColumnList } from '../../server/src/plugins/timeline';
@@ -1403,6 +1403,9 @@ const MOOD_LABELS: Record<number, string> = {
   5: 'great',
 };
 
+/** Most daily mood reminders a user can schedule. */
+export const MAX_REMINDER_TIMES = 12;
+
 export const server: CheckinTypeServerPlugin = {
   storage: 'custom',
 
@@ -1683,7 +1686,34 @@ export const server: CheckinTypeServerPlugin = {
       label: 'Mood icon pack',
       default: 'emoji',
     },
+    {
+      // Daily wall-clock times ('HH:MM', 24-hour) for "How are you feeling?"
+      // reminders, in each subscribed device's own timezone.
+      name: 'reminder_times',
+      type: 'json',
+      label: 'Reminder times',
+      default: [],
+      validate: (value) => validateDailyTimes(value, MAX_REMINDER_TIMES),
+    },
   ],
+
+  notifications: {
+    dueOccurrences: async ({ timeZone, since, now, settings }) => {
+      const times = Array.isArray(settings.reminder_times)
+        ? settings.reminder_times.filter((t): t is string => typeof t === 'string')
+        : [];
+      return dailyTimeOccurrences(times, timeZone, since, now).map((occurrence_at) => ({
+        trigger_key: 'checkin_reminder',
+        occurrence_at,
+        payload: {
+          title: 'How are you feeling?',
+          body: 'Tap to log your mood.',
+          url: '/mood-check-in',
+          tag: 'mood-reminder',
+        },
+      }));
+    },
+  },
 
   // `mood_icon_pack` used to live on user_settings (old backups still carry
   // it in settings.mood_icon_pack) — claim it so legacy restores land in

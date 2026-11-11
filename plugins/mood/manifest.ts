@@ -42,6 +42,15 @@ export const manifest: CheckinTypeManifest = {
       default: [],
     },
   ],
+  notifications: {
+    triggers: [
+      {
+        key: 'checkin_reminder',
+        label: 'Check-in reminders',
+        description: 'Asks "How are you feeling?" at the times you choose, every day.',
+      },
+    ],
+  },
   strings: {
     title: 'Mood',
     singular: 'mood check-in',

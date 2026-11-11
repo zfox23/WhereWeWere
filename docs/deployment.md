@@ -57,7 +57,16 @@ If behind Traefik/Caddy/Nginx, set:
 TRUST_PROXY=true
 ```
 
-Serve the app over HTTPS: browsers only allow microphone access (audio notes) on HTTPS or `localhost`. If your proxy sits in front of the bundled nginx, allow large request bodies on `/api/v1/backup/` (restoring a backup that includes audio can be many GB) and use long timeouts there. See [Audio notes](audio-notes.md).
+Serve the app over HTTPS: browsers only allow microphone access (audio notes) and notifications (Web Push) on HTTPS or `localhost`. If your proxy sits in front of the bundled nginx, allow large request bodies on `/api/v1/backup/` (restoring a backup that includes audio can be many GB) and use long timeouts there. See [Audio notes](audio-notes.md).
+
+## Notifications
+
+Notifications are sent by the server with Web Push, so they arrive on a phone even when the installed app is closed. Each person turns them on per device in **Settings > Notifications**, then turns on each feature that offers them (e.g. Mood check-in reminders). Nothing is on by default.
+
+- The server needs outbound HTTPS to the browsers' push services (e.g. `fcm.googleapis.com` for Chrome on Android, `*.push.services.mozilla.com`, `*.push.apple.com`).
+- The VAPID key pair is generated on first start and stored in the database (`server_secrets`), so backups of the database keep it. `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` override it; changing the pair turns notifications off on every device until they're turned on again.
+- Scheduled reminders use each device's own timezone, which the app updates whenever it opens.
+- On iPhone/iPad, notifications only work after adding the app to the Home Screen.
 
 ## Persistence
 

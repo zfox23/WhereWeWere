@@ -88,8 +88,17 @@ Register each side:
 | `reconcile` | Rows can have a missing/wrong timezone label and participate in reconciliation. |
 | `jobs` | Contribute background jobs (e.g. data backfills). The framework owns the jobs row lifecycle and dispatches `handler(ctx)` with `ctx = { jobId, isCancelled, updateProgress }`; handlers check `isCancelled` between work units, report progress via `updateProgress`, and must not write job status themselves (throw an error with message `'cancelled'` for user cancellations). |
 | `resetSettings` | Start-over "reset settings only" must clear user-scoped auxiliary tables. Returns rows deleted; run on the provided transaction client. Never touch `plugin_settings`. |
-| `settingsKeys` | Persist plugin settings in `plugin_settings` (framework upserts declared keys only). Exposed at `GET/PUT /api/v1/plugins/<id>/settings`. |
+| `settingsKeys` | Persist plugin settings in `plugin_settings` (framework upserts declared keys only). Exposed at `GET/PUT /api/v1/plugins/<id>/settings`. Add `validate(value)` to a key to reject bad values (400; skipped on restore). |
+| `notifications` | Send notifications (see below). |
 | `legacySettingsKeys` / `legacyBackupKeys` / `restoreLegacyBackup` | **Only when migrating an existing built-in type** (see note below). |
+
+#### Notifications
+
+1. Declare the triggers in the manifest: `notifications: { triggers: [{ key, label, description }] }`. That gives the plugin a section with an on/off toggle in Settings > Notifications (stored as the core `notifications_enabled` key in `plugin_settings`; default off).
+2. Scheduled triggers: implement `server.notifications.dueOccurrences({ user_id, timeZone, since, now, settings })` and return `{ trigger_key, occurrence_at, payload: { title, body, url, tag } }` for occurrences in `(since, now]`. The core calls it once a minute for each subscribed device (with that device's IANA zone), only while the toggle is on, and sends each (device, trigger, occurrence) exactly once. Use `dailyTimeOccurrences(times, timeZone, since, now)` from `wwp-shared` for daily wall-clock schedules.
+3. Event-driven triggers: call `notifyUser(userId, pluginId, triggerKey, payload, { occurrenceAt? })` from `server/src/services/notifications/send.ts`. It checks the toggle; pass `occurrenceAt` to make it idempotent.
+4. Extra configuration (e.g. a schedule editor) goes in `client.notificationSettings` (props `{ enabled }`), rendered under the toggle.
+5. `payload.url` must be an app-relative path; tapping the notification opens it. Plugins never call web-push themselves. Reference: Mood check-in reminders (`plugins/mood`).
 
 ### 4. Client half
 
@@ -98,7 +107,7 @@ If you don't ship components, omit them — the framework renders
 profile tab (`AutoProfileTab`: total count + most recent entry). Custom
 components (`checkInForm`, `detailPage`, `timelineCard`, `filterSection`,
 `profileTab`, `settings`, `reflectionCard`, `integrationsSettings`,
-`dataSettings`) slot in one at a time. `detailPath` (e.g. `/name-checkins/:id`)
+`dataSettings`, `notificationSettings`) slot in one at a time. `detailPath` (e.g. `/name-checkins/:id`)
 overrides the generic `/checkins/<pluginId>/<id>` detail route. Note there is
 NO auto-generated settings form: a plugin that declares `settingsKeys` but
 ships no `settings` component simply gets no Settings tab (the settings

@@ -31,7 +31,7 @@
 import type { PoolClient } from 'pg';
 import { query } from '../db';
 import { allPlugins } from './registry';
-import { exportGenericCheckins, heldByAnotherUser, importGenericCheckins, type PluginCheckinBackupRow } from './genericStore';
+import { exportGenericCheckins, heldByAnotherUser, importGenericCheckins, pluginSettingsKeys, type PluginCheckinBackupRow } from './genericStore';
 
 export interface PluginBackupEntry {
   checkins: unknown;
@@ -250,9 +250,15 @@ export async function importPluginData(
     // written (mirrors setPluginSettings, and keeps renamed/stale keys out
     // of the table).
     if (entry.settings && typeof entry.settings === 'object') {
-      const declaredKeys = new Map((plugin.server.settingsKeys ?? []).map((k) => [k.name, k]));
+      const declaredKeys = new Map(pluginSettingsKeys(plugin).map((k) => [k.name, k]));
       for (const [key, value] of Object.entries(entry.settings)) {
         if (declaredKeys.size > 0 && !declaredKeys.has(key)) continue;
+        const problem = declaredKeys.get(key)?.validate?.(value);
+        if (problem) {
+          errors?.push(`${plugin.id}: skipped setting "${key}": ${problem}`);
+          pluginCounts.skipped += 1;
+          continue;
+        }
         // An account-identifying value another user holds (e.g. their own
         // backup restored into a second account) would lock both out.
         if (declaredKeys.get(key)?.uniquePerUser && (await heldByAnotherUser(client, user_id, plugin.id, key, value))) {

@@ -11,3 +11,4 @@ export * from './timeline';
 export * from './plugin';
 export * from './timezones';
 export * from './appearance';
+export * from './notifications';

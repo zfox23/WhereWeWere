@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, User, Link2, Download, Ruler, Users } from 'lucide-react';
+import { Loader2, User, Link2, Download, Ruler, Users, Bell } from 'lucide-react';
 import { settings } from '../api/client';
 import { usePageTitle } from '../utils/pageTitle';
 import { allClientPlugins } from '../plugins/registry';
@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { DisplayTab } from './settings/DisplayTab';
 import { IntegrationsTab } from './settings/IntegrationsTab';
 import { DataTab } from './settings/DataTab';
+import { NotificationsTab } from './settings/NotificationsTab';
 import type { UserSettings } from '../types';
 import type { CheckinTypeClient } from 'wwp-shared';
 
@@ -20,13 +21,13 @@ import type { CheckinTypeClient } from 'wwp-shared';
  */
 const SETTINGS_PLUGINS = allClientPlugins().filter((p) => p.client.settings);
 
-type SettingsTab = 'account' | 'users' | 'display' | 'integrations' | 'data' | `plugin:${string}`;
+type SettingsTab = 'account' | 'users' | 'display' | 'notifications' | 'integrations' | 'data' | `plugin:${string}`;
 
 // `users` (account management) only exists for admins.
 const isSettingsTab = (value: string | null, isAdmin: boolean): value is SettingsTab => {
   if (!value) return false;
   if (value === 'users') return isAdmin;
-  if (value === 'account' || value === 'display' || value === 'integrations' || value === 'data') {
+  if (value === 'account' || value === 'display' || value === 'notifications' || value === 'integrations' || value === 'data') {
     return true;
   }
   if (value.startsWith('plugin:')) {
@@ -110,6 +111,7 @@ export default function Settings() {
       icon: p.client.icon,
     })),
     { value: 'display' as const, label: 'Display', icon: Ruler },
+    { value: 'notifications' as const, label: 'Notifications', icon: Bell },
     { value: 'integrations' as const, label: 'Integrations', icon: Link2 },
     { value: 'data' as const, label: 'Data', icon: Download },
     ...(isAdmin ? [{ value: 'users' as const, label: 'Users', icon: Users }] : []),
@@ -129,6 +131,9 @@ export default function Settings() {
           onSaved={patchSettings}
         />
       );
+    }
+    if (activeTab === 'notifications') {
+      return <NotificationsTab />;
     }
     if (activeTab === 'integrations') {
       return data && (

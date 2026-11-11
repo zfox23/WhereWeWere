@@ -25,6 +25,7 @@
  *  - no custom storage      -> the generic `plugin_checkins` JSONB table
  */
 
+import type { NotificationPayload, PluginNotificationTrigger } from './notifications';
 import type { PluginField } from './fields';
 import type {
   PluginFilterClause,
@@ -68,6 +69,11 @@ export interface PluginSettingsKey {
    * restore skips it when another user already has it.
    */
   uniquePerUser?: boolean;
+  /**
+   * Optional value check run before the value is stored (settings API and
+   * backup restore). Return an error message to reject it (400).
+   */
+  validate?: (value: unknown) => string | null;
 }
 
 /**
@@ -300,6 +306,39 @@ export interface PluginJobDefinition {
   * for user cancellations — the framework maps that to status 'cancelled').
   */
  handler: (ctx: PluginJobContext) => Promise<void>;
+}
+
+/** A scheduled notification that is due (see `dueOccurrences`). */
+export interface PluginNotificationOccurrence {
+  /** The manifest trigger this occurrence belongs to. */
+  trigger_key: string;
+  /** UTC instant (ms) the occurrence is scheduled for; part of the de-dup key. */
+  occurrence_at: number;
+  payload: NotificationPayload;
+}
+
+export interface PluginNotificationsServer {
+  /**
+   * Scheduled triggers. Called about once a minute for each user whose
+   * toggle for this plugin is on, once per subscribed device, with that
+   * device's IANA `timeZone`. Return the occurrences scheduled in the
+   * window (since, now] (UTC ms); `dailyTimeOccurrences` handles daily
+   * wall-clock schedules. Runs inside the user's context. The core sends
+   * each (device, trigger, occurrence) at most once.
+   */
+  dueOccurrences?: (ctx: {
+    user_id: string;
+    timeZone: string;
+    since: number;
+    now: number;
+    settings: Record<string, unknown>;
+  }) => Promise<PluginNotificationOccurrence[]>;
+}
+
+/** Props passed to a plugin's Settings > Notifications section. */
+export interface PluginNotificationSettingsProps {
+  /** True when the plugin's toggle is on and this device is subscribed. */
+  enabled: boolean;
 }
 
 export interface CheckinTypeServerPlugin {
@@ -546,6 +585,17 @@ export interface CheckinTypeServerPlugin {
   onServerStart?: () => void | Promise<void>;
 
   /**
+   * Notification triggers this plugin implements (declare the triggers in
+   * the manifest's `notifications`). The core owns delivery (Web Push to
+   * every device the user turned notifications on for), the per-plugin
+   * toggle, and de-duplication; plugins never send directly.
+   *
+   * Event-driven triggers call the core `notifyUser()` helper
+   * (server/src/services/notifications/send.ts) instead.
+   */
+  notifications?: PluginNotificationsServer;
+
+  /**
    * `user_settings` column names this plugin has migrated to
    * `plugin_settings` (same key name must be declared in `settingsKeys`).
    * When restoring a backup whose settings object carries one of these
@@ -690,6 +740,13 @@ export interface CheckinTypeClientPlugin {
   integrationsSettings?: AnyComponent<Record<string, unknown>>;
   /** Settings > Data section. Optional. */
   dataSettings?: AnyComponent<{ jobRefreshKey?: number; onImportComplete?: () => void }>;
+  /**
+   * Extra configuration rendered under this plugin's toggle in
+   * Settings > Notifications (e.g. a reminder schedule). Only used when the
+   * manifest declares `notifications`. `enabled` is false while the plugin's
+   * toggle is off or this device isn't subscribed.
+   */
+  notificationSettings?: AnyComponent<PluginNotificationSettingsProps>;
 }
 
 /**
@@ -720,6 +777,13 @@ export interface CheckinTypeManifest {
   /**
    * Start-over (danger zone) options for this plugin.
    */
+  /**
+   * Notification triggers this plugin offers. Declaring this gives the
+   * plugin a section (with an on/off toggle) in Settings > Notifications;
+   * the server half implements them in `server.notifications`.
+   */
+  notifications?: { triggers: PluginNotificationTrigger[] };
+
   startOver?: {
     /**
      * Label override for the plugin's data-deletion checkbox (default:

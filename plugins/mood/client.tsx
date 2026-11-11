@@ -26,6 +26,7 @@ import MoodFilter from './ui/MoodFilter';
 import { MoodsTab } from './ui/MoodStats';
 import { MoodTab } from './ui/MoodTab';
 import { MoodReflectionCard } from './ui/MoodReflectionCard';
+import { MoodNotificationSettings } from './ui/MoodNotificationSettings';
 import { moodActivities } from './ui/api';
 import { plugins } from '../../client/src/plugins/api';
 import type { TimelineItem } from '../../client/src/types';
@@ -136,6 +137,7 @@ export const client: CheckinTypeClientPlugin = {
   profileTab: MoodProfileTab,
   reflectionCard: (props: PluginReflectionCardProps) => <MoodReflectionCard {...props} />,
   settings: MoodTab,
+  notificationSettings: MoodNotificationSettings,
 };
 
 export { manifest };

@@ -7,8 +7,8 @@
  * restore, and start-over are driven by the same helpers below.
  */
 
-import type { CheckinTypeServer, PluginTimelineContext } from 'wwp-shared';
-import { validatePluginData, isValidTimeZone } from 'wwp-shared';
+import type { CheckinTypeServer, PluginSettingsKey, PluginTimelineContext } from 'wwp-shared';
+import { validatePluginData, isValidTimeZone, NOTIFICATIONS_ENABLED_KEY } from 'wwp-shared';
 
 /** A stored zone must be one Postgres' AT TIME ZONE accepts; a bad label poisons every date query. */
 function validZoneOrNull(value: unknown): string | null {
@@ -319,11 +319,32 @@ export async function deletePluginCheckins(user_id: string, pluginId: string): P
  * Return the effective settings object for a plugin: declared keys with
  * defaults, overlaid with stored values.
  */
+/**
+ * A plugin's settings keys: the ones it declares, plus the core
+ * `notifications_enabled` toggle when it declares notification triggers.
+ */
+export function pluginSettingsKeys(plugin: CheckinTypeServer): PluginSettingsKey[] {
+  const keys = plugin.server.settingsKeys ?? [];
+  if (!plugin.notifications?.triggers?.length || keys.some((k) => k.name === NOTIFICATIONS_ENABLED_KEY)) {
+    return keys;
+  }
+  return [
+    ...keys,
+    {
+      name: NOTIFICATIONS_ENABLED_KEY,
+      type: 'boolean',
+      label: 'Notifications',
+      default: false,
+      validate: (v) => (typeof v === 'boolean' ? null : 'Notifications setting must be true or false'),
+    },
+  ];
+}
+
 export async function getPluginSettings(
   user_id: string,
   plugin: CheckinTypeServer,
 ): Promise<Record<string, unknown>> {
-  const keys = plugin.server.settingsKeys ?? [];
+  const keys = pluginSettingsKeys(plugin);
   const out: Record<string, unknown> = {};
   for (const key of keys) {
     out[key.name] = key.default ?? null;
@@ -372,10 +393,16 @@ export async function setPluginSettings(
   plugin: CheckinTypeServer,
   updates: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const declared = new Map((plugin.server.settingsKeys ?? []).map((k) => [k.name, k]));
-  for (const key of Object.keys(updates)) {
+  const declared = new Map(pluginSettingsKeys(plugin).map((k) => [k.name, k]));
+  for (const [key, value] of Object.entries(updates)) {
     if (!declared.has(key)) {
       const err = new Error(`Unknown setting: ${key}`) as Error & { status?: number };
+      err.status = 400;
+      throw err;
+    }
+    const problem = declared.get(key)!.validate?.(value);
+    if (problem) {
+      const err = new Error(problem) as Error & { status?: number };
       err.status = 400;
       throw err;
     }
