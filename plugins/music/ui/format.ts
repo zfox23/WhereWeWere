@@ -23,8 +23,24 @@ export function formatClock(iso: string, timeZone?: string | null, withZone = fa
   }
 }
 
-export function formatDay(iso: string): string {
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(iso));
+/** The calendar day of `iso`, in `timeZone` when given (else the browser's). */
+export function formatDay(iso: string, timeZone?: string | null): string {
+  const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+  const zone = normalizeTimezoneForDisplay(timeZone);
+  try {
+    return new Intl.DateTimeFormat('en-US', { ...options, ...(zone ? { timeZone: zone } : {}) }).format(new Date(iso));
+  } catch {
+    return new Intl.DateTimeFormat('en-US', options).format(new Date(iso));
+  }
+}
+
+/** A plain local date ("2024-03-01") as "Mar 1, 2024", with no timezone shift. */
+export function formatDateKey(date: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return date;
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))),
+  );
 }
 
 export function joinArtists(artists: string[] | undefined | null): string {
@@ -46,4 +62,20 @@ export function parseLength(text: string): number | null {
 export function formatLength(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return '';
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/** Where a play came from, in words. */
+export function sourceLabel(source: string | null): string {
+  switch (source) {
+    case 'manual':
+      return 'Written down by hand';
+    case 'multi-scrobbler':
+      return 'Scrobbled by multi-scrobbler';
+    case 'lastfm':
+      return 'Imported from Last.fm';
+    case 'import':
+      return 'Imported';
+    default:
+      return 'Scrobbled';
+  }
 }

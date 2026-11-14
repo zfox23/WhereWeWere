@@ -35,6 +35,8 @@ import {
 import { listError } from '../../server/src/services/lists';
 import { mountRankRoutes } from '../../server/src/services/lists/routes';
 import { suggest } from './services/suggest';
+import { getDailyListening, getDiscovery, getListeningClock } from './services/insights';
+import { getLifeSoundtrack, LIFE_BY, type LifeBy } from './services/life';
 import { parseScrobbleExport } from './services/importParser';
 import { parseLastfmCsv } from './services/lastfmCsv';
 import {
@@ -76,6 +78,8 @@ import {
   deleteScrobble,
   findScrobblerKeyOwner,
   getScrobbleDetail,
+  getSongPlays,
+  getSongPlaysSummary,
   updateScrobble,
   insertManualScrobble,
   insertScrobble,
@@ -308,6 +312,84 @@ musicRouter.get('/library', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error loading music library:', err);
     res.status(500).json({ error: 'Failed to load library' });
+  }
+});
+
+/** A song's key from the query (free text: title and first artist); null when missing. */
+function songKeyParam(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.length > 0 && raw.length <= 2000 ? raw : null;
+}
+
+// GET /song-plays/summary?song_key - a song's totals and plays per month
+musicRouter.get('/song-plays/summary', async (req: Request, res: Response) => {
+  try {
+    const songKey = songKeyParam(req.query.song_key);
+    if (!songKey) return res.status(400).json({ error: 'song_key is required' });
+    const summary = await getSongPlaysSummary(currentUserId(), songKey);
+    if (!summary) return res.status(404).json({ error: 'No plays of that song' });
+    res.json(summary);
+  } catch (err) {
+    console.error('Error loading song summary:', err);
+    res.status(500).json({ error: 'Failed to load the song' });
+  }
+});
+
+// GET /song-plays?song_key&limit&offset - every play of a song, newest first -> { rows, total }
+musicRouter.get('/song-plays', async (req: Request, res: Response) => {
+  try {
+    const songKey = songKeyParam(req.query.song_key);
+    if (!songKey) return res.status(400).json({ error: 'song_key is required' });
+    const limit = clampInt(req.query.limit, { fallback: 100, min: 1, max: 500 });
+    const offset = clampInt(req.query.offset, { fallback: 0, min: 0, max: 10_000_000 });
+    res.json(await getSongPlays(currentUserId(), songKey, { limit, offset }));
+  } catch (err) {
+    console.error('Error loading song plays:', err);
+    res.status(500).json({ error: 'Failed to load plays' });
+  }
+});
+
+// GET /insights/daily?year=YYYY&today=YYYY-MM-DD - plays per local day of the year, and streaks
+musicRouter.get('/insights/daily', async (req: Request, res: Response) => {
+  try {
+    const year = clampInt(req.query.year, { fallback: new Date().getUTCFullYear(), min: 1900, max: 2200 });
+    // "Today" is the viewer's own day; the server's would be off around midnight.
+    const today = dateParam(req.query.today) ?? new Date().toISOString().slice(0, 10);
+    res.json(await getDailyListening(currentUserId(), year, today));
+  } catch (err) {
+    console.error('Error loading daily listening:', err);
+    res.status(500).json({ error: 'Failed to load listening' });
+  }
+});
+
+// GET /insights/clock?from&to - plays per local day of week and hour
+musicRouter.get('/insights/clock', async (req: Request, res: Response) => {
+  try {
+    res.json(await getListeningClock(currentUserId(), dateParam(req.query.from), dateParam(req.query.to)));
+  } catch (err) {
+    console.error('Error loading the listening clock:', err);
+    res.status(500).json({ error: 'Failed to load listening' });
+  }
+});
+
+// GET /insights/discovery?from&to - new against familiar plays per week, month or year
+musicRouter.get('/insights/discovery', async (req: Request, res: Response) => {
+  try {
+    res.json(await getDiscovery(currentUserId(), dateParam(req.query.from), dateParam(req.query.to)));
+  } catch (err) {
+    console.error('Error loading discovery:', err);
+    res.status(500).json({ error: 'Failed to load discovery' });
+  }
+});
+
+// GET /insights/life?by=companion|place|mood&from&to - what you played around your other check-ins
+musicRouter.get('/insights/life', async (req: Request, res: Response) => {
+  try {
+    const by = LIFE_BY.includes(req.query.by as LifeBy) ? (req.query.by as LifeBy) : null;
+    if (!by) return res.status(400).json({ error: 'by must be companion, place or mood' });
+    res.json(await getLifeSoundtrack(currentUserId(), by, dateParam(req.query.from), dateParam(req.query.to)));
+  } catch (err) {
+    console.error('Error loading the soundtrack of your life:', err);
+    res.status(500).json({ error: 'Failed to load' });
   }
 });
 

@@ -708,4 +708,68 @@ describe('music plugin', () => {
       expect((await query('SELECT 1 FROM music_sessions')).rowCount).toBe(0);
     });
   });
+
+  describe('a song\'s plays', () => {
+    const songKeyOf = async (name: string) => {
+      const res = await request(app).get('/api/v1/music/library').query({ view: 'songs' });
+      return res.body.rows.find((r: any) => r.name === name).song_key as string;
+    };
+
+    beforeEach(async () => {
+      // Two plays of Hit on May 1 (one session), one late on June 1 UTC (still May 31 in Chicago).
+      await pushAt(0, 'Hit', ['A']);
+      await pushAt(5, 'Other', ['A']);
+      await pushAt(10, 'Hit', ['A']);
+      const late = 1717210800; // 2024-06-01T03:00:00Z
+      expect((await push({ title: 'Hit', artists: ['A'], album: 'Hits', time: late })).status).toBe(200);
+      await query(`UPDATE music_scrobbles SET timezone = 'America/Chicago'`);
+      await query(`UPDATE music_sessions SET timezone = 'America/Chicago'`);
+    });
+
+    it('summarises the song with plays per local month', async () => {
+      const res = await request(app).get('/api/v1/music/song-plays/summary').query({ song_key: await songKeyOf('Hit') });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ name: 'Hit', artists: ['A'], plays: 3 });
+      expect(res.body.monthly).toEqual([{ month: '2024-05', plays: 3 }]);
+    });
+
+    it('pages the plays newest first, each with its session and the day Home shows it on', async () => {
+      const songKey = await songKeyOf('Hit');
+      const first = await request(app).get('/api/v1/music/song-plays').query({ song_key: songKey, limit: 1 });
+      expect(first.body.total).toBe(3);
+      expect(first.body.rows).toHaveLength(1);
+      expect(first.body.rows[0]).toMatchObject({ played_at: '2024-06-01T03:00:00.000Z', session_date: '2024-05-31' });
+      expect(first.body.rows[0].session_id).toBeTruthy();
+      const rest = await request(app).get('/api/v1/music/song-plays').query({ song_key: songKey, limit: 5, offset: 1 });
+      expect(rest.body.rows.map((r: any) => r.played_at)).toEqual(['2024-05-01T12:10:00.000Z', '2024-05-01T12:00:00.000Z']);
+      expect(rest.body.rows[0].session_id).toBe(rest.body.rows[1].session_id);
+    });
+
+    it('rejects a missing key and answers 404 for a song never played', async () => {
+      expect((await request(app).get('/api/v1/music/song-plays/summary')).status).toBe(400);
+      expect((await request(app).get('/api/v1/music/song-plays')).status).toBe(400);
+      expect((await request(app).get('/api/v1/music/song-plays/summary').query({ song_key: 'nope' })).status).toBe(404);
+    });
+
+    it('shows another user none of the plays', async () => {
+      const other = await createTestUser('other');
+      const songKey = await songKeyOf('Hit');
+      const summary = await request(app).get('/api/v1/music/song-plays/summary').set('Cookie', other.cookie).query({ song_key: songKey });
+      expect(summary.status).toBe(404);
+      const plays = await request(app).get('/api/v1/music/song-plays').set('Cookie', other.cookie).query({ song_key: songKey });
+      expect(plays.body).toEqual({ rows: [], total: 0 });
+    });
+
+    it('gives each library row its last play\'s session and that session\'s local day', async () => {
+      const lastSession = (
+        await query(`SELECT session_id FROM music_scrobbles WHERE played_at = '2024-06-01T03:00:00Z'`)
+      ).rows[0].session_id;
+      for (const view of ['songs', 'artists', 'albums']) {
+        const res = await request(app).get('/api/v1/music/library').query({ view });
+        const row = res.body.rows[0];
+        expect(row, view).toBeTruthy();
+        expect(row).toMatchObject({ last_session_id: lastSession, last_session_date: '2024-05-31' });
+      }
+    });
+  });
 });

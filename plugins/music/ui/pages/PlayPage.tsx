@@ -16,7 +16,7 @@ import { usePageTitle } from '../../../../client/src/utils/pageTitle';
 import MapView from '../../../location/ui/MapView';
 import { albumArtUrl, music } from '../api';
 import { AlbumLink } from '../AlbumLink';
-import { formatDay, formatLength } from '../format';
+import { formatDay, formatLength, sourceLabel } from '../format';
 import { ArtistLinks, libraryHref } from '../libraryLinks';
 import { ListBadge, songItemKey } from '../ListBadge';
 import { ListPicker } from '../ListPicker';
@@ -26,21 +26,7 @@ import type { ScrobbleDetail, SessionNeighbour } from '../types';
 
 const THUMB = 72;
 
-/** Where a play came from, in words. */
-export function sourceLabel(source: string | null): string {
-  switch (source) {
-    case 'manual':
-      return 'Written down by hand';
-    case 'multi-scrobbler':
-      return 'Scrobbled by multi-scrobbler';
-    case 'lastfm':
-      return 'Imported from Last.fm';
-    case 'import':
-      return 'Imported';
-    default:
-      return 'Scrobbled';
-  }
-}
+export { sourceLabel };
 
 const ordinal = (n: number) => {
   const v = n % 100;

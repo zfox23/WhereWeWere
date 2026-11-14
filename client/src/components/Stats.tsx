@@ -30,6 +30,8 @@ export function Heatmap({
   onDayClick,
   showTitleIcon = true,
   showTitleYear = true,
+  title,
+  unit = 'check-in',
 }: {
   days: HeatmapDay[];
   year: number;
@@ -37,6 +39,10 @@ export function Heatmap({
   onDayClick?: (date: string) => void;
   showTitleIcon?: boolean;
   showTitleYear?: boolean;
+  /** Replaces the default heading. */
+  title?: string;
+  /** What a day's count counts, singular ("check-in"); an "s" is added for plurals. */
+  unit?: string;
 }) {
   const dayMap = new Map(days.map((d) => [d.date, d.count]));
   const startDate = new Date(year, 0, 1);
@@ -90,7 +96,7 @@ export function Heatmap({
       <div className="flex items-center justify-start mb-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
           {showTitleIcon ? <MapPinCheck size={16} className="text-primary-600" /> : null}
-          {showTitleYear ? `${year} Activity` : 'Venue Activity'}
+          {title ?? (showTitleYear ? `${year} Activity` : 'Venue Activity')}
         </h3>
         {onYearChange && (
           <div className="flex items-center gap-2">
@@ -134,7 +140,7 @@ export function Heatmap({
           {weeks.map((week, wi) => (
             <div key={wi} className="flex flex-col gap-[3px]">
               {week.map((day, di) => {
-                const label = day ? `${day.date}: ${day.count} check-in${day.count !== 1 ? 's' : ''}` : '';
+                const label = day ? `${day.date}: ${day.count} ${unit}${day.count !== 1 ? 's' : ''}` : '';
                 const base = `w-[12px] h-[12px] rounded-sm ${day ? getColor(day.count) : 'bg-transparent'}`;
                 // Days that lead somewhere are real buttons (keyboard + screen reader
                 // reachable); empty days and read-only heatmaps stay plain cells.

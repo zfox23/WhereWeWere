@@ -664,6 +664,54 @@ export async function getScrobbleDetail(userId: string, id: string): Promise<Scr
   } as ScrobbleDetail;
 }
 
+/** Header for a song's plays: its name, credit, cover, totals and plays per local month. */
+export async function getSongPlaysSummary(userId: string, songKey: string) {
+  const head = await query(
+    `SELECT ${latestTitleSql()} AS name, ${fullestArtistsSql()} AS artists,
+            MODE() WITHIN GROUP (ORDER BY ${albumRefSql()}) AS album_ref,
+            COUNT(*)::int AS plays, MIN(played_at) AS first_played_at, MAX(played_at) AS last_played_at
+     FROM music_scrobbles
+     WHERE user_id = $1 AND ${songKeySql()} = $2
+     HAVING COUNT(*) > 0`,
+    [userId, songKey],
+  );
+  const row = head.rows[0];
+  if (!row) return null;
+  const [art, monthly] = await Promise.all([
+    query(`SELECT id FROM music_albums WHERE user_id = $1 AND album_key = $2 AND thumb_file IS NOT NULL`, [userId, row.album_ref]),
+    query(
+      `SELECT to_char(played_at AT TIME ZONE timezone, 'YYYY-MM') AS month, COUNT(*)::int AS plays
+       FROM music_scrobbles
+       WHERE user_id = $1 AND ${songKeySql()} = $2
+       GROUP BY 1 ORDER BY 1`,
+      [userId, songKey],
+    ),
+  ]);
+  return { ...row, art_id: art.rows[0]?.id ?? null, monthly: monthly.rows };
+}
+
+/** One page of a song's plays, newest first, each with its session and the day Home shows it on. */
+export async function getSongPlays(
+  userId: string,
+  songKey: string,
+  opts: { limit: number; offset: number },
+): Promise<{ rows: any[]; total: number }> {
+  const r = await query(
+    `SELECT m.id, m.played_at, m.timezone, m.album, ${albumRefSql('m.')} AS album_ref, a.id AS art_id,
+            m.track_length, m.listened_for, m.source, m.session_id,
+            (ms.ended_at AT TIME ZONE ms.timezone)::date::text AS session_date,
+            COUNT(*) OVER()::int AS total
+     FROM music_scrobbles m
+     LEFT JOIN music_albums a ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
+     LEFT JOIN music_sessions ms ON ms.id = m.session_id AND ms.user_id = m.user_id
+     WHERE m.user_id = $1 AND ${songKeySql('m.')} = $2
+     ORDER BY m.played_at DESC, m.id DESC
+     LIMIT $3 OFFSET $4`,
+    [userId, songKey, opts.limit, opts.offset],
+  );
+  return { rows: r.rows.map(({ total: _t, ...row }) => row), total: r.rows[0]?.total ?? 0 };
+}
+
 const BULK_BATCH = 1000;
 
 /**
@@ -794,10 +842,10 @@ export interface MusicTotals {
  * SQL fragment bounding plays to local dates, each play read in its own
  * timezone; params start at $2.
  */
-const IN_RANGE = `
+export const IN_RANGE = `
   AND ($2::date IS NULL OR (played_at AT TIME ZONE timezone)::date >= $2::date)
   AND ($3::date IS NULL OR (played_at AT TIME ZONE timezone)::date <= $3::date)`;
-const PLAY_SECONDS = `COALESCE(listened_for, track_length, 0)`;
+export const PLAY_SECONDS = `COALESCE(listened_for, track_length, 0)`;
 const ALBUM_ARTISTS = `CASE WHEN cardinality(album_artists) > 0 THEN album_artists ELSE artists[1:1] END`;
 
 function rangeParams(userId: string, from: string | null, to: string | null) {
@@ -865,7 +913,8 @@ export async function getLibrary(
   const agg = `COUNT(*)::int AS plays,
                COALESCE(SUM(${PLAY_SECONDS}), 0)::int AS listened_seconds,
                MIN(played_at) AS first_played_at,
-               MAX(played_at) AS last_played_at`;
+               MAX(played_at) AS last_played_at,
+               (ARRAY_AGG(session_id ORDER BY played_at DESC))[1] AS last_session_id`;
   const like = (text: string) => `BOOL_OR(lower(${text}) LIKE '%' || $4 || '%' ESCAPE '\\')`;
   let grouped: string;
   if (view === 'artists') {
@@ -873,7 +922,8 @@ export async function getLibrary(
                       COUNT(DISTINCT m.song_key)::int AS unique_tracks,
                       COUNT(*)::int AS plays,
                       COALESCE(SUM(COALESCE(m.listened_for, m.track_length, 0)), 0)::int AS listened_seconds,
-                      MIN(m.played_at) AS first_played_at, MAX(m.played_at) AS last_played_at
+                      MIN(m.played_at) AS first_played_at, MAX(m.played_at) AS last_played_at,
+                      (ARRAY_AGG(m.session_id ORDER BY m.played_at DESC))[1] AS last_session_id
                FROM music_scrobbles m, unnest(m.artists) AS a(artist)
                WHERE m.user_id = $1
                  AND ($2::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date >= $2::date)
@@ -900,10 +950,14 @@ export async function getLibrary(
                HAVING $4 = '' OR ${like("title || ' ' || array_to_string(artists, ' ') || ' ' || COALESCE(album, '')")}`;
   }
   const sort = opts.sort && LIBRARY_SORTS[opts.sort] ? opts.sort : 'plays';
-  const sql = `SELECT g.*, a.id AS art_id, COUNT(*) OVER()::int AS total
+  // The last play's session and its date as Home groups it (the session's end, in its own zone).
+  const sql = `SELECT g.*, a.id AS art_id,
+                      (ls.ended_at AT TIME ZONE ls.timezone)::date::text AS last_session_date,
+                      COUNT(*) OVER()::int AS total
                FROM (${grouped}) g
                LEFT JOIN music_albums a
                  ON a.user_id = $1 AND a.album_key = g.album_ref AND a.thumb_file IS NOT NULL
+               LEFT JOIN music_sessions ls ON ls.id = g.last_session_id AND ls.user_id = $1
                ORDER BY ${orderBy(LIBRARY_SORTS, sort, opts.dir ?? 'desc', 'g.last_played_at DESC, lower(g.name)')}
                LIMIT $5 OFFSET $6`;
   const result = await query(sql, params);

@@ -20,6 +20,38 @@ export interface MusicAggregate {
   listened_seconds: number;
   first_played_at: string;
   last_played_at: string;
+  /** Listening session of the most recent play, and the day Home shows it on. */
+  last_session_id?: string | null;
+  last_session_date?: string | null;
+}
+
+/** A song's header in the plays modal. */
+export interface SongPlaysSummary {
+  name: string;
+  artists: string[];
+  album_ref: string | null;
+  art_id: string | null;
+  plays: number;
+  first_played_at: string;
+  last_played_at: string;
+  /** Plays per month ('YYYY-MM', each play's local month), months without plays omitted. */
+  monthly: { month: string; plays: number }[];
+}
+
+/** One play of a song in the plays modal. */
+export interface SongPlay {
+  id: string;
+  played_at: string;
+  timezone: string;
+  album: string | null;
+  album_ref: string | null;
+  art_id: string | null;
+  track_length: number | null;
+  listened_for: number | null;
+  source: string | null;
+  session_id: string | null;
+  /** The day Home shows the play's session on. */
+  session_date: string | null;
 }
 
 export interface MusicStats {
@@ -242,4 +274,60 @@ export interface ScrobbleDetail {
     previous: SessionNeighbour | null;
     next: SessionNeighbour | null;
   } | null;
+}
+
+/** Plays per local day of one year, with streaks over the whole history. */
+export interface DailyListening {
+  days: { date: string; plays: number; seconds: number }[];
+  listening_days: number;
+  longest_streak: number;
+  current_streak: number;
+}
+
+/** Plays per local day of week (0 = Sunday) and hour; cells without plays omitted. */
+export interface ClockCell {
+  dow: number;
+  hour: number;
+  plays: number;
+  seconds: number;
+}
+
+export type DiscoveryBucketSize = 'week' | 'month' | 'year';
+
+export interface DiscoveryBucket {
+  /** First day of the week, month or year. */
+  start: string;
+  new_plays: number;
+  familiar_plays: number;
+  new_songs: number;
+  new_artists: number;
+}
+
+export interface Discovery {
+  bucket: DiscoveryBucketSize;
+  buckets: DiscoveryBucket[];
+  totals: { plays: number; new_plays: number; new_songs: number; new_artists: number };
+}
+
+export type LifeBy = 'companion' | 'place' | 'mood';
+
+export interface LifeItem {
+  name: string;
+  plays: number;
+  /** Share of the group's plays over share of all plays in the period (> 1: more than usual). */
+  lift: number;
+}
+
+export interface LifeGroup {
+  key: string;
+  label: string;
+  checkins: number;
+  plays: number;
+  top_artists: LifeItem[];
+  top_songs: (LifeItem & { artists: string[]; song_key: string })[];
+}
+
+export interface LifeSoundtrack {
+  groups: LifeGroup[];
+  gap_minutes: number;
 }

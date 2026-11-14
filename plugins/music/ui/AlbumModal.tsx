@@ -115,11 +115,12 @@ export function AlbumDetails({
   const panel = (
       <div
         role={page ? undefined : 'dialog'}
+        data-album-dialog={page ? undefined : ''}
         aria-modal={page ? undefined : true}
         aria-label={album ? `${album.title} by ${album.artist}` : 'Album details'}
         className={`relative mx-auto flex w-full flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-gray-900 ${
           page ? '' : 'max-h-[90vh]'
-        } ${album?.art_id ? 'max-w-3xl sm:flex-row' : 'max-w-xl'}`}
+        } ${album?.art_id ? 'max-w-4xl sm:flex-row' : 'max-w-xl'}`}
       >
         {!page && onClose && (
           <button
@@ -135,11 +136,15 @@ export function AlbumDetails({
           </button>
         )}
         {album?.art_id && (
-          <img
-            src={albumArtUrl(album.art_id, 'large')}
-            alt={`${album.title} cover`}
-            className="aspect-square w-full shrink-0 object-cover sm:w-72"
-          />
+          // Its own box, aligned to the top: a stretched flex item would grow to
+          // the tracklist's height and crop the cover's sides.
+          <div className="w-full shrink-0 sm:w-64 sm:self-start md:w-80 lg:w-96">
+            <img
+              src={albumArtUrl(album.art_id, 'large')}
+              alt={`${album.title} cover`}
+              className="aspect-square w-full object-contain"
+            />
+          </div>
         )}
         <div className="min-w-0 flex-1 overflow-y-auto p-4">
           {error && <p className="text-sm text-red-500">Couldn't load this album.</p>}

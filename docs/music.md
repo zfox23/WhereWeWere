@@ -4,7 +4,7 @@ The Music plugin stores your scrobbles in WhereWeWere and shows them in three pl
 
 - **Home timeline** — one item per *listening session* (plays less than 30 minutes apart), expandable to the track list. Sessions shorter than the minimum track count (default 3) stay off the timeline.
 - **Other check-in cards** — a footer with the last up to three songs played on or before the check-in, newest first. The oldest fades out when the session has earlier plays. Clicking it jumps to that listening session on the Home timeline, opened and highlighted. It appears only when the most recent play is within the session gap of the check-in and its session meets the timeline's minimum track count (otherwise there is no session card to jump to).
-- **Profile → Music** — totals, top songs/artists/albums and a library table for the period chosen with the usual period selector.
+- **Profile → Music** — totals, top songs/artists/albums and charts for the period chosen with the usual period selector, a library table and lists (see [Profile → Music](#profile--music)).
 
 Scrobbles arrive from [multi-scrobbler](https://github.com/FoxxMD/multi-scrobbler) or from a history import. Preferences (session gap, minimum tracks, timezone) live in **Settings → Music**.
 
@@ -66,6 +66,25 @@ Covers and release info come from [Deezer](https://developers.deezer.com/api) (n
 - **Storage:** matches live in the `music_albums` table and thumbnails (and, once opened, large covers) in `DATA_DIR/music-art/`. **Start Over → All music data** clears them.
 - **Backups:** every album's match, release info and tracklist (and "not found" results) are in the backup, and ZIP backups carry the thumbnails as files. Large covers are not included; they download again when you open an album. A restore never contacts Deezer or MusicBrainz. If a restore had no thumbnails (a plain `.json` backup), press **Update music metadata** to download them again.
 - **Privacy:** lookups send album and artist names to Deezer (and MusicBrainz when Deezer has no match). Nothing else leaves your server, and your browser only ever talks to WhereWeWere for images.
+
+## Profile → Music
+
+### Overview charts
+
+Below the totals and Top lists, **Overview** has four charts. Every day, hour and month is read in the timezone the play happened in (see [Timezones](#timezones)).
+
+- **Listening calendar** — plays per day for one year, as a heatmap. It opens on the year the selected period ends in, and the arrows change the year. Click a day to open it on Home. Above it are the number of days you listened that year, and your current and longest streaks of days in a row. Streaks count your whole history, not just the year shown. The current streak still counts if your last play was yesterday.
+- **Listening clock** — a day-of-week by hour-of-day grid for the period, darker for more listening. **Plays** / **Time** switches between play counts and listening time. Hover a cell for its numbers.
+- **Discovery** — for each week, month or year of the period, plays of songs that were *new to you* stacked against *familiar* ones. A play counts as new when it falls in the same week, month or year as the first time you ever played that song. The bucket size follows the period: weeks for two months or less, months for up to three years, years beyond that. The headline gives the share of new plays and how many songs and artists you heard for the first time ever during the period.
+- **Soundtrack of your life** — what you played around your other check-ins, grouped by **Companions** (who you were with), **Places** (venue category) or **Mood** (the mood you logged). A play belongs to a check-in when it falls within your session gap (Settings → Music, 30 minutes by default) before or after it. A play near several check-ins of the same group counts once. Pick a group to see its top artists and songs. **Most distinctive** sorts them by *lift*, which is how much bigger an item's share is in that group than in all your plays for the period: 2.0× means twice as often as usual. Items played only once, or no more than usual, are left out of that view. Hand-entered songs with companions count for those companions too.
+
+### Library
+
+The library table is a way in to the rest of your history:
+
+- **Title** and **Artist** fill the filter box with that name. Each artist in a shared credit is its own link. On the **Artists** view, an artist's name opens the Songs view filtered to them.
+- **Plays** (Songs view) opens every play of that song: its totals, a plays-per-month chart over its whole history, and every play newest first (date and time in the play's own timezone, album, length, where it came from). Click a play to open its own page. The home icon opens its listening session on Home.
+- **Last played** shows the day of the song's last listening session, as Home groups it, and opens that day on Home with the session expanded and highlighted. Sessions shorter than the minimum-tracks setting aren't on Home: you land on the right day, but nothing is highlighted. The play's own page, reached from **Plays**, always works. A ctrl- or middle-click opens the day in a new tab, without the highlight.
 
 ## Lists
 

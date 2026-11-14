@@ -8,6 +8,9 @@ const statsMock = vi.fn();
 const libraryMock = vi.fn();
 const albumViewMock = vi.fn();
 const createFromMock = vi.fn();
+const clockMock = vi.fn();
+const discoveryMock = vi.fn();
+const dailyMock = vi.fn();
 let listsData: any[] = [];
 vi.mock('../ui/api', () => ({
   music: {
@@ -18,6 +21,10 @@ vi.mock('../ui/api', () => ({
     listItems: () => Promise.resolve([]),
     rankSession: () => Promise.reject(new Error('none')),
     albumView: (...args: unknown[]) => albumViewMock(...args),
+    listeningClock: (...args: unknown[]) => clockMock(...args),
+    discovery: (...args: unknown[]) => discoveryMock(...args),
+    dailyListening: (...args: unknown[]) => dailyMock(...args),
+    lifeSoundtrack: () => Promise.resolve({ groups: [], gap_minutes: 30 }),
   },
 }));
 vi.mock('../../../client/src/api/client', () => ({
@@ -48,6 +55,9 @@ describe('MusicTab', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/profile?tab=plugin:music');
     statsMock.mockResolvedValue(STATS);
+    clockMock.mockReset().mockResolvedValue([]);
+    discoveryMock.mockReset().mockResolvedValue({ bucket: 'week', buckets: [], totals: { plays: 0, new_plays: 0, new_songs: 0, new_artists: 0 } });
+    dailyMock.mockReset().mockResolvedValue({ days: [], listening_days: 0, longest_streak: 0, current_streak: 0 });
     libraryMock.mockResolvedValue({ rows: [], total: 0 });
   });
   afterEach(() => {
@@ -263,6 +273,10 @@ describe('MusicTab', () => {
     window.history.replaceState(null, '', '/profile?tab=plugin:music&musicMonth=2023-06&musicPeriod=single');
     renderTab();
     await waitFor(() => expect(statsMock).toHaveBeenCalledWith('2023-06-01', '2023-06-30'));
+    // The charts follow the same period; the calendar shows its year.
+    await waitFor(() => expect(clockMock).toHaveBeenCalledWith('2023-06-01', '2023-06-30'));
+    expect(discoveryMock).toHaveBeenCalledWith('2023-06-01', '2023-06-30');
+    expect(dailyMock).toHaveBeenCalledWith(2023, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
   });
 
   it('shows zeros when stats fail to load', async () => {

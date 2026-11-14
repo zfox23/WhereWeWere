@@ -22,6 +22,13 @@ import type {
   MusicSettingsData,
   MusicStats,
   SessionTrack,
+  SongPlay,
+  SongPlaysSummary,
+  DailyListening,
+  ClockCell,
+  Discovery,
+  LifeBy,
+  LifeSoundtrack,
 } from './types';
 
 function rangeQuery(from?: string, to?: string, extra: Record<string, string> = {}): string {
@@ -94,6 +101,21 @@ export const music = {
     if (opts.offset) extra.offset = String(opts.offset);
     return request<{ rows: MusicAggregate[]; total: number }>(`/music/library${rangeQuery(from, to, extra)}`);
   },
+  songPlaysSummary: (songKey: string) =>
+    request<SongPlaysSummary>(`/music/song-plays/summary?${new URLSearchParams({ song_key: songKey })}`),
+  /** One page of a song's plays, newest first. */
+  songPlays: (songKey: string, opts: { limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams({ song_key: songKey });
+    if (opts.limit) params.set('limit', String(opts.limit));
+    if (opts.offset) params.set('offset', String(opts.offset));
+    return request<{ rows: SongPlay[]; total: number }>(`/music/song-plays?${params}`);
+  },
+  dailyListening: (year: number, today: string) =>
+    request<DailyListening>(`/music/insights/daily?${new URLSearchParams({ year: String(year), today })}`),
+  listeningClock: (from?: string, to?: string) => request<ClockCell[]>(`/music/insights/clock${rangeQuery(from, to)}`),
+  discovery: (from?: string, to?: string) => request<Discovery>(`/music/insights/discovery${rangeQuery(from, to)}`),
+  lifeSoundtrack: (by: LifeBy, from?: string, to?: string) =>
+    request<LifeSoundtrack>(`/music/insights/life${rangeQuery(from, to, { by })}`),
   sessionTracks: (sessionId: string) =>
     request<SessionTrack[]>(`/music/sessions/${sessionId}/tracks`),
   reflect: (date: string) => request<MusicReflectionYear[]>(`/music/reflect?date=${date}`),

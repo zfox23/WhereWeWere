@@ -5,7 +5,8 @@
  * shows the first page and loads more on request.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Loader2, Search, X } from 'lucide-react';
 import { usePagedLibrary, useDebouncedValue } from '../../../client/src/hooks/usePagedLibrary';
 import { PagingFooter } from '../../../client/src/components/lists/PagingFooter';
@@ -13,7 +14,10 @@ import { music } from './api';
 import { AlbumArt } from './AlbumArt';
 import { AlbumLink } from './AlbumLink';
 import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
-import { formatDay, formatDuration, joinArtists } from './format';
+import { formatDateKey, formatDay, formatDuration, joinArtists } from './format';
+import { homeDayLink } from './homeLinks';
+import { jumpToLibrary } from './libraryLinks';
+import { SongPlaysModal } from './SongPlaysModal';
 import type { MusicAggregate, MusicLibraryView } from './types';
 
 type SortDir = 'asc' | 'desc';
@@ -40,7 +44,8 @@ const TIME: Column = {
 const LAST: Column = {
   key: 'last', label: 'Last played', numeric: true,
   sort: (r) => new Date(r.last_played_at).getTime(),
-  render: (r) => formatDay(r.last_played_at),
+  // The day Home shows the last play's session on, so the label matches where it links.
+  render: (r) => (r.last_session_date ? formatDateKey(r.last_session_date) : formatDay(r.last_played_at)),
 };
 const TRACKS: Column = {
   key: 'tracks', label: 'Tracks', numeric: true,
@@ -64,6 +69,42 @@ const COLUMNS: Record<MusicLibraryView, Column[]> = {
     TRACKS, PLAYS, TIME, LAST,
   ],
 };
+
+const CELL_LINK = 'text-left hover:underline decoration-dotted underline-offset-2';
+
+/** A cell value that filters the library to `q`. */
+function FilterButton({ q, onFilter, children }: { q: string; onFilter: (q: string) => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={() => onFilter(q)} title={`Filter library to ${q}`} className={CELL_LINK}>
+      {children}
+    </button>
+  );
+}
+
+/** Artists as individual filter buttons, comma separated. */
+function ArtistFilters({ artists, onFilter }: { artists: string[] | undefined; onFilter: (q: string) => void }) {
+  return (
+    <>
+      {(artists ?? []).map((a, i) => (
+        <span key={`${a}-${i}`}>
+          {i > 0 && ', '}
+          <FilterButton q={a} onFilter={onFilter}>{a}</FilterButton>
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** Last played, linking to that listening session on Home. */
+function LastPlayedLink({ row, children }: { row: MusicAggregate; children: ReactNode }) {
+  const link = homeDayLink(row.last_session_date, row.last_session_id);
+  if (!link) return <>{children}</>;
+  return (
+    <Link to={link.to} state={link.state} title="Show this listening session on Home" className={CELL_LINK}>
+      {children}
+    </Link>
+  );
+}
 
 const VIEWS: { value: MusicLibraryView; label: string }[] = [
   { value: 'songs', label: 'Songs' },
@@ -109,6 +150,7 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   const [sortBy, setSortBy] = useState(initial.sortBy);
   const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
   const [query, setQuery] = useState(initial.query);
+  const [playsOf, setPlaysOf] = useState<string | null>(null);
 
   // The search text is sent a moment after typing stops.
   const searchText = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
@@ -171,6 +213,47 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
       setSortBy(DEFAULT_SORT);
       setSortDir(DEFAULT_DIR);
     }
+  };
+
+  // Filter to a title or artist from the table, keeping the view and sort.
+  const filterTo = (q: string) => {
+    setQuery(q);
+    document.getElementById('music-library')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
+
+  /** A cell's content: links and buttons where the column has an action. */
+  const cell = (c: Column, row: MusicAggregate): ReactNode => {
+    if (c.key === 'name' && view === 'songs') {
+      return (
+        <>
+          <FilterButton q={row.name} onFilter={filterTo}>{row.name}</FilterButton>
+          <ListBadge itemKey={songItemKey(row.song_key)} />
+        </>
+      );
+    }
+    if (c.key === 'name' && view === 'artists') {
+      return (
+        <button type="button" onClick={() => jumpToLibrary('songs', row.name)} title={`Show songs by ${row.name}`} className={CELL_LINK}>
+          {row.name}
+        </button>
+      );
+    }
+    if (c.key === 'artists') return <ArtistFilters artists={row.artists} onFilter={filterTo} />;
+    if (c.key === 'plays' && view === 'songs' && row.song_key) {
+      return (
+        <button
+          type="button"
+          onClick={() => setPlaysOf(row.song_key as string)}
+          title={`Show every play of ${row.name}`}
+          aria-label={`${row.plays} plays of ${row.name}: show every play`}
+          className={CELL_LINK}
+        >
+          {c.render(row)}
+        </button>
+      );
+    }
+    if (c.key === 'last') return <LastPlayedLink row={row}>{c.render(row)}</LastPlayedLink>;
+    return c.render(row);
   };
 
   const toggleSort = (column: Column) => {
@@ -270,12 +353,8 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
                           <ListBadge itemKey={albumItemKey(row.album_ref)} />
                         </span>
                       </span>
-                    ) : view === 'songs' && c.key === 'name' ? (
-                      <>
-                        {c.render(row)}<ListBadge itemKey={songItemKey(row.song_key)} />
-                      </>
                     ) : (
-                      c.render(row)
+                      cell(c, row)
                     )}
                   </td>
                 ))}
@@ -292,6 +371,7 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
         </table>
       </div>
       <PagingFooter shown={rows.length} total={total} loadingMore={loadingMore} onMore={loadMore} />
+      {playsOf && <SongPlaysModal songKey={playsOf} onClose={() => setPlaysOf(null)} />}
     </section>
   );
 }

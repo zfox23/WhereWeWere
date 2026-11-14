@@ -27,6 +27,10 @@ import { AlbumLink } from './AlbumLink';
 import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
 import { MusicLibrarySection } from './MusicLibrarySection';
 import { MusicListsSection } from './MusicListsSection';
+import { ListeningCalendar } from './insights/ListeningCalendar';
+import { ListeningClock } from './insights/ListeningClock';
+import { DiscoveryChart } from './insights/DiscoveryChart';
+import { MusicLifeCard } from './insights/MusicLifeCard';
 import { openMusicList, topListTitle } from './listTitle';
 import { refreshMusicLists } from './useMusicLists';
 import { ProfileLibraryLink } from './libraryLinks';
@@ -271,6 +275,8 @@ export function MusicTab(_props: PluginProfileTabProps) {
   }, [periodMode, selectedMonth, selectedWeek, section]);
 
   const totals = data?.totals;
+  // The calendar shows the year the period ends in (this year for all time).
+  const calendarYear = visibleRange.to ? parseInt(visibleRange.to.slice(0, 4), 10) : new Date().getFullYear();
 
   // A new list of the rows shown (rank 1 = most played), named for the period; then open it.
   const makeList = (kind: 'songs' | 'albums') => async (shown: MusicAggregate[]) => {
@@ -347,6 +353,16 @@ export function MusicTab(_props: PluginProfileTabProps) {
               <TopList title="Top artists" icon={Mic2} view="artists" rows={data?.top_artists ?? []} detail={() => ''} />
               <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt onMakeList={makeList('albums')} />
             </div>
+          </div>
+
+          {/* Each chart loads on its own, so the totals above never wait for them. */}
+          <div className="space-y-3">
+            <ListeningCalendar defaultYear={calendarYear} />
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <ListeningClock from={visibleRange.from || undefined} to={visibleRange.to || undefined} />
+              <DiscoveryChart from={visibleRange.from || undefined} to={visibleRange.to || undefined} />
+            </div>
+            <MusicLifeCard from={visibleRange.from || undefined} to={visibleRange.to || undefined} />
           </div>
 
         </>

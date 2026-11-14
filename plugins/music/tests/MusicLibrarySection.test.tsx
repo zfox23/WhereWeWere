@@ -1,13 +1,21 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MusicLibrarySection } from '../ui/MusicLibrarySection';
 import type { MusicAggregate, MusicLibraryView } from '../ui/types';
 
 const libraryMock = vi.fn();
+const summaryMock = vi.fn();
+const songPlaysMock = vi.fn();
 vi.mock('../ui/api', () => ({
-  music: { library: (...args: unknown[]) => libraryMock(...args), lists: () => Promise.resolve([]) },
+  music: {
+    library: (...args: unknown[]) => libraryMock(...args),
+    lists: () => Promise.resolve([]),
+    songPlaysSummary: (...args: unknown[]) => summaryMock(...args),
+    songPlays: (...args: unknown[]) => songPlaysMock(...args),
+  },
+  albumArtUrl: (id: string) => `/art/${id}`,
 }));
 
 const song = (name: string, artists: string[], plays: number, last: string, album: string | null = null): MusicAggregate => ({
@@ -136,5 +144,57 @@ describe('MusicLibrarySection', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     renderSection();
     await waitFor(() => expect(screen.getByText("Couldn't load the music library.")).toBeTruthy());
+  });
+
+  it('filters to a song title or one of its artists when clicked', async () => {
+    libraryMock.mockImplementation(() => page([song('Bravo', ['Amy', 'Bob'], 9, '2024-02-01T00:00:00Z')]));
+    const user = userEvent.setup();
+    renderSection();
+    await waitFor(() => expect(titles()).toEqual(['Bravo']));
+    await user.click(screen.getByRole('button', { name: 'Bob' }));
+    expect((screen.getByLabelText('Filter library') as HTMLInputElement).value).toBe('Bob');
+    await waitFor(() => expect(lastCall()[3]).toMatchObject({ q: 'Bob' }));
+    expect(lastCall()[0]).toBe('songs');
+    await user.click(screen.getByRole('button', { name: 'Bravo' }));
+    await waitFor(() => expect(lastCall()[3]).toMatchObject({ q: 'Bravo' }));
+  });
+
+  it('opens every play of a song from its play count', async () => {
+    libraryMock.mockImplementation(() => page([{ ...song('Bravo', ['Amy'], 9, '2024-02-01T00:00:00Z'), song_key: 'bravo|amy' }]));
+    summaryMock.mockResolvedValue({
+      name: 'Bravo', artists: ['Amy'], album_ref: null, art_id: null, plays: 9,
+      first_played_at: '2024-01-01T00:00:00Z', last_played_at: '2024-02-01T00:00:00Z',
+      monthly: [{ month: '2024-01', plays: 4 }, { month: '2024-02', plays: 5 }],
+    });
+    songPlaysMock.mockResolvedValue({ rows: [], total: 0 });
+    const user = userEvent.setup();
+    renderSection();
+    await user.click(await screen.findByRole('button', { name: '9 plays of Bravo: show every play' }));
+    expect(await screen.findByRole('dialog', { name: 'Plays of Bravo' })).toBeTruthy();
+    expect(summaryMock).toHaveBeenCalledWith('bravo|amy');
+    expect(songPlaysMock).toHaveBeenCalledWith('bravo|amy', { limit: 100 });
+  });
+
+  it('links Last played to its listening session on Home, labelled with that day', async () => {
+    libraryMock.mockImplementation(() =>
+      page([{ ...song('Bravo', ['Amy'], 9, '2024-02-02T03:00:00Z'), last_session_id: 'sess-1', last_session_date: '2024-02-01' }]),
+    );
+    function HomeProbe() {
+      const loc = useLocation();
+      return <p>home {loc.search} {JSON.stringify(loc.state)}</p>;
+    }
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/profile']}>
+        <Routes>
+          <Route path="/profile" element={<MusicLibrarySection from="" to="" />} />
+          <Route path="/" element={<HomeProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const link = await screen.findByRole('link', { name: 'Feb 1, 2024' });
+    expect(link.getAttribute('href')).toBe('/?from=2024-02-01&to=2024-02-01');
+    await user.click(link);
+    expect(await screen.findByText('home ?from=2024-02-01&to=2024-02-01 {"focusSession":"sess-1"}')).toBeTruthy();
   });
 });
