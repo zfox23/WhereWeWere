@@ -48,6 +48,12 @@ const PLUGIN_HOTKEYS: Record<string, string> = Object.fromEntries(
     .filter((p) => p.client.hotkey && !p.client.noCheckIn)
     .map((p) => [p.client.hotkey as string, p.client.checkInPath]),
 );
+/** Hotkey -> plugin id, for Shift+hotkey ("only this type, then search"). */
+const PLUGIN_HOTKEY_IDS: Record<string, string> = Object.fromEntries(
+  allClientPlugins()
+    .filter((p) => p.client.hotkey)
+    .map((p) => [(p.client.hotkey as string).toLowerCase(), p.id]),
+);
 
 /** All registered check-in plugins get the generic filter section + include state. */
 const NEW_PLUGINS = allClientPlugins();
@@ -475,8 +481,44 @@ export default function Home() {
   // and mirror changes into the URL.
   const [searchInput, setSearchInput] = useState(searchQuery);
 
+  /** Focus the search box (scrolled into view) with its text selected. */
+  const focusSearch = useCallback(() => {
+    const input = searchInputRef.current;
+    if (!input) return;
+    window.scrollTo({ top: 0 });
+    input.focus();
+    input.select();
+  }, []);
+
+  /**
+   * Shift+hotkey: show only that type, then search. Pressing it again for the
+   * type that is already the only one returns to All.
+   */
+  const searchOnlyPluginType = (pluginId: string) => {
+    if (hasPluginFilter) {
+      // Same type -> All; another type -> drop the refinement and switch.
+      selectPluginType(pluginId);
+    } else if (includedPluginIds.length === 1 && includedPluginIds[0] === pluginId) {
+      setAllPluginIncludes(true);
+    } else {
+      setOnlyPluginInclude(pluginId, true);
+    }
+    if (!isDesktop) setShowFilters(false);
+    focusSearch();
+  };
+  // The keydown listener is registered once; it reads the latest closure.
+  const searchOnlyPluginTypeRef = useRef(searchOnlyPluginType);
+  searchOnlyPluginTypeRef.current = searchOnlyPluginType;
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/⌘+K focuses search from anywhere, even inside another field.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (!e.repeat) focusSearch();
+        return;
+      }
+
       const target = e.target as HTMLElement;
       const isEditable =
         target.tagName === 'INPUT' ||
@@ -485,9 +527,25 @@ export default function Home() {
         target.isContentEditable;
       if (isEditable || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
 
-      // Plugin-declared hotkeys (plugins may override built-in keys).
-      const hotkeyRoutes: Record<string, string> = { ...PLUGIN_HOTKEYS };
-      const route = hotkeyRoutes[e.key.toLowerCase()];
+      if (e.key === '/') {
+        e.preventDefault();
+        focusSearch();
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      if (e.shiftKey) {
+        // Shift+hotkey filters to that type (it used to open a check-in too).
+        const pluginId = PLUGIN_HOTKEY_IDS[key];
+        if (pluginId) {
+          e.preventDefault();
+          searchOnlyPluginTypeRef.current(pluginId);
+        }
+        return;
+      }
+
+      // Plugin-declared hotkeys: open that type's check-in.
+      const route = PLUGIN_HOTKEYS[key];
       if (route) {
         e.preventDefault();
         navigate(route);
@@ -495,7 +553,7 @@ export default function Home() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [navigate]);
+  }, [navigate, focusSearch]);
 
   const setFilter = useCallback((key: string, value: string) => {
     setSearchParams((prev) => {
@@ -856,6 +914,17 @@ export default function Home() {
             type="text"
             value={searchInput}
             onChange={handleSearchChange}
+            onKeyDown={(e) => {
+              // Esc clears the search first, then leaves the box.
+              if (e.key !== 'Escape') return;
+              e.preventDefault();
+              if (searchInput) {
+                setSearchInput('');
+                setFilter('q', '');
+              } else {
+                e.currentTarget.blur();
+              }
+            }}
             placeholder="Search check-ins..."
             className="w-full pl-10 pr-4 py-3 bg-white/70 dark:bg-gray-900/70 border border-white/40 dark:border-gray-700/40 rounded-2xl text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none shadow-sm shadow-black/3 dark:text-gray-100"
           />
