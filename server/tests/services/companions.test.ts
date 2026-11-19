@@ -147,31 +147,49 @@ describe('deleteCompanionsForCheckins', () => {
 });
 
 describe('searchCompanionNames', () => {
-  it('returns distinct, ordered names with a default limit', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ name: 'Ada' }, { name: 'Grace' }] });
-    const names = await searchCompanionNames();
-    expect(names).toEqual(['Ada', 'Grace']);
-    const [sql, values] = queryMock.mock.calls[0];
-    expect(sql).toContain('GROUP BY name');
-    expect(sql).toContain('ORDER BY name');
-    expect(sql).toContain('WHERE user_id = $1');
-    expect(values).toEqual([U, 50]);
+  const unionSql = 'SELECT id, checked_in_at FROM plugin_checkins WHERE id = ANY($1::uuid[])';
+
+  it('orders names by their latest check-in time, unused names last', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }, { checkin_id: 'c2' }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Grace' }, { name: 'Ada' }] });
+    const names = await searchCompanionNames(null, undefined, unionSql);
+    expect(names).toEqual(['Grace', 'Ada']);
+
+    const [idsSql, idsValues] = queryMock.mock.calls[0];
+    expect(idsSql).toContain('SELECT DISTINCT checkin_id FROM companions');
+    expect(idsSql).not.toContain('ILIKE');
+    expect(idsValues).toEqual([U]);
+
+    const [sql, values] = queryMock.mock.calls[1];
+    expect(sql).toContain(unionSql);
+    expect(sql).toContain('t.id = c.checkin_id');
+    expect(sql).toContain('WHERE c.user_id = $2');
+    expect(sql).toContain('GROUP BY c.name');
+    expect(sql).toContain('ORDER BY MAX(t.checked_in_at) DESC NULLS LAST, c.name');
+    expect(values).toEqual([['c1', 'c2'], U, 50]);
   });
 
   it('applies a case-insensitive substring filter when q is present', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ name: 'Ada' }] });
-    await searchCompanionNames('ad', '10');
-    const [sql, values] = queryMock.mock.calls[0];
-    expect(sql).toContain('AND name ILIKE $2');
-    expect(values).toEqual([U, '%ad%', 10]);
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Ada' }] });
+    await searchCompanionNames('ad', '10', unionSql);
+    const [idsSql, idsValues] = queryMock.mock.calls[0];
+    expect(idsSql).toContain('AND name ILIKE $2');
+    expect(idsValues).toEqual([U, '%ad%']);
+    const [sql, values] = queryMock.mock.calls[1];
+    expect(sql).toContain('AND c.name ILIKE $3');
+    expect(sql).toContain('LIMIT $4');
+    expect(values).toEqual([['c1'], U, '%ad%', 10]);
   });
 
   it('clamps the limit to the 1..200 range', async () => {
     queryMock.mockResolvedValue({ rows: [] });
-    await searchCompanionNames(null, 9999);
-    expect(queryMock.mock.calls[0][1]).toEqual([U, 200]);
-    await searchCompanionNames(null, '0');
-    expect(queryMock.mock.calls[1][1]).toEqual([U, 50]);
+    await searchCompanionNames(null, 9999, unionSql);
+    expect(queryMock.mock.calls[1][1]).toEqual([[], U, 200]);
+    await searchCompanionNames(null, '0', unionSql);
+    expect(queryMock.mock.calls[3][1]).toEqual([[], U, 50]);
   });
 });
 
@@ -422,14 +440,17 @@ describe('GET /companions/names (core route)', () => {
     return a;
   }
 
-  it('returns distinct, ILIKE-filtered names', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ name: 'Ada' }, { name: 'Adam' }] });
+  it('returns distinct, ILIKE-filtered names, most recently used first', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ checkin_id: 'c1' }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Adam' }, { name: 'Ada' }] });
     const res = await request(app()).get('/companions/names?q=ad&limit=10');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual(['Ada', 'Adam']);
-    const [sql, values] = queryMock.mock.calls[0];
+    expect(res.body).toEqual(['Adam', 'Ada']);
+    const [sql, values] = queryMock.mock.calls[1];
     expect(sql).toContain('FROM companions');
-    expect(values).toEqual([U, '%ad%', 10]);
+    expect(sql).toContain('ORDER BY MAX(t.checked_in_at) DESC NULLS LAST');
+    expect(values).toEqual([['c1'], U, '%ad%', 10]);
   });
 
   it('500s with an error body when the query fails', async () => {

@@ -7,7 +7,8 @@
  *
  * GET /api/v1/companions/names?q=&limit=
  *   Distinct companion names across all check-in types that implement
- *   companions, for the "Here With…" chip input autocomplete. The name pool
+ *   companions, for the "Here With…" chip input autocomplete, most recently
+ *   used first (by the check-ins' own times). The name pool
  *   is shared across check-in types, so a name entered on any type
  *   autocompletes on all.
  *
@@ -55,7 +56,7 @@ router.get('/names', async (req: Request, res: Response) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q : '';
     const limit = req.query.limit != null ? String(req.query.limit) : '50';
-    const names = await searchCompanionNames(q || null, limit);
+    const names = await searchCompanionNames(q || null, limit, pluginTimestampUnion(''));
     res.json(names);
   } catch (err) {
     console.error('Error listing companion names:', err);

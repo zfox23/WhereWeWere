@@ -168,27 +168,55 @@ export async function deleteCompanionsForCheckins(
 
 /**
  * The user's distinct companion names for autocomplete, case-insensitively
- * filtered by `q` (ILIKE) when present, alphabetically ordered. Shared across
- * all check-in types so a name typed on one type autocompletes on every other.
+ * filtered by `q` (ILIKE) when present. Shared across all check-in types so a
+ * name typed on one type autocompletes on every other.
+ *
+ * Ordered by recency of use: the latest `checked_in_at` (when the event
+ * happened, not when it was entered) among the check-ins carrying the name.
+ * Names on no check-in (standalone pool entries) come last; ties are
+ * alphabetical. `timestampUnionSql` resolves check-in ids to timestamps, as
+ * for {@link listCompanionSummaries} (the registry's `pluginTimestampUnion()`,
+ * taking $1 = uuid[] of ids).
  */
 export async function searchCompanionNames(
-  q?: string | null,
-  limit?: number | string,
+  q: string | null | undefined,
+  limit: number | string | undefined,
+  timestampUnionSql: string,
   client?: QueryExecutor | null,
 ): Promise<string[]> {
+  const ex = executor(client);
   const limitNum = Math.min(Math.max(parseInt(String(limit ?? 50), 10) || 50, 1), 200);
-  const params: unknown[] = [currentUserId()];
-  let sql = 'SELECT name FROM companions WHERE user_id = $1';
-  if (q && q.trim() !== '') {
-    params.push(`%${escapeLike(q.trim())}%`);
-    sql += ' AND name ILIKE $2';
+  const userId = currentUserId();
+  const pattern = q && q.trim() !== '' ? `%${escapeLike(q.trim())}%` : null;
+
+  // Only the check-ins of matching names need a timestamp.
+  const idsResult = await ex.query(
+    `SELECT DISTINCT checkin_id FROM companions
+     WHERE checkin_id IS NOT NULL AND user_id = $1${pattern ? ' AND name ILIKE $2' : ''}`,
+    pattern ? [userId, pattern] : [userId],
+  );
+  const checkinIds: string[] = idsResult.rows.map((r) => r.checkin_id as string);
+
+  // The union is wrapped so its own $1 stays the id list.
+  const params: unknown[] = [checkinIds, userId];
+  let filter = '';
+  if (pattern) {
+    params.push(pattern);
+    filter = ` AND c.name ILIKE $${params.length}`;
   }
-  sql += `
-    GROUP BY name
-    ORDER BY name
-    LIMIT $${params.length + 1}`;
   params.push(limitNum);
-  const result = await executor(client).query(sql, params);
+  const result = await ex.query(
+    `SELECT c.name
+     FROM companions c
+     LEFT JOIN (
+       ${timestampUnionSql}
+     ) t ON t.id = c.checkin_id
+     WHERE c.user_id = $2${filter}
+     GROUP BY c.name
+     ORDER BY MAX(t.checked_in_at) DESC NULLS LAST, c.name
+     LIMIT $${params.length}`,
+    params,
+  );
   return result.rows.map((r) => r.name as string);
 }
 

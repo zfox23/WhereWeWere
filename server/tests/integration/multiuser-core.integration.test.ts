@@ -275,6 +275,37 @@ describe('Multi-user isolation (core)', () => {
 
   // ---------------------------------------------------------------------------
   describe('companions', () => {
+    it('suggests names by their latest check-in time (event time, not entry order), unused last', async () => {
+      // SCUBA dives: a real plugin whose resolveTimestamps feeds the ordering.
+      // Entered newest-event first, so entry order differs from event order.
+      const at = async (checkedInAt: string, names: string[]) => {
+        const result = await query(
+          `INSERT INTO plugin_checkins (plugin_id, user_id, checked_in_at, checkin_timezone, data)
+           VALUES ('scuba', $1, $2, 'UTC', '{"place": "Reef"}'::jsonb) RETURNING id`,
+          [A, checkedInAt]
+        );
+        for (const name of names) {
+          await query(
+            `INSERT INTO companions (user_id, checkin_type, checkin_id, name) VALUES ($1, 'scuba', $2, $3)`,
+            [A, result.rows[0].id, name]
+          );
+        }
+      };
+      await at('2025-06-01T12:00:00Z', ['New']);
+      await at('2023-01-01T12:00:00Z', ['Mid', 'Old']);
+      await at('2025-01-01T12:00:00Z', ['Mid']);
+      await at('2024-01-01T12:00:00Z', ['Old']);
+      await request(app).post('/api/v1/companions/names').send({ name: 'Zed' }).expect(201);
+      await request(app).post('/api/v1/companions/names').send({ name: 'Abe' }).expect(201);
+
+      const all = await request(app).get('/api/v1/companions/names');
+      expect(all.body).toEqual(['New', 'Mid', 'Old', 'Abe', 'Zed']);
+      const filtered = await request(app).get('/api/v1/companions/names?q=E');
+      expect(filtered.body).toEqual(['New', 'Abe', 'Zed']);
+      const limited = await request(app).get('/api/v1/companions/names?limit=2');
+      expect(limited.body).toEqual(['New', 'Mid']);
+    });
+
     it("keeps each user's name pool, summaries, renames and deletes separate", async () => {
       const id = await createGenericCheckin();
       await query(
