@@ -23,6 +23,7 @@ import { AudioSection } from './audio/AudioSection';
 import { deleteRecording, listRecordings, updateRecording } from './audio/recordingStore';
 import { processUploads } from './audio/uploadQueue';
 import { clearDraft, draftKey, loadDraft, sameContent, saveDraft, type NoteDraft } from './noteDraft';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 
 const labelClass = 'block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5';
 
@@ -192,6 +193,9 @@ export default function NoteCheckIn({ editId = null, dateParam = null, onCreated
     }
   };
 
+  const formRef = useRef<HTMLFormElement>(null);
+  useSubmitHotkey(() => formRef.current?.requestSubmit(), !saving);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -219,6 +223,7 @@ export default function NoteCheckIn({ editId = null, dateParam = null, onCreated
       )}
 
       <form
+        ref={formRef}
         onSubmit={submit}
         className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-5"
       >

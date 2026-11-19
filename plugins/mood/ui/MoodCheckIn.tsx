@@ -7,6 +7,7 @@ import { MoodIcon, MOOD_LABELS, MOOD_COLORS } from './MoodIcons';
 import { resolveActivityIcon } from '../../../client/src/utils/icons';
 import type { MoodActivityGroup } from './types';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -273,7 +274,8 @@ export default function MoodCheckInPage() {
   }, []);
 
   const handleSubmit = async () => {
-    if (mood === 0) return;
+    // The keyboard shortcut bypasses the disabled Save button.
+    if (mood === 0 || saving) return;
     setSaving(true);
     let succeeded = false;
     let createdId: string | undefined;
@@ -299,6 +301,7 @@ export default function MoodCheckInPage() {
     }
     if (succeeded) navigate('/', { state: editId ? undefined : { newId: createdId } });
   };
+  useSubmitHotkey(() => void handleSubmit(), mood !== 0 && !saving);
 
   const handleDelete = async () => {
     if (!editId || !confirm('Delete this mood check-in?')) return;
@@ -382,12 +385,6 @@ export default function MoodCheckInPage() {
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.shiftKey) {
-              e.preventDefault();
-              handleSubmit();
-            }
-          }}
           placeholder={notePlaceholder}
           rows={4}
           className="input w-full resize-none"

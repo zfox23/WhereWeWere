@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import type { CheckInFormProps } from 'wwp-shared';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 import { tracks } from './api';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
 
@@ -151,6 +152,7 @@ export default function TrackCheckIn({ onCreated }: CheckInFormProps) {
   };
 
   const pendingCount = items.filter((it) => it.status === 'pending').length;
+  useSubmitHotkey(() => void handleSubmit(), pendingCount > 0 && !submitting);
   const uploadingCount = items.filter((it) => it.status === 'uploading').length;
 
   const formatSize = (bytes: number) =>

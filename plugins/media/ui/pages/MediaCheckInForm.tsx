@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2, ArrowLeft, CheckCircle2, ListPlus } from 'lucide-react';
 import { media } from '../api';
@@ -10,6 +10,7 @@ import CompanionChipInput from '../../../../client/src/components/CompanionChipI
 import { MEDIA_SUBTYPES, CHECKIN_TYPE_LABELS, detailPath, providerNameForItem } from '../../utils/media';
 import { deviceTimezone, nowLocalDatetimeValue, localDatetimeToIso, slugify } from '../../../../client/src/utils/slugify';
 import { usePageTitle } from '../../../../client/src/utils/pageTitle';
+import { useSubmitHotkey } from '../../../../client/src/hooks/useSubmitHotkey';
 
 interface MediaCheckInFormProps {
   subtype: MediaSubtype;
@@ -92,6 +93,9 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
     }
   };
 
+  const formRef = useRef<HTMLFormElement>(null);
+  useSubmitHotkey(() => formRef.current?.requestSubmit(), !submitting);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -157,6 +161,7 @@ export default function MediaCheckInForm({ subtype, episodeMode }: MediaCheckInF
 
       {/* Check-in form */}
       <form
+        ref={formRef}
         onSubmit={handleSubmit}
         className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-5"
       >

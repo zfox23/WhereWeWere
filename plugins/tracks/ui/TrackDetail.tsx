@@ -6,7 +6,7 @@
  * instead of reading `:id` from the route params.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import type { CheckInDetailProps } from 'wwp-shared';
 import {
@@ -41,6 +41,7 @@ import CompanionChipInput from '../../../client/src/components/CompanionChipInpu
 import { formatDistance, formatSpeed, type DistanceUnit } from '../../location/ui/geo';
 import { normalizeTimezoneForDisplay } from '../../../client/src/utils/checkin';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 import { ThemedTileLayer } from '../../location/ui/ThemedTileLayer';
 
 // Fix Leaflet's default icon paths (broken by bundlers)
@@ -431,7 +432,7 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !track) return;
+    if (!id || !track || saving) return;
     const name = editName.trim();
     if (!name) return;
     setSaving(true);
@@ -522,6 +523,9 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
     }
   };
 
+  const editFormRef = useRef<HTMLFormElement>(null);
+  useSubmitHotkey(() => editFormRef.current?.requestSubmit(), isEditing && !saving);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -551,6 +555,7 @@ export default function TrackDetail({ id }: CheckInDetailProps) {
 
       {isEditing ? (
         <form
+          ref={editFormRef}
           onSubmit={handleSave}
           className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-indigo-200 dark:border-indigo-700/50 shadow-sm shadow-black/3 p-5 space-y-4"
         >

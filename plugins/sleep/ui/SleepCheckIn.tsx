@@ -16,6 +16,7 @@ import { sleepEntries } from './api';
 import type { SleepEntry } from './types';
 import type { CheckInFormProps } from 'wwp-shared';
 import { usePageTitle } from '../../../client/src/utils/pageTitle';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -121,6 +122,8 @@ export default function SleepCheckIn({ editId, dateParam, onCreated, onUpdated }
   }, [startedAt, endedAt]);
 
   const handleSubmit = async () => {
+    // The keyboard shortcut bypasses the disabled Save button.
+    if (saving) return;
     if (!startedAt || !endedAt) {
       setError('Start and end time are required.');
       return;
@@ -177,6 +180,8 @@ export default function SleepCheckIn({ editId, dateParam, onCreated, onUpdated }
       }
     }
   };
+
+  useSubmitHotkey(() => void handleSubmit(), !saving && Boolean(duration));
 
   const handleDelete = async () => {
     if (!editId) return;
@@ -287,12 +292,6 @@ export default function SleepCheckIn({ editId, dateParam, onCreated, onUpdated }
         <textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.shiftKey) {
-              e.preventDefault();
-              handleSubmit();
-            }
-          }}
           placeholder="How was your sleep?"
           rows={4}
           className="input w-full resize-none"

@@ -69,7 +69,7 @@ describe('LocationCheckInForm', () => {
     cleanup();
   });
 
-  it('submits and calls onSuccess when pressing Shift+Enter in notes', async () => {
+  it('submits and calls onSuccess when pressing Ctrl+Enter in notes', async () => {
     const onSuccess = vi.fn();
     const user = userEvent.setup();
 
@@ -82,7 +82,7 @@ describe('LocationCheckInForm', () => {
     const notesInput = screen.getByLabelText('Note.md');
 
     await user.type(notesInput, 'Late night coffee');
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    await user.keyboard('{Control>}{Enter}{/Control}');
 
     await waitFor(() => {
       expect(apiMocks.checkinsCreate).toHaveBeenCalledTimes(1);
@@ -101,6 +101,19 @@ describe('LocationCheckInForm', () => {
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 
+  it('treats Shift+Enter in notes as a newline, not a submit', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LocationCheckInForm venueId="venue-1" venueName="Test Venue" onSuccess={vi.fn()} />
+      </MemoryRouter>,
+    );
+    const notesInput = screen.getByLabelText('Note.md') as HTMLTextAreaElement;
+    await user.type(notesInput, 'a{Shift>}{Enter}{/Shift}b');
+    expect(notesInput.value).toBe('a\nb');
+    expect(apiMocks.checkinsCreate).not.toHaveBeenCalled();
+  });
+
   it('includes the selected rating and companions in the create payload', async () => {
     const onSuccess = vi.fn();
     const user = userEvent.setup();
@@ -115,10 +128,8 @@ describe('LocationCheckInForm', () => {
     await user.click(screen.getByRole('radio', { name: '3 stars' }));
     // Add a companion via the "Here With…" chip input.
     await user.type(screen.getByLabelText('Here with (companion names)'), 'Ada{Enter}');
-    // Submit with Shift+Enter in the notes field.
-    const notesInput = screen.getByLabelText('Note.md');
-    await user.click(notesInput);
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    // Submit with ⌘+Enter while focus is outside the notes field.
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
 
     await waitFor(() => {
       expect(apiMocks.checkinsCreate).toHaveBeenCalledTimes(1);
@@ -152,7 +163,7 @@ describe('LocationCheckInForm', () => {
     await user.click(screen.getByRole('checkbox', { name: /Broadway/ }));
     const notesInput = screen.getByLabelText('Note.md');
     await user.click(notesInput);
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    await user.keyboard('{Control>}{Enter}{/Control}');
 
     await waitFor(() => {
       expect(apiMocks.checkinsCreate).toHaveBeenCalledTimes(1);
@@ -184,7 +195,7 @@ describe('LocationCheckInForm', () => {
     expect(box).toHaveAttribute('aria-checked', 'true');
     const notesInput = screen.getByLabelText('Note.md');
     await user.click(notesInput);
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    await user.keyboard('{Control>}{Enter}{/Control}');
 
     await waitFor(() => {
       expect(apiMocks.checkinsCreate).toHaveBeenCalledTimes(1);
@@ -212,7 +223,7 @@ describe('LocationCheckInForm', () => {
 
     const notesInput = screen.getByLabelText('Note.md');
     await user.click(notesInput);
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    await user.keyboard('{Control>}{Enter}{/Control}');
 
     await waitFor(() => {
       expect(apiMocks.checkinsUpdate).toHaveBeenCalledTimes(1);

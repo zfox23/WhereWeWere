@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, Loader2, Save, Trash2 } from 'lucide-react';
 import type { CheckInFormProps } from 'wwp-shared';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 import { plugins, type GenericCheckin } from '../../../client/src/plugins/api';
 import {
   depthToDisplay,
@@ -400,6 +401,8 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
   }, []);
 
   const submit = async () => {
+    // The keyboard shortcut bypasses the disabled Save button.
+    if (saving) return;
     setSaving(true);
     setError(null);
     try {
@@ -429,6 +432,7 @@ export default function ScubaCheckIn({ editId = null }: CheckInFormProps) {
       setSaving(false);
     }
   };
+  useSubmitHotkey(() => void submit(), !saving);
 
   const remove = async () => {
     if (!editId) return;

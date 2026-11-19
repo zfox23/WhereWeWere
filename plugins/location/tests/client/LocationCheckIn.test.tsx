@@ -108,7 +108,7 @@ describe('LocationCheckIn (edit redirect)', () => {
     await user.clear(notes);
     await user.type(notes, 'updated');
     await user.click(notes);
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    await user.keyboard('{Control>}{Enter}{/Control}');
 
     await waitFor(() => {
       expect(apiMocks.checkinsUpdate).toHaveBeenCalledWith(

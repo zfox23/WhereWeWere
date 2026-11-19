@@ -20,6 +20,7 @@ import { formatClock, formatLength, parseLength } from './format';
 import { playPath } from './listTitle';
 import { utcToZonedLocalValue, zonedLocalToIso } from './zoned';
 import type { NearDuplicate, SongSuggestion } from './types';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 
 const norm = (s: string) =>
   s
@@ -327,6 +328,9 @@ export default function MusicCheckInForm({ editId, dateParam, onCreated }: Check
     onKeyDown,
   });
 
+  const formRef = useRef<HTMLFormElement>(null);
+  useSubmitHotkey(() => formRef.current?.requestSubmit(), canSave);
+
   if (loadingEdit) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -345,6 +349,7 @@ export default function MusicCheckInForm({ editId, dateParam, onCreated }: Check
       </div>
 
       <form
+        ref={formRef}
         onSubmit={(e) => {
           e.preventDefault();
           if (canSave) void save(false);

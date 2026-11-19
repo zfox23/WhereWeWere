@@ -20,6 +20,7 @@ import { TIMEZONE_IDS, isValidTimezoneId } from '../../../../client/src/utils/ti
 import { findExactOption } from '../../../../client/src/components/filters/filterUtils';
 import { slugify } from '../../../../client/src/utils/slugify';
 import { usePageTitle } from '../../../../client/src/utils/pageTitle';
+import { useSubmitHotkey } from '../../../../client/src/hooks/useSubmitHotkey';
 
 interface MediaDetailProps {
   subtype: MediaSubtype;
@@ -588,6 +589,11 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
     url.searchParams.set('to', date);
     return `${url.pathname}${url.search}`;
   };
+
+  // Ctrl/⌘+Enter saves the check-in being edited inline.
+  useSubmitHotkey(() => {
+    if (editingCheckinId) void saveEdit(editingCheckinId);
+  }, editingCheckinId != null && draft != null && !saving);
 
   if (loading) {
     return (

@@ -7,7 +7,7 @@
  * and companions.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Loader2, Trash2 } from 'lucide-react';
 import type { CheckInFormProps } from 'wwp-shared';
@@ -19,6 +19,7 @@ import { usePageTitle } from '../../../client/src/utils/pageTitle';
 import { MEAL_TYPES, MEAL_TYPE_LABELS, type MealType } from '../manifest';
 import { food, mealTypeForHour, type FoodCheckinInput, type MealieRecipe, type MealieStatus, type MealieSync } from './api';
 import RecipePicker from './RecipePicker';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 
 interface LocationOption {
   id: string;
@@ -223,6 +224,9 @@ export default function FoodCheckIn({ editId = null, dateParam = null, onCreated
     }
   };
 
+  const formRef = useRef<HTMLFormElement>(null);
+  useSubmitHotkey(() => formRef.current?.requestSubmit(), !saving);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -254,6 +258,7 @@ export default function FoodCheckIn({ editId = null, dateParam = null, onCreated
       </h1>
 
       <form
+        ref={formRef}
         onSubmit={submit}
         className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-5 space-y-5"
       >

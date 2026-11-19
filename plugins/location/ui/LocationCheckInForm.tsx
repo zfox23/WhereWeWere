@@ -7,6 +7,7 @@ import type { CheckinList } from '../../../client/src/types';
 import VenueSearch from './VenueSearch';
 import ScorePicker from '../../../client/src/components/ScorePicker';
 import CompanionChipInput from '../../../client/src/components/CompanionChipInput';
+import { useSubmitHotkey } from '../../../client/src/hooks/useSubmitHotkey';
 
 function toLocalDatetimeString(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -201,6 +202,7 @@ export default function CheckInForm({
   };
 
   const submitCheckIn = async () => {
+    if (submitting) return;
     if (!venueId && !isEditMode) {
       setError('Please select a venue.');
       return;
@@ -256,13 +258,16 @@ export default function CheckInForm({
     if (succeeded) onSuccess?.(createdId ?? '');
   };
 
+  const formRef = useRef<HTMLFormElement>(null);
+  useSubmitHotkey(() => formRef.current?.requestSubmit(), !submitting && (Boolean(venueId) || isEditMode));
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     void submitCheckIn();
   };
 
   return (
-    <form onSubmit={handleSubmit} className={`space-y-5 ${isEditMode ? 'pb-56 md:pb-44' : 'pb-40 md:pb-24'}`}>
+    <form ref={formRef} onSubmit={handleSubmit} className={`space-y-5 ${isEditMode ? 'pb-56 md:pb-44' : 'pb-40 md:pb-24'}`}>
       {/* Venue selection (hidden in edit mode or when parent renders venue card) */}
       {!isEditMode && !hideVenueCard && (
         <div>
@@ -410,12 +415,6 @@ export default function CheckInForm({
           id="checkin-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.shiftKey) {
-              e.preventDefault();
-              void submitCheckIn();
-            }
-          }}
           placeholder="What are you up to?"
           rows={3}
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
