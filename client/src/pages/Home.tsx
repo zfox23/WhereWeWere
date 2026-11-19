@@ -8,7 +8,6 @@ import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/r
 import { PluginTimelineCard } from '../plugins/autoCard';
 import { plugins as pluginApi } from '../plugins/api';
 import Filters from '../components/filters/Filters';
-import { matchDatePreset } from '../components/filters/datePresets';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { CompanionPhoto } from '../components/CompanionName';
 import { usePageTitle } from '../utils/pageTitle';
@@ -870,10 +869,7 @@ export default function Home() {
       key: 'companion',
     });
   }
-  const datePreset = matchDatePreset(fromDate, toDate);
-  if (datePreset) {
-    filterPills.push({ label: datePreset.label, key: 'dates' });
-  } else if (fromDate && toDate && fromDate === toDate) {
+  if (fromDate && toDate && fromDate === toDate) {
     filterPills.push({ label: `Date: ${fromDate}`, key: 'from' });
   } else {
     if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
@@ -974,8 +970,6 @@ export default function Home() {
                 onClick={() => {
                   if (pill.key === 'types') {
                     setAllPluginIncludes(true);
-                  } else if (pill.key === 'dates') {
-                    setDateRange('', '');
                   } else if (pill.key === 'from' && fromDate === toDate) {
                     setSearchParams((prev) => {
                       const next = new URLSearchParams(prev);

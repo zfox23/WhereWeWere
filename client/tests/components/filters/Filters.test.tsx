@@ -1,10 +1,9 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Smile, Music } from 'lucide-react';
 import type { CheckinTypeClient } from 'wwp-shared';
 import Filters, { type PluginFilterSpec } from '../../../src/components/filters/Filters';
-import { DATE_PRESETS } from '../../../src/components/filters/datePresets';
 
 afterEach(cleanup);
 
@@ -67,26 +66,23 @@ describe('Filters', () => {
     expect(onSelectAllTypes).toHaveBeenCalled();
   });
 
-  it('applies a date preset as one range', async () => {
+  it('always shows the From/To inputs and sets the range from them', () => {
     const onSetDateRange = vi.fn();
     render(<Filters {...base} onSetDateRange={onSetDateRange} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Past 7 days' }));
-    const expected = DATE_PRESETS.find((p) => p.id === 'week')!.range(new Date());
-    expect(onSetDateRange).toHaveBeenCalledWith(expected.from, expected.to);
-  });
-
-  it('hides the custom date inputs until Custom is chosen', async () => {
-    render(<Filters {...base} />);
-    expect(screen.queryByLabelText('From')).toBeNull();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Custom…' }));
-    expect(screen.getByLabelText('From')).toBeTruthy();
+    const from = screen.getByLabelText('From') as HTMLInputElement;
+    fireEvent.change(from, { target: { value: '2024-03-02' } });
+    fireEvent.blur(from);
+    expect(onSetDateRange).toHaveBeenCalledWith('2024-03-02', '');
     expect(screen.getByLabelText('To')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Clear dates' })).toBeNull();
   });
 
-  it('opens a non-preset range as a custom single day', () => {
-    render(<Filters {...base} hasActiveFilters fromDate="2024-03-02" toDate="2024-03-02" />);
-    expect(screen.getByRole('button', { name: 'Custom…', pressed: true })).toBeTruthy();
+  it('shows a single day as one input, with Clear dates', async () => {
+    const onSetDateRange = vi.fn();
+    render(<Filters {...base} hasActiveFilters fromDate="2024-03-02" toDate="2024-03-02" onSetDateRange={onSetDateRange} />);
     expect((screen.getByLabelText('Day') as HTMLInputElement).value).toBe('2024-03-02');
     expect(screen.getByText(/Reset all/)).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Clear dates' }));
+    expect(onSetDateRange).toHaveBeenCalledWith('', '');
   });
 });

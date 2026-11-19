@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { X, ArrowLeftRight } from 'lucide-react';
 import type { CheckinTypeClient } from 'wwp-shared';
 import PluginFilterShell from './PluginFilterShell';
-import { DATE_PRESETS, matchDatePreset } from './datePresets';
 
 const COMPLETE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -157,102 +156,58 @@ function DateSection({
   toDate: string;
   onSetDateRange: (from: string, to: string) => void;
 }) {
-  const preset = matchDatePreset(fromDate, toDate);
   const hasDates = Boolean(fromDate || toDate);
-  const [customOpen, setCustomOpen] = useState(false);
   const [singleDay, setSingleDay] = useState(Boolean(fromDate) && fromDate === toDate);
-  const showCustom = customOpen || (hasDates && !preset);
 
   // Follow outside changes (e.g. clicking a day in the timeline sets from = to).
   useEffect(() => {
     if (fromDate && fromDate === toDate) setSingleDay(true);
   }, [fromDate, toDate]);
 
-  // Clearing every date (Reset, removing pills) collapses the custom range.
-  useEffect(() => {
-    if (!hasDates) setCustomOpen(false);
-  }, [hasDates]);
-
-  const chip = (active: boolean) => `${CHIP_BASE} ${active ? CHIP_ON : CHIP_OFF}`;
-
   return (
     <section className="space-y-2">
-      <h3 className={SECTION_LABEL}>When</h3>
-      <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          aria-pressed={!hasDates && !showCustom}
-          onClick={() => {
-            setCustomOpen(false);
-            if (hasDates) onSetDateRange('', '');
-          }}
-          className={chip(!hasDates && !showCustom)}
-        >
-          Any time
-        </button>
-        {DATE_PRESETS.map((p) => {
-          const active = !showCustom && preset?.id === p.id;
-          return (
-            <button
-              key={p.id}
-              type="button"
-              aria-pressed={active}
-              onClick={() => {
-                setCustomOpen(false);
-                const r = p.range(new Date());
-                onSetDateRange(r.from, r.to);
-              }}
-              className={chip(active)}
-            >
-              {p.label}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          aria-pressed={showCustom}
-          aria-expanded={showCustom}
-          onClick={() => setCustomOpen(true)}
-          className={chip(showCustom)}
-        >
-          Custom…
-        </button>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className={SECTION_LABEL}>When</h3>
+        {hasDates && (
+          <button
+            type="button"
+            onClick={() => onSetDateRange('', '')}
+            className="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400"
+          >
+            Clear dates
+          </button>
+        )}
       </div>
-
-      {showCustom && (
-        <div className="space-y-2 pt-1">
-          <div className="flex flex-wrap gap-3">
-            {singleDay ? (
-              <DateInput
-                label="Day"
-                value={fromDate === toDate ? fromDate : fromDate || toDate}
-                onCommit={(v) => onSetDateRange(v, v)}
-              />
-            ) : (
-              <>
-                <DateInput label="From" value={fromDate} onCommit={(v) => onSetDateRange(v, toDate)} />
-                <DateInput label="To" value={toDate} onCommit={(v) => onSetDateRange(fromDate, v)} />
-              </>
-            )}
-          </div>
-          <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={singleDay}
-              onChange={(e) => {
-                const on = e.target.checked;
-                setSingleDay(on);
-                if (on) {
-                  const day = fromDate || toDate;
-                  if (day && (fromDate !== day || toDate !== day)) onSetDateRange(day, day);
-                }
-              }}
-              className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-            />
-            Single day
-          </label>
-        </div>
-      )}
+      <div className="flex flex-wrap gap-3">
+        {singleDay ? (
+          <DateInput
+            label="Day"
+            value={fromDate === toDate ? fromDate : fromDate || toDate}
+            onCommit={(v) => onSetDateRange(v, v)}
+          />
+        ) : (
+          <>
+            <DateInput label="From" value={fromDate} onCommit={(v) => onSetDateRange(v, toDate)} />
+            <DateInput label="To" value={toDate} onCommit={(v) => onSetDateRange(fromDate, v)} />
+          </>
+        )}
+      </div>
+      <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={singleDay}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setSingleDay(on);
+            if (on) {
+              const day = fromDate || toDate;
+              if (day && (fromDate !== day || toDate !== day)) onSetDateRange(day, day);
+            }
+          }}
+          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+        />
+        Single day
+      </label>
     </section>
   );
 }
