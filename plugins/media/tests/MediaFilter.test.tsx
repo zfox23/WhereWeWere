@@ -17,23 +17,13 @@ afterEach(() => {
 });
 
 describe('MediaFilter', () => {
-  it('renders the Media include toggle and all five subtype pills', () => {
+  it('renders all five subtype pills (the include toggle lives in the panel chip row)', () => {
     render(<MediaFilter {...baseProps} onToggleIncluded={vi.fn()} onSetMediaSubtypes={vi.fn()} />);
 
-    expect(screen.getByRole('button', { name: 'Media' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Media' })).toBeNull();
     for (const label of ['Movies', 'TV Shows', 'Games', 'Books', 'Board Games']) {
       expect(screen.getByRole('button', { name: label, pressed: false })).toBeTruthy();
     }
-  });
-
-  it('calls onToggleIncluded when the Media toggle changes', async () => {
-    const onToggleIncluded = vi.fn();
-    render(<MediaFilter {...baseProps} onToggleIncluded={onToggleIncluded} onSetMediaSubtypes={vi.fn()} />);
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Media' }));
-
-    expect(onToggleIncluded).toHaveBeenCalledTimes(1);
   });
 
   it('collapses subtype options when the Media type is not included', () => {
@@ -80,13 +70,5 @@ describe('MediaFilter', () => {
     );
     expect(screen.getByRole('button', { name: 'Movies' })).toHaveAttribute('disabled');
     expect(screen.getByRole('button', { name: 'Books' })).toHaveAttribute('disabled');
-  });
-
-  it('disables the include toggle when type toggling is disabled and explains why', () => {
-    render(
-      <MediaFilter {...baseProps} typeToggleDisabled filtersDisabled onToggleIncluded={vi.fn()} onSetMediaSubtypes={vi.fn()} />,
-    );
-    expect(screen.getByRole('button', { name: 'Media' })).toHaveAttribute('disabled');
-    expect(screen.getByText(/clear other type filters/i)).toBeTruthy();
   });
 });

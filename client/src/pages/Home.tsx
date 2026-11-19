@@ -8,6 +8,8 @@ import { allClientPlugins, getClientPlugin, hasClientPlugin } from '../plugins/r
 import { PluginTimelineCard } from '../plugins/autoCard';
 import { plugins as pluginApi } from '../plugins/api';
 import Filters from '../components/filters/Filters';
+import { matchDatePreset } from '../components/filters/datePresets';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { CompanionPhoto } from '../components/CompanionName';
 import { usePageTitle } from '../utils/pageTitle';
 import WeatherBadge from '../../../plugins/location/ui/WeatherBadge';
@@ -262,6 +264,8 @@ export default function Home() {
   // Core companion filter: only check-ins carrying this companion name.
   const companion = searchParams.get('companion') || '';
   const [showFilters, setShowFilters] = useState(false);
+  // Type to select once a cleared refinement stops pinning the timeline.
+  const pendingOnlyTypeRef = useRef<string | null>(null);
 
   // Check-in plugin filter params, scoped per plugin.
   const pluginFilterParams = useMemo(() => {
@@ -311,7 +315,7 @@ export default function Home() {
     sectionDisabled: (activePluginFilterId !== null && activePluginFilterId !== plugin.id) || !(pluginIncludes[plugin.id] ?? true),
     typeToggleDisabled: pluginTypeToggleDisabled,
     params: pluginFilterParams[plugin.id] ?? {},
-    onToggleIncluded: () => togglePluginType(plugin.id),
+    onToggleIncluded: () => selectPluginType(plugin.id),
     onSetParam: (name: string, value: string) => setPluginTypeFilter(plugin.id, name, value),
   }));
 
@@ -329,17 +333,66 @@ export default function Home() {
     );
   }
 
-  function togglePluginType(pluginId: string) {
-    if (pluginTypeToggleDisabled) return;
-    setPluginIncludes((prev) => {
-      const current = prev[pluginId] ?? true;
-      // Keep at least one type visible.
-      const othersOn = Object.keys(prev).some((k) => k !== pluginId && (prev[k] ?? true));
-      if (current && !othersOn) {
-        return prev;
+  /** Drop every plugin refinement param from the URL. */
+  function clearPluginFilterParams() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const key of pluginFilterKeys) next.delete(key);
+      next.delete('venue_id');
+      next.delete('category');
+      next.delete('country');
+      next.delete('type');
+      return next;
+    }, { replace: true });
+  }
+
+  /**
+   * Type chip click. From "All", a chip selects only that type (so its
+   * refinements show); after that chips toggle in and out, and deselecting
+   * the last one returns to All. While a refinement is active, another chip
+   * drops the refinement and switches to that type alone, and the refined
+   * type's own chip drops it and returns to All.
+   */
+  function selectPluginType(pluginId: string) {
+    if (hasPluginFilter) {
+      if (pluginId === activePluginFilterId) {
+        selectAllPluginTypes();
+        return;
       }
-      return { ...prev, [pluginId]: !current };
+      // Clearing the params flips hasPluginFilter, whose effect below would
+      // reset to All; it applies this type instead.
+      pendingOnlyTypeRef.current = pluginId;
+      clearPluginFilterParams();
+      return;
+    }
+    setPluginIncludes((prev) => {
+      const on = (id: string) => prev[id] ?? true;
+      const allOn = NEW_PLUGINS.every((p) => on(p.id));
+      if (allOn) {
+        return Object.fromEntries(NEW_PLUGINS.map((p) => [p.id, p.id === pluginId]));
+      }
+      const othersOn = NEW_PLUGINS.some((p) => p.id !== pluginId && on(p.id));
+      if (on(pluginId) && !othersOn) {
+        return Object.fromEntries(NEW_PLUGINS.map((p) => [p.id, true]));
+      }
+      return { ...prev, [pluginId]: !on(pluginId) };
     });
+  }
+
+  /** "All" chip: every type again, without any type refinement. */
+  function selectAllPluginTypes() {
+    pendingOnlyTypeRef.current = null;
+    if (hasPluginFilter) clearPluginFilterParams();
+    setAllPluginIncludes(true);
+  }
+
+  function setDateRange(from: string, to: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (from) next.set('from', from); else next.delete('from');
+      if (to) next.set('to', to); else next.delete('to');
+      return next;
+    }, { replace: true });
   }
 
   function setPluginTypeFilter(pluginId: string, name: string, value: string) {
@@ -378,15 +431,31 @@ export default function Home() {
   // normal include toggle.
   useEffect(() => {
     if (hasPluginFilter) return;
-    setAllPluginIncludes(true);
-  }, [hasPluginFilter, setAllPluginIncludes]);
-
-  // Show filters panel if any structured filter is active
-  useEffect(() => {
-    if (fromDate || toDate || venueId || category || country || companion || hasPluginFilter) {
-      setShowFilters(true);
+    const pending = pendingOnlyTypeRef.current;
+    pendingOnlyTypeRef.current = null;
+    if (pending && hasClientPlugin(pending)) {
+      setOnlyPluginInclude(pending, true);
+      return;
     }
-  }, [fromDate, toDate, venueId, category, country, companion, hasPluginFilter]);
+    setAllPluginIncludes(true);
+  }, [hasPluginFilter, setAllPluginIncludes, setOnlyPluginInclude]);
+
+  // Below md the filters open as a bottom sheet over the feed.
+  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const filterSheetOpen = showFilters && !isDesktop;
+  useEffect(() => {
+    if (!filterSheetOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowFilters(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [filterSheetOpen]);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const feedContainerRef = useRef<HTMLDivElement>(null);
@@ -743,7 +812,10 @@ export default function Home() {
       key: 'companion',
     });
   }
-  if (fromDate && toDate && fromDate === toDate) {
+  const datePreset = matchDatePreset(fromDate, toDate);
+  if (datePreset) {
+    filterPills.push({ label: datePreset.label, key: 'dates' });
+  } else if (fromDate && toDate && fromDate === toDate) {
     filterPills.push({ label: `Date: ${fromDate}`, key: 'from' });
   } else {
     if (fromDate) filterPills.push({ label: `From: ${fromDate}`, key: 'from' });
@@ -755,6 +827,15 @@ export default function Home() {
     for (const [name, value] of Object.entries(pluginFilterParams[plugin.id] ?? {})) {
       filterPills.push({ label: `${plugin.strings.title}: ${value}`, key: name });
     }
+  }
+  // Type selection (when no refinement already implies it).
+  if (hasNewPluginFilter && !hasPluginFilter && includedPluginIds.length > 0) {
+    const title = (id: string) => getClientPlugin(id)?.strings.title ?? id;
+    const excluded = NEW_PLUGINS.filter((p) => !(pluginIncludes[p.id] ?? true));
+    const label = includedPluginIds.length <= excluded.length
+      ? `Only ${includedPluginIds.map(title).join(', ')}`
+      : `Hiding ${excluded.map((p) => title(p.id)).join(', ')}`;
+    filterPills.push({ label, key: 'types' });
   }
 
   return (
@@ -793,15 +874,20 @@ export default function Home() {
         </button>
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`px-3 py-3 rounded-2xl border transition-all ${
+          className={`relative px-3 py-3 rounded-2xl border transition-all ${
             showFilters || hasActiveFilters
               ? 'bg-primary-50/70 border-primary-300/60 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
               : 'bg-white/70 dark:bg-gray-900/70 border-white/40 dark:border-gray-700/40 text-gray-600 dark:text-gray-400 hover:bg-white/90 dark:hover:bg-gray-800/90 shadow-sm shadow-black/3'
           }`}
-          aria-label={showFilters ? "Hide filters" : "Show filters"}
+          aria-label={showFilters ? "Hide filters" : filterPills.length > 0 ? `Show filters (${filterPills.length} active)` : "Show filters"}
           aria-expanded={showFilters}
         >
           <SlidersHorizontal size={18} />
+          {filterPills.length > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-primary-600 text-white text-[11px] font-semibold leading-5 text-center tabular-nums">
+              {filterPills.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -815,8 +901,13 @@ export default function Home() {
             >
               {pill.label}
               <button
+                aria-label={`Remove filter: ${typeof pill.label === 'string' ? pill.label : pill.key}`}
                 onClick={() => {
-                  if (pill.key === 'from' && fromDate === toDate) {
+                  if (pill.key === 'types') {
+                    setAllPluginIncludes(true);
+                  } else if (pill.key === 'dates') {
+                    setDateRange('', '');
+                  } else if (pill.key === 'from' && fromDate === toDate) {
                     setSearchParams((prev) => {
                       const next = new URLSearchParams(prev);
                       next.delete('from');
@@ -845,20 +936,58 @@ export default function Home() {
         </div>
       )}
 
-      {/* Expanded filters */}
-      <div className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out ${showFilters ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}>
-        <div className="min-h-0">
-          <Filters
-            hasActiveFilters={Boolean(hasActiveFilters)}
-            fromDate={fromDate}
-            toDate={toDate}
-            onSetDateFilter={setFilter}
-            onClearAll={clearFilters}
-            pluginFilterSpecs={pluginFilterSpecs}
-            onInvertPluginFilters={invertPluginTypes}
-          />
+      {/* Expanded filters: inline on md+, a bottom sheet on phones */}
+      {isDesktop ? (
+        <div
+          inert={!showFilters}
+          className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out ${showFilters ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}
+        >
+          <div className="min-h-0">
+            <Filters
+              hasActiveFilters={Boolean(hasActiveFilters)}
+              fromDate={fromDate}
+              toDate={toDate}
+              onSetDateRange={setDateRange}
+              onClearAll={clearFilters}
+              pluginFilterSpecs={pluginFilterSpecs}
+              onSelectAllTypes={selectAllPluginTypes}
+              onInvertPluginFilters={invertPluginTypes}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div
+          inert={!filterSheetOpen}
+          className={`fixed inset-0 z-70 ${filterSheetOpen ? '' : 'pointer-events-none'}`}
+        >
+          <button
+            type="button"
+            aria-label="Close filters"
+            onClick={() => setShowFilters(false)}
+            className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${filterSheetOpen ? 'opacity-100' : 'opacity-0'}`}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Filters"
+            className={`absolute inset-x-0 bottom-0 max-h-[85vh] max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-white dark:bg-gray-900 shadow-xl px-4 pt-2 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] transition-transform duration-300 ease-out ${filterSheetOpen ? 'translate-y-0' : 'translate-y-full'}`}
+          >
+            <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
+            <Filters
+              variant="sheet"
+              hasActiveFilters={Boolean(hasActiveFilters)}
+              fromDate={fromDate}
+              toDate={toDate}
+              onSetDateRange={setDateRange}
+              onClearAll={clearFilters}
+              pluginFilterSpecs={pluginFilterSpecs}
+              onSelectAllTypes={selectAllPluginTypes}
+              onInvertPluginFilters={invertPluginTypes}
+              onDone={() => setShowFilters(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {openTimelineDotDate && (
         <button
