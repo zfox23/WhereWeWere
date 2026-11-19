@@ -1031,7 +1031,8 @@ export default function Home() {
         >
           <button
             type="button"
-            aria-label="Close filters"
+            aria-label="Dismiss filters"
+            tabIndex={-1}
             onClick={() => setShowFilters(false)}
             className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${filterSheetOpen ? 'opacity-100' : 'opacity-0'}`}
           />
@@ -1039,9 +1040,21 @@ export default function Home() {
             role="dialog"
             aria-modal="true"
             aria-label="Filters"
-            className={`absolute inset-x-0 bottom-0 max-h-[85vh] max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-white dark:bg-gray-900 shadow-xl px-4 pt-2 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] transition-transform duration-300 ease-out ${filterSheetOpen ? 'translate-y-0' : 'translate-y-full'}`}
+            // Closed: slid off-screen AND invisible (visibility flips only
+            // after the slide), so no edge or shadow peeks over the bottom nav.
+            className={`absolute inset-x-0 bottom-0 max-h-[85vh] max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-white dark:bg-gray-900 px-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] transition-[translate,visibility,box-shadow] duration-300 ease-out ${filterSheetOpen ? 'translate-y-0 visible shadow-xl' : 'translate-y-full invisible shadow-none'}`}
           >
-            <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-gray-300 dark:bg-gray-700" aria-hidden="true" />
+            <div className="sticky top-0 z-10 -mx-4 mb-2 flex items-center justify-between bg-white dark:bg-gray-900 px-4 pt-3 pb-2">
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Filters</h2>
+              <button
+                type="button"
+                aria-label="Close filters"
+                onClick={() => setShowFilters(false)}
+                className="-mr-2 rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              >
+                <X size={20} />
+              </button>
+            </div>
             <Filters
               variant="sheet"
               hasActiveFilters={Boolean(hasActiveFilters)}
@@ -1052,7 +1065,6 @@ export default function Home() {
               pluginFilterSpecs={pluginFilterSpecs}
               onSelectAllTypes={selectAllPluginTypes}
               onInvertPluginFilters={invertPluginTypes}
-              onDone={() => setShowFilters(false)}
             />
           </div>
         </div>

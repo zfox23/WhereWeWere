@@ -270,10 +270,8 @@ export interface FiltersProps {
   onSelectAllTypes?: () => void;
   /** Invert the include state of every top-level plugin filter. */
   onInvertPluginFilters?: () => void;
-  /** `sheet` drops the card chrome and adds a Done button (mobile bottom sheet). */
+  /** `sheet` drops the card chrome (mobile bottom sheet). */
   variant?: 'inline' | 'sheet';
-  /** Close handler for the sheet's Done button. */
-  onDone?: () => void;
 }
 
 export default function Filters({
@@ -286,7 +284,6 @@ export default function Filters({
   onSelectAllTypes,
   onInvertPluginFilters,
   variant = 'inline',
-  onDone,
 }: FiltersProps) {
   const included = pluginFilterSpecs.filter((s) => s.included);
   const allIncluded = included.length === pluginFilterSpecs.length;
@@ -359,25 +356,16 @@ export default function Filters({
 
       <DateSection fromDate={fromDate} toDate={toDate} onSetDateRange={onSetDateRange} />
 
-      {(hasActiveFilters || onDone) && (
-        <div className="flex items-center justify-between gap-3 pt-1">
-          {hasActiveFilters ? (
-            <button
-              type="button"
-              onClick={onClearAll}
-              className="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 flex items-center gap-1"
-            >
-              <X size={12} />
-              Reset all
-            </button>
-          ) : (
-            <span />
-          )}
-          {onDone && (
-            <button type="button" onClick={onDone} className="btn-primary px-5">
-              Done
-            </button>
-          )}
+      {hasActiveFilters && (
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 flex items-center gap-1"
+          >
+            <X size={12} />
+            Reset all
+          </button>
         </div>
       )}
     </div>
