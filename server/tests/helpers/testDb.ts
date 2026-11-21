@@ -74,20 +74,82 @@ export async function setupIntegrationDatabase() {
   await runMigrations(pool);
 }
 
+interface ResetPlan {
+  tables: string[];
+  /** One query naming the tables that hold any rows. */
+  nonEmptySql: string;
+  sequences: string[];
+}
+
+let resetPlan: ResetPlan | null = null;
+
+async function getResetPlan(): Promise<ResetPlan> {
+  if (resetPlan) return resetPlan;
+  const tables = (
+    await query(
+      `SELECT tablename FROM pg_tables
+       WHERE schemaname = 'public' AND tablename <> 'schema_migrations'
+       ORDER BY tablename`
+    )
+  ).rows.map((row: { tablename: string }) => row.tablename);
+  const sequences = (
+    await query(`SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public'`)
+  ).rows.map((row: { sequence_name: string }) => row.sequence_name);
+  resetPlan = {
+    tables,
+    nonEmptySql: tables
+      .map((t: string) => `SELECT ${quoteLiteral(t)} AS t WHERE EXISTS (SELECT 1 FROM ${quoteIdentifier(t)})`)
+      .join(' UNION ALL '),
+    sequences,
+  };
+  return resetPlan;
+}
+
+function quoteLiteral(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+async function truncateAll(plan: ResetPlan) {
+  if (plan.tables.length === 0) return;
+  await query(`TRUNCATE TABLE ${plan.tables.map(quoteIdentifier).join(', ')} RESTART IDENTITY CASCADE`);
+}
+
+/**
+ * Empty every table, as `TRUNCATE ... RESTART IDENTITY` of them all would.
+ *
+ * TRUNCATE gives every table and index a new file, which costs ~0.5 s for
+ * ~60 tables even when nearly all are empty (and nearly every table
+ * references users, so CASCADE always pulls in the lot). Instead, DELETE
+ * from just the tables holding rows - usually a handful - with triggers and
+ * foreign-key checks off for that one transaction (session_replication_role,
+ * superuser only): every table that holds rows is emptied, so nothing is
+ * left dangling. Falls back to TRUNCATE when that isn't allowed.
+ */
+async function emptyAllTables() {
+  const plan = await getResetPlan();
+  const nonEmpty = (await query(plan.nonEmptySql)).rows.map((row: { t: string }) => row.t);
+  const restartSequences = plan.sequences.map((s) => `ALTER SEQUENCE ${quoteIdentifier(s)} RESTART;`).join(' ');
+  if (nonEmpty.length === 0) {
+    if (restartSequences) await query(restartSequences);
+    return;
+  }
+  try {
+    // One simple-protocol query runs as a single implicit transaction, so
+    // SET LOCAL lasts exactly as long as the deletes, and an error rolls
+    // the whole thing back (and leaves no open transaction on the client).
+    await query(
+      `SET LOCAL session_replication_role = replica; ${nonEmpty
+        .map((t: string) => `DELETE FROM ${quoteIdentifier(t)};`)
+        .join(' ')} ${restartSequences}`
+    );
+  } catch {
+    await truncateAll(plan);
+  }
+}
+
 export async function resetIntegrationDatabase() {
   await releaseStaleTransactions();
-  const tableResult = await query(
-    `SELECT tablename
-     FROM pg_tables
-     WHERE schemaname = 'public'
-       AND tablename <> 'schema_migrations'`
-  );
-
-  const tableNames = tableResult.rows.map((row: { tablename: string }) => row.tablename);
-  if (tableNames.length > 0) {
-    const quoted = tableNames.map((name: string) => `"${name}"`).join(', ');
-    await query(`TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE`);
-  }
+  await emptyAllTables();
 
   await query(
     `INSERT INTO users (id, username, email, password_hash, display_name, is_admin)

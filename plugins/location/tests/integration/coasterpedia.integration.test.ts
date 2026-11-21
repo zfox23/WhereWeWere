@@ -38,7 +38,7 @@ function stubCoasterpedia(search: unknown[], attraction: unknown = ATTRACTION) {
   return fetchMock;
 }
 
-/** Calls to Coasterpedia only; venue creation also geocodes through the stubbed fetch. */
+/** Calls to Coasterpedia only. */
 const coasterpediaCalls = (fetchMock: ReturnType<typeof vi.fn>) =>
   fetchMock.mock.calls.filter(([url]) => String(url).includes('api.coasterpedia.net')).length;
 
@@ -57,9 +57,10 @@ async function category(name: string) {
 }
 
 async function createVenue(name: string, categoryId: string) {
+  // A full address, so saving doesn't reverse-geocode (Nominatim is paced to one call a second).
   const res = await request(app)
     .post('/api/v1/venues')
-    .send({ name, category_id: categoryId, latitude: 41.5, longitude: -81.6, country: 'USA' });
+    .send({ name, category_id: categoryId, latitude: 41.5, longitude: -81.6, country: 'USA', state: 'Ohio', city: 'Sandusky' });
   expect(res.status).toBe(201);
   return res.body.id as string;
 }
