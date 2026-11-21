@@ -22,6 +22,8 @@ import TvEpisodeCheckInForm from '../../plugins/media/ui/pages/TvEpisodeCheckInF
 import MediaDetail from '../../plugins/media/ui/pages/MediaDetail';
 import AlbumPage from '../../plugins/music/ui/pages/AlbumPage';
 import PlayPage from '../../plugins/music/ui/pages/PlayPage';
+import SongPage from '../../plugins/music/ui/pages/SongPage';
+import ArtistPage from '../../plugins/music/ui/pages/ArtistPage';
 
 /** Check-in page for a specific plugin (create + edit via ?edit=<id>). */
 function PluginCheckInPage({ pluginId }: { pluginId: string }) {
@@ -122,6 +124,8 @@ export default function App() {
         <Route path="/media/board-game/:id/:slug" element={<MediaDetail subtype="board_game" />} />
         <Route path="/music/album" element={<AlbumPage />} />
         <Route path="/music/plays/:id" element={<PlayPage />} />
+        <Route path="/music/song" element={<SongPage />} />
+        <Route path="/music/artist" element={<ArtistPage />} />
         <Route path="/venues/:id" element={<VenueDetail />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/settings" element={<Settings />} />

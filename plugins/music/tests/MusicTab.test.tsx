@@ -81,47 +81,17 @@ describe('MusicTab', () => {
     expect(screen.getByText('Nothing played in this period.')).toBeTruthy();
   });
 
-  it('jumps to the Library subtab filtered to a clicked artist, song or album', async () => {
-    const user = userEvent.setup();
-    window.HTMLElement.prototype.scrollIntoView = vi.fn();
-    window.history.replaceState(null, '', '/profile?tab=plugin:music&musicPeriod=twelve&sort=plays&dir=asc');
+  it('links top artists, songs and albums to their own pages', async () => {
     statsMock.mockResolvedValue({
       ...STATS,
+      top_songs: [agg('Song 1', 9, { artists: ['Khruangbin'], song_key: 'song 1|khruangbin' })],
       top_albums: [agg('Mowgli\'s Road', 4, { artists: ['Khruangbin'], album_ref: 'mowglis road|khruangbin' })],
     });
     renderTab();
     await waitFor(() => screen.getByText('Song 1'));
-
-    await user.click(screen.getByRole('link', { name: 'Khruangbin' }));
-    let params = new URLSearchParams(window.location.search);
-    expect([params.get('musicSection'), params.get('musicView'), params.get('q')]).toEqual(['library', 'artists', 'Khruangbin']);
-    expect(params.has('sort') && params.has('dir')).toBe(false);
-    expect((await screen.findByLabelText('Filter library') as HTMLInputElement).value).toBe('Khruangbin');
-    // The library is all-time, whatever period the overview was on.
-    expect(libraryMock).toHaveBeenLastCalledWith('artists', undefined, undefined, expect.objectContaining({ q: 'Khruangbin' }));
-    expect(screen.queryByText('Top songs')).toBeNull();
-
-    await user.click(screen.getByRole('button', { name: 'Overview' }));
-    await user.click(await screen.findByRole('link', { name: 'Song 3' }));
-    params = new URLSearchParams(window.location.search);
-    expect([params.get('musicSection'), params.get('musicView'), params.get('q')]).toEqual(['library', null, 'Song 3']); // songs is the default view
-    expect((await screen.findByLabelText('Filter library') as HTMLInputElement).value).toBe('Song 3');
-    expect(params.get('musicPeriod')).toBe('twelve'); // the overview's period is remembered
-
-    // An album opens its details instead of filtering, matched or not.
-    await user.click(screen.getByRole('button', { name: 'Overview' }));
-    albumViewMock.mockResolvedValue({
-      album_ref: 'mowglis road|khruangbin', art_id: null, matched: false, title: "Mowgli's Road", artist: 'Khruangbin',
-      release_date: null, label: null, plays: 4, listened_seconds: 0, tracks: [],
-    });
-    await user.click(await screen.findByRole('link', { name: "Mowgli's Road" }));
-    expect(await screen.findByRole('dialog', { name: "Mowgli's Road by Khruangbin" })).toBeTruthy();
-    expect(albumViewMock).toHaveBeenCalledWith({ ref: 'mowglis road|khruangbin', artId: undefined });
-    // ...and its "Show in library" filters the Library subtab.
-    await user.click(screen.getByRole('button', { name: 'Show in library' }));
-    params = new URLSearchParams(window.location.search);
-    expect([params.get('musicSection'), params.get('musicView'), params.get('q')]).toEqual(['library', 'albums', "Mowgli's Road"]);
-    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(screen.getAllByRole('link', { name: 'Khruangbin' })[0].getAttribute('href')).toBe('/music/artist?name=Khruangbin');
+    expect(screen.getByRole('link', { name: 'Song 1' }).getAttribute('href')).toBe('/music/song?key=song+1%7Ckhruangbin');
+    expect(screen.getByRole('link', { name: "Mowgli's Road" }).getAttribute('href')).toBe('/music/album?ref=mowglis+road%7Ckhruangbin');
   });
 
   describe('making a list from the top songs and albums', () => {

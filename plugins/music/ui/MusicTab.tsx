@@ -12,6 +12,7 @@ import type { PluginProfileTabProps } from 'wwp-shared';
 import { stats as statsApi } from '../../../client/src/api/client';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
 import { StatCard } from '../../../client/src/components/Stats';
+import { useScrollRestoration } from '../../../client/src/hooks/useScrollRestoration';
 import {
   PeriodMode,
   getCurrentMonthIso,
@@ -33,7 +34,7 @@ import { DiscoveryChart } from './insights/DiscoveryChart';
 import { MusicLifeCard } from './insights/MusicLifeCard';
 import { openMusicList, topListTitle } from './listTitle';
 import { refreshMusicLists } from './useMusicLists';
-import { ProfileLibraryLink } from './libraryLinks';
+import { ArtistLink, SongLink } from './links';
 import type { ListTarget, MusicAggregate, MusicLibraryView, MusicStats } from './types';
 
 function getMonthFromLocation(): string {
@@ -143,8 +144,10 @@ function TopList({
                   <span className="min-w-0 truncate">
                     {view === 'albums' ? (
                       <AlbumLink albumRef={row.album_ref}>{row.name}</AlbumLink>
+                    ) : view === 'songs' ? (
+                      <SongLink songKey={row.song_key}>{row.name}</SongLink>
                     ) : (
-                      <ProfileLibraryLink view={view} q={row.name}>{row.name}</ProfileLibraryLink>
+                      <ArtistLink name={row.name} />
                     )}
                     {view !== 'artists' && (
                       <>
@@ -186,6 +189,9 @@ export function MusicTab(_props: PluginProfileTabProps) {
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [data, setData] = useState<MusicStats | null>(null);
   const [earliestDate, setEarliestDate] = useState<string | null>(null);
+
+  // Back from a song, artist or album page returns to the same spot (once the Overview has loaded).
+  useScrollRestoration(section !== 'overview' || initialLoaded);
 
   const visibleRange = useMemo(
     () => getPeriodDateRange(selectedMonth, periodMode, selectedWeek),

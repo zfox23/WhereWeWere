@@ -113,18 +113,19 @@ describe('MusicCard', () => {
     const user = userEvent.setup();
     sessionTracksMock.mockResolvedValue([
       { played_at: '2024-05-01T12:00:00Z', title: 'Maria También', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'UTC' },
-      { played_at: '2024-05-01T12:30:00Z', title: 'Evidence', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'Pacific/Auckland' },
+      { played_at: '2024-05-01T12:30:00Z', title: 'Evidence', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'Pacific/Auckland', song_key: 'evidence|khruangbin' },
     ]);
     renderCard();
     const toggle = screen.getByRole('button');
     await user.click(toggle);
     await waitFor(() => expect(screen.getByText(/Maria También/)).toBeTruthy());
     expect(sessionTracksMock).toHaveBeenCalledWith('session-1');
-    // Artist and title open the library in a new tab, without toggling the card.
+    // Artist and title open their pages.
     const artist = screen.getAllByRole('link', { name: 'Khruangbin' })[0];
-    expect(artist.getAttribute('href')).toContain('musicView=artists&q=Khruangbin');
-    expect(artist.getAttribute('target')).toBe('_blank');
-    expect(screen.getByRole('link', { name: 'Evidence' }).getAttribute('href')).toContain('q=Evidence');
+    expect(artist.getAttribute('href')).toBe('/music/artist?name=Khruangbin');
+    expect(screen.getByRole('link', { name: 'Evidence' }).getAttribute('href')).toBe('/music/song?key=evidence%7Ckhruangbin');
+    // A title without a song key stays text.
+    expect(screen.queryByRole('link', { name: 'Maria También' })).toBeNull();
     // Each track's clock time is in the zone it was played in.
     expect(screen.getByText('12:00 PM UTC')).toBeTruthy();
     expect(screen.getByText(/^12:30 AM (GMT\+12|NZST)$/)).toBeTruthy();

@@ -1,106 +1,75 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AlbumArt } from '../ui/AlbumArt';
-import { releaseDateLabel } from '../ui/AlbumModal';
-import { resetMusicLists } from '../ui/useMusicLists';
+import { AlbumLink } from '../ui/AlbumLink';
 
-const albumMock = vi.fn();
-const listsMock = vi.fn();
 vi.mock('../ui/api', () => ({
   albumArtUrl: (id: string, size = 'thumb') => `/art/${id}/${size}`,
-  music: { albumView: (...args: unknown[]) => albumMock(...args), lists: () => listsMock() },
 }));
 
-const ALBUM = {
-  album_ref: 'group therapy|above & beyond',
-  art_id: 'a1',
-  matched: true,
-  title: 'Group Therapy',
-  artist: 'Above & Beyond',
-  release_date: '2011-06-14',
-  label: 'Anjunabeats',
-  plays: 3,
-  listened_seconds: 900,
-  tracks: [
-    { position: 1, title: 'Filaments', artists: ['Above & Beyond'], length: 300, plays: 0, song_key: null },
-    { position: 2, title: 'Sun & Moon', artists: ['Above & Beyond'], length: 321, plays: 3, song_key: 'sun & moon\u001fabove & beyond' },
-  ],
-};
+function Where() {
+  const { pathname, search } = useLocation();
+  return <p data-testid="where">{`${pathname}${search}`}</p>;
+}
+
+const renderIn = (ui: React.ReactNode) =>
+  render(
+    <MemoryRouter initialEntries={['/']}>
+      <Routes>
+        <Route path="*" element={<>{ui}<Where /></>} />
+      </Routes>
+    </MemoryRouter>,
+  );
 
 describe('AlbumArt', () => {
-  beforeEach(() => {
-    albumMock.mockResolvedValue(ALBUM);
-    listsMock.mockResolvedValue([]);
-    resetMusicLists();
-  });
-  afterEach(() => {
-    cleanup();
-    albumMock.mockReset();
-    listsMock.mockReset();
-  });
+  afterEach(cleanup);
 
   it('renders nothing without a cover', () => {
-    const { container } = render(<AlbumArt artId={null} size={24} />);
+    const { container } = render(<MemoryRouter><AlbumArt artId={null} size={24} /></MemoryRouter>);
     expect(container.innerHTML).toBe('');
   });
 
-  it('opens the album details with the large cover, release info and play counts', async () => {
+  it('opens the album\'s page, by its ref or else its cover, without the click reaching the row', async () => {
     const user = userEvent.setup();
-    const { container } = render(<AlbumArt artId="a1" />);
-    expect(container.querySelector('img')?.getAttribute('src')).toBe('/art/a1/thumb');
-    await user.click(screen.getByRole('link', { name: 'Show album details' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Group Therapy by Above & Beyond' });
-    expect(dialog.querySelector('img')?.getAttribute('src')).toBe('/art/a1/large');
-    expect(dialog.textContent).toContain('Jun 14, 2011 · Anjunabeats');
-    expect(dialog.textContent).toContain('3 scrobbles');
-    expect(dialog.textContent).toContain('5:21'); // track length
-    expect(dialog.textContent).toContain('3x');
-    expect(albumMock).toHaveBeenCalledWith({ artId: 'a1', ref: undefined });
-  });
-
-  it('closes with Escape, the close button, or the backdrop', async () => {
-    const user = userEvent.setup();
-    render(<AlbumArt artId="a1" />);
-    const open = () => user.click(screen.getByRole('link', { name: 'Show album details' }));
-    await open();
-    await screen.findByRole('dialog');
-    await user.keyboard('{Escape}');
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await open();
-    await user.click(await screen.findByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    await open();
-    const dialog = await screen.findByRole('dialog');
-    await user.click(dialog.parentElement!);
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('links to the album\'s own page, so a middle-click opens it in a new tab', async () => {
-    const user = userEvent.setup();
-    render(<AlbumArt artId="a1" albumRef="group therapy|above & beyond" />);
-    const link = screen.getByRole('link', { name: 'Show album details' });
+    const onRow = vi.fn();
+    renderIn(
+      <div onClick={onRow}>
+        <AlbumArt artId="a1" albumRef="group therapy|above & beyond" />
+      </div>,
+    );
+    const link = screen.getByRole('link', { name: 'Show album' });
+    expect(link.querySelector('img')?.getAttribute('src')).toBe('/art/a1/thumb');
     expect(link.getAttribute('href')).toBe('/music/album?ref=group+therapy%7Cabove+%26+beyond');
-    // A ctrl-click follows the link (a new tab) instead of opening the modal.
-    await user.keyboard('{Control>}');
     await user.click(link);
-    await user.keyboard('{/Control}');
+    expect(screen.getByTestId('where').textContent).toBe('/music/album?ref=group+therapy%7Cabove+%26+beyond');
+    expect(onRow).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).toBeNull();
-    // Without an identity the cover id stands in.
     cleanup();
-    render(<AlbumArt artId="a1" />);
-    expect(screen.getByRole('link', { name: 'Show album details' }).getAttribute('href')).toBe('/music/album?art_id=a1');
+    renderIn(<AlbumArt artId="a1" />);
+    expect(screen.getByRole('link', { name: 'Show album' }).getAttribute('href')).toBe('/music/album?art_id=a1');
   });
 
   it('disappears when the image fails to load', async () => {
-    const { container } = render(<AlbumArt artId="a1" />);
+    const { container } = render(<MemoryRouter><AlbumArt artId="a1" /></MemoryRouter>);
     container.querySelector('img')!.dispatchEvent(new Event('error'));
     await waitFor(() => expect(container.innerHTML).toBe(''));
   });
+});
 
-  it('formats release dates, leaving partial ones as they are', () => {
-    expect(releaseDateLabel('2011-06-14')).toBe('Jun 14, 2011');
-    expect(releaseDateLabel('2011-06')).toBe('2011-06');
-    expect(releaseDateLabel(null)).toBeNull();
+describe('AlbumLink', () => {
+  afterEach(cleanup);
+
+  it('links an album name to its page, and reads "Unknown album" without one', () => {
+    renderIn(
+      <>
+        <AlbumLink albumRef="discovery|daft punk">Discovery</AlbumLink>
+        <AlbumLink albumRef={null} />
+      </>,
+    );
+    expect(screen.getByRole('link', { name: 'Discovery' }).getAttribute('href')).toBe('/music/album?ref=discovery%7Cdaft+punk');
+    expect(document.body.textContent).toContain('Unknown album');
+    expect(screen.getAllByRole('link')).toHaveLength(1);
   });
 });

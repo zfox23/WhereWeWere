@@ -664,37 +664,14 @@ export async function getScrobbleDetail(userId: string, id: string): Promise<Scr
   } as ScrobbleDetail;
 }
 
-/** Header for a song's plays: its name, credit, cover, totals and plays per local month. */
-export async function getSongPlaysSummary(userId: string, songKey: string) {
-  const head = await query(
-    `SELECT ${latestTitleSql()} AS name, ${fullestArtistsSql()} AS artists,
-            MODE() WITHIN GROUP (ORDER BY ${albumRefSql()}) AS album_ref,
-            COUNT(*)::int AS plays, MIN(played_at) AS first_played_at, MAX(played_at) AS last_played_at
-     FROM music_scrobbles
-     WHERE user_id = $1 AND ${songKeySql()} = $2
-     HAVING COUNT(*) > 0`,
-    [userId, songKey],
-  );
-  const row = head.rows[0];
-  if (!row) return null;
-  const [art, monthly] = await Promise.all([
-    query(`SELECT id FROM music_albums WHERE user_id = $1 AND album_key = $2 AND thumb_file IS NOT NULL`, [userId, row.album_ref]),
-    query(
-      `SELECT to_char(played_at AT TIME ZONE timezone, 'YYYY-MM') AS month, COUNT(*)::int AS plays
-       FROM music_scrobbles
-       WHERE user_id = $1 AND ${songKeySql()} = $2
-       GROUP BY 1 ORDER BY 1`,
-      [userId, songKey],
-    ),
-  ]);
-  return { ...row, art_id: art.rows[0]?.id ?? null, monthly: monthly.rows };
-}
-
-/** One page of a song's plays, newest first, each with its session and the day Home shows it on. */
+/**
+ * One page of a song's plays, newest first, each with its session and the day
+ * Home shows it on; `from`/`to` bound them to local dates.
+ */
 export async function getSongPlays(
   userId: string,
   songKey: string,
-  opts: { limit: number; offset: number },
+  opts: { limit: number; offset: number; from?: string | null; to?: string | null },
 ): Promise<{ rows: any[]; total: number }> {
   const r = await query(
     `SELECT m.id, m.played_at, m.timezone, m.album, ${albumRefSql('m.')} AS album_ref, a.id AS art_id,
@@ -705,9 +682,11 @@ export async function getSongPlays(
      LEFT JOIN music_albums a ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
      LEFT JOIN music_sessions ms ON ms.id = m.session_id AND ms.user_id = m.user_id
      WHERE m.user_id = $1 AND ${songKeySql('m.')} = $2
+       AND ($5::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date >= $5::date)
+       AND ($6::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date <= $6::date)
      ORDER BY m.played_at DESC, m.id DESC
      LIMIT $3 OFFSET $4`,
-    [userId, songKey, opts.limit, opts.offset],
+    [userId, songKey, opts.limit, opts.offset, opts.from ?? null, opts.to ?? null],
   );
   return { rows: r.rows.map(({ total: _t, ...row }) => row), total: r.rows[0]?.total ?? 0 };
 }

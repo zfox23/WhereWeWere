@@ -25,6 +25,8 @@ interface PeriodRangeSelectorProps {
   allTimeLabel?: string;
   allTimeStartDate?: string;
   onOpenHome?: () => void;
+  /** What the reset button does, in words (its tooltip). */
+  resetLabel?: string;
 }
 
 export function PeriodRangeSelector({
@@ -40,6 +42,7 @@ export function PeriodRangeSelector({
   allTimeLabel = 'All available data',
   allTimeStartDate,
   onOpenHome,
+  resetLabel = 'Reset to current month and 3-month view',
 }: PeriodRangeSelectorProps) {
   const currentYear = new Date().getFullYear();
   const currentMonthIso = getCurrentMonthIso();
@@ -110,8 +113,8 @@ export function PeriodRangeSelector({
           type="button"
           onClick={resetToDefaultView}
           className="shrink-0 rounded-md p-1 text-indigo-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-300"
-          title="Reset to current month and 3-month view"
-          aria-label="Reset to current month and 3-month view"
+          title={resetLabel}
+          aria-label={resetLabel}
         >
           <RotateCcw size={14} />
         </button>

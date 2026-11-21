@@ -11,7 +11,7 @@ const listening = (overrides: Partial<ListeningBefore> = {}): ListeningBefore =>
   session_date: '2024-05-01',
   anchor_time: 360,
   tracks: [
-    { artists: ['Khruangbin'], title: 'Newest', time: 300 },
+    { artists: ['Khruangbin'], title: 'Newest', time: 300, song_key: 'newest|khruangbin' },
     { artists: ['Men I Trust', 'Guest'], title: 'Middle', time: 200 },
     { artists: ['Tycho'], title: 'Oldest', time: 100 },
   ],
@@ -67,7 +67,7 @@ describe('MusicPreview', () => {
 
   it('shows no album covers', () => {
     renderPreview(listening({ tracks: [{ artists: ['A'], title: 'With cover', time: 2, art_id: 'art-1' }] }));
-    expect(screen.queryByRole('link', { name: 'Show album details' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Show album' })).toBeNull();
     expect(document.querySelector('img')).toBeNull();
   });
 
@@ -87,16 +87,16 @@ describe('MusicPreview', () => {
     expect(screen.getByTestId('probe').textContent).toBe(JUMP);
   });
 
-  it('links artists and titles to the library in a new tab without jumping to the session', async () => {
+  it('links artists and titles to their pages without jumping to the session', async () => {
     const user = userEvent.setup();
     renderPreview(listening());
     const artist = screen.getByRole('link', { name: 'Khruangbin' });
     const title = screen.getByRole('link', { name: 'Newest' });
-    expect(artist.getAttribute('href')).toContain('musicView=artists&q=Khruangbin');
-    expect(title.getAttribute('href')).toContain('q=Newest');
-    expect([artist.getAttribute('target'), title.getAttribute('target')]).toEqual(['_blank', '_blank']);
+    expect(artist.getAttribute('href')).toBe('/music/artist?name=Khruangbin');
+    expect(title.getAttribute('href')).toBe('/music/song?key=newest%7Ckhruangbin');
     await user.click(title);
-    expect(screen.queryByTestId('probe')).toBeNull(); // the preview's own jump did not fire
+    // The song's page, not the preview's own jump to the session.
+    expect(screen.getByTestId('probe').textContent).toBe('/music/song?key=newest%7Ckhruangbin|null');
   });
 });
 

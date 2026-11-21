@@ -28,8 +28,6 @@ export function ListeningClock({ from, to }: { from?: string; to?: string }) {
   const [cells, setCells] = useState<ClockCell[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [metric, setMetric] = useState<Metric>('plays');
-  const [hover, setHover] = useState<{ dow: number; hour: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +45,32 @@ export function ListeningClock({ from, to }: { from?: string; to?: string }) {
       cancelled = true;
     };
   }, [from, to]);
+
+  return <ClockCard cells={cells} loading={loading} error={error} />;
+}
+
+/**
+ * The grid itself, for any set of plays: the Overview's period, or one song's
+ * or artist's whole history on their pages.
+ */
+export function ClockCard({
+  cells,
+  loading = false,
+  error = false,
+  title = 'Listening clock',
+  emptyText = 'Nothing played in this period.',
+  withTotals = false,
+}: {
+  cells: ClockCell[];
+  loading?: boolean;
+  error?: boolean;
+  title?: string;
+  emptyText?: string;
+  /** Add bars by hour and by weekday under the grid. */
+  withTotals?: boolean;
+}) {
+  const [metric, setMetric] = useState<Metric>('plays');
+  const [hover, setHover] = useState<{ dow: number; hour: number } | null>(null);
 
   const value = (c: ClockCell | undefined) => (c ? (metric === 'plays' ? c.plays : c.seconds) : 0);
   const byKey = useMemo(() => new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c])), [cells]);
@@ -71,7 +95,7 @@ export function ListeningClock({ from, to }: { from?: string; to?: string }) {
 
   return (
     <ChartCard
-      title="Listening clock"
+      title={title}
       icon={Clock}
       loading={loading}
       controls={
@@ -89,7 +113,7 @@ export function ListeningClock({ from, to }: { from?: string; to?: string }) {
       {error ? (
         <p className="text-xs text-red-500">Couldn't load the listening clock.</p>
       ) : cells.length === 0 && !loading ? (
-        <p className="text-xs text-gray-500">Nothing played in this period.</p>
+        <p className="text-xs text-gray-500">{emptyText}</p>
       ) : (
         <>
           <p className="mb-2 min-h-4 text-xs tabular-nums text-gray-500 dark:text-gray-400" aria-live="polite">
@@ -132,8 +156,46 @@ export function ListeningClock({ from, to }: { from?: string; to?: string }) {
               </span>
             ))}
           </div>
+          {withTotals && <Totals cells={cells} value={value} />}
         </>
       )}
     </ChartCard>
+  );
+}
+
+/** By hour of day and by weekday on their own, summed across the other. */
+function Totals({ cells, value }: { cells: ClockCell[]; value: (c: ClockCell | undefined) => number }) {
+  const byHour = HOURS.map((h) => cells.reduce((n, c) => (c.hour === h ? n + value(c) : n), 0));
+  const byDay = DAYS.map((d) => cells.reduce((n, c) => (c.dow === d ? n + value(c) : n), 0));
+  const topHour = byHour.indexOf(Math.max(...byHour));
+  const topDay = DAYS[byDay.indexOf(Math.max(...byDay))];
+  const bars = (values: number[], labels: string[], titles: string[], name: string) => {
+    const max = Math.max(...values, 1);
+    return (
+      <div role="img" aria-label={name} className="flex h-12 items-end gap-px">
+        {values.map((v, i) => (
+          <div key={i} title={titles[i]} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end">
+            <span className="block w-full rounded-t-sm bg-pink-400/80" style={{ height: `${v ? Math.max((v / max) * 100, 4) : 0}%` }} />
+            <span className="mt-0.5 h-3 text-[9px] leading-3 text-gray-400">{labels[i]}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[3fr_1fr]">
+      <div>
+        <p className="mb-1 text-[11px] text-gray-500 dark:text-gray-400">
+          By hour · most at <span className="font-medium text-gray-700 dark:text-gray-200">{hourLabel(topHour)}</span>
+        </p>
+        {bars(byHour, HOURS.map((h) => (h % 6 === 0 ? hourLabel(h) : '')), HOURS.map((h, i) => `${hourLabel(h)}: ${byHour[i]}`), 'Listening by hour of day')}
+      </div>
+      <div>
+        <p className="mb-1 text-[11px] text-gray-500 dark:text-gray-400">
+          By weekday · most on <span className="font-medium text-gray-700 dark:text-gray-200">{DAY_NAMES[topDay].slice(0, 3)}</span>
+        </p>
+        {bars(byDay, DAYS.map((d) => DAY_NAMES[d].slice(0, 1)), DAYS.map((d, i) => `${DAY_NAMES[d]}: ${byDay[i]}`), 'Listening by weekday')}
+      </div>
+    </div>
   );
 }

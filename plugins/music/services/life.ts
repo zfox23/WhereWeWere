@@ -107,7 +107,7 @@ async function moodAnchors(userId: string, lo: Date | null, hi: Date | null): Pr
   return r.rows;
 }
 
-const ANCHORS: Record<LifeBy, (userId: string, lo: Date | null, hi: Date | null) => Promise<Anchor[]>> = {
+export const ANCHORS: Record<LifeBy, (userId: string, lo: Date | null, hi: Date | null) => Promise<Anchor[]>> = {
   companion: companionAnchors,
   place: placeAnchors,
   mood: moodAnchors,

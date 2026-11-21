@@ -10,7 +10,7 @@ import { Headphones } from 'lucide-react';
 import { MOOD_LABELS } from '../../../mood/ui/MoodIcons';
 import { music } from '../api';
 import { joinArtists } from '../format';
-import { ProfileLibraryLink } from '../libraryLinks';
+import { ArtistLink, SongLink } from '../links';
 import type { LifeBy, LifeGroup, LifeItem, LifeSoundtrack } from '../types';
 import { ChartCard, Toggle } from './ChartCard';
 
@@ -74,7 +74,11 @@ function ItemList({
             <li key={`${i.name}|${detail?.(i) ?? ''}`} className="text-sm">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="min-w-0 truncate text-gray-900 dark:text-gray-100">
-                  <ProfileLibraryLink view={view} q={i.name}>{i.name}</ProfileLibraryLink>
+                  {view === 'songs' ? (
+                    <SongLink songKey={(i as { song_key?: string }).song_key}>{i.name}</SongLink>
+                  ) : (
+                    <ArtistLink name={i.name} />
+                  )}
                   {detail && <span className="text-xs text-gray-500 dark:text-gray-400"> · {detail(i)}</span>}
                 </span>
                 <span className="shrink-0 text-xs tabular-nums text-gray-500">

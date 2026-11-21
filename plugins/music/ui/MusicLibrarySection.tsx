@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Loader2, Search, X } from 'lucide-react';
 import { usePagedLibrary, useDebouncedValue } from '../../../client/src/hooks/usePagedLibrary';
 import { PagingFooter } from '../../../client/src/components/lists/PagingFooter';
@@ -16,8 +16,7 @@ import { AlbumLink } from './AlbumLink';
 import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
 import { formatDateKey, formatDay, formatDuration, joinArtists } from './format';
 import { homeDayLink } from './homeLinks';
-import { jumpToLibrary } from './libraryLinks';
-import { SongPlaysModal } from './SongPlaysModal';
+import { ArtistLink, ArtistLinks, SongLink } from './links';
 import type { MusicAggregate, MusicLibraryView } from './types';
 
 type SortDir = 'asc' | 'desc';
@@ -71,29 +70,6 @@ const COLUMNS: Record<MusicLibraryView, Column[]> = {
 };
 
 const CELL_LINK = 'text-left hover:underline decoration-dotted underline-offset-2';
-
-/** A cell value that filters the library to `q`. */
-function FilterButton({ q, onFilter, children }: { q: string; onFilter: (q: string) => void; children: ReactNode }) {
-  return (
-    <button type="button" onClick={() => onFilter(q)} title={`Filter library to ${q}`} className={CELL_LINK}>
-      {children}
-    </button>
-  );
-}
-
-/** Artists as individual filter buttons, comma separated. */
-function ArtistFilters({ artists, onFilter }: { artists: string[] | undefined; onFilter: (q: string) => void }) {
-  return (
-    <>
-      {(artists ?? []).map((a, i) => (
-        <span key={`${a}-${i}`}>
-          {i > 0 && ', '}
-          <FilterButton q={a} onFilter={onFilter}>{a}</FilterButton>
-        </span>
-      ))}
-    </>
-  );
-}
 
 /** Last played, linking to that listening session on Home. */
 function LastPlayedLink({ row, children }: { row: MusicAggregate; children: ReactNode }) {
@@ -150,18 +126,20 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   const [sortBy, setSortBy] = useState(initial.sortBy);
   const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
   const [query, setQuery] = useState(initial.query);
-  const [playsOf, setPlaysOf] = useState<string | null>(null);
 
   // The search text is sent a moment after typing stops.
   const searchText = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
 
   // A new view, search, sort or range starts again from the first page.
+  // Rows loaded with "Load more" come back with Back from a song, artist or album page.
+  const location = useLocation();
   const { rows, total, loading, loadingMore, error, loadMore } = usePagedLibrary<MusicAggregate>(
-    (offset) =>
+    (offset, limit) =>
       music.library(view, from || undefined, to || undefined, {
-        q: searchText, sort: sortBy, dir: sortDir, limit: PAGE_SIZE, ...(offset ? { offset } : {}),
+        q: searchText, sort: sortBy, dir: sortDir, limit: limit ?? PAGE_SIZE, ...(offset ? { offset } : {}),
       }),
     [view, from, to, searchText, sortBy, sortDir],
+    { snapshotKey: `${location.key}|${view}|${from}|${to}|${searchText}|${sortBy}|${sortDir}` },
   );
 
   // Re-sync with the URL on back/forward.
@@ -215,41 +193,29 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
     }
   };
 
-  // Filter to a title or artist from the table, keeping the view and sort.
-  const filterTo = (q: string) => {
-    setQuery(q);
-    document.getElementById('music-library')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-  };
-
   /** A cell's content: links and buttons where the column has an action. */
   const cell = (c: Column, row: MusicAggregate): ReactNode => {
     if (c.key === 'name' && view === 'songs') {
       return (
         <>
-          <FilterButton q={row.name} onFilter={filterTo}>{row.name}</FilterButton>
+          <SongLink songKey={row.song_key} className={CELL_LINK}>{row.name}</SongLink>
           <ListBadge itemKey={songItemKey(row.song_key)} />
         </>
       );
     }
     if (c.key === 'name' && view === 'artists') {
       return (
-        <button type="button" onClick={() => jumpToLibrary('songs', row.name)} title={`Show songs by ${row.name}`} className={CELL_LINK}>
-          {row.name}
-        </button>
+        <ArtistLink name={row.name} className={CELL_LINK} />
       );
     }
-    if (c.key === 'artists') return <ArtistFilters artists={row.artists} onFilter={filterTo} />;
+    if (c.key === 'artists') return <ArtistLinks artists={row.artists} />;
     if (c.key === 'plays' && view === 'songs' && row.song_key) {
       return (
-        <button
-          type="button"
-          onClick={() => setPlaysOf(row.song_key as string)}
-          title={`Show every play of ${row.name}`}
-          aria-label={`${row.plays} plays of ${row.name}: show every play`}
-          className={CELL_LINK}
-        >
-          {c.render(row)}
-        </button>
+        <SongLink songKey={row.song_key} className={CELL_LINK}>
+          <span title={`Show every play of ${row.name}`} aria-label={`${row.plays} plays of ${row.name}: show every play`}>
+            {c.render(row)}
+          </span>
+        </SongLink>
       );
     }
     if (c.key === 'last') return <LastPlayedLink row={row}>{c.render(row)}</LastPlayedLink>;
@@ -371,7 +337,6 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
         </table>
       </div>
       <PagingFooter shown={rows.length} total={total} loadingMore={loadingMore} onMore={loadMore} />
-      {playsOf && <SongPlaysModal songKey={playsOf} onClose={() => setPlaysOf(null)} />}
     </section>
   );
 }

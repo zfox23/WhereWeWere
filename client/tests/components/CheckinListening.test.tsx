@@ -44,7 +44,7 @@ describe('CheckinListening', () => {
       'NewestKhruangbinjust before',
       'OlderTycho5 min before',
     ]);
-    expect(screen.getAllByRole('link', { name: 'Show album details' })).toHaveLength(1);
+    expect(screen.getAllByRole('link', { name: 'Show album' })).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'Show the whole listening session' }).getAttribute('href')).toBe(
       '/?from=2024-05-01&to=2024-05-01',
     );

@@ -1,19 +1,15 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { MusicLibrarySection } from '../ui/MusicLibrarySection';
 import type { MusicAggregate, MusicLibraryView } from '../ui/types';
 
 const libraryMock = vi.fn();
-const summaryMock = vi.fn();
-const songPlaysMock = vi.fn();
 vi.mock('../ui/api', () => ({
   music: {
     library: (...args: unknown[]) => libraryMock(...args),
     lists: () => Promise.resolve([]),
-    songPlaysSummary: (...args: unknown[]) => summaryMock(...args),
-    songPlays: (...args: unknown[]) => songPlaysMock(...args),
   },
   albumArtUrl: (id: string) => `/art/${id}`,
 }));
@@ -40,6 +36,11 @@ function renderSection(props: { from?: string; to?: string } = {}) {
       <MusicLibrarySection from={props.from ?? ''} to={props.to ?? ''} />
     </MemoryRouter>,
   );
+}
+
+function BackProbe() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate(-1)}>Back</button>;
 }
 
 const page = (rows: MusicAggregate[], total = rows.length) => Promise.resolve({ rows, total });
@@ -146,33 +147,51 @@ describe('MusicLibrarySection', () => {
     await waitFor(() => expect(screen.getByText("Couldn't load the music library.")).toBeTruthy());
   });
 
-  it('filters to a song title or one of its artists when clicked', async () => {
-    libraryMock.mockImplementation(() => page([song('Bravo', ['Amy', 'Bob'], 9, '2024-02-01T00:00:00Z')]));
-    const user = userEvent.setup();
+  it('links titles and the play count to the song\'s page, artists to theirs', async () => {
+    libraryMock.mockImplementation(() =>
+      page([{ ...song('Bravo', ['Amy', 'Bob'], 9, '2024-02-01T00:00:00Z'), song_key: 'bravo|amy' }]),
+    );
     renderSection();
     await waitFor(() => expect(titles()).toEqual(['Bravo']));
-    await user.click(screen.getByRole('button', { name: 'Bob' }));
-    expect((screen.getByLabelText('Filter library') as HTMLInputElement).value).toBe('Bob');
-    await waitFor(() => expect(lastCall()[3]).toMatchObject({ q: 'Bob' }));
-    expect(lastCall()[0]).toBe('songs');
-    await user.click(screen.getByRole('button', { name: 'Bravo' }));
-    await waitFor(() => expect(lastCall()[3]).toMatchObject({ q: 'Bravo' }));
+    expect(screen.getByRole('link', { name: 'Bravo' }).getAttribute('href')).toBe('/music/song?key=bravo%7Camy');
+    expect(screen.getByLabelText('9 plays of Bravo: show every play').closest('a')?.getAttribute('href')).toBe('/music/song?key=bravo%7Camy');
+    expect(screen.getByRole('link', { name: 'Bob' }).getAttribute('href')).toBe('/music/artist?name=Bob');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('opens every play of a song from its play count', async () => {
-    libraryMock.mockImplementation(() => page([{ ...song('Bravo', ['Amy'], 9, '2024-02-01T00:00:00Z'), song_key: 'bravo|amy' }]));
-    summaryMock.mockResolvedValue({
-      name: 'Bravo', artists: ['Amy'], album_ref: null, art_id: null, plays: 9,
-      first_played_at: '2024-01-01T00:00:00Z', last_played_at: '2024-02-01T00:00:00Z',
-      monthly: [{ month: '2024-01', plays: 4 }, { month: '2024-02', plays: 5 }],
-    });
-    songPlaysMock.mockResolvedValue({ rows: [], total: 0 });
-    const user = userEvent.setup();
+  it('links an artist row to the artist\'s page', async () => {
+    window.history.replaceState(null, '', '/profile?tab=plugin:music&musicView=artists');
     renderSection();
-    await user.click(await screen.findByRole('button', { name: '9 plays of Bravo: show every play' }));
-    expect(await screen.findByRole('dialog', { name: 'Plays of Bravo' })).toBeTruthy();
-    expect(summaryMock).toHaveBeenCalledWith('bravo|amy');
-    expect(songPlaysMock).toHaveBeenCalledWith('bravo|amy', { limit: 100 });
+    expect((await screen.findByRole('link', { name: 'Zed' })).getAttribute('href')).toBe('/music/artist?name=Zed');
+  });
+
+  it('comes back from a song\'s page with the rows that were loaded, refreshed in one request', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ({ ...song(`Song ${i}`, ['A'], 200 - i, '2024-02-01T00:00:00Z'), song_key: `k${i}` }));
+    const more = [{ ...song('Song 100', ['A'], 1, '2024-02-01T00:00:00Z'), song_key: 'k100' }];
+    libraryMock.mockImplementation((_v: string, _f: unknown, _t: unknown, opts: { offset?: number; limit?: number }) =>
+      opts.offset ? page(more, 101) : page(opts.limit === 101 ? [...many, ...more] : many, 101),
+    );
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/profile']}>
+        <Routes>
+          <Route path="/profile" element={<MusicLibrarySection from="" to="" />} />
+          <Route path="/music/song" element={<BackProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(titles()).toHaveLength(100));
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => expect(titles()).toHaveLength(101));
+    await user.click(screen.getByRole('link', { name: 'Song 100' }));
+    libraryMock.mockClear();
+    await user.click(await screen.findByRole('button', { name: 'Back' }));
+    // All 101 rows at once, without waiting on the server…
+    expect(titles()).toHaveLength(101);
+    // …then refreshed in place with one request for as many rows.
+    await waitFor(() => expect(libraryMock).toHaveBeenCalledTimes(1));
+    expect(lastCall()[3]).toMatchObject({ limit: 101 });
+    expect(titles()).toHaveLength(101);
   });
 
   it('links Last played to its listening session on Home, labelled with that day', async () => {

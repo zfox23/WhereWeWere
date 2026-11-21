@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Music } from 'lucide-react';
 import { musicListening } from '../api/client';
 import { AlbumArt } from '../../../plugins/music/ui/AlbumArt';
-import { ArtistLinks, HomeLibraryLink } from '../../../plugins/music/ui/libraryLinks';
+import { ArtistLinks, SongLink } from '../../../plugins/music/ui/links';
 import type { ListeningBefore } from '../types';
 import type { FocusSessionState } from './MusicPreview';
 
@@ -52,7 +52,7 @@ export function CheckinListening({ checkinId }: { checkinId: string }) {
             <AlbumArt artId={t.art_id} albumRef={t.album_ref} size={36} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-gray-900 dark:text-gray-100">
-                <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink>
+                <SongLink songKey={t.song_key}>{t.title}</SongLink>
               </span>
               <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
                 <ArtistLinks artists={t.artists} />

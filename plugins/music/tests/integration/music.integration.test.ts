@@ -726,11 +726,26 @@ describe('music plugin', () => {
       await query(`UPDATE music_sessions SET timezone = 'America/Chicago'`);
     });
 
-    it('summarises the song with plays per local month', async () => {
-      const res = await request(app).get('/api/v1/music/song-plays/summary').query({ song_key: await songKeyOf('Hit') });
+    it('describes the song: totals, plays per local day, hour and weekday, rank and albums', async () => {
+      const res = await request(app).get('/api/v1/music/song').query({ song_key: await songKeyOf('Hit') });
       expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ name: 'Hit', artists: ['A'], plays: 3 });
-      expect(res.body.monthly).toEqual([{ month: '2024-05', plays: 3 }]);
+      expect(res.body).toMatchObject({ name: 'Hit', artists: ['A'], plays: 3, rank: 1, songs_total: 2 });
+      expect(res.body.daily).toEqual([{ date: '2024-05-01', plays: 2 }, { date: '2024-05-31', plays: 1 }]);
+      // 12:00 UTC is 07:00 in Chicago on a Wednesday; 03:00 UTC June 1 is 22:00 Friday May 31.
+      expect(res.body.clock).toEqual([
+        expect.objectContaining({ dow: 3, hour: 7, plays: 2 }),
+        expect.objectContaining({ dow: 5, hour: 22, plays: 1 }),
+      ]);
+      expect(res.body.albums.map((a: any) => [a.album, a.plays])).toEqual([[null, 2], ['Hits', 1]]);
+    });
+
+    it('bounds the plays to local dates', async () => {
+      const songKey = await songKeyOf('Hit');
+      const may31 = await request(app).get('/api/v1/music/song-plays').query({ song_key: songKey, from: '2024-05-31', to: '2024-05-31' });
+      expect(may31.body.total).toBe(1);
+      expect(may31.body.rows[0].played_at).toBe('2024-06-01T03:00:00.000Z');
+      const june = await request(app).get('/api/v1/music/song-plays').query({ song_key: songKey, from: '2024-06-01' });
+      expect(june.body.total).toBe(0);
     });
 
     it('pages the plays newest first, each with its session and the day Home shows it on', async () => {
@@ -746,15 +761,15 @@ describe('music plugin', () => {
     });
 
     it('rejects a missing key and answers 404 for a song never played', async () => {
-      expect((await request(app).get('/api/v1/music/song-plays/summary')).status).toBe(400);
+      expect((await request(app).get('/api/v1/music/song')).status).toBe(400);
       expect((await request(app).get('/api/v1/music/song-plays')).status).toBe(400);
-      expect((await request(app).get('/api/v1/music/song-plays/summary').query({ song_key: 'nope' })).status).toBe(404);
+      expect((await request(app).get('/api/v1/music/song').query({ song_key: 'nope' })).status).toBe(404);
     });
 
     it('shows another user none of the plays', async () => {
       const other = await createTestUser('other');
       const songKey = await songKeyOf('Hit');
-      const summary = await request(app).get('/api/v1/music/song-plays/summary').set('Cookie', other.cookie).query({ song_key: songKey });
+      const summary = await request(app).get('/api/v1/music/song').set('Cookie', other.cookie).query({ song_key: songKey });
       expect(summary.status).toBe(404);
       const plays = await request(app).get('/api/v1/music/song-plays').set('Cookie', other.cookie).query({ song_key: songKey });
       expect(plays.body).toEqual({ rows: [], total: 0 });

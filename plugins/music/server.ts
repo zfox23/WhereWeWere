@@ -37,6 +37,7 @@ import { mountRankRoutes } from '../../server/src/services/lists/routes';
 import { suggest } from './services/suggest';
 import { getDailyListening, getDiscovery, getListeningClock } from './services/insights';
 import { getLifeSoundtrack, LIFE_BY, type LifeBy } from './services/life';
+import { getArtistDetail, getScopedTies, getSongDetail } from './services/detail';
 import { parseScrobbleExport } from './services/importParser';
 import { parseLastfmCsv } from './services/lastfmCsv';
 import {
@@ -79,7 +80,6 @@ import {
   findScrobblerKeyOwner,
   getScrobbleDetail,
   getSongPlays,
-  getSongPlaysSummary,
   updateScrobble,
   insertManualScrobble,
   insertScrobble,
@@ -320,28 +320,60 @@ function songKeyParam(raw: unknown): string | null {
   return typeof raw === 'string' && raw.length > 0 && raw.length <= 2000 ? raw : null;
 }
 
-// GET /song-plays/summary?song_key - a song's totals and plays per month
-musicRouter.get('/song-plays/summary', async (req: Request, res: Response) => {
+// GET /song?song_key - a song's totals, plays per day, hour and weekday, rank and albums
+musicRouter.get('/song', async (req: Request, res: Response) => {
   try {
     const songKey = songKeyParam(req.query.song_key);
     if (!songKey) return res.status(400).json({ error: 'song_key is required' });
-    const summary = await getSongPlaysSummary(currentUserId(), songKey);
-    if (!summary) return res.status(404).json({ error: 'No plays of that song' });
-    res.json(summary);
+    const song = await getSongDetail(currentUserId(), songKey);
+    if (!song) return res.status(404).json({ error: 'No plays of that song' });
+    res.json(song);
   } catch (err) {
-    console.error('Error loading song summary:', err);
+    console.error('Error loading song:', err);
     res.status(500).json({ error: 'Failed to load the song' });
   }
 });
 
-// GET /song-plays?song_key&limit&offset - every play of a song, newest first -> { rows, total }
+/** An artist's name from the query (exact, as credited); null when missing. */
+function artistParam(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.length > 0 && raw.length <= 500 ? raw : null;
+}
+
+// GET /artist?name - an artist's totals, plays per day, hour and weekday, rank, songs and albums
+musicRouter.get('/artist', async (req: Request, res: Response) => {
+  try {
+    const name = artistParam(req.query.name);
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const artist = await getArtistDetail(currentUserId(), name);
+    if (!artist) return res.status(404).json({ error: 'No plays by that artist' });
+    res.json(artist);
+  } catch (err) {
+    console.error('Error loading artist:', err);
+    res.status(500).json({ error: 'Failed to load the artist' });
+  }
+});
+
+// GET /ties?song_key | ?artist - companions, places and moods around a song's or artist's plays
+musicRouter.get('/ties', async (req: Request, res: Response) => {
+  try {
+    const songKey = songKeyParam(req.query.song_key);
+    const artist = artistParam(req.query.artist);
+    if (!songKey && !artist) return res.status(400).json({ error: 'song_key or artist is required' });
+    res.json(await getScopedTies(currentUserId(), songKey ? { kind: 'song', songKey } : { kind: 'artist', name: artist as string }));
+  } catch (err) {
+    console.error('Error loading ties:', err);
+    res.status(500).json({ error: 'Failed to load' });
+  }
+});
+
+// GET /song-plays?song_key&from&to&limit&offset - every play of a song, newest first -> { rows, total }
 musicRouter.get('/song-plays', async (req: Request, res: Response) => {
   try {
     const songKey = songKeyParam(req.query.song_key);
     if (!songKey) return res.status(400).json({ error: 'song_key is required' });
     const limit = clampInt(req.query.limit, { fallback: 100, min: 1, max: 500 });
     const offset = clampInt(req.query.offset, { fallback: 0, min: 0, max: 10_000_000 });
-    res.json(await getSongPlays(currentUserId(), songKey, { limit, offset }));
+    res.json(await getSongPlays(currentUserId(), songKey, { limit, offset, from: dateParam(req.query.from), to: dateParam(req.query.to) }));
   } catch (err) {
     console.error('Error loading song plays:', err);
     res.status(500).json({ error: 'Failed to load plays' });

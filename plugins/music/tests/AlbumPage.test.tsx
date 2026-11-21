@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import AlbumPage from '../ui/pages/AlbumPage';
+import AlbumPage, { releaseDateLabel } from '../ui/pages/AlbumPage';
 import { resetMusicLists } from '../ui/useMusicLists';
 
 const albumViewMock = vi.fn();
@@ -13,8 +13,17 @@ vi.mock('../ui/api', () => ({
 
 const VIEW = {
   album_ref: 'group therapy|above & beyond', art_id: 'a1', matched: true, title: 'Group Therapy', artist: 'Above & Beyond',
-  release_date: '2011-06-14', label: 'Anjunabeats', plays: 3, listened_seconds: 900,
-  tracks: [{ position: 1, title: 'Sun & Moon', artists: ['Above & Beyond'], length: 321, plays: 3, song_key: 'k' }],
+  release_date: '2011-06-14', label: 'Anjunabeats', plays: 4, listened_seconds: 900,
+  first_played_at: '2024-01-05T12:00:00Z', last_played_at: '2024-03-02T12:00:00Z',
+  tracks: [
+    { position: 1, title: 'Filaments', artists: ['Above & Beyond'], length: 300, plays: 0, song_key: null },
+    { position: 2, title: 'Sun & Moon', artists: ['Above & Beyond'], length: 321, plays: 3, song_key: 'sun & moon|above & beyond' },
+    { position: 3, title: 'Alchemy', artists: ['Above & Beyond'], length: 280, plays: 1, song_key: 'alchemy|above & beyond' },
+  ],
+  daily: [{ date: '2024-01-05', plays: 3 }, { date: '2024-03-02', plays: 1 }],
+  other_albums: [
+    { album_ref: 'tri-state|above & beyond', name: 'Tri-State', art_id: null, plays: 7, unique_tracks: 4, last_played_at: '2024-02-01T00:00:00Z' },
+  ],
 };
 
 const renderAt = (search: string) =>
@@ -31,17 +40,39 @@ describe('AlbumPage', () => {
     vi.clearAllMocks();
   });
 
-  it('shows the same details as the modal, without a close button, and titles the tab', async () => {
+  it('shows the cover, release info, totals and the tracklist, and titles the tab', async () => {
     albumViewMock.mockResolvedValue(VIEW);
     renderAt('?ref=group+therapy%7Cabove+%26+beyond');
     expect(await screen.findByRole('heading', { name: /Group Therapy/ })).toBeTruthy();
     expect(albumViewMock).toHaveBeenCalledWith({ ref: 'group therapy|above & beyond', artId: null });
+    expect(document.querySelector('img[alt="Group Therapy cover"]')?.getAttribute('src')).toBe('/art/a1/large');
     expect(document.body.textContent).toContain('Jun 14, 2011 · Anjunabeats');
-    expect(document.body.textContent).toContain('3 scrobbles');
+    expect(document.body.textContent).toContain('4 scrobbles');
+    expect(document.body.textContent).toContain('first Jan 5, 2024');
     expect(screen.getByRole('button', { name: 'Add album to list' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
-    expect(screen.queryByRole('dialog')).toBeNull(); // a page, not an overlay
+    expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.title).toContain('Group Therapy');
+  });
+
+  it('links the artist, and each played track to its song page', async () => {
+    albumViewMock.mockResolvedValue(VIEW);
+    renderAt('?ref=x');
+    await screen.findByRole('heading', { name: /Group Therapy/ });
+    expect(screen.getByRole('link', { name: 'Above & Beyond' }).getAttribute('href')).toBe('/music/artist?name=Above+%26+Beyond');
+    const tracks = within(screen.getByRole('list', { name: 'Tracks' }));
+    expect(tracks.getByRole('link', { name: 'Sun & Moon' }).getAttribute('href')).toBe('/music/song?key=sun+%26+moon%7Cabove+%26+beyond');
+    // Never played: nothing to open.
+    expect(tracks.queryByRole('link', { name: 'Filaments' })).toBeNull();
+  });
+
+  it('draws plays over time and the artist\'s other albums', async () => {
+    albumViewMock.mockResolvedValue(VIEW);
+    renderAt('?ref=x');
+    await screen.findByRole('heading', { name: /Group Therapy/ });
+    expect(screen.getByRole('group', { name: 'Plays per month from Jan 2024 to Mar 2024' })).toBeTruthy();
+    const more = screen.getByRole('region', { name: 'More by Above & Beyond' });
+    expect(within(more).getByRole('link', { name: /Tri-State/ }).getAttribute('href')).toBe('/music/album?ref=tri-state%7Cabove+%26+beyond');
   });
 
   it('opens by cover id when there is no ref', async () => {
@@ -60,11 +91,17 @@ describe('AlbumPage', () => {
     expect(await screen.findByText("Couldn't load this album.")).toBeTruthy();
   });
 
-  it('adds to a list from the page as the modal does', async () => {
+  it('adds to a list from the page', async () => {
     const user = userEvent.setup();
     albumViewMock.mockResolvedValue(VIEW);
     renderAt('?ref=x');
     await user.click(await screen.findByRole('button', { name: 'Add album to list' }));
     expect(await screen.findByRole('dialog', { name: /Add .* to a list/ })).toBeTruthy();
+  });
+
+  it('formats release dates, leaving partial ones as they are', () => {
+    expect(releaseDateLabel('2011-06-14')).toBe('Jun 14, 2011');
+    expect(releaseDateLabel('2011-06')).toBe('2011-06');
+    expect(releaseDateLabel(null)).toBeNull();
   });
 });

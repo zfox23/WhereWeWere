@@ -17,7 +17,7 @@ import MapView from '../../../location/ui/MapView';
 import { albumArtUrl, music } from '../api';
 import { AlbumLink } from '../AlbumLink';
 import { formatDay, formatLength, sourceLabel } from '../format';
-import { ArtistLinks, libraryHref } from '../libraryLinks';
+import { ArtistLinks, SongLink, songPath } from '../links';
 import { ListBadge, songItemKey } from '../ListBadge';
 import { ListPicker } from '../ListPicker';
 import { playPath } from '../listTitle';
@@ -136,7 +136,7 @@ export default function PlayPage() {
 
         <div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-            {play.title}
+            <SongLink songKey={play.song_key}>{play.title}</SongLink>
             <ListBadge itemKey={itemKey} size={14} />
           </h1>
           <p className="text-sm text-gray-600 dark:text-gray-300"><ArtistLinks artists={play.artists} /></p>
@@ -190,7 +190,7 @@ export default function PlayPage() {
             You’ve played this {play.history.plays.toLocaleString()} time{play.history.plays === 1 ? '' : 's'}
             {play.history.plays > 1 ? <span className="text-gray-500 dark:text-gray-400"> · first {formatDay(play.history.first_played_at)}, last {formatDay(play.history.last_played_at)}</span> : null}
           </p>
-          <Link to={libraryHref('songs', play.title)} className="text-xs font-medium text-primary-600 hover:underline">Show in library</Link>
+          <Link to={songPath(play.song_key)} className="text-xs font-medium text-primary-600 hover:underline">Show every play of this song</Link>
         </div>
 
         {play.session && (

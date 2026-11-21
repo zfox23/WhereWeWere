@@ -19,6 +19,7 @@ import sharp from 'sharp';
 import { query } from '../../../server/src/db';
 import { config } from '../../../server/src/config';
 import { normalizeTitle, type AlbumMatch } from './albumMatch';
+import { getOtherAlbums, getScopedDaily, type ArtistAlbum, type DayCount } from './detail';
 import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql, UNKNOWN_ALBUM } from './identity';
 import {
   ProviderUnavailableError,
@@ -550,7 +551,13 @@ export interface AlbumView {
   label: string | null;
   plays: number;
   listened_seconds: number;
+  first_played_at: string | null;
+  last_played_at: string | null;
   tracks: AlbumViewTrack[];
+  /** Plays per local day, for the plays-over-time chart. */
+  daily: DayCount[];
+  /** Other albums by the same album artist that you've played. */
+  other_albums: ArtistAlbum[];
 }
 
 /**
@@ -584,13 +591,15 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
   const played = (await query(
     `SELECT ${songKeySql()} AS song_key, ${latestTitleSql()} AS title, ${fullestArtistsSql()} AS artists, COUNT(*)::int AS plays,
             COALESCE(SUM(COALESCE(listened_for, track_length, 0)), 0)::int AS seconds,
-            MAX(track_length) AS length, MIN(album) AS album, MIN(COALESCE(album_artists[1], artists[1])) AS album_artist
+            MAX(track_length) AS length, MIN(album) AS album, MIN(COALESCE(album_artists[1], artists[1])) AS album_artist,
+            MIN(played_at) AS first_played_at, MAX(played_at) AS last_played_at
      FROM music_scrobbles WHERE user_id = $1 AND ${albumRefSql()} = ANY($2::text[])
      GROUP BY ${songKeySql()}`,
     [userId, refs],
   )).rows as {
     song_key: string; title: string; artists: string[]; plays: number; seconds: number;
     length: number | null; album: string | null; album_artist: string;
+    first_played_at: Date; last_played_at: Date;
   }[];
   if (played.length === 0 && !matchedRow) return null;
 
@@ -634,6 +643,11 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
   }
 
   const albumName = matchedRow?.title ?? played.find((r) => r.album)?.album ?? null;
+  const times = played.flatMap((r) => [new Date(r.first_played_at).getTime(), new Date(r.last_played_at).getTime()]);
+  const [daily, otherAlbums] = await Promise.all([
+    played.length ? getScopedDaily(userId, { kind: 'album', refs }) : Promise.resolve([]),
+    getOtherAlbums(userId, albumArtist, refs),
+  ]);
   return {
     album_ref: ref,
     art_id: matchedRow?.thumb_file ? matchedRow.id : null,
@@ -644,7 +658,11 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
     label: matchedRow?.label ?? null,
     plays,
     listened_seconds: seconds,
+    first_played_at: times.length ? new Date(Math.min(...times)).toISOString() : null,
+    last_played_at: times.length ? new Date(Math.max(...times)).toISOString() : null,
     tracks,
+    daily,
+    other_albums: otherAlbums,
   };
 }
 

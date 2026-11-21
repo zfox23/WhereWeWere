@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MusicListsSection } from '../ui/MusicListsSection';
 import { MusicLibrarySection } from '../ui/MusicLibrarySection';
@@ -67,7 +68,7 @@ describe('MusicListsSection', () => {
   });
 
   it('shows an index of lists with counts and a cover mosaic', async () => {
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await screen.findByText('Favorites');
     expect(screen.getByText(/2 items/)).toBeTruthy();
     expect(screen.getByText(/0 items/)).toBeTruthy();
@@ -76,7 +77,7 @@ describe('MusicListsSection', () => {
   });
 
   it('shows when each list was created and last changed', async () => {
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await screen.findByText('Favorites');
     const card = screen.getByTitle('Open Favorites');
     expect(card.textContent).toMatch(/created .*2024.* · updated .*2024/);
@@ -85,7 +86,7 @@ describe('MusicListsSection', () => {
   it('opens the list named in the URL, and keeps the URL in step with the open list', async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, '', '/profile?tab=plugin:music&musicSection=lists&musicList=l1');
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await screen.findAllByRole('row');
     expect(screen.getByRole('heading', { name: /Favorites/ })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: /Back to lists/ }));
@@ -101,14 +102,14 @@ describe('MusicListsSection', () => {
 
   it('guides an empty start', async () => {
     lists = [];
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     expect(await screen.findByText(/No lists yet/)).toBeTruthy();
   });
 
   it('creates, renames and deletes lists from the index', async () => {
     const user = userEvent.setup();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await screen.findByText('Favorites');
 
     await user.type(screen.getByLabelText('New list name'), 'Chill');
@@ -130,7 +131,7 @@ describe('MusicListsSection', () => {
 
   it('opens a list as a ranked table: songs and albums with their all-time plays', async () => {
     const user = userEvent.setup();
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await user.click(await screen.findByTitle('Open Favorites'));
     const rows = await screen.findAllByRole('row');
     const text = rows.map((r) => r.textContent);
@@ -151,7 +152,7 @@ describe('MusicListsSection', () => {
   it('ranks from the row menu, and removes with a confirmation', async () => {
     const user = userEvent.setup();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await user.click(await screen.findByTitle('Open Favorites'));
     await screen.findAllByRole('row');
 
@@ -170,7 +171,7 @@ describe('MusicListsSection', () => {
 
   it('offers "Rank by comparing" on a list with two or more items, and opens the tool', async () => {
     const user = userEvent.setup();
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await user.click(await screen.findByTitle('Open Favorites'));
     await user.click(await screen.findByRole('button', { name: 'Rank by comparing' }));
     expect(await screen.findByText(/Rank “Favorites” by comparing/)).toBeTruthy();
@@ -182,7 +183,7 @@ describe('MusicListsSection', () => {
 
   it('disables it for a list with fewer than two items', async () => {
     const user = userEvent.setup();
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await user.click(await screen.findByTitle('Open Road trip'));
     const button = await screen.findByRole('button', { name: 'Rank by comparing' });
     expect(button.hasAttribute('disabled')).toBe(true);
@@ -194,21 +195,21 @@ describe('MusicListsSection', () => {
       state: { mode: 'scratch', itemIds: ['s1', 'a1'], initialRanks: { s1: null, a1: 1 }, answers: [{ a: 's1', b: 'a1', r: 'a' }] },
       updated_at: '',
     });
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await user.click(await screen.findByTitle('Open Favorites'));
     expect(await screen.findByRole('button', { name: 'Resume ranking' })).toBeTruthy();
   });
 
   it('says what to do with an empty list', async () => {
     const user = userEvent.setup();
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await user.click(await screen.findByTitle('Open Road trip'));
     expect(await screen.findByText(/Nothing in this list yet/)).toBeTruthy();
   });
 
   it('closes a list that is deleted elsewhere', async () => {
     const user = userEvent.setup();
-    render(<MusicListsSection />);
+    render(<MemoryRouter><MusicListsSection /></MemoryRouter>);
     await user.click(await screen.findByTitle('Open Favorites'));
     await screen.findAllByRole('row');
     lists = [lists[1]];
@@ -234,7 +235,7 @@ describe('list badges', () => {
       { name: 'Sun & Moon', artists: ['A'], album: 'Group Therapy', album_ref: 'group therapy|a', song_key: 'SK', plays: 2, listened_seconds: 1, first_played_at: '2024-01-01T00:00:00Z', last_played_at: '2024-01-02T00:00:00Z' },
       { name: 'Other', artists: ['A'], album: null, album_ref: '|a', song_key: 'OK', plays: 1, listened_seconds: 1, first_played_at: '2024-01-01T00:00:00Z', last_played_at: '2024-01-02T00:00:00Z' },
     ] });
-    render(<MusicLibrarySection from="2024-01-01" to="2024-01-31" />);
+    render(<MemoryRouter><MusicLibrarySection from="2024-01-01" to="2024-01-31" /></MemoryRouter>);
     await screen.findByText('Sun & Moon');
     // Song heart + album heart on the first row; none on the second.
     const [first, second] = screen.getAllByRole('row').slice(1);

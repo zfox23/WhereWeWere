@@ -26,19 +26,75 @@ export interface MusicAggregate {
 }
 
 /** A song's header in the plays modal. */
-export interface SongPlaysSummary {
+/** Plays on one local day ('YYYY-MM-DD'); days without plays are omitted. */
+export interface DayCount {
+  date: string;
+  plays: number;
+}
+
+export interface SongDetail {
   name: string;
   artists: string[];
   album_ref: string | null;
   art_id: string | null;
   plays: number;
+  listened_seconds: number;
   first_played_at: string;
   last_played_at: string;
-  /** Plays per month ('YYYY-MM', each play's local month), months without plays omitted. */
-  monthly: { month: string; plays: number }[];
+  /** Place among every song played, by plays (1 = most played). */
+  rank: number;
+  songs_total: number;
+  daily: DayCount[];
+  clock: ClockCell[];
+  /** The albums its plays were credited to, most plays first. */
+  albums: { album_ref: string; album: string | null; art_id: string | null; plays: number }[];
 }
 
-/** One play of a song in the plays modal. */
+export interface ArtistSong {
+  song_key: string;
+  name: string;
+  artists: string[];
+  album_ref: string | null;
+  art_id: string | null;
+  plays: number;
+  last_played_at: string;
+}
+
+export interface ArtistAlbum {
+  album_ref: string;
+  name: string;
+  art_id: string | null;
+  plays: number;
+  unique_tracks: number;
+  last_played_at: string;
+}
+
+export interface ArtistDetail {
+  name: string;
+  plays: number;
+  listened_seconds: number;
+  first_played_at: string;
+  last_played_at: string;
+  unique_songs: number;
+  rank: number;
+  artists_total: number;
+  daily: DayCount[];
+  clock: ClockCell[];
+  songs: ArtistSong[];
+  albums: ArtistAlbum[];
+}
+
+/** A companion, place category or mood a song or artist is played around. */
+export interface Tie {
+  key: string;
+  label: string;
+  plays: number;
+  checkins: number;
+}
+
+export type Ties = Record<LifeBy, Tie[]> & { gap_minutes: number };
+
+/** One play of a song on its page. */
 export interface SongPlay {
   id: string;
   played_at: string;
@@ -156,7 +212,12 @@ export interface AlbumView {
   label: string | null;
   plays: number;
   listened_seconds: number;
+  first_played_at: string | null;
+  last_played_at: string | null;
   tracks: AlbumViewTrack[];
+  daily: DayCount[];
+  /** Other albums by the same album artist that you've played. */
+  other_albums: ArtistAlbum[];
 }
 
 export interface ListItem {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Music } from 'lucide-react';
-import { ArtistLinks, HomeLibraryLink } from '../../../plugins/music/ui/libraryLinks';
+import { ArtistLinks, SongLink } from '../../../plugins/music/ui/links';
 import type { ListeningBefore } from '../types';
 
 /** Router state that tells Home which listening session to reveal. */
@@ -53,7 +53,7 @@ export function MusicPreview({ listening, compact = false }: { listening: Listen
           <li key={`${t.time}-${t.title}`} className="truncate">
             <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
             {' — '}
-            <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink>
+            <SongLink songKey={t.song_key}>{t.title}</SongLink>
           </li>
         ))}
       </ul>

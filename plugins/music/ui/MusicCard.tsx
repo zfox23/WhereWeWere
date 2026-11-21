@@ -11,7 +11,7 @@ import { CardShell } from '../../../client/src/components/checkin-card/CardShell
 import { music } from './api';
 import { AlbumArt } from './AlbumArt';
 import { ListBadge, songItemKey } from './ListBadge';
-import { ArtistLinks, HomeLibraryLink } from './libraryLinks';
+import { ArtistLinks, SongLink } from './links';
 import { formatClock, formatDuration } from './format';
 import { playPath } from './listTitle';
 import type { MusicSessionData, SessionTrack } from './types';
@@ -144,7 +144,7 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
                       <span className="min-w-0">
                         <span className="font-medium text-gray-600 dark:text-gray-300"><ArtistLinks artists={t.artists} /></span>
                         {' — '}
-                        <HomeLibraryLink view="songs" q={t.title}>{t.title}</HomeLibraryLink><ListBadge itemKey={songItemKey(t.song_key)} />
+                        <SongLink songKey={t.song_key}>{t.title}</SongLink><ListBadge itemKey={songItemKey(t.song_key)} />
                       </span>
                       {t.manual && t.id && (
                         <button

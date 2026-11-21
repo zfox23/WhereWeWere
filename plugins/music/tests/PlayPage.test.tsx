@@ -72,7 +72,8 @@ describe('PlayPage', () => {
     expect(await screen.findByRole('heading', { name: /Sun & Moon/ })).toBeTruthy();
     expect(scrobbleMock).toHaveBeenCalledWith('p1');
     expect(document.querySelector('img[alt$="cover"]')?.getAttribute('src')).toBe('/art/art1/large');
-    expect(screen.getByRole('link', { name: 'Above & Beyond' }).getAttribute('href')).toContain('musicView=artists');
+    expect(screen.getByRole('link', { name: 'Above & Beyond' }).getAttribute('href')).toBe('/music/artist?name=Above+%26+Beyond');
+    expect(screen.getByRole('link', { name: 'Sun & Moon' }).getAttribute('href')).toBe(`/music/song?key=${encodeURIComponent('sun & moon\u001fabove & beyond').replace(/%20/g, '+')}`);
     expect(screen.getByRole('link', { name: 'Group Therapy' })).toBeTruthy();
     expect(screen.getByText(/5:21/)).toBeTruthy(); // length
     // The time is in the zone it was played in, with the abbreviation, like other check-in pages.
@@ -86,14 +87,14 @@ describe('PlayPage', () => {
     expect(screen.getByText(/within about 35 m/)).toBeTruthy();
   });
 
-  it('links to the day, the neighbouring songs, the session on Home and the library', async () => {
+  it('links to the day, the neighbouring songs, the session on Home and the song\'s page', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: /Sun & Moon/ });
     expect(screen.getByRole('link', { name: 'View this day on Home' }).getAttribute('href')).toBe('/?from=2024-05-01&to=2024-05-01');
     expect(screen.getByRole('link', { name: /Before Song/ }).getAttribute('href')).toBe('/music/plays/p0');
     expect(screen.getByRole('link', { name: /After Song/ }).getAttribute('href')).toBe('/music/plays/p2');
-    expect(screen.getByRole('link', { name: 'Show in library' }).getAttribute('href')).toContain('q=Sun+%26+Moon');
+    expect(screen.getByRole('link', { name: 'Show every play of this song' }).getAttribute('href')).toMatch(/^\/music\/song\?key=/);
     await user.click(screen.getByRole('link', { name: 'View this session on Home' }));
     expect(screen.getByTestId('probe').textContent).toBe('/?from=2024-05-01&to=2024-05-01|{"focusSession":"sess1"}');
   });

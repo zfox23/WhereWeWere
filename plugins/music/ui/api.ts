@@ -23,7 +23,9 @@ import type {
   MusicStats,
   SessionTrack,
   SongPlay,
-  SongPlaysSummary,
+  SongDetail,
+  ArtistDetail,
+  Ties,
   DailyListening,
   ClockCell,
   Discovery,
@@ -101,11 +103,16 @@ export const music = {
     if (opts.offset) extra.offset = String(opts.offset);
     return request<{ rows: MusicAggregate[]; total: number }>(`/music/library${rangeQuery(from, to, extra)}`);
   },
-  songPlaysSummary: (songKey: string) =>
-    request<SongPlaysSummary>(`/music/song-plays/summary?${new URLSearchParams({ song_key: songKey })}`),
-  /** One page of a song's plays, newest first. */
-  songPlays: (songKey: string, opts: { limit?: number; offset?: number } = {}) => {
+  song: (songKey: string) => request<SongDetail>(`/music/song?${new URLSearchParams({ song_key: songKey })}`),
+  artist: (name: string) => request<ArtistDetail>(`/music/artist?${new URLSearchParams({ name })}`),
+  /** Companions, places and moods around a song's or an artist's plays. */
+  ties: (scope: { songKey: string } | { artist: string }) =>
+    request<Ties>(`/music/ties?${new URLSearchParams('songKey' in scope ? { song_key: scope.songKey } : { artist: scope.artist })}`),
+  /** One page of a song's plays, newest first, optionally within local dates. */
+  songPlays: (songKey: string, opts: { limit?: number; offset?: number; from?: string; to?: string } = {}) => {
     const params = new URLSearchParams({ song_key: songKey });
+    if (opts.from) params.set('from', opts.from);
+    if (opts.to) params.set('to', opts.to);
     if (opts.limit) params.set('limit', String(opts.limit));
     if (opts.offset) params.set('offset', String(opts.offset));
     return request<{ rows: SongPlay[]; total: number }>(`/music/song-plays?${params}`);
