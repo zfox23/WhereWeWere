@@ -24,6 +24,16 @@ function mounts(): Record<string, any> {
   return out;
 }
 
+/**
+ * Index of the first layer in a router's stack that serves `path`, either as
+ * its own route or through a mounted sub-router.
+ */
+function layerIndex(router: any, path: string): number {
+  return router.stack.findIndex(
+    (l: any) => l.route?.path === path || (l.handle?.stack ?? []).some((s: any) => s.route?.path === path),
+  );
+}
+
 function app() {
   const a = express();
   a.use(express.json());
@@ -174,7 +184,7 @@ describe('venue lists (endpoints)', () => {
     const client = {
       query: vi.fn(async (sql: string) => {
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
-        if (sql.includes('SELECT id FROM venue_lists')) return { rows: [{ id: 'l1' }] };
+        if (sql.includes('FROM venue_lists WHERE id')) return { rows: [{ id: 'l1' }], rowCount: 1 };
         if (sql.includes('SELECT id FROM venues')) return { rows: [{ id: 'v1' }] };
         if (sql.includes('MAX(position)')) return { rows: [{ pos: 2 }] };
         if (sql.includes('INSERT INTO venue_list_items')) return { rows: [] };
@@ -202,13 +212,9 @@ describe('venue lists (endpoints)', () => {
 
   it('GET /lists is registered before GET /:id (literal segment wins)', () => {
     const router = mounts()['/venues'];
-    const getLayers = router.stack
-      .filter((l: any) => l.route && l.route.path === '/lists')
-      .map((l: any) => Object.keys(l.route.methods));
-    expect(getLayers.length).toBeGreaterThan(0);
     // The literal /lists route must appear before the /:id catch-all in the stack.
-    const listsIdx = router.stack.findIndex((l: any) => l.route?.path === '/lists');
-    const idIdx = router.stack.findIndex((l: any) => l.route?.path === '/:id');
+    const listsIdx = layerIndex(router, '/lists');
+    const idIdx = layerIndex(router, '/:id');
     expect(listsIdx).toBeGreaterThan(-1);
     expect(idIdx).toBeGreaterThan(listsIdx);
   });
@@ -285,7 +291,7 @@ describe('checkin lists (endpoints)', () => {
     const client = {
       query: vi.fn(async (sql: string) => {
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
-        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
+        if (sql.includes('FROM checkin_lists WHERE id')) return { rows: [{ id: 'cl1' }], rowCount: 1 };
         if (sql.includes('SELECT id FROM checkins')) return { rows: [{ id: 'c1' }] };
         if (sql.includes('INSERT INTO checkin_list_items')) return { rows: [] };
         return { rows: [] };
@@ -305,7 +311,7 @@ describe('checkin lists (endpoints)', () => {
     const client = {
       query: vi.fn(async (sql: string) => {
         if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
-        if (sql.includes('SELECT id FROM checkin_lists')) return { rows: [{ id: 'cl1' }] };
+        if (sql.includes('FROM checkin_lists WHERE id')) return { rows: [{ id: 'cl1' }], rowCount: 1 };
         if (sql.includes('SELECT id FROM checkins')) return { rows: [] };
         return { rows: [] };
       }),
@@ -344,8 +350,8 @@ describe('checkin lists (endpoints)', () => {
 
   it('GET /lists is registered before GET /:id on the checkin router', () => {
     const router = mounts()['/location-checkins'];
-    const listsIdx = router.stack.findIndex((l: any) => l.route?.path === '/lists');
-    const idIdx = router.stack.findIndex((l: any) => l.route?.path === '/:id');
+    const listsIdx = layerIndex(router, '/lists');
+    const idIdx = layerIndex(router, '/:id');
     expect(listsIdx).toBeGreaterThan(-1);
     expect(idIdx).toBeGreaterThan(listsIdx);
   });

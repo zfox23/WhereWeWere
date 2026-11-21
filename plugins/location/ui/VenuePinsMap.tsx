@@ -1,0 +1,617 @@
+/**
+ * The Places tab's venue map: every visited venue as a pin, clustered by
+ * screen distance at lower zooms and fanned out (with leader lines) at max
+ * zoom where pins would overlap.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
+import { CircleMarker, FeatureGroup, MapContainer, Marker, Polyline, Popup as LeafletPopup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { Loader2 } from 'lucide-react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { useTheme } from '../../../client/src/contexts/ThemeContext';
+import { getThemeDefinition } from '../../../client/src/themes';
+import type { MapDataPoint } from '../../../client/src/types';
+import { formatDate } from '../../../client/src/utils/checkin';
+import '../../../client/src/utils/smoothLeafletZoom';
+import { ThemedTileLayer } from './ThemedTileLayer';
+
+type ClusteredVenueItem =
+  | {
+    kind: 'venue';
+    venue: MapDataPoint;
+  }
+  | {
+    kind: 'cluster';
+    id: string;
+    latitude: number;
+    longitude: number;
+    checkinCount: number;
+    venues: MapDataPoint[];
+  };
+
+interface VenueMarkerPlacement {
+  venue: MapDataPoint;
+  displayPosition: [number, number];
+  originalPosition: [number, number];
+  displaced: boolean;
+}
+
+
+// Pin icons only vary by badge text, size bucket and theme colors. Reusing the
+// same DivIcon instance keeps react-leaflet from calling setIcon (rebuilding
+// every marker's DOM) on each zoom/move re-render.
+const pinIconCache = new Map<string, L.DivIcon>();
+
+function getVenuePinIcon(
+  checkinCount: number,
+  resolvedTheme: 'light' | 'dark',
+  palette: Record<string, string>
+): L.DivIcon {
+  const badge = checkinCount > 99 ? '99+' : String(checkinCount);
+  const tier = checkinCount >= 25 ? 'l' : checkinCount >= 10 ? 'm' : 's';
+  const key = `${badge}|${tier}|${resolvedTheme}|${palette['400']}|${palette['500']}|${palette['600']}|${palette['700']}`;
+  let icon = pinIconCache.get(key);
+  if (!icon) {
+    icon = buildVenuePinIcon(checkinCount, resolvedTheme, palette);
+    pinIconCache.set(key, icon);
+  }
+  return icon;
+}
+
+function buildVenuePinIcon(
+  checkinCount: number,
+  resolvedTheme: 'light' | 'dark',
+  palette: Record<string, string>
+): L.DivIcon {
+  const rgb = (step: string) => `rgb(${palette[step]})`;
+  const badge = checkinCount > 99 ? '99+' : String(checkinCount);
+  const size = checkinCount >= 25 ? 42 : checkinCount >= 10 ? 38 : 34;
+  const pointerHeight = 12;
+  const background = checkinCount >= 25
+    ? `linear-gradient(135deg, ${rgb('400')} 0%, ${rgb('500')} 100%)`
+    : checkinCount >= 10
+      ? `linear-gradient(135deg, ${rgb('500')} 0%, ${rgb('600')} 100%)`
+      : `linear-gradient(135deg, ${rgb('500')} 0%, ${rgb('700')} 100%)`;
+  const pointerColor = rgb(resolvedTheme === 'dark' ? '500' : '600');
+
+  return L.divIcon({
+    className: 'venue-pin-icon',
+    html: `<div style="position: relative; width: ${size}px; height: ${size + pointerHeight}px;">
+      <div style="position: absolute; left: 0; top: 0; width: ${size}px; height: ${size}px; border-radius: 9999px; background: ${background}; border: 2px solid rgba(255,255,255,0.95); box-shadow: 0 8px 16px rgba(15, 23, 42, 0.22); display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: ${badge.length > 2 ? 10 : 11}px; line-height: 1;">${badge}</div>
+      <div style="position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: ${pointerHeight}px solid ${pointerColor};"></div>
+    </div>`,
+    iconSize: [size, size + pointerHeight],
+    iconAnchor: [size / 2, size + pointerHeight],
+    popupAnchor: [0, -(size + pointerHeight - 8)],
+  });
+}
+
+function MapBoundsController({ data }: { data: MapDataPoint[] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (data.length === 0) {
+      return;
+    }
+
+    if (data.length === 1) {
+      map.setView([data[0].latitude, data[0].longitude], 13);
+      return;
+    }
+
+    const bounds = L.latLngBounds(data.map((item) => [item.latitude, item.longitude] as [number, number]));
+    if (bounds.isValid()) {
+      map.fitBounds(bounds.pad(0.2), { maxZoom: 13 });
+    }
+  }, [data, map]);
+
+  return null;
+}
+
+function getClusterRadius(venueCount: number, checkinCount: number): number {
+  if (venueCount >= 20 || checkinCount >= 100) return 28;
+  if (venueCount >= 10 || checkinCount >= 50) return 24;
+  if (venueCount >= 5 || checkinCount >= 20) return 20;
+  return 16;
+}
+
+const MAX_CLUSTER_RADIUS_PX = 28; // must match the max returned by getClusterRadius
+
+function buildClusteredVenueItems(map: L.Map, data: MapDataPoint[], zoom: number, maxZoom: number): ClusteredVenueItem[] {
+  if (zoom >= maxZoom) {
+    return data.map((venue) => ({ kind: 'venue', venue }));
+  }
+
+  // ── Pass 0: project each point exactly once and cull to the padded viewport.
+  // Points far off-screen never need to be clustered or drawn; with a half-viewport
+  // margin, circles at the screen edge stay stable while the user pans a little.
+  const bounds = map.getBounds();
+  const nw = map.project(bounds.getNorthWest(), zoom);
+  const se = map.project(bounds.getSouthEast(), zoom);
+  const size = map.getSize();
+  const marginX = size.x * 0.5;
+  const marginY = size.y * 0.5;
+  const minX = Math.min(nw.x, se.x) - marginX;
+  const maxX = Math.max(nw.x, se.x) + marginX;
+  const minY = Math.min(nw.y, se.y) - marginY;
+  const maxY = Math.max(nw.y, se.y) + marginY;
+
+  interface ProjectedVenue {
+    venue: MapDataPoint;
+    x: number;
+    y: number;
+    weight: number;
+  }
+
+  const projected: ProjectedVenue[] = [];
+  for (const venue of data) {
+    const point = map.project([venue.latitude, venue.longitude], zoom);
+    if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) {
+      continue;
+    }
+    projected.push({
+      venue,
+      x: point.x,
+      y: point.y,
+      weight: venue.checkin_count > 0 ? venue.checkin_count : 1,
+    });
+  }
+
+  if (projected.length === 0) {
+    return [];
+  }
+
+  // ── Pass 1: bucket into ~44 px grid cells. 44 px matches the largest pin diameter
+  // so visually-overlapping pins always merge, at every zoom level.
+  const CLUSTER_CELL_PX = 44;
+  const buckets = new Map<string, ProjectedVenue[]>();
+  for (const pv of projected) {
+    const key = `${Math.floor(pv.x / CLUSTER_CELL_PX)}:${Math.floor(pv.y / CLUSTER_CELL_PX)}`;
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.push(pv);
+    } else {
+      buckets.set(key, [pv]);
+    }
+  }
+
+  // ── Pass 2: merge clusters whose circles overlap.
+  // A grid cell only guarantees that *pins* merge; it says nothing about circle radii,
+  // so clusters in adjacent cells can still have intersecting circles. Iteratively merge
+  // any two clusters whose weighted bounding disks overlap until all circles are
+  // disjoint. Nodes cache their weighted pixel sums so centroids are O(1) and a merge
+  // is a handful of additions; a spatial hash (cell size = 2x max radius) means each
+  // node is only compared with nodes in its own and neighboring cells, and all
+  // non-conflicting merges in a pass are applied together. Every merge pass strictly
+  // reduces the node count, so this terminates in ~O(n) work per pass.
+  interface ClusterNode {
+    venues: MapDataPoint[];
+    sumX: number;
+    sumY: number;
+    weight: number;
+    checkins: number;
+  }
+
+  const nodes: ClusterNode[] = Array.from(buckets.values()).map((pvs) => {
+    let sumX = 0;
+    let sumY = 0;
+    let weight = 0;
+    let checkins = 0;
+    const venues = new Array<MapDataPoint>(pvs.length);
+    for (let i = 0; i < pvs.length; i++) {
+      const pv = pvs[i];
+      venues[i] = pv.venue;
+      sumX += pv.x * pv.weight;
+      sumY += pv.y * pv.weight;
+      weight += pv.weight;
+      checkins += pv.venue.checkin_count;
+    }
+    return { venues, sumX, sumY, weight, checkins };
+  });
+
+  const nodeRadius = (node: ClusterNode): number => getClusterRadius(node.venues.length, node.checkins);
+
+  const HASH_CELL_PX = MAX_CLUSTER_RADIUS_PX * 2;
+
+  let mergedAny = true;
+  while (mergedAny) {
+    mergedAny = false;
+
+    const centroids = nodes.map((node) => L.point(node.sumX / node.weight, node.sumY / node.weight));
+
+    const grid = new Map<string, number[]>();
+    for (let i = 0; i < nodes.length; i++) {
+      const key = `${Math.floor(centroids[i].x / HASH_CELL_PX)}:${Math.floor(centroids[i].y / HASH_CELL_PX)}`;
+      const cell = grid.get(key);
+      if (cell) {
+        cell.push(i);
+      } else {
+        grid.set(key, [i]);
+      }
+    }
+
+    // Find a maximal set of non-conflicting overlapping pairs, then apply them together.
+    const consumed = new Set<number>();
+    const targets = new Map<number, number[]>();
+
+    for (let i = 0; i < nodes.length; i++) {
+      if (consumed.has(i)) continue;
+      const ci = centroids[i];
+      const hx = Math.floor(ci.x / HASH_CELL_PX);
+      const hy = Math.floor(ci.y / HASH_CELL_PX);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const cell = grid.get(`${hx + dx}:${hy + dy}`);
+          if (!cell) continue;
+          for (const j of cell) {
+            if (j <= i || consumed.has(j)) continue;
+            if (ci.distanceTo(centroids[j]) < nodeRadius(nodes[i]) + nodeRadius(nodes[j])) {
+              consumed.add(i);
+              consumed.add(j);
+              const list = targets.get(i);
+              if (list) {
+                list.push(j);
+              } else {
+                targets.set(i, [j]);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (targets.size === 0) {
+      break;
+    }
+
+    mergedAny = true;
+    const targetSet = new Set<number>();
+    for (const ts of targets.values()) {
+      for (const t of ts) {
+        targetSet.add(t);
+      }
+    }
+
+    const merged: ClusterNode[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      if (targetSet.has(i)) continue;
+      let node = nodes[i];
+      const ts = targets.get(i);
+      if (ts) {
+        for (const t of ts) {
+          const other = nodes[t];
+          node = {
+            venues: [...node.venues, ...other.venues],
+            sumX: node.sumX + other.sumX,
+            sumY: node.sumY + other.sumY,
+            weight: node.weight + other.weight,
+            checkins: node.checkins + other.checkins,
+          };
+        }
+      }
+      merged.push(node);
+    }
+    nodes.length = 0;
+    for (const node of merged) {
+      nodes.push(node);
+    }
+  }
+
+  return nodes.map((node, index) => {
+    if (node.venues.length === 1) {
+      return { kind: 'venue' as const, venue: node.venues[0] };
+    }
+
+    const center = map.unproject(L.point(node.sumX / node.weight, node.sumY / node.weight), zoom);
+
+    return {
+      kind: 'cluster' as const,
+      id: `cluster-${index}`,
+      latitude: center.lat,
+      longitude: center.lng,
+      checkinCount: node.checkins,
+      venues: [...node.venues].sort((a, b) => b.checkin_count - a.checkin_count),
+    };
+  });
+}
+
+function splitFormattedTimestamp(value: string): { datePart: string; timePart: string } {
+  const parts = value.split(', ');
+  if (parts.length >= 4) {
+    return {
+      datePart: parts.slice(0, 3).join(', '),
+      timePart: parts.slice(3).join(', '),
+    };
+  }
+
+  return { datePart: value, timePart: '' };
+}
+
+function buildMaxZoomPlacements(map: L.Map, venues: MapDataPoint[], zoom: number): VenueMarkerPlacement[] {
+  const MIN_MARKER_SPACING_PX = 44;
+
+  // Cull to the padded viewport: off-screen pins never need a DOM node or
+  // a placement search. They come back via the moveend-driven recompute.
+  const bounds = map.getBounds();
+  const nw = map.project(bounds.getNorthWest(), zoom);
+  const se = map.project(bounds.getSouthEast(), zoom);
+  const size = map.getSize();
+  const minX = Math.min(nw.x, se.x) - size.x * 0.5;
+  const maxX = Math.max(nw.x, se.x) + size.x * 0.5;
+  const minY = Math.min(nw.y, se.y) - size.y * 0.5;
+  const maxY = Math.max(nw.y, se.y) + size.y * 0.5;
+
+  const visibleVenues: MapDataPoint[] = [];
+  for (const venue of venues) {
+    const point = map.project([venue.latitude, venue.longitude], zoom);
+    if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) {
+      continue;
+    }
+    visibleVenues.push(venue);
+  }
+
+  const placedPoints: L.Point[] = [];
+
+  const overlaps = (candidate: L.Point): boolean => {
+    return placedPoints.some((point) => candidate.distanceTo(point) < MIN_MARKER_SPACING_PX);
+  };
+
+  const findPlacementPoint = (basePoint: L.Point): L.Point => {
+    if (!overlaps(basePoint)) return basePoint;
+
+    // Search outward on a square lattice until a free marker-tip position is found.
+    for (let ring = 1; ring <= 300; ring += 1) {
+      for (let dx = -ring; dx <= ring; dx += 1) {
+        for (let dy = -ring; dy <= ring; dy += 1) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+
+          const candidate = L.point(
+            basePoint.x + dx * MIN_MARKER_SPACING_PX,
+            basePoint.y + dy * MIN_MARKER_SPACING_PX
+          );
+
+          if (!overlaps(candidate)) {
+            return candidate;
+          }
+        }
+      }
+    }
+
+    return basePoint;
+  };
+
+  return visibleVenues.map((venue) => {
+    const basePoint = map.project([venue.latitude, venue.longitude], zoom);
+    const placedPoint = findPlacementPoint(basePoint);
+    placedPoints.push(placedPoint);
+
+    const placedLatLng = map.unproject(placedPoint, zoom);
+
+    return {
+      venue,
+      displayPosition: [placedLatLng.lat, placedLatLng.lng],
+      originalPosition: [venue.latitude, venue.longitude],
+      displaced: placedPoint.distanceTo(basePoint) > 0.01,
+    };
+  });
+}
+
+function VenueMapMarkers({
+  data,
+}: {
+  data: MapDataPoint[];
+}) {
+  const map = useMap();
+  const { resolvedTheme, resolvedThemeId } = useTheme();
+  const themePalette = getThemeDefinition(resolvedThemeId).palette;
+  const [zoom, setZoom] = useState(() => map.getZoom());
+  // Bump when the viewport moves so the (viewport-culled) clustering recomputes
+  // after pans settle, without reworking mid-gesture.
+  const [viewportVersion, setViewportVersion] = useState(0);
+
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+    moveend: () => setViewportVersion((v) => v + 1),
+  });
+
+  const maxZoom = map.getMaxZoom();
+  const isMaxZoom = zoom >= maxZoom;
+
+  const items = useMemo(
+    () => buildClusteredVenueItems(map, data, zoom, maxZoom),
+    [data, map, zoom, maxZoom, viewportVersion]
+  );
+
+  const markerPlacements = useMemo(() => {
+    if (!isMaxZoom) return null;
+
+    const venuesOnly = items
+      .filter((item): item is Extract<ClusteredVenueItem, { kind: 'venue' }> => item.kind === 'venue')
+      .map((item) => item.venue);
+
+    return buildMaxZoomPlacements(map, venuesOnly, zoom);
+  }, [isMaxZoom, items, map, zoom]);
+
+  const placementByVenueId = useMemo(() => {
+    if (!markerPlacements) return null;
+    return new Map(markerPlacements.map((placement) => [placement.venue.venue_id, placement]));
+  }, [markerPlacements]);
+
+  // Memoize formatted venue data to avoid expensive date formatting on every render
+  const formattedVenueData = useMemo(() => {
+    const formatted = new Map<string, { formattedLastVisit: string | null; datePart: string; timePart: string; dayFilter: string | null }>();
+    for (const venue of data) {
+      const formattedLastVisit = venue.last_checkin_at
+        ? formatDate(venue.last_checkin_at, venue.last_checkin_timezone)
+        : null;
+      const { datePart, timePart } = formattedLastVisit
+        ? splitFormattedTimestamp(formattedLastVisit)
+        : { datePart: '', timePart: '' };
+      const dayFilter = venue.dates[0] || null;
+      formatted.set(venue.venue_id, { formattedLastVisit, datePart, timePart, dayFilter });
+    }
+    return formatted;
+  }, [data]);
+
+  // Memoize polyline pathOptions to avoid object creation on every render
+  const polylinePathOptions = useMemo(() => {
+    const color = `rgb(${themePalette[resolvedTheme === 'dark' ? '400' : '600']})`;
+    return {
+      light: {
+        color,
+        weight: 2,
+        opacity: 0.65,
+      },
+      dark: {
+        color,
+        weight: 2,
+        opacity: 0.65,
+      },
+    };
+  }, [themePalette, resolvedTheme]);
+
+  return (
+    <>
+      {items.map((item) => {
+        if (item.kind === 'venue') {
+          const venue = item.venue;
+          const placement = placementByVenueId?.get(venue.venue_id);
+          const markerPosition: [number, number] = placement?.displayPosition ?? [venue.latitude, venue.longitude];
+          const venueFormatted = formattedVenueData.get(venue.venue_id) || { formattedLastVisit: null, datePart: '', timePart: '', dayFilter: null };
+          return (
+            <FeatureGroup key={venue.venue_id}>
+              {placement?.displaced && (
+                <Polyline
+                  positions={[placement.displayPosition, placement.originalPosition]}
+                  pathOptions={resolvedTheme === 'dark' ? polylinePathOptions.dark : polylinePathOptions.light}
+                />
+              )}
+              <Marker
+                position={markerPosition}
+                icon={getVenuePinIcon(venue.checkin_count, resolvedTheme, themePalette)}
+              >
+                <LeafletPopup>
+                  <div className="p-2 text-sm min-w-[220px] max-w-[260px] space-y-1.5 rounded-md border border-gray-200 bg-white text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.open(`/venues/${venue.venue_id}`, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="text-sm text-left font-medium text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
+                    >
+                      {venue.venue_name}
+                    </button>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {venue.checkin_count} check-in{venue.checkin_count !== 1 ? 's' : ''}
+                    </p>
+                    {venueFormatted.formattedLastVisit && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Last visit:{' '}
+                        {venueFormatted.dayFilter ? (
+                          <a
+                            href={`/?from=${encodeURIComponent(venueFormatted.dayFilter)}&to=${encodeURIComponent(venueFormatted.dayFilter)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            {venueFormatted.datePart}
+                          </a>
+                        ) : (
+                          venueFormatted.datePart
+                        )}
+                        {venueFormatted.timePart ? `, ${venueFormatted.timePart}` : ''}
+                      </p>
+                    )}
+                  </div>
+                </LeafletPopup>
+              </Marker>
+            </FeatureGroup>
+          );
+        }
+
+        return (
+          <CircleMarker
+            key={item.id}
+            center={[item.latitude, item.longitude]}
+            radius={getClusterRadius(item.venues.length, item.checkinCount)}
+            pathOptions={{
+              color: `rgb(${themePalette[resolvedTheme === 'dark' ? '400' : '600']})`,
+              weight: 2,
+              fillColor: `rgb(${themePalette['500']})`,
+              fillOpacity: 0.34,
+            }}
+            eventHandlers={{
+              click: () => {
+                const nextZoom = Math.min(map.getZoom() + 2, map.getMaxZoom());
+                map.flyTo([item.latitude, item.longitude], nextZoom, { duration: 0.35 });
+              },
+            }}
+          >
+            <Tooltip direction="center" permanent className="bg-transparent! border-0! shadow-none! text-white! font-bold!">
+              <span className="text-xs">{item.venues.length}</span>
+            </Tooltip>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
+}
+
+export function VenuePinsMap({
+  data,
+  loading,
+  periodLabel,
+  range,
+}: {
+  data: MapDataPoint[];
+  loading: boolean;
+  periodLabel: string;
+  range: { from: string; to: string };
+}) {
+  const center = useMemo((): [number, number] => {
+    if (data.length === 0) return [40.7128, -74.006];
+    const avgLat = data.reduce((sum, item) => sum + item.latitude, 0) / data.length;
+    const avgLng = data.reduce((sum, item) => sum + item.longitude, 0) / data.length;
+    return [avgLat, avgLng];
+  }, [data]);
+
+  if (loading) {
+    return (
+      <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
+        <div className="h-[500px] flex items-center justify-center">
+          <Loader2 className="animate-spin text-primary-600" size={28} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 overflow-hidden">
+      {data.length === 0 ? (
+        <div className="h-[280px] px-6 py-10 flex items-center justify-center text-center text-sm text-gray-400">
+          No venue check-ins in this time period.
+        </div>
+      ) : (
+        <div className="relative z-0 h-[500px]">
+          <MapContainer
+            center={center}
+            zoom={4}
+            scrollWheelZoom={false}
+            smoothWheelZoom={true}
+            smoothSensitivity={5}
+            zoomSnap={0}
+            attributionControl={false}
+            className="w-full h-full"
+            style={{ height: '100%' }}
+          >
+            <ThemedTileLayer />
+            <MapBoundsController data={data} />
+            <VenueMapMarkers data={data} />
+          </MapContainer>
+        </div>
+      )}
+    </div>
+  );
+}

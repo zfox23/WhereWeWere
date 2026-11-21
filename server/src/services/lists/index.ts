@@ -50,7 +50,7 @@ export interface ListDescriptor {
   sessions: string;
 }
 
-async function inTransaction<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+export async function inTransaction<T>(fn: (db: Db) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

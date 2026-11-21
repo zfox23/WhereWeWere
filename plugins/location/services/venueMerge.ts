@@ -1,5 +1,6 @@
 import { query } from '../../../server/src/db';
 import { maybeCurrentUserId } from '../../../server/src/auth/context';
+import { haversineMeters } from './distance';
 
 interface Queryable {
   query: (text: string, params?: any[]) => Promise<any>;
@@ -132,28 +133,6 @@ function coordinateToNumber(value: unknown): number {
   return typeof value === 'number' ? value : Number(value);
 }
 
-export function calculateDistanceMeters(
-  latitudeA: number,
-  longitudeA: number,
-  latitudeB: number,
-  longitudeB: number
-): number {
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const earthRadiusMeters = 6371000;
-
-  const dLat = toRadians(latitudeB - latitudeA);
-  const dLon = toRadians(longitudeB - longitudeA);
-  const lat1 = toRadians(latitudeA);
-  const lat2 = toRadians(latitudeB);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return earthRadiusMeters * c;
-}
-
 function scoreNameSimilarity(leftName: string, rightName: string): { score: number; reason: string } {
   const leftSemantic = normalizedSemanticName(leftName);
   const rightSemantic = normalizedSemanticName(rightName);
@@ -193,7 +172,7 @@ export function areVenuesSimilar(
   right: Pick<VenueCandidate, 'name' | 'latitude' | 'longitude' | 'osm_id' | 'swarm_venue_id'>,
   maxDistanceMeters = DEFAULT_AUTO_MATCH_RADIUS_METERS
 ): VenueSimilarity {
-  const distanceMeters = calculateDistanceMeters(
+  const distanceMeters = haversineMeters(
     coordinateToNumber(left.latitude),
     coordinateToNumber(left.longitude),
     coordinateToNumber(right.latitude),

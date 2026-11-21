@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { areVenuesSimilar, calculateDistanceMeters } from '../services/venueMerge';
+import { areVenuesSimilar } from '../services/venueMerge';
+import { haversineMeters } from '../services/distance';
 
-describe('calculateDistanceMeters', () => {
+describe('haversineMeters', () => {
   it('returns zero when coordinates match', () => {
-    const distance = calculateDistanceMeters(40.7128, -74.006, 40.7128, -74.006);
+    const distance = haversineMeters(40.7128, -74.006, 40.7128, -74.006);
     expect(distance).toBe(0);
   });
 
   it('returns realistic value for close-by points', () => {
-    const distance = calculateDistanceMeters(40.7128, -74.006, 40.7138, -74.006);
+    const distance = haversineMeters(40.7128, -74.006, 40.7138, -74.006);
     expect(distance).toBeGreaterThan(100);
     expect(distance).toBeLessThan(120);
   });
