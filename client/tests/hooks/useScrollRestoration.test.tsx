@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Link, MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useScrollRestoration } from '../../src/hooks/useScrollRestoration';
@@ -76,5 +76,59 @@ describe('useScrollRestoration', () => {
     expect(scrollSpy).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Loaded' }));
     expect(scrollSpy).toHaveBeenCalledWith(0, 500);
+  });
+
+  describe('on a page that keeps its settings in the URL', () => {
+    function Filtered() {
+      const [params, setParams] = useSearchParams();
+      useScrollRestoration();
+      return (
+        <>
+          <p>bucket={params.get('bucket') ?? 'month'}</p>
+          <button type="button" onClick={() => setParams({ id: params.get('id') ?? '', bucket: 'week' }, { replace: true })}>
+            Weeks
+          </button>
+          <Link to="/filtered?id=2">Other</Link>
+          <Link to="/detail">Open</Link>
+        </>
+      );
+    }
+    const renderFiltered = () =>
+      render(
+        <MemoryRouter initialEntries={['/filtered?id=1']}>
+          <Routes>
+            <Route path="/filtered" element={<Filtered />} />
+            <Route path="/detail" element={<Detail />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+    it('stays where it is when a setting replaces the entry', async () => {
+      const user = userEvent.setup();
+      renderFiltered();
+      await scrollTo(800);
+      await user.click(screen.getByRole('button', { name: 'Weeks' }));
+      expect(screen.getByText('bucket=week')).toBeTruthy();
+      expect(scrollSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns to the same spot on Back after a setting changed, without scrolling again', async () => {
+      const user = userEvent.setup();
+      renderFiltered();
+      await scrollTo(800);
+      await user.click(screen.getByRole('button', { name: 'Weeks' }));
+      await user.click(screen.getByRole('link', { name: 'Open' }));
+      await user.click(screen.getByRole('button', { name: 'Back' }));
+      expect(screen.getByText('bucket=week')).toBeTruthy();
+      expect(scrollSpy).toHaveBeenCalledWith(0, 800);
+    });
+
+    it('starts another item shown by the same page at the top', async () => {
+      const user = userEvent.setup();
+      renderFiltered();
+      await scrollTo(800);
+      await user.click(screen.getByRole('link', { name: 'Other' }));
+      expect(scrollSpy).toHaveBeenCalledWith(0, 0);
+    });
   });
 });

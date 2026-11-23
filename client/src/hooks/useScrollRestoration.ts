@@ -9,6 +9,12 @@ import { useLocation, useNavigationType } from 'react-router-dom';
 const positions = new Map<string, number>();
 const MAX_POSITIONS = 200;
 
+function remember(key: string, y: number): void {
+  positions.delete(key);
+  positions.set(key, y);
+  if (positions.size > MAX_POSITIONS) positions.delete(positions.keys().next().value as string);
+}
+
 /**
  * Put the window back where it was when the user returns to this history
  * entry with Back/Forward. `ready` should turn true once the content that
@@ -25,8 +31,11 @@ export function useScrollRestoration(ready = true): void {
   const handled = useRef<string | null>(null);
 
   useLayoutEffect(() => {
+    // A replaced entry (a filter or chart setting changed in the URL) is the
+    // same view: it keeps the window where it is, so Back returns there too.
+    if (navigationType === 'REPLACE' && keyRef.current !== key) remember(key, window.scrollY);
     keyRef.current = key;
-  }, [key]);
+  }, [key, navigationType]);
 
   useEffect(() => {
     let frame = 0;
@@ -34,9 +43,7 @@ export function useScrollRestoration(ready = true): void {
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        positions.delete(keyRef.current);
-        positions.set(keyRef.current, window.scrollY);
-        if (positions.size > MAX_POSITIONS) positions.delete(positions.keys().next().value as string);
+        remember(keyRef.current, window.scrollY);
       });
     };
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -52,8 +59,9 @@ export function useScrollRestoration(ready = true): void {
     handled.current = key;
     const saved = positions.get(key);
     if (navigationType === 'POP' && saved != null) window.scrollTo(0, saved);
-    // A new entry shown by the same mounted page starts at the top, like a new page.
-    else if (!firstEntry && navigationType !== 'POP') window.scrollTo(0, 0);
+    // A new entry shown by the same mounted page (another album) starts at the
+    // top, like a new page. A replaced one stays put.
+    else if (!firstEntry && navigationType === 'PUSH') window.scrollTo(0, 0);
   }, [key, ready, navigationType]);
 }
 
