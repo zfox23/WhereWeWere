@@ -39,7 +39,7 @@ export const PLUGIN_SECTION_KEYWORDS: Record<string, string[]> = {
     'Similarity Web', 'Voice notes',
   ],
   location: ['Coasterpedia', 'Weather', 'Open-Meteo', 'Venues'],
-  media: ['TMDB', 'Hardcover', 'IGDB', 'Twitch', 'Plex', 'Movies', 'TV', 'Books', 'Games'],
+  media: ['TMDB', 'Hardcover', 'IGDB', 'Twitch', 'Plex', 'Steam', 'Playtime', 'Time played', 'Movies', 'TV', 'Books', 'Games'],
   tracks: ['Activity types'],
   scuba: ['Dives', 'Dive sites'],
   sleep: [],

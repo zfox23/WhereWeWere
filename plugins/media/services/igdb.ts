@@ -96,6 +96,18 @@ interface IgdbGameRow {
   age_ratings?: IgdbAgeRating[];
 }
 
+/** A row of IGDB's external_games table (another store's id for a game). */
+interface IgdbExternalGameRow {
+  game?: number | { id?: number };
+  uid?: string;
+  /** Deprecated store enum (1 = Steam), replaced by external_game_source. */
+  category?: number;
+  external_game_source?: number | { id?: number };
+}
+
+/** Steam app ids per external_games query (IGDB caps a response at 500 rows). */
+const STEAM_LOOKUP_BATCH = 200;
+
 interface TwitchTokenResponse {
   access_token?: string;
   expires_in?: number;
@@ -256,10 +268,15 @@ export function getIgdbToken(clientId: string, clientSecret: string): Promise<st
 // Query execution (single 401 retry with a fresh token)
 // ---------------------------------------------------------------------------
 
-async function igdbQuery(clientId: string, clientSecret: string, apicalypse: string): Promise<IgdbGameRow[]> {
+async function igdbQuery<Row = IgdbGameRow>(
+  clientId: string,
+  clientSecret: string,
+  apicalypse: string,
+  endpoint = 'games'
+): Promise<Row[]> {
   const doFetch = async (token: string) =>
-    externalFetchPostText<IgdbGameRow[] | null>(
-      `${IGDB_BASE}/games`,
+    externalFetchPostText<Row[] | null>(
+      `${IGDB_BASE}/${endpoint}`,
       apicalypse,
       { 'Client-ID': clientId, Authorization: `Bearer ${token}` }
     );
@@ -497,6 +514,54 @@ export const igdb = {
       },
       null,
       `IGDB game details ${gameId}`
+    );
+  },
+
+  /**
+   * Map Steam app ids to IGDB game ids through IGDB's external_games table.
+   * Apps IGDB doesn't know are left out. Returns null when credentials are
+   * missing or a lookup fails, so callers fall back to title matching.
+   */
+  async steamAppIdsToIgdb(
+    clientId: string | null,
+    clientSecret: string | null,
+    appids: number[]
+  ): Promise<Map<number, string> | null> {
+    if (!this.hasCredentials(clientId, clientSecret)) return null;
+    const id = clientId as string;
+    const secret = clientSecret as string;
+    const unique = [...new Set(appids.filter((a) => Number.isInteger(a) && a > 0))];
+    return withDegradation(
+      async () => {
+        const out = new Map<number, string>();
+        for (let i = 0; i < unique.length; i += STEAM_LOOKUP_BATCH) {
+          const batch = unique.slice(i, i + STEAM_LOOKUP_BATCH);
+          const key = `igdb:steam:${batch.join(',')}`;
+          // Filtering on uid alone (not the source) keeps the query valid across
+          // IGDB's rename of `category` to `external_game_source`; non-Steam
+          // rows that happen to share a uid are dropped below. Steam is source 1.
+          const apicalypse =
+            `fields game,uid,category,external_game_source; ` +
+            `where uid = (${batch.map((a) => apicalypseQuote(String(a))).join(',')}); ` +
+            `limit 500;`;
+          const rows = await cache.get<IgdbExternalGameRow[]>(key, () =>
+            igdbQuery<IgdbExternalGameRow>(id, secret, apicalypse, 'external_games')
+          );
+          for (const row of rows) {
+            const source = typeof row.external_game_source === 'number'
+              ? row.external_game_source
+              : (row.external_game_source as { id?: number } | undefined)?.id;
+            if (source !== 1 && row.category !== 1) continue;
+            const appid = Number(row.uid);
+            const gameId = typeof row.game === 'number' ? row.game : row.game?.id;
+            if (!Number.isInteger(appid) || gameId == null || out.has(appid)) continue;
+            out.set(appid, String(gameId));
+          }
+        }
+        return out;
+      },
+      null,
+      `IGDB Steam app lookup (${unique.length} apps)`
     );
   },
 };

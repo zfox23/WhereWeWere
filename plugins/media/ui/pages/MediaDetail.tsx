@@ -1060,6 +1060,16 @@ export default function MediaDetail({ subtype }: MediaDetailProps) {
                   View on {providerName || 'web'} <ExternalLink size={11} />
                 </a>
               )}
+              {item.steam_appid != null && (
+                <a
+                  href={`https://store.steampowered.com/app/${item.steam_appid}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline mt-2"
+                >
+                  View on Steam <ExternalLink size={11} />
+                </a>
+              )}
               <div className="flex items-center gap-3 mt-auto pt-4">
                 <button onClick={openListModal} className="btn-secondary text-sm">
                   <ListPlus size={15} className="mr-1.5" />

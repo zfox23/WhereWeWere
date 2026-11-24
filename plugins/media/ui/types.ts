@@ -51,6 +51,8 @@ export interface MediaItem {
   time_played_minutes: number | null;
   /** Item-level status for games (completed/in_progress/dropped). */
   status: 'completed' | 'in_progress' | 'started' | 'dropped' | null;
+  /** Game: the linked Steam app (its playtime is synced from Steam). */
+  steam_appid?: number | null;
   created_at: string;
   last_checkin_at?: string | null;
   checkin_count?: number;
@@ -271,4 +273,36 @@ export interface YamtrackImportResult {
     duplicates_skipped: number;
   };
   plans: YamtrackImportPlanRow[];
+}
+
+/** Settings > Media: the Steam sync's state. */
+export interface SteamStatus {
+  configured: boolean;
+  last_synced_at: string | null;
+  last_attempt_at: string | null;
+  last_error: string | null;
+  last_summary: {
+    games: number;
+    matched: number;
+    newly_matched: number;
+    time_updated: number;
+    checkins_created: number;
+    unmatched: number;
+    ignored: number;
+  } | null;
+  /** Played games waiting in the review list. */
+  unmatched: number;
+  /** Every game waiting in the review list, played or not. */
+  unmatched_all: number;
+  ignored: number;
+}
+
+/** An owned Steam game in the review list (or the ignored list). */
+export interface SteamGame {
+  appid: number;
+  name: string;
+  playtime_minutes: number;
+  last_played_at: string | null;
+  icon_url: string | null;
+  status: 'unmatched' | 'ignored' | 'matched';
 }

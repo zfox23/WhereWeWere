@@ -17,6 +17,7 @@ vi.mock('../../../client/src/plugins/api', () => ({
 }));
 
 vi.mock('../ui/YamtrackImportSection', () => ({ YamtrackImportSection: () => null }));
+vi.mock('../ui/SteamSettings', () => ({ SteamSettings: () => null }));
 
 describe('MediaSettings Plex webhook URL', () => {
   beforeEach(() => {

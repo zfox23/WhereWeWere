@@ -13,6 +13,9 @@
  *                       library, stats, TV season cache (ex-routes/media.ts)
  *   - /webhook/plex     the Plex scrobble webhook, POST /:token per user
  *                       (ex-routes/webhook-plex.ts), and its event count
+ *   - /media/steam/*    Steam library sync: verify, status, review list
+ *                       (steamRoutes.ts; the sync runs as the steam-sync job
+ *                       and hourly, see services/steamSync.ts)
  *
  * Its provider API keys (tmdb/igdb/hardcover) and the plex_usernames filter
  * live in the generic plugin_settings table (declared in settingsKeys; the
@@ -44,6 +47,8 @@ import { parsePlexGuids, splitTitleYear, resolvePlexMovie, resolvePlexShow, type
 import { igdb, pickIgdbCandidate, type IgdbGameResult } from './services/igdb';
 import { normalizeTitle, titleRelation } from './services/titleMatch';
 import { hardcover } from './services/hardcover';
+import { mountSteamRoutes } from './steamRoutes';
+import { runSteamSync, startSteamAutoSync, STEAM_SYNC_JOB } from './services/steamSync';
 import {
   normalizeCompanions,
   getCompanions,
@@ -606,7 +611,7 @@ router.post('/items', async (req: Request, res: Response) => {
       series_count: toIntOrNull(series_count),
     });
     const item = await query(
-      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, overview, content_rating, players, coop, genres, developers, publishers, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status, created_at FROM media_items WHERE id = $1 AND user_id = $2',
+      'SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform, overview, content_rating, players, coop, genres, developers, publishers, page_count, series_name, series_position, series_count, rating, raw_score, notes, time_played_minutes, status, steam_appid, created_at FROM media_items WHERE id = $1 AND user_id = $2',
       [id, currentUserId()]
     );
     res.status(201).json(item.rows[0]);
@@ -779,7 +784,7 @@ router.put('/items/:id', async (req: Request, res: Response) => {
       `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
               overview, content_rating, players, coop, genres, developers, publishers,
               page_count, series_name, series_position, series_count, rating, raw_score, notes,
-              time_played_minutes, status, created_at
+              time_played_minutes, status, steam_appid, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
       [req.params.id, currentUserId()]
     );
@@ -1063,7 +1068,7 @@ router.get('/items/:id', async (req: Request, res: Response) => {
       `SELECT id, media_type, external_source, external_id, title, author, release_year, image_url, external_url, platform,
               overview, content_rating, players, coop, genres, developers, publishers,
               page_count, series_name, series_position, series_count, rating, raw_score, notes,
-              time_played_minutes, status, created_at
+              time_played_minutes, status, steam_appid, created_at
        FROM media_items WHERE id = $1 AND user_id = $2`,
       [req.params.id, currentUserId()]
     );
@@ -2452,7 +2457,7 @@ const MEDIA_ITEM_INSERT_SQL = `
      genres, developers, publishers,
      page_count, series_name, series_position, series_count,
      rating, raw_score, notes, time_played_minutes, status,
-     created_at, updated_at
+     created_at, updated_at, steam_appid
    )
    VALUES (
      $1, $2, $3, $4, $5,
@@ -2460,7 +2465,10 @@ const MEDIA_ITEM_INSERT_SQL = `
      $11, $12, $13, $14, $15,
      $16, $17, $18, $19, $20,
      $21, $22, $23, $24, $25, $26, $27,
-     COALESCE($28::timestamptz, NOW()), COALESCE($29::timestamptz, NOW())
+     COALESCE($28::timestamptz, NOW()), COALESCE($29::timestamptz, NOW()),
+     -- A Steam app already linked to another of the user's games stays there.
+     (SELECT $30::int WHERE NOT EXISTS (
+        SELECT 1 FROM media_items x WHERE x.user_id = $2 AND x.steam_appid = $30::int))
    )
    ON CONFLICT (id) DO NOTHING`;
 
@@ -2495,6 +2503,7 @@ function mediaItemInsertParams(user_id: string, row: Record<string, unknown>): u
     backupToStatusOrNull(row.status),
     row.created_at || null,
     row.updated_at || null,
+    backupToIntOrNull(row.steam_appid),
   ];
 }
 
@@ -2505,6 +2514,10 @@ function mediaItemInsertParams(user_id: string, row: Record<string, unknown>): u
  */
 const reconcileDetailPaths = new Map<string, string>();
 
+mountSteamRoutes(router, {
+  upsertGame: (game) => upsertMediaItem({ media_type: 'game', author: null, ...game }),
+});
+
 export const server: CheckinTypeServerPlugin = {
   storage: 'custom',
 
@@ -2513,6 +2526,28 @@ export const server: CheckinTypeServerPlugin = {
     { mount: '/webhook/plex', router: plexWebhookRouter, public: true },
     { mount: '/webhook/plex', router: plexStatsRouter },
   ],
+
+  // Steam sync: the "Sync Steam now" button starts this job; the hourly sync
+  // (started below) runs the same sync for users with auto-sync on.
+  jobs: [
+    {
+      jobType: STEAM_SYNC_JOB,
+      handler: async (ctx) => {
+        const summary = await runSteamSync(currentUserId(), {
+          isCancelled: () => ctx.isCancelled(),
+          onProgress: (message) => ctx.updateProgress({ phase: 'steam', message }),
+        });
+        await ctx.updateProgress({
+          phase: 'done',
+          message: `Synced ${summary.games} Steam games: ${summary.time_updated} time played updated, ` +
+            `${summary.checkins_created} check-ins added, ${summary.unmatched} to review.`,
+          ...summary,
+        });
+      },
+    },
+  ],
+
+  onServerStart: () => startSteamAutoSync(),
 
   // ------------------------------------------------------------------
   // Unified timeline (branch moved verbatim from the core timeline route's
@@ -2639,7 +2674,7 @@ export const server: CheckinTypeServerPlugin = {
               genres, developers, publishers,
               page_count, series_name, series_position, series_count,
               rating, raw_score, notes, time_played_minutes, status,
-              created_at, updated_at
+              created_at, updated_at, steam_appid
        FROM media_items WHERE user_id = $1
        ORDER BY created_at ASC, title ASC`,
       [user_id],
@@ -2752,6 +2787,8 @@ export const server: CheckinTypeServerPlugin = {
       'DELETE FROM media_items WHERE user_id = $1 RETURNING id',
       'DELETE FROM media_lists WHERE user_id = $1 RETURNING id',
       'DELETE FROM plex_webhook_events WHERE user_id = $1 RETURNING id',
+      'DELETE FROM media_steam_games WHERE user_id = $1 RETURNING appid',
+      'DELETE FROM media_steam_sync_state WHERE user_id = $1 RETURNING user_id',
     ]) {
       const result = await run(sql, [user_id]);
       deleted += result.rowCount ?? 0;
@@ -2765,6 +2802,19 @@ export const server: CheckinTypeServerPlugin = {
     { name: 'igdb_client_id', type: 'string', label: 'IGDB Client ID (Twitch app)' },
     { name: 'igdb_client_secret', type: 'string', label: 'IGDB Client Secret (Twitch app)' },
     { name: 'plex_usernames', type: 'string', label: 'Plex usernames to track' },
+    { name: 'steam_api_key', type: 'string', label: 'Steam Web API key' },
+    {
+      name: 'steam_id',
+      type: 'string',
+      label: 'SteamID64',
+      // Stored resolved: the settings UI turns a profile URL or custom URL
+      // name into the SteamID64 via POST /media/steam/verify before saving.
+      validate: (value) =>
+        value == null || value === '' || (typeof value === 'string' && /^7656119\d{10}$/.test(value))
+          ? null
+          : 'steam_id must be a 17-digit SteamID64',
+    },
+    { name: 'steam_auto_sync', type: 'boolean', label: 'Sync Steam playtime hourly', default: true },
   ],
 
   // Old backups still carry these in settings.*; restoring them writes the

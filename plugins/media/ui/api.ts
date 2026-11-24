@@ -18,6 +18,8 @@ import type {
   MediaSearchHit,
   MediaStats,
   MediaTvSeason,
+  SteamGame,
+  SteamStatus,
   YamtrackImportResult,
   YamtrackPreview,
 } from './types';
@@ -191,4 +193,30 @@ export const yamtrackImport = {
       body: JSON.stringify({ csv }),
     });
   },
+};
+
+// Steam library sync (the sync itself runs as the 'steam-sync' job)
+export const steam = {
+  /** Check a key + Steam ID (SteamID64, profile URL, or custom URL name) and resolve the ID. */
+  verify: (api_key: string, steam_id: string) =>
+    request<{ steamid64: string; persona_name: string; game_count: number }>('/media/steam/verify', {
+      method: 'POST',
+      body: JSON.stringify({ api_key, steam_id }),
+    }),
+  status: () => request<SteamStatus>('/media/steam/status'),
+  games: (status: 'unmatched' | 'ignored', includeUnplayed = false) =>
+    request<SteamGame[]>(
+      `/media/steam/games?${new URLSearchParams({ status, include_unplayed: String(includeUnplayed) })}`
+    ),
+  link: (appid: number, mediaItemId: string) =>
+    request<{ ok: true; media_item_id: string }>(`/media/steam/games/${appid}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ media_item_id: mediaItemId }),
+    }),
+  add: (appid: number) =>
+    request<{ ok: true; media_item_id: string }>(`/media/steam/games/${appid}/add`, { method: 'POST' }),
+  ignore: (appid: number) =>
+    request<{ ok: true }>(`/media/steam/games/${appid}/ignore`, { method: 'POST' }),
+  unignore: (appid: number) =>
+    request<{ ok: true }>(`/media/steam/games/${appid}/unignore`, { method: 'POST' }),
 };

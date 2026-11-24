@@ -3,6 +3,7 @@ import { Check, Copy, Clapperboard, Tv, Film, Gamepad2, BookOpen } from 'lucide-
 import { plugins } from '../../../client/src/plugins/api';
 import { plexWebhook } from './api';
 import { YamtrackImportSection } from './YamtrackImportSection';
+import { SteamSettings } from './SteamSettings';
 import { copyText } from '../../../client/src/utils/clipboard';
 
 interface MediaPluginSettings {
@@ -247,6 +248,10 @@ export function MediaSettings() {
       <button onClick={save} disabled={saving || !loaded} className="btn-primary">
         {saving ? 'Saving…' : 'Save Media Settings'}
       </button>
+    </div>
+
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6">
+      <SteamSettings />
     </div>
 
     <YamtrackImportSection />

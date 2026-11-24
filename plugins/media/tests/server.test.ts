@@ -129,6 +129,9 @@ describe('media plugin — plugin shape', () => {
       'igdb_client_id',
       'igdb_client_secret',
       'plex_usernames',
+      'steam_api_key',
+      'steam_id',
+      'steam_auto_sync',
     ]);
     expect(server.legacySettingsKeys).toEqual([
       'tmdb_api_key',
@@ -229,7 +232,7 @@ describe('media plugin — backup hooks', () => {
 
   it('deletes media in FK-safe order on start-over (check-ins before items, plex log last)', async () => {
     queryMock.mockResolvedValue({ rows: [], rowCount: 2 });
-    expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(14);
+    expect(await server.deleteUserData!({ user_id: 'u1' } as any)).toBe(18);
     const sqls = queryMock.mock.calls.map((c) => c[0]);
     expect(sqls).toEqual([
       'DELETE FROM companions WHERE checkin_type = \'media\' AND checkin_id IN (SELECT id FROM media_checkins WHERE user_id = $1) RETURNING id',
@@ -239,6 +242,8 @@ describe('media plugin — backup hooks', () => {
       'DELETE FROM media_items WHERE user_id = $1 RETURNING id',
       'DELETE FROM media_lists WHERE user_id = $1 RETURNING id',
       'DELETE FROM plex_webhook_events WHERE user_id = $1 RETURNING id',
+      'DELETE FROM media_steam_games WHERE user_id = $1 RETURNING appid',
+      'DELETE FROM media_steam_sync_state WHERE user_id = $1 RETURNING user_id',
     ]);
     for (const [, values] of queryMock.mock.calls) {
       expect(values).toEqual(['u1']);
