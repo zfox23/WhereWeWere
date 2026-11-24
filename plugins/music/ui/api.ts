@@ -16,6 +16,8 @@ import type {
   MusicList,
   AlbumStatus,
   MusicImportResult,
+  DuplicateScan,
+  RemovedPlay,
   MusicReflectionYear,
   MusicLibraryView,
   MusicAggregate,
@@ -165,6 +167,10 @@ export const music = {
   settings: () => request<MusicSettingsData>('/music/settings'),
   updateSettings: (patch: Partial<Pick<MusicSettingsData, 'session_gap_minutes' | 'min_session_tracks' | 'timezone'>>) =>
     request<MusicSettingsData>('/music/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  /** The dry run: bursts of impossible repeat plays. Changes nothing. */
+  duplicates: () => request<DuplicateScan>('/music/duplicates'),
+  removeDuplicates: (ids: string[]) =>
+    request<{ removed: number; plays: RemovedPlay[] }>('/music/duplicates/remove', { method: 'POST', body: JSON.stringify({ ids }) }),
   refreshTimezones: () =>
     request<{ updated: number }>('/music/timezones/refresh', { method: 'POST' }),
   regenerateKey: () =>

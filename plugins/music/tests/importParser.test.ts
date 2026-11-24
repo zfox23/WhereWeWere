@@ -59,6 +59,19 @@ describe('parseScrobbleExport', () => {
     expect(skipped).toBe(4);
   });
 
+  it('keeps a restorable source and the timezone (the removed-plays download), but never restores a hand entry', () => {
+    const { scrobbles } = parseScrobbleExport(JSON.stringify({
+      scrobbles: [
+        entry({ source: 'lastfm', timezone: 'America/Chicago' }),
+        entry({ source: 'manual' }),
+        entry(),
+      ],
+    }));
+    expect(scrobbles.map((s) => s.source)).toEqual(['lastfm', 'import', 'import']);
+    expect(scrobbles[0].timezone).toBe('America/Chicago');
+    expect(scrobbles[2].timezone).toBeUndefined();
+  });
+
   it('rejects files that are not scrobble exports', () => {
     expect(() => parseScrobbleExport('not json')).toThrow('File is not valid JSON');
     expect(() => parseScrobbleExport('{"tracks": []}')).toThrow('No scrobbles found in file');

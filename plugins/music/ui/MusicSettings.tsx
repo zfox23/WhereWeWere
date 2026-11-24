@@ -1,12 +1,13 @@
 /**
  * Settings > Music: connection details for multi-scrobbler, timeline/session
- * preferences, and the scrobble-history import.
+ * preferences, duplicate-play cleanup, and the scrobble-history import.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, Copy, Loader2, Music, RefreshCw, Upload } from 'lucide-react';
 import { copyText } from '../../../client/src/utils/clipboard';
 import { music } from './api';
+import { DuplicatesSection } from './DuplicatesSection';
 import type { AlbumStatus, MusicImportResult, MusicSettingsData } from './types';
 
 const CARD =
@@ -386,6 +387,7 @@ export function MusicSettings() {
       <PreferencesSection settings={settings} onSaved={setSettings} />
       <ArtworkSection />
       <TimezoneSection onRefreshed={load} />
+      <DuplicatesSection onRemoved={load} />
       <ImportSection
         title="Import from Last.fm"
         description="Import a Last.fm history export (.csv with the columns uts, artist, album, track). Last.fm keeps each artist credit whole, so names like Above & Beyond stay intact. Plays you already have are skipped."

@@ -22,6 +22,8 @@ vi.mock('../ui/api', () => ({
     startAlbumBackfill: (...args: unknown[]) => albumStartMock(...args),
     cancelAlbumBackfill: vi.fn(),
     refreshTimezones: () => refreshMock(),
+    duplicates: vi.fn(),
+    removeDuplicates: vi.fn(),
   },
 }));
 

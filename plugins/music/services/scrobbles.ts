@@ -281,6 +281,11 @@ async function rebuildSessions(
   await db.query(`DROP TABLE music_grp`);
 }
 
+/** Regroup every session inside the caller's transaction (which holds the sessions lock). */
+export function rebuildSessionsInTransaction(db: Queryable, userId: string, gapMinutes: number): Promise<void> {
+  return rebuildSessions(db, userId, gapMinutes, null);
+}
+
 export async function rebuildAllSessions(userId: string): Promise<void> {
   const settings = await getMusicSettings(userId);
   const client = await pool.connect();

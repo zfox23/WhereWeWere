@@ -4,7 +4,8 @@
  * Reads the JSON export produced by Maloja
  * (`{ maloja: {...}, scrobbles: [{ time, track: { artists, title, album, length }, duration }] }`)
  * or a bare array of the same entries. Rows that can't be read are counted,
- * not fatal.
+ * not fatal. Entries may also carry `source` and `timezone` (the "removed
+ * plays" download from Settings writes them), which are kept on re-import.
  */
 
 import type { ScrobbleInput } from './scrobbles';
@@ -21,6 +22,9 @@ function str(value: unknown): string | null {
 function strList(value: unknown): string[] {
   return Array.isArray(value) ? value.map(str).filter((v): v is string => v !== null) : [];
 }
+
+/** Sources a file may restore; anything else (including hand entries) imports as 'import'. */
+const RESTORABLE_SOURCES = new Set(['lastfm', 'multi-scrobbler', 'import']);
 
 function seconds(value: unknown): number | null {
   const n = Number(value);
@@ -62,7 +66,8 @@ export function parseScrobbleExport(text: string): ParsedImport {
       albumArtists: typeof album === 'object' && album ? strList(album.artists) : [],
       trackLength: seconds(track.length),
       listenedFor: seconds(e.duration),
-      source: 'import',
+      source: RESTORABLE_SOURCES.has(e.source) ? e.source : 'import',
+      ...(str(e.timezone) ? { timezone: str(e.timezone) } : {}),
     });
   }
   return { scrobbles, skipped };

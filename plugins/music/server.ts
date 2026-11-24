@@ -40,6 +40,7 @@ import { getLifeSoundtrack, LIFE_BY, type LifeBy } from './services/life';
 import { getArtistDetail, getScopedTies, getSongDetail } from './services/detail';
 import { parseScrobbleExport } from './services/importParser';
 import { parseLastfmCsv } from './services/lastfmCsv';
+import { findDuplicatePlays, removeDuplicatePlays } from './services/duplicates';
 import {
   addItem,
   kit as listKit,
@@ -710,6 +711,34 @@ musicRouter.put('/scrobbles/:id', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error updating scrobble:', err);
     res.status(500).json({ error: 'Failed to save the changes' });
+  }
+});
+
+// GET /duplicates - the dry run: bursts of one song played impossibly close
+// together, and which plays would go. Changes nothing.
+musicRouter.get('/duplicates', async (_req: Request, res: Response) => {
+  try {
+    res.json(await findDuplicatePlays(currentUserId()));
+  } catch (err) {
+    console.error('Error scanning for duplicate plays:', err);
+    res.status(500).json({ error: 'Failed to scan for duplicates' });
+  }
+});
+
+// POST /duplicates/remove { ids } - remove those of the given plays that a
+// fresh scan still flags; answers with the removed plays in full.
+const MAX_DUPLICATE_IDS = 50_000;
+musicRouter.post('/duplicates/remove', async (req: Request, res: Response) => {
+  try {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_DUPLICATE_IDS || !ids.every((id) => typeof id === 'string' && isUuid(id))) {
+      return res.status(400).json({ error: 'ids must be a non-empty list of play ids' });
+    }
+    const removed = await removeDuplicatePlays(currentUserId(), ids);
+    res.json({ removed: removed.length, plays: removed });
+  } catch (err) {
+    console.error('Error removing duplicate plays:', err);
+    res.status(500).json({ error: 'Failed to remove the duplicates' });
   }
 });
 

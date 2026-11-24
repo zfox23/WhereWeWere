@@ -392,3 +392,50 @@ export interface LifeSoundtrack {
   groups: LifeGroup[];
   gap_minutes: number;
 }
+
+/** A play in a burst of one song played impossibly close together (Settings → Music). */
+export interface DuplicatePlay {
+  id: string;
+  played_at: string;
+  title: string;
+  artists: string[];
+  album_artists: string[];
+  timezone: string | null;
+  source: string | null;
+  album: string | null;
+  track_length: number | null;
+  listened_for: number | null;
+  /** A hand entry, or a play with a note, place or companions: never removed. */
+  protected: boolean;
+}
+
+export interface DuplicateBurst {
+  /** The kept play's id. */
+  id: string;
+  song_key: string;
+  title: string;
+  artists: string[];
+  length: number | null;
+  /** Gaps shorter than this many seconds chained the burst. */
+  threshold: number;
+  keep: DuplicatePlay[];
+  remove: DuplicatePlay[];
+}
+
+export interface DuplicateScan {
+  bursts: DuplicateBurst[];
+  removable: number;
+}
+
+export interface RemovedPlay {
+  id: string;
+  played_at: string;
+  title: string;
+  artists: string[];
+  album: string | null;
+  album_artists: string[];
+  track_length: number | null;
+  listened_for: number | null;
+  source: string | null;
+  timezone: string | null;
+}
