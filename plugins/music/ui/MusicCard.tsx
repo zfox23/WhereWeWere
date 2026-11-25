@@ -14,7 +14,18 @@ import { ListBadge, songItemKey } from './ListBadge';
 import { ArtistLinks, SongLink } from './links';
 import { formatClock, formatDuration } from './format';
 import { playPath } from './listTitle';
+import { GenreChips } from './GenreChips';
 import type { MusicSessionData, SessionTrack } from './types';
+
+/** Genres named in an expanded session. */
+const SESSION_GENRES = 4;
+
+/** The session's genres, most tracks first. */
+export function sessionGenres(tracks: SessionTrack[]): { name: string; plays: number }[] {
+  const counts = new Map<string, number>();
+  for (const t of tracks) for (const g of t.genres ?? []) counts.set(g, (counts.get(g) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, plays]) => ({ name, plays }));
+}
 
 /** How long the jump highlight stays on the card. */
 const HIGHLIGHT_MS = 2500;
@@ -124,6 +135,11 @@ export function MusicCard({ item, compact = false }: CheckinCardProps) {
             {loading && <Loader2 size={14} className="animate-spin text-primary-600" />}
             {error && <p className="text-xs text-red-500">Couldn't load tracks.</p>}
             {deleteError && <p className="text-xs text-red-500">Couldn't delete that song.</p>}
+            {tracks && sessionGenres(tracks).length > 0 && (
+              <div className="mb-1.5">
+                <GenreChips genres={sessionGenres(tracks)} max={SESSION_GENRES} label="Genres in this session" />
+              </div>
+            )}
             {tracks && (
               <ol className="space-y-0.5">
                 {tracks.map((t, i) => (

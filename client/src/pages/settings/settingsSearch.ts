@@ -32,7 +32,7 @@ export const CORE_SECTION_KEYWORDS: Record<string, string[]> = {
 /** Extra terms for plugin sections, keyed by plugin id (mirrors each plugin's `settingsKeys` labels). */
 export const PLUGIN_SECTION_KEYWORDS: Record<string, string[]> = {
   mood: ['Icon pack', 'Activities', 'Reminder times'],
-  music: ['Scrobbler key', 'Maloja', 'Session gap', 'Timeline sessions', 'Play timezones', 'Music metadata'],
+  music: ['Scrobbler key', 'Maloja', 'Session gap', 'Timeline sessions', 'Play timezones', 'Music metadata', 'Genres'],
   food: ['Mealie', 'Meal plan', 'Recipes'],
   notes: [
     'Embedding model', 'Transcription', 'Speaker identification', 'Diarization',

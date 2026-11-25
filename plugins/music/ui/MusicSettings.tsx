@@ -8,7 +8,7 @@ import { AlertCircle, Check, Copy, Loader2, Music, RefreshCw, Upload } from 'luc
 import { copyText } from '../../../client/src/utils/clipboard';
 import { music } from './api';
 import { DuplicatesSection } from './DuplicatesSection';
-import type { AlbumStatus, MusicImportResult, MusicSettingsData } from './types';
+import type { AlbumStatus, GenreStatus, MusicImportResult, MusicSettingsData } from './types';
 
 const CARD =
   'bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-6 space-y-4';
@@ -369,6 +369,93 @@ function ArtworkSection() {
   );
 }
 
+function GenresSection() {
+  const [status, setStatus] = useState<GenreStatus | null>(null);
+  const [retryMissing, setRetryMissing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const running = status?.job.state === 'running';
+
+  const load = () => music.genreStatus().then(setStatus).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+  // Poll while the lookup runs.
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(load, 2000);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  const start = async () => {
+    setError(null);
+    try {
+      await music.startGenreBackfill(retryMissing);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start.');
+    }
+  };
+
+  if (!status) return null;
+  const { counts, job } = status;
+  const share = counts.plays ? Math.round((counts.plays_with_genres / counts.plays) * 100) : 0;
+  const n = (v: number) => v.toLocaleString();
+  return (
+    <div className={CARD}>
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Genres</h2>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Genres come from MusicBrainz, voted on by its community, for each album and each artist. A play takes its album's
+        genres, or its artist's when the album has none. Artists are looked up first, then albums, most played first; new
+        plays are looked up as they arrive. MusicBrainz allows about one request a second, so a large library takes a
+        while (it can run for hours). You can correct any album's or artist's genres on its page; your corrections are
+        kept when genres are looked up again. Lookups send artist and album names to MusicBrainz.
+      </p>
+      <p className="text-xs text-gray-600 dark:text-gray-300">
+        {n(counts.plays_with_genres)} of {n(counts.plays)} plays ({share}%) have genres. Artists: {n(counts.artists.found)} with
+        genres, {n(counts.artists.not_found)} without. Albums: {n(counts.albums.found)} with genres, {n(counts.albums.not_found)} without.{' '}
+        {n(counts.pending)} waiting.
+      </p>
+      {!status.enabled && <p className="text-xs text-amber-600">Genre lookup is turned off on this server.</p>}
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <input type="checkbox" checked={retryMissing} onChange={(e) => setRetryMissing(e.target.checked)} disabled={running} />
+        Also retry albums and artists that had no genres
+      </label>
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={start} disabled={running || !status.enabled} className="btn-primary">
+          Update genres
+        </button>
+        {running && (
+          <button type="button" onClick={() => music.cancelGenreBackfill().then(load)} className="btn-secondary text-xs">
+            Cancel
+          </button>
+        )}
+      </div>
+      {running && (
+        <p className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2">
+          <Loader2 size={13} className="animate-spin" />
+          {job.phase === 'album' ? 'Albums' : 'Artists'}: {n(job.processed)} of {n(job.total)} looked up, {n(job.found)} with genres
+        </p>
+      )}
+      {(job.state === 'done' || job.state === 'cancelled') && (
+        <div className="flex items-start gap-2 rounded-lg bg-green-50 dark:bg-green-900/20 p-3 text-sm text-green-700 dark:text-green-300">
+          <Check size={16} className="mt-0.5 shrink-0" />
+          <span>
+            {job.state === 'cancelled' ? 'Cancelled. ' : ''}Looked up {n(job.processed)}: {n(job.found)} with genres,{' '}
+            {n(job.not_found)} without.
+            {job.skipped > 0 ? ` ${n(job.skipped)} skipped while MusicBrainz was unavailable; run it again for those.` : ''}
+          </span>
+        </div>
+      )}
+      {(error || job.error) && (
+        <div className="flex items-start gap-2 rounded-lg bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{error ?? job.error}. Progress is kept; run it again to continue.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MusicSettings() {
   const [settings, setSettings] = useState<MusicSettingsData | null>(null);
   const [error, setError] = useState(false);
@@ -386,6 +473,7 @@ export function MusicSettings() {
       <ConnectionSection settings={settings} onKeyChanged={(key) => setSettings({ ...settings, scrobbler_key: key })} />
       <PreferencesSection settings={settings} onSaved={setSettings} />
       <ArtworkSection />
+      <GenresSection />
       <TimezoneSection onRefreshed={load} />
       <DuplicatesSection onRemoved={load} />
       <ImportSection

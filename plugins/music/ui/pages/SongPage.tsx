@@ -24,6 +24,7 @@ import { AlbumLink } from '../AlbumLink';
 import { formatClock, formatDateKey, formatDay, formatDuration, formatLength, sourceLabel, UNKNOWN_ALBUM } from '../format';
 import { homeDayLink } from '../homeLinks';
 import { ArtistLinks, albumPath } from '../links';
+import { GenreChips } from '../GenreChips';
 import { ListBadge, songItemKey } from '../ListBadge';
 import { playPath } from '../listTitle';
 import { ClockCard } from '../insights/ListeningClock';
@@ -230,6 +231,11 @@ export default function SongPage() {
                   {` · first ${formatDay(current.first_played_at)} · last ${formatDay(current.last_played_at)}`}
                 </span>
               </p>
+              {current.genres.length > 0 && (
+                <div className="mt-2">
+                  <GenreChips genres={current.genres} />
+                </div>
+              )}
             </div>
           </header>
 

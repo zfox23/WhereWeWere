@@ -1,5 +1,5 @@
 /**
- * Where songs, artists and albums open: each has a page of its own, so a
+ * Where songs, artists, albums and genres open: each has a page of its own, so a
  * click is an ordinary navigation (Back returns to where it was clicked,
  * middle-click opens a new tab).
  *
@@ -21,6 +21,8 @@ export function albumPath(id: { albumRef?: string | null; artId?: string | null 
 export const songPath = (songKey: string): string => `/music/song?${new URLSearchParams({ key: songKey })}`;
 
 export const artistPath = (name: string): string => `/music/artist?${new URLSearchParams({ name })}`;
+
+export const genrePath = (name: string): string => `/music/genre?${new URLSearchParams({ name })}`;
 
 export const LINK_CLASS = 'hover:underline decoration-dotted underline-offset-2';
 
@@ -55,5 +57,13 @@ export function ArtistLinks({ artists }: { artists: string[] | null | undefined 
         </span>
       ))}
     </>
+  );
+}
+
+export function GenreLink({ name, children, className = LINK_CLASS }: { name: string; children?: ReactNode; className?: string }) {
+  return (
+    <Link to={genrePath(name)} onClick={stop} title={`Show the genre ${name}`} className={className}>
+      {children ?? name}
+    </Link>
   );
 }

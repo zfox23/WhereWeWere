@@ -112,13 +112,16 @@ describe('MusicCard', () => {
   it('loads the tracks once, on first expand', async () => {
     const user = userEvent.setup();
     sessionTracksMock.mockResolvedValue([
-      { played_at: '2024-05-01T12:00:00Z', title: 'Maria También', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'UTC' },
-      { played_at: '2024-05-01T12:30:00Z', title: 'Evidence', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'Pacific/Auckland', song_key: 'evidence|khruangbin' },
+      { played_at: '2024-05-01T12:00:00Z', title: 'Maria También', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'UTC', genres: ['psychedelic rock', 'funk'] },
+      { played_at: '2024-05-01T12:30:00Z', title: 'Evidence', artists: ['Khruangbin'], album: null, track_length: null, listened_for: null, timezone: 'Pacific/Auckland', song_key: 'evidence|khruangbin', genres: ['psychedelic rock'] },
     ]);
     renderCard();
     const toggle = screen.getByRole('button');
     await user.click(toggle);
     await waitFor(() => expect(screen.getByText(/Maria También/)).toBeTruthy());
+    // The session's genres, most tracks first.
+    const genres = screen.getByRole('list', { name: 'Genres in this session' });
+    expect([...genres.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['psychedelic rock', 'funk']);
     expect(sessionTracksMock).toHaveBeenCalledWith('session-1');
     // Artist and title open their pages.
     const artist = screen.getAllByRole('link', { name: 'Khruangbin' })[0];

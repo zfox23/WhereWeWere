@@ -10,6 +10,8 @@ import { query, pool } from '../../../server/src/db';
 import { allPlugins } from '../../../server/src/plugins/registry';
 import { resolveTimezones, loadTimezoneAnchors, timezoneAt } from './timezones';
 import { lookupAlbumSoon } from './albums';
+import { lookupGenresSoon } from './genres';
+import { inGenreSql, playGenres } from './genreSql';
 import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql } from './identity';
 import { likeText, orderBy } from '../../../server/src/services/libraryQuery';
 import { tokensMatch } from '../../../server/src/services/tokens';
@@ -463,7 +465,10 @@ async function insertOne(
       sessionId = (await client.query(`SELECT session_id FROM music_scrobbles WHERE id = $1`, [id])).rows[0]?.session_id ?? null;
     }
     await client.query('COMMIT');
-    if ((inserted.rowCount ?? 0) > 0) lookupAlbumSoon(userId, inserted.rows[0].album_key);
+    if ((inserted.rowCount ?? 0) > 0) {
+      lookupAlbumSoon(userId, inserted.rows[0].album_key);
+      lookupGenresSoon(userId, { albumKey: inserted.rows[0].album_key, artist: s.artists[0] });
+    }
     return { inserted: (inserted.rowCount ?? 0) > 0, id, sessionId, duplicate: null };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -576,6 +581,7 @@ export async function updateScrobble(
     const sessionId = (await client.query(`SELECT session_id FROM music_scrobbles WHERE id = $1`, [id])).rows[0]?.session_id ?? null;
     await client.query('COMMIT');
     lookupAlbumSoon(userId, updated.rows[0].album_key);
+    lookupGenresSoon(userId, { albumKey: updated.rows[0].album_key, artist: e.artists[0] });
     return { status: 'updated', sessionId };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -604,6 +610,8 @@ export interface ScrobbleDetail {
   art_id: string | null;
   album_ref: string;
   song_key: string;
+  /** This play's genres: its album's, or its first artist's when the album has none. */
+  genres: string[];
   /** Your plays of this song, all time. */
   history: { plays: number; first_played_at: string; last_played_at: string };
   /** Its listening session, or null while one is being rebuilt. */
@@ -631,9 +639,10 @@ export async function getScrobbleDetail(userId: string, id: string): Promise<Scr
     `SELECT m.id, m.played_at, m.timezone, m.title, m.artists, m.album, m.album_artists, m.track_length, m.listened_for,
             m.source, m.note, m.latitude, m.longitude, m.location_accuracy, m.session_id,
             a.id AS art_id, ${albumRefSql('m.')} AS album_ref, ${songKeySql('m.')} AS song_key,
-            (${companionNamesSql(PLUGIN_ID, 'm.id')}) AS companions
+            (${companionNamesSql(PLUGIN_ID, 'm.id')}) AS companions, ${playGenres('m').genres} AS genres
      FROM music_scrobbles m
      LEFT JOIN music_albums a ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
+     ${playGenres('m').join}
      WHERE m.id = $2 AND m.user_id = $1`,
     [userId, id],
   );
@@ -861,6 +870,8 @@ export interface LibraryOptions {
   q?: string;
   sort?: string;
   dir?: 'asc' | 'desc';
+  /** Only plays with this genre count. */
+  genre?: string | null;
 }
 
 /** Sortable columns, as the outer query names them. */
@@ -892,8 +903,9 @@ export async function getLibrary(
   opts: LibraryOptions,
 ): Promise<{ rows: any[]; total: number }> {
   const q = likeText(opts.q ?? '');
-  // $1 user, $2/$3 range (IN_RANGE), $4 search text, $5 limit, $6 offset.
-  const params = [...rangeParams(userId, from, to), q, opts.limit, opts.offset ?? 0];
+  // $1 user, $2/$3 range (IN_RANGE), $4 search text, $5 limit, $6 offset, $7 genre.
+  const params = [...rangeParams(userId, from, to), q, opts.limit, opts.offset ?? 0, opts.genre || null];
+  const genreOf = (alias: string) => `AND ($7::text IS NULL OR ${inGenreSql(alias, '$7')})`;
   const agg = `COUNT(*)::int AS plays,
                COALESCE(SUM(${PLAY_SECONDS}), 0)::int AS listened_seconds,
                MIN(played_at) AS first_played_at,
@@ -912,6 +924,7 @@ export async function getLibrary(
                WHERE m.user_id = $1
                  AND ($2::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date >= $2::date)
                  AND ($3::date IS NULL OR (m.played_at AT TIME ZONE m.timezone)::date <= $3::date)
+                 ${genreOf('m.')}
                GROUP BY a.artist
                HAVING $4 = '' OR lower(a.artist) LIKE '%' || $4 || '%' ESCAPE '\\'`;
   } else if (view === 'albums') {
@@ -920,7 +933,7 @@ export async function getLibrary(
                       NULL::text AS album, album_key AS album_ref, NULL::text AS song_key,
                       COUNT(DISTINCT song_key)::int AS unique_tracks, ${agg}
                FROM music_scrobbles
-               WHERE user_id = $1 AND album_key IS NOT NULL ${IN_RANGE}
+               WHERE user_id = $1 AND album_key IS NOT NULL ${IN_RANGE} ${genreOf('')}
                GROUP BY album_key
                HAVING $4 = '' OR ${like("album || ' ' || array_to_string(artists, ' ')")}`;
   } else {
@@ -929,7 +942,7 @@ export async function getLibrary(
                       MODE() WITHIN GROUP (ORDER BY ${albumRefSql()}) AS album_ref,
                       ${songKeySql()} AS song_key, NULL::int AS unique_tracks, ${agg}
                FROM music_scrobbles
-               WHERE user_id = $1 ${IN_RANGE}
+               WHERE user_id = $1 ${IN_RANGE} ${genreOf('')}
                GROUP BY ${songKeySql()}
                HAVING $4 = '' OR ${like("title || ' ' || array_to_string(artists, ' ') || ' ' || COALESCE(album, '')")}`;
   }
@@ -1045,10 +1058,11 @@ export async function getSessionTracks(userId: string, sessionId: string) {
     `SELECT m.played_at, m.title, m.artists, m.album, m.track_length, m.listened_for, m.timezone, a.id AS art_id,
             ${albumRefSql('m.')} AS album_ref, ${songKeySql('m.')} AS song_key,
             m.id, m.note, (m.source = 'manual') AS manual, m.latitude, m.longitude,
-            (${companionNamesSql(PLUGIN_ID, 'm.id')}) AS companions
+            (${companionNamesSql(PLUGIN_ID, 'm.id')}) AS companions, ${playGenres('m').genres} AS genres
      FROM music_scrobbles m
      LEFT JOIN music_albums a
        ON a.user_id = m.user_id AND a.album_key = m.album_key AND a.thumb_file IS NOT NULL
+     ${playGenres('m').join}
      WHERE m.user_id = $1 AND m.session_id = $2
      ORDER BY m.played_at DESC, m.id DESC`,
     [userId, sessionId],

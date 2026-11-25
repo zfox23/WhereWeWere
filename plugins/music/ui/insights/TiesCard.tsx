@@ -1,5 +1,5 @@
 /**
- * The companions, kinds of place and moods a song or artist is played
+ * The companions, kinds of place and moods a song, artist or genre is played
  * around: plays within the listening-session gap of those check-ins, over the
  * whole history. Companions and places open Home filtered to them.
  */
@@ -20,10 +20,10 @@ const KINDS: { by: LifeBy; title: string; home?: (t: Tie) => string }[] = [
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-export function TiesCard({ scope }: { scope: { songKey: string } | { artist: string } }) {
+export function TiesCard({ scope }: { scope: { songKey: string } | { artist: string } | { genre: string } }) {
   const [ties, setTies] = useState<Ties | null>(null);
   const [error, setError] = useState(false);
-  const id = 'songKey' in scope ? `s:${scope.songKey}` : `a:${scope.artist}`;
+  const id = 'songKey' in scope ? `s:${scope.songKey}` : 'artist' in scope ? `a:${scope.artist}` : `g:${scope.genre}`;
 
   useEffect(() => {
     let cancelled = false;

@@ -33,6 +33,12 @@ import type {
   Discovery,
   LifeBy,
   LifeSoundtrack,
+  GenreCount,
+  GenreDetail,
+  GenreStatus,
+  GenreBackfillStatus,
+  GenreStream,
+  ItemGenres,
 } from './types';
 
 function rangeQuery(from?: string, to?: string, extra: Record<string, string> = {}): string {
@@ -95,10 +101,11 @@ export const music = {
     view: MusicLibraryView,
     from?: string,
     to?: string,
-    opts: { q?: string; sort?: string; dir?: 'asc' | 'desc'; limit?: number; offset?: number } = {},
+    opts: { q?: string; genre?: string; sort?: string; dir?: 'asc' | 'desc'; limit?: number; offset?: number } = {},
   ) => {
     const extra: Record<string, string> = { view };
     if (opts.q) extra.q = opts.q;
+    if (opts.genre) extra.genre = opts.genre;
     if (opts.sort) extra.sort = opts.sort;
     if (opts.dir) extra.dir = opts.dir;
     if (opts.limit) extra.limit = String(opts.limit);
@@ -107,9 +114,24 @@ export const music = {
   },
   song: (songKey: string) => request<SongDetail>(`/music/song?${new URLSearchParams({ song_key: songKey })}`),
   artist: (name: string) => request<ArtistDetail>(`/music/artist?${new URLSearchParams({ name })}`),
-  /** Companions, places and moods around a song's or an artist's plays. */
-  ties: (scope: { songKey: string } | { artist: string }) =>
-    request<Ties>(`/music/ties?${new URLSearchParams('songKey' in scope ? { song_key: scope.songKey } : { artist: scope.artist })}`),
+  genre: (name: string) => request<GenreDetail>(`/music/genre?${new URLSearchParams({ name })}`),
+  /** Every genre played, most played first. */
+  genres: () => request<GenreCount[]>('/music/genres'),
+  /** Correct an album's (by album ref) or artist's genres; null goes back to MusicBrainz's. */
+  setGenres: (kind: 'album' | 'artist', ref: string, genres: string[] | null) =>
+    request<ItemGenres>('/music/genres', { method: 'PUT', body: JSON.stringify({ kind, ref, genres }) }),
+  genreStatus: () => request<GenreStatus>('/music/genres/status'),
+  startGenreBackfill: (retryMissing: boolean) =>
+    request<GenreBackfillStatus>('/music/genres/backfill', { method: 'POST', body: JSON.stringify({ retry_missing: retryMissing }) }),
+  cancelGenreBackfill: () => request<GenreBackfillStatus>('/music/genres/backfill/cancel', { method: 'POST' }),
+  genreStream: (from?: string, to?: string) => request<GenreStream>(`/music/insights/genres${rangeQuery(from, to)}`),
+  /** Companions, places and moods around a song's, an artist's or a genre's plays. */
+  ties: (scope: { songKey: string } | { artist: string } | { genre: string }) =>
+    request<Ties>(
+      `/music/ties?${new URLSearchParams(
+        'songKey' in scope ? { song_key: scope.songKey } : 'artist' in scope ? { artist: scope.artist } : { genre: scope.genre },
+      )}`,
+    ),
   /** One page of a song's plays, newest first, optionally within local dates. */
   songPlays: (songKey: string, opts: { limit?: number; offset?: number; from?: string; to?: string } = {}) => {
     const params = new URLSearchParams({ song_key: songKey });

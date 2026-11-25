@@ -47,6 +47,7 @@ const api = {
   discardRankSession: vi.fn(async () => ({ deleted: true })),
   library: vi.fn(),
   albumView: vi.fn(),
+  genres: vi.fn(async () => []),
 };
 vi.mock('../ui/api', () => ({
   albumArtUrl: (id: string) => `/art/${id}`,

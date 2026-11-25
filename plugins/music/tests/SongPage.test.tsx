@@ -25,6 +25,7 @@ const SONG: SongDetail = {
   daily: [{ date: '2024-01-05', plays: 2 }, { date: '2024-03-02', plays: 1 }],
   clock: [{ dow: 5, hour: 12, plays: 2, seconds: 400 }, { dow: 6, hour: 12, plays: 1, seconds: 200 }],
   albums: [{ album_ref: 'discovery|daft punk', album: 'Discovery', art_id: 'a1', plays: 3 }],
+  genres: [{ name: 'french house', plays: 3 }, { name: 'disco', plays: 1 }],
 };
 
 const play = (id: string, played_at: string, extra: Partial<SongPlay> = {}): SongPlay => ({
@@ -139,5 +140,12 @@ describe('SongPage', () => {
     songMock.mockRejectedValue(new Error('404'));
     renderPage();
     expect(await screen.findByText("Couldn't load this song.")).toBeTruthy();
+  });
+
+  it('shows the genres of its plays, each opening its page', async () => {
+    renderPage();
+    const list = await screen.findByRole('list', { name: 'Genres' });
+    expect(within(list).getByRole('link', { name: 'french house' }).getAttribute('href')).toBe('/music/genre?name=french+house');
+    expect(within(list).getByRole('link', { name: 'disco' })).toBeTruthy();
   });
 });

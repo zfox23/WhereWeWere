@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowDown, ArrowUp, Loader2, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Loader2, Search, Tags, X } from 'lucide-react';
 import { usePagedLibrary, useDebouncedValue } from '../../../client/src/hooks/usePagedLibrary';
 import { PagingFooter } from '../../../client/src/components/lists/PagingFooter';
 import { music } from './api';
@@ -17,7 +17,7 @@ import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
 import { formatDateKey, formatDay, formatDuration, joinArtists } from './format';
 import { homeDayLink } from './homeLinks';
 import { ArtistLink, ArtistLinks, SongLink } from './links';
-import type { MusicAggregate, MusicLibraryView } from './types';
+import type { GenreCount, MusicAggregate, MusicLibraryView } from './types';
 
 type SortDir = 'asc' | 'desc';
 
@@ -99,6 +99,8 @@ interface LibraryUrlState {
   sortBy: string;
   sortDir: SortDir;
   query: string;
+  /** Only plays with this genre; '' for all. */
+  genre: string;
 }
 
 function getStateFromLocation(): LibraryUrlState {
@@ -112,6 +114,7 @@ function getStateFromLocation(): LibraryUrlState {
     sortBy: COLUMNS[resolvedView].some((c) => c.key === sort) ? (sort as string) : DEFAULT_SORT,
     sortDir: dir === 'asc' || dir === 'desc' ? dir : DEFAULT_DIR,
     query: params.get('q') ?? '',
+    genre: params.get('genre') ?? '',
   };
 }
 
@@ -126,6 +129,19 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   const [sortBy, setSortBy] = useState(initial.sortBy);
   const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
   const [query, setQuery] = useState(initial.query);
+  const [genre, setGenre] = useState(initial.genre);
+  const [genres, setGenres] = useState<GenreCount[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    music
+      .genres()
+      .then((g) => !cancelled && setGenres(g))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // The search text is sent a moment after typing stops.
   const searchText = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
@@ -136,10 +152,10 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
   const { rows, total, loading, loadingMore, error, loadMore } = usePagedLibrary<MusicAggregate>(
     (offset, limit) =>
       music.library(view, from || undefined, to || undefined, {
-        q: searchText, sort: sortBy, dir: sortDir, limit: limit ?? PAGE_SIZE, ...(offset ? { offset } : {}),
+        q: searchText, genre: genre || undefined, sort: sortBy, dir: sortDir, limit: limit ?? PAGE_SIZE, ...(offset ? { offset } : {}),
       }),
-    [view, from, to, searchText, sortBy, sortDir],
-    { snapshotKey: `${location.key}|${view}|${from}|${to}|${searchText}|${sortBy}|${sortDir}` },
+    [view, from, to, searchText, genre, sortBy, sortDir],
+    { snapshotKey: `${location.key}|${view}|${from}|${to}|${searchText}|${genre}|${sortBy}|${sortDir}` },
   );
 
   // Re-sync with the URL on back/forward.
@@ -150,6 +166,7 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
       setSortBy(s.sortBy);
       setSortDir(s.sortDir);
       setQuery(s.query);
+      setGenre(s.genre);
     };
     window.addEventListener('popstate', sync);
     return () => window.removeEventListener('popstate', sync);
@@ -174,10 +191,11 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
     setOrDelete('sort', sortBy, sortBy === DEFAULT_SORT);
     setOrDelete('dir', sortDir, sortDir === DEFAULT_DIR);
     setOrDelete('q', query, query === '');
+    setOrDelete('genre', genre, genre === '');
     if (changed) {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [view, sortBy, sortDir, query]);
+  }, [view, sortBy, sortDir, query, genre]);
 
   const columns = COLUMNS[view];
   const activeColumn = columns.find((c) => c.key === sortBy) ?? columns.find((c) => c.key === DEFAULT_SORT)!;
@@ -272,6 +290,26 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
             </button>
           )}
         </div>
+        {(genres.length > 0 || genre) && (
+          <label className="relative flex items-center">
+            <Tags size={14} className="pointer-events-none absolute left-2.5 text-gray-400" aria-hidden />
+            <select
+              value={genre}
+              onChange={(e) => setGenre(e.target.value)}
+              aria-label="Filter by genre"
+              className="input max-w-[14rem] py-1.5 pl-8 text-sm"
+            >
+              <option value="">All genres</option>
+              {/* A genre from a link that this list doesn't have (yet) still shows. */}
+              {genre && !genres.some((g) => g.name === genre) && <option value={genre}>{genre}</option>}
+              {genres.map((g) => (
+                <option key={g.name} value={g.name}>
+                  {g.name} ({g.plays.toLocaleString()})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {loading && <Loader2 size={16} className="animate-spin text-primary-600" />}
       </div>
 
@@ -329,7 +367,7 @@ export function MusicLibrarySection({ from, to }: MusicLibrarySectionProps) {
             {!loading && visibleRows.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-3 py-8 text-center text-sm text-gray-500">
-                  {error ? "Couldn't load the music library." : searchText ? 'Nothing matches your filter.' : 'No music played yet.'}
+                  {error ? "Couldn't load the music library." : searchText || genre ? 'Nothing matches your filter.' : 'No music played yet.'}
                 </td>
               </tr>
             )}

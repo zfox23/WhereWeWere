@@ -20,12 +20,14 @@ import { query } from '../../../server/src/db';
 import { config } from '../../../server/src/config';
 import { normalizeTitle, type AlbumMatch } from './albumMatch';
 import { getOtherAlbums, getScopedDaily, type ArtistAlbum, type DayCount } from './detail';
+import { getItemGenres, type ItemGenres } from './genres';
 import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql, UNKNOWN_ALBUM } from './identity';
 import {
   ProviderUnavailableError,
   chainProviders,
   createDeezerProvider,
-  createMusicBrainzProvider,
+  musicBrainzProvider,
+  sharedMusicBrainz,
   type AlbumProvider,
   type FetchLike,
 } from './albumProviders';
@@ -43,7 +45,7 @@ const LARGE_PX = 1200;
 function realDeps(): AlbumDeps {
   const fetchJson: FetchLike = (url, init) => fetch(url, init);
   return {
-    provider: chainProviders([createDeezerProvider(fetchJson), createMusicBrainzProvider(fetchJson)]),
+    provider: chainProviders([createDeezerProvider(fetchJson), musicBrainzProvider(sharedMusicBrainz())]),
     fetchImage: (url) => fetch(url, { signal: AbortSignal.timeout(30_000) }),
   };
 }
@@ -558,6 +560,10 @@ export interface AlbumView {
   daily: DayCount[];
   /** Other albums by the same album artist that you've played. */
   other_albums: ArtistAlbum[];
+  /** The album's own genres; null for an artist's "Unknown album", which has none of its own. */
+  genres: ItemGenres | null;
+  /** The album artist's genres, which plays fall back to while the album has none. */
+  artist_genres: string[];
 }
 
 /**
@@ -644,9 +650,12 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
 
   const albumName = matchedRow?.title ?? played.find((r) => r.album)?.album ?? null;
   const times = played.flatMap((r) => [new Date(r.first_played_at).getTime(), new Date(r.last_played_at).getTime()]);
-  const [daily, otherAlbums] = await Promise.all([
+  const realAlbum = !ref.startsWith('|');
+  const [daily, otherAlbums, genres, artistGenres] = await Promise.all([
     played.length ? getScopedDaily(userId, { kind: 'album', refs }) : Promise.resolve([]),
     getOtherAlbums(userId, albumArtist, refs),
+    realAlbum ? getItemGenres(userId, 'album', ref) : Promise.resolve(null),
+    albumArtist.trim() ? getItemGenres(userId, 'artist', albumArtist) : Promise.resolve(null),
   ]);
   return {
     album_ref: ref,
@@ -663,6 +672,8 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
     tracks,
     daily,
     other_albums: otherAlbums,
+    genres,
+    artist_genres: artistGenres?.genres ?? [],
   };
 }
 

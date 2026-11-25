@@ -31,7 +31,7 @@ const PLAY = {
   id: 'p1', played_at: '2024-05-01T20:05:00Z', timezone: 'America/Chicago', title: 'Sun & Moon', artists: ['Above & Beyond'],
   album: 'Group Therapy', album_artists: ['Above & Beyond'], track_length: 321, listened_for: 200, source: 'manual',
   note: 'At the *farmers* market', latitude: 41.88, longitude: -87.63, location_accuracy: 35, companions: ['Sam', 'Riley'],
-  art_id: 'art1', album_ref: 'group therapy|above & beyond', song_key: 'sun & moon\u001fabove & beyond',
+  art_id: 'art1', album_ref: 'group therapy|above & beyond', song_key: 'sun & moon\u001fabove & beyond', genres: ['trance'],
   history: { plays: 12, first_played_at: '2023-01-02T00:00:00Z', last_played_at: '2024-05-01T20:05:00Z' },
   session: {
     id: 'sess1', date: '2024-05-01', position: 2, count: 3,

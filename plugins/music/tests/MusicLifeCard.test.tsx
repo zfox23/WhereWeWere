@@ -56,6 +56,15 @@ describe('MusicLifeCard', () => {
     expect(screen.getByText('2 plays within 30 min of 1 check-in')).toBeTruthy();
   });
 
+  it('lists the group\'s top genres, each opening its page', async () => {
+    lifeMock.mockResolvedValue({ gap_minutes: 30, groups: [{ ...GROUPS[0], top_genres: [artist('trance', 9, 1.8), artist('house', 2, 0.5)] }] });
+    renderCard();
+    const genres = await screen.findByRole('link', { name: 'trance' });
+    expect(genres.getAttribute('href')).toBe('/music/genre?name=trance');
+    expect(screen.getByRole('heading', { name: 'Genres' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'house' })).toBeTruthy();
+  });
+
   it('labels moods and explains an empty grouping', async () => {
     const user = userEvent.setup();
     renderCard();

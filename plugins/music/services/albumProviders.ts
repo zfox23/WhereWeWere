@@ -161,10 +161,17 @@ const MB_USER_AGENT = 'WhereWeWere/1.0 (https://github.com/zfox23/WhereWeWere)';
 
 const MB_ATTEMPTS = 4;
 
-export function createMusicBrainzProvider(fetchImpl: FetchLike, gapMs = 1100, retryMs = 3_000): AlbumProvider {
+/** A rate-limited MusicBrainz GET returning parsed JSON, or null for a 404 / unreadable answer. */
+export type MusicBrainzGet = (path: string, params: Record<string, string>) => Promise<any | null>;
+
+/**
+ * One gate per client: album and genre lookups share a client (see
+ * `sharedMusicBrainz`) so together they stay within the one-a-second limit.
+ */
+export function createMusicBrainzClient(fetchImpl: FetchLike, gapMs = 1100, retryMs = 3_000): MusicBrainzGet {
   const wait = gate(gapMs);
 
-  async function get(path: string, params: Record<string, string>): Promise<any | null> {
+  return async function get(path, params) {
     const url = `${MB}${path}?${new URLSearchParams({ ...params, fmt: 'json' })}`;
     // MusicBrainz answers 503 when it is over its rate limit; that clears quickly.
     for (let attempt = 0; attempt < MB_ATTEMPTS; attempt++) {
@@ -190,8 +197,22 @@ export function createMusicBrainzProvider(fetchImpl: FetchLike, gapMs = 1100, re
       return res.json().catch(() => null);
     }
     return null;
-  }
+  };
+}
 
+let shared: MusicBrainzGet | null = null;
+
+/** The process-wide MusicBrainz client over the real network. */
+export function sharedMusicBrainz(): MusicBrainzGet {
+  shared ??= createMusicBrainzClient((url, init) => fetch(url, init));
+  return shared;
+}
+
+export function createMusicBrainzProvider(fetchImpl: FetchLike, gapMs = 1100, retryMs = 3_000): AlbumProvider {
+  return musicBrainzProvider(createMusicBrainzClient(fetchImpl, gapMs, retryMs));
+}
+
+export function musicBrainzProvider(get: MusicBrainzGet): AlbumProvider {
   return {
     async find(played) {
       const esc = (s: string) => s.replace(/["\\]/g, ' ');

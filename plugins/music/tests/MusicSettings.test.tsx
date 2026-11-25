@@ -11,6 +11,8 @@ const lastfmMock = vi.fn();
 const albumStatusMock = vi.fn();
 const albumStartMock = vi.fn();
 const refreshMock = vi.fn();
+const genreStatusMock = vi.fn();
+const genreStartMock = vi.fn();
 vi.mock('../ui/api', () => ({
   music: {
     settings: () => settingsMock(),
@@ -24,6 +26,9 @@ vi.mock('../ui/api', () => ({
     refreshTimezones: () => refreshMock(),
     duplicates: vi.fn(),
     removeDuplicates: vi.fn(),
+    genreStatus: () => genreStatusMock(),
+    startGenreBackfill: (...args: unknown[]) => genreStartMock(...args),
+    cancelGenreBackfill: vi.fn(),
   },
 }));
 
@@ -44,6 +49,11 @@ describe('MusicSettings', () => {
       albums: { total: 10, matched: 6, not_found: 1, pending: 3 },
       job: { state: 'idle', processed: 0, total: 0, matched: 0, not_found: 0, skipped: 0, durations_filled: 0, thumbnails_restored: 0, error: null },
     });
+    genreStatusMock.mockResolvedValue({
+      enabled: true,
+      counts: { artists: { found: 3, not_found: 1 }, albums: { found: 5, not_found: 2 }, pending: 4, plays: 200, plays_with_genres: 150 },
+      job: { state: 'idle', phase: null, processed: 0, total: 0, found: 0, not_found: 0, skipped: 0, error: null },
+    });
   });
   afterEach(() => {
     cleanup();
@@ -55,6 +65,8 @@ describe('MusicSettings', () => {
     lastfmMock.mockReset();
     albumStatusMock.mockReset();
     albumStartMock.mockReset();
+    genreStatusMock.mockReset();
+    genreStartMock.mockReset();
     refreshMock.mockReset();
   });
 
@@ -170,4 +182,26 @@ describe('MusicSettings', () => {
     await user.click(screen.getByRole('button', { name: /^Import$/ }));
     await waitFor(() => expect(screen.getByText('File is not valid JSON')).toBeTruthy());
   });
+  it('shows genre coverage and starts a genre lookup, optionally retrying misses', async () => {
+    const user = userEvent.setup();
+    genreStartMock.mockResolvedValue({});
+    render(<MusicSettings />);
+    await waitFor(() => screen.getByText(/150 of 200 plays \(75%\) have genres/));
+    expect(document.body.textContent).toContain('Artists: 3 with genres, 1 without. Albums: 5 with genres, 2 without. 4 waiting.');
+    await user.click(screen.getByLabelText(/retry albums and artists that had no genres/));
+    await user.click(screen.getByRole('button', { name: 'Update genres' }));
+    expect(genreStartMock).toHaveBeenCalledWith(true);
+  });
+
+  it('shows a running genre lookup\'s phase and progress', async () => {
+    genreStatusMock.mockResolvedValue({
+      enabled: true,
+      counts: { artists: { found: 3, not_found: 1 }, albums: { found: 0, not_found: 0 }, pending: 9, plays: 200, plays_with_genres: 90 },
+      job: { state: 'running', phase: 'album', processed: 4, total: 13, found: 3, not_found: 1, skipped: 0, error: null },
+    });
+    render(<MusicSettings />);
+    expect(await screen.findByText('Albums: 4 of 13 looked up, 3 with genres')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Update genres' })).toHaveProperty('disabled', true);
+  });
+
 });

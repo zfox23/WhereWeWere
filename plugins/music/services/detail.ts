@@ -14,11 +14,14 @@ import { query } from '../../../server/src/db';
 import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql } from './identity';
 import { ANCHORS, LIFE_BY, type LifeBy } from './life';
 import { getMusicSettings } from './scrobbles';
+import { genresOfPlays, getItemGenres, listGenres, type GenreCount, type ItemGenres } from './genres';
+import { inGenreSql } from './genreSql';
 
 export type Scope =
   | { kind: 'song'; songKey: string }
   | { kind: 'artist'; name: string }
-  | { kind: 'album'; refs: string[] };
+  | { kind: 'album'; refs: string[] }
+  | { kind: 'genre'; name: string };
 
 /** The scope as a condition on `alias`'s plays, its value bound to `param` (e.g. "$2"). */
 function scopeWhere(scope: Scope, alias: string, param: string): { sql: string; value: unknown } {
@@ -29,6 +32,8 @@ function scopeWhere(scope: Scope, alias: string, param: string): { sql: string; 
       return { sql: `${param}::text = ANY(${alias}artists)`, value: scope.name };
     case 'album':
       return { sql: `${albumRefSql(alias)} = ANY(${param}::text[])`, value: scope.refs };
+    case 'genre':
+      return { sql: inGenreSql(alias, param), value: scope.name };
   }
 }
 
@@ -136,6 +141,8 @@ export interface SongDetail {
   clock: Awaited<ReturnType<typeof getScopedClock>>;
   /** The albums its plays were credited to, most plays first. */
   albums: { album_ref: string; album: string | null; art_id: string | null; plays: number }[];
+  /** The genres of its plays, most plays first. */
+  genres: GenreCount[];
 }
 
 /** Everything the song page shows above its plays; null for a song never played. */
@@ -153,7 +160,7 @@ export async function getSongDetail(userId: string, songKey: string): Promise<So
   const row = head.rows[0];
   if (!row) return null;
   const scope: Scope = { kind: 'song', songKey };
-  const [art, rank, daily, clock, albums] = await Promise.all([
+  const [art, rank, daily, clock, albums, genres] = await Promise.all([
     query(`SELECT id FROM music_albums WHERE user_id = $1 AND album_key = $2 AND thumb_file IS NOT NULL`, [userId, row.album_ref]),
     query(
       `SELECT COUNT(*) FILTER (WHERE n > $2)::int + 1 AS rank, COUNT(*)::int AS total
@@ -173,6 +180,7 @@ export async function getSongDetail(userId: string, songKey: string): Promise<So
        ORDER BY g.plays DESC, g.album`,
       [userId, songKey],
     ),
+    genresOfPlays(userId, `${songKeySql('m.')} = $2`, [songKey]),
   ]);
   return {
     ...row,
@@ -182,6 +190,7 @@ export async function getSongDetail(userId: string, songKey: string): Promise<So
     daily,
     clock,
     albums: albums.rows,
+    genres,
   };
 }
 
@@ -220,6 +229,10 @@ export interface ArtistDetail {
   clock: Awaited<ReturnType<typeof getScopedClock>>;
   songs: ArtistSong[];
   albums: ArtistAlbum[];
+  /** The artist's own genres (which their plays fall back to when an album has none). */
+  genres: ItemGenres;
+  /** The genres their plays have, most plays first. */
+  play_genres: GenreCount[];
 }
 
 /** Songs returned on the artist page, most played first. */
@@ -242,7 +255,7 @@ export async function getArtistDetail(userId: string, name: string): Promise<Art
   const row = head.rows[0];
   if (!row) return null;
   const scope: Scope = { kind: 'artist', name };
-  const [rank, daily, clock, songs, albums] = await Promise.all([
+  const [rank, daily, clock, songs, albums, genres, playGenres] = await Promise.all([
     query(
       `SELECT COUNT(*) FILTER (WHERE n > $2)::int + 1 AS rank, COUNT(*)::int AS total
        FROM (SELECT COUNT(*) AS n FROM music_scrobbles m, unnest(m.artists) AS a(artist) WHERE m.user_id = $1 GROUP BY a.artist) s`,
@@ -276,6 +289,8 @@ export async function getArtistDetail(userId: string, name: string): Promise<Art
        ORDER BY g.plays DESC, g.last_played_at DESC`,
       [userId, name],
     ),
+    getItemGenres(userId, 'artist', name),
+    genresOfPlays(userId, '$2::text = ANY(m.artists)', [name]),
   ]);
   return {
     name,
@@ -286,6 +301,8 @@ export async function getArtistDetail(userId: string, name: string): Promise<Art
     clock,
     songs: songs.rows,
     albums: albums.rows,
+    genres,
+    play_genres: playGenres,
   };
 }
 
@@ -316,4 +333,105 @@ export async function getOtherAlbums(userId: string, artist: string, refs: strin
     [userId, artist, refs],
   );
   return r.rows;
+}
+
+// ---- Genre -------------------------------------------------------------
+
+export interface GenreDetail {
+  name: string;
+  plays: number;
+  listened_seconds: number;
+  first_played_at: string;
+  last_played_at: string;
+  unique_songs: number;
+  unique_artists: number;
+  /** Place among every genre played, by plays (1 = most played). */
+  rank: number;
+  genres_total: number;
+  daily: DayCount[];
+  clock: Awaited<ReturnType<typeof getScopedClock>>;
+  artists: { name: string; plays: number }[];
+  songs: ArtistSong[];
+  albums: ArtistAlbum[];
+  /** Other genres on the same plays, most shared plays first. */
+  related: GenreCount[];
+}
+
+const GENRE_ARTISTS = 30;
+const GENRE_SONGS = 200;
+const GENRE_ALBUMS = 24;
+const RELATED_GENRES = 12;
+
+/**
+ * A genre's page: every play that has it (see genreSql.ts for which genres a
+ * play has). Null for a genre no play has.
+ */
+export async function getGenreDetail(userId: string, name: string): Promise<GenreDetail | null> {
+  const w = scopeWhere({ kind: 'genre', name }, '', '$2');
+  const head = await query(
+    `SELECT COUNT(*)::int AS plays, COALESCE(SUM(${SECONDS}), 0)::int AS listened_seconds,
+            MIN(played_at) AS first_played_at, MAX(played_at) AS last_played_at,
+            COUNT(DISTINCT ${songKeySql()})::int AS unique_songs
+     FROM music_scrobbles
+     WHERE user_id = $1 AND ${w.sql}
+     HAVING COUNT(*) > 0`,
+    [userId, name],
+  );
+  const row = head.rows[0];
+  if (!row) return null;
+  const scope: Scope = { kind: 'genre', name };
+  const wm = scopeWhere(scope, 'm.', '$2');
+  const [all, daily, clock, artists, songs, albums, together] = await Promise.all([
+    listGenres(userId),
+    getScopedDaily(userId, scope),
+    getScopedClock(userId, scope),
+    query(
+      `SELECT a.artist AS name, COUNT(*)::int AS plays
+       FROM music_scrobbles m, unnest(m.artists) AS a(artist)
+       WHERE m.user_id = $1 AND ${wm.sql}
+       GROUP BY a.artist ORDER BY plays DESC, a.artist`,
+      [userId, name],
+    ),
+    query(
+      `SELECT g.*, a.id AS art_id
+       FROM (
+         SELECT ${songKeySql()} AS song_key, ${latestTitleSql()} AS name, ${fullestArtistsSql()} AS artists,
+                MODE() WITHIN GROUP (ORDER BY ${albumRefSql()}) AS album_ref,
+                COUNT(*)::int AS plays, MAX(played_at) AS last_played_at
+         FROM music_scrobbles WHERE user_id = $1 AND ${w.sql}
+         GROUP BY ${songKeySql()}
+       ) g
+       LEFT JOIN music_albums a ON a.user_id = $1 AND a.album_key = g.album_ref AND a.thumb_file IS NOT NULL
+       ORDER BY g.plays DESC, g.last_played_at DESC
+       LIMIT ${GENRE_SONGS}`,
+      [userId, name],
+    ),
+    query(
+      `SELECT g.*, a.id AS art_id
+       FROM (
+         SELECT album_key AS album_ref, (ARRAY_AGG(album ORDER BY played_at DESC))[1] AS name,
+                COUNT(*)::int AS plays, COUNT(DISTINCT ${songKeySql()})::int AS unique_tracks, MAX(played_at) AS last_played_at
+         FROM music_scrobbles WHERE user_id = $1 AND ${w.sql} AND album_key IS NOT NULL
+         GROUP BY album_key
+       ) g
+       LEFT JOIN music_albums a ON a.user_id = $1 AND a.album_key = g.album_ref AND a.thumb_file IS NOT NULL
+       ORDER BY g.plays DESC, g.last_played_at DESC
+       LIMIT ${GENRE_ALBUMS}`,
+      [userId, name],
+    ),
+    genresOfPlays(userId, wm.sql, [name]),
+  ]);
+  return {
+    name,
+    ...row,
+    unique_artists: artists.rows.length,
+    rank: all.filter((g) => g.plays > row.plays).length + 1,
+    genres_total: all.length,
+    daily,
+    clock,
+    artists: artists.rows.slice(0, GENRE_ARTISTS),
+    songs: songs.rows,
+    albums: albums.rows,
+    related: together.filter((g) => g.name !== name).slice(0, RELATED_GENRES),
+  };
 }

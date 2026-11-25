@@ -1,7 +1,7 @@
 /**
  * Exploring or comfort-listening: per week, month or year of the period,
  * plays of songs first heard in that bucket ("new") stacked under the rest
- * ("familiar"), plus how many songs and artists were new to you.
+ * ("familiar"), plus how many songs, artists and genres were new to you.
  */
 
 import { useEffect, useState } from 'react';
@@ -31,7 +31,7 @@ function describe(b: DiscoveryBucket, size: DiscoveryBucketSize): string {
   return `${bucketLabel(b.start, size)}: ${plural(b.new_plays, 'new play')}, ${plural(b.familiar_plays, 'familiar play')} · ${plural(
     b.new_songs,
     'new song',
-  )}, ${plural(b.new_artists, 'new artist')}`;
+  )}, ${plural(b.new_artists, 'new artist')}${b.new_genres ? `, ${plural(b.new_genres, 'new genre')}` : ''}`;
 }
 
 export function DiscoveryChart({ from, to }: { from?: string; to?: string }) {
@@ -78,6 +78,7 @@ export function DiscoveryChart({ from, to }: { from?: string; to?: string }) {
           <p className="text-sm text-gray-700 dark:text-gray-300">
             <span className="font-semibold">{pct(totals.new_plays, totals.plays)}%</span> of plays were songs new to you ·{' '}
             {plural(totals.new_songs, 'new song')} · {plural(totals.new_artists, 'new artist')}
+            {(totals.new_genres ?? 0) > 0 && <> · {plural(totals.new_genres, 'new genre')}</>}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-600 dark:text-gray-300">
             <span className="inline-flex items-center gap-1.5">

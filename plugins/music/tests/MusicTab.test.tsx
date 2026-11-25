@@ -25,6 +25,8 @@ vi.mock('../ui/api', () => ({
     discovery: (...args: unknown[]) => discoveryMock(...args),
     dailyListening: (...args: unknown[]) => dailyMock(...args),
     lifeSoundtrack: () => Promise.resolve({ groups: [], gap_minutes: 30 }),
+    genreStream: () => Promise.resolve({ bucket: 'week', genres: [], buckets: [], plays: 0, plays_with_genres: 0 }),
+    genres: () => Promise.resolve([]),
   },
 }));
 vi.mock('../../../client/src/api/client', () => ({
@@ -41,6 +43,7 @@ const STATS = {
   top_songs: Array.from({ length: 12 }, (_, i) => agg(`Song ${i + 1}`, 50 - i, { artists: ['Someone'] })),
   top_artists: [agg('Khruangbin', 30)],
   top_albums: [],
+  top_genres: [{ name: 'psychedelic rock', plays: 30, listened_seconds: 3000, artists: 1 }],
 };
 
 function renderTab() {
@@ -77,6 +80,9 @@ describe('MusicTab', () => {
     expect(screen.getByText('Top songs')).toBeTruthy();
     expect(screen.getByText('Top artists')).toBeTruthy();
     expect(screen.getByText('Top albums')).toBeTruthy();
+    expect(screen.getByText('Top genres')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'psychedelic rock' }).getAttribute('href')).toBe('/music/genre?name=psychedelic+rock');
+    expect(screen.getByRole('region', { name: 'Genres over time' })).toBeTruthy();
     expect(screen.getByText('Khruangbin')).toBeTruthy();
     expect(screen.getByText('Nothing played in this period.')).toBeTruthy();
   });

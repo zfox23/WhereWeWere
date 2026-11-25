@@ -48,6 +48,8 @@ export interface SongDetail {
   clock: ClockCell[];
   /** The albums its plays were credited to, most plays first. */
   albums: { album_ref: string; album: string | null; art_id: string | null; plays: number }[];
+  /** The genres of its plays, most plays first. */
+  genres: GenreCount[];
 }
 
 export interface ArtistSong {
@@ -82,6 +84,10 @@ export interface ArtistDetail {
   clock: ClockCell[];
   songs: ArtistSong[];
   albums: ArtistAlbum[];
+  /** The artist's own genres (plays fall back to them when an album has none). */
+  genres: ItemGenres;
+  /** The genres their plays have, most plays first. */
+  play_genres: GenreCount[];
 }
 
 /** A companion, place category or mood a song or artist is played around. */
@@ -115,6 +121,91 @@ export interface MusicStats {
   top_songs: MusicAggregate[];
   top_artists: MusicAggregate[];
   top_albums: MusicAggregate[];
+  /** A play counts toward each of its genres. */
+  top_genres: TopGenre[];
+}
+
+export interface TopGenre {
+  name: string;
+  plays: number;
+  listened_seconds: number;
+  /** First-credited artists of its plays. */
+  artists: number;
+}
+
+/** A genre and how many plays (of some group) carry it. */
+export interface GenreCount {
+  name: string;
+  plays: number;
+}
+
+/** An album's or artist's own genres. */
+export interface ItemGenres {
+  /** What counts: the user's edit when there is one, else MusicBrainz's. */
+  genres: string[];
+  catalog_genres: string[];
+  edited: boolean;
+  /** MusicBrainz's answer; null before it was asked. */
+  lookup: 'found' | 'not_found' | null;
+}
+
+export interface GenreDetail {
+  name: string;
+  plays: number;
+  listened_seconds: number;
+  first_played_at: string;
+  last_played_at: string;
+  unique_songs: number;
+  unique_artists: number;
+  rank: number;
+  genres_total: number;
+  daily: DayCount[];
+  clock: ClockCell[];
+  artists: GenreCount[];
+  songs: ArtistSong[];
+  albums: ArtistAlbum[];
+  /** Other genres on the same plays, most shared plays first. */
+  related: GenreCount[];
+}
+
+export interface GenreStreamBucket {
+  start: string;
+  /** Plays per band, in `GenreStream.genres` order. */
+  counts: number[];
+  other: number;
+  other_top: GenreCount[];
+}
+
+export interface GenreStream {
+  bucket: DiscoveryBucketSize;
+  /** The bands, most played first. */
+  genres: string[];
+  buckets: GenreStreamBucket[];
+  plays: number;
+  plays_with_genres: number;
+}
+
+export interface GenreBackfillStatus {
+  state: 'idle' | 'running' | 'done' | 'cancelled' | 'error';
+  phase: 'artist' | 'album' | null;
+  processed: number;
+  total: number;
+  found: number;
+  not_found: number;
+  skipped: number;
+  error: string | null;
+}
+
+export interface GenreStatus {
+  enabled: boolean;
+  counts: {
+    artists: { found: number; not_found: number };
+    albums: { found: number; not_found: number };
+    pending: number;
+    plays: number;
+    plays_with_genres: number;
+  };
+  job: GenreBackfillStatus;
 }
 
 export type MusicLibraryView = 'songs' | 'artists' | 'albums';
@@ -154,6 +245,7 @@ export interface SessionTrack {
   latitude?: number | null;
   longitude?: number | null;
   companions?: string[];
+  genres?: string[];
 }
 
 export interface MusicSessionData {
@@ -218,6 +310,10 @@ export interface AlbumView {
   daily: DayCount[];
   /** Other albums by the same album artist that you've played. */
   other_albums: ArtistAlbum[];
+  /** The album's own genres; null for an artist's "Unknown album". */
+  genres: ItemGenres | null;
+  /** The album artist's genres, which plays fall back to while the album has none. */
+  artist_genres: string[];
 }
 
 export interface ListItem {
@@ -326,6 +422,8 @@ export interface ScrobbleDetail {
   art_id: string | null;
   album_ref: string;
   song_key: string;
+  /** Its album's genres, or its first artist's when the album has none. */
+  genres: string[];
   history: { plays: number; first_played_at: string; last_played_at: string };
   session: {
     id: string;
@@ -362,12 +460,13 @@ export interface DiscoveryBucket {
   familiar_plays: number;
   new_songs: number;
   new_artists: number;
+  new_genres: number;
 }
 
 export interface Discovery {
   bucket: DiscoveryBucketSize;
   buckets: DiscoveryBucket[];
-  totals: { plays: number; new_plays: number; new_songs: number; new_artists: number };
+  totals: { plays: number; new_plays: number; new_songs: number; new_artists: number; new_genres: number };
 }
 
 export type LifeBy = 'companion' | 'place' | 'mood';
@@ -386,6 +485,7 @@ export interface LifeGroup {
   plays: number;
   top_artists: LifeItem[];
   top_songs: (LifeItem & { artists: string[]; song_key: string })[];
+  top_genres: LifeItem[];
 }
 
 export interface LifeSoundtrack {

@@ -9,6 +9,7 @@
 
 import { query } from '../../../server/src/db';
 import { IN_RANGE, PLAY_SECONDS } from './scrobbles';
+import { playGenres } from './genreSql';
 
 /** A play's local calendar day. */
 const LOCAL_DAY = `(played_at AT TIME ZONE timezone)::date`;
@@ -81,8 +82,8 @@ export function discoveryBucket(first: string, last: string): DiscoveryBucket {
 
 export interface Discovery {
   bucket: DiscoveryBucket;
-  buckets: { start: string; new_plays: number; familiar_plays: number; new_songs: number; new_artists: number }[];
-  totals: { plays: number; new_plays: number; new_songs: number; new_artists: number };
+  buckets: { start: string; new_plays: number; familiar_plays: number; new_songs: number; new_artists: number; new_genres: number }[];
+  totals: { plays: number; new_plays: number; new_songs: number; new_artists: number; new_genres: number };
 }
 
 /**
@@ -98,19 +99,22 @@ export async function getDiscovery(userId: string, from: string | null, to: stri
     [userId, from, to],
   );
   const { first, last } = span.rows[0] as { first: string | null; last: string | null };
-  const empty = { plays: 0, new_plays: 0, new_songs: 0, new_artists: 0 };
+  const empty = { plays: 0, new_plays: 0, new_songs: 0, new_artists: 0, new_genres: 0 };
   if (!first || !last) return { bucket: 'month', buckets: [], totals: empty };
   const start = from ?? first;
   const end = to ?? last;
   const bucket = discoveryBucket(start, end);
 
+  const pg = playGenres('m');
   // $1 user, $2 start, $3 end, $4 bucket unit.
   const r = await query(
     `WITH plays AS (
-       SELECT song_key, artists, ${LOCAL_DAY} AS day FROM music_scrobbles WHERE user_id = $1
+       SELECT m.song_key, m.artists, (m.played_at AT TIME ZONE m.timezone)::date AS day, ${pg.genres} AS genres
+       FROM music_scrobbles m ${pg.join} WHERE m.user_id = $1
      ),
      song_first AS (SELECT song_key, MIN(day) AS first_day FROM plays GROUP BY song_key),
      artist_first AS (SELECT a AS artist, MIN(day) AS first_day FROM plays, unnest(artists) AS a GROUP BY a),
+     genre_first AS (SELECT g AS genre, MIN(day) AS first_day FROM plays, unnest(genres) AS g GROUP BY g),
      buckets AS (
        SELECT generate_series(date_trunc($4::text, ($2::date)::timestamp), date_trunc($4::text, ($3::date)::timestamp), ('1 ' || $4::text)::interval)::date AS start
      ),
@@ -129,14 +133,19 @@ export async function getDiscovery(userId: string, from: string | null, to: stri
      artist_counts AS (
        SELECT date_trunc($4::text, (first_day)::timestamp)::date AS start, COUNT(*)::int AS n
        FROM artist_first WHERE first_day BETWEEN $2::date AND $3::date GROUP BY 1
+     ),
+     genre_counts AS (
+       SELECT date_trunc($4::text, (first_day)::timestamp)::date AS start, COUNT(*)::int AS n
+       FROM genre_first WHERE first_day BETWEEN $2::date AND $3::date GROUP BY 1
      )
      SELECT b.start::text AS start,
             COALESCE(pc.new_plays, 0) AS new_plays, COALESCE(pc.familiar_plays, 0) AS familiar_plays,
-            COALESCE(sc.n, 0) AS new_songs, COALESCE(ac.n, 0) AS new_artists
+            COALESCE(sc.n, 0) AS new_songs, COALESCE(ac.n, 0) AS new_artists, COALESCE(gc.n, 0) AS new_genres
      FROM buckets b
      LEFT JOIN play_counts pc USING (start)
      LEFT JOIN song_counts sc USING (start)
      LEFT JOIN artist_counts ac USING (start)
+     LEFT JOIN genre_counts gc USING (start)
      ORDER BY b.start`,
     [userId, start, end, bucket],
   );
@@ -147,6 +156,7 @@ export async function getDiscovery(userId: string, from: string | null, to: stri
       new_plays: t.new_plays + b.new_plays,
       new_songs: t.new_songs + b.new_songs,
       new_artists: t.new_artists + b.new_artists,
+      new_genres: t.new_genres + b.new_genres,
     }),
     empty,
   );

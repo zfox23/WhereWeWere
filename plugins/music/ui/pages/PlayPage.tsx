@@ -20,6 +20,7 @@ import { formatDay, formatLength, sourceLabel } from '../format';
 import { ArtistLinks, SongLink, songPath } from '../links';
 import { ListBadge, songItemKey } from '../ListBadge';
 import { ListPicker } from '../ListPicker';
+import { GenreChips } from '../GenreChips';
 import { playPath } from '../listTitle';
 import type { ImmichAsset } from '../../../../client/src/types';
 import type { ScrobbleDetail, SessionNeighbour } from '../types';
@@ -144,6 +145,11 @@ export default function PlayPage() {
             <AlbumLink albumRef={play.album_ref}>{play.album ?? undefined}</AlbumLink>
             {play.track_length ? ` · ${formatLength(play.track_length)}` : ''}
           </p>
+          {play.genres.length > 0 && (
+            <div className="mt-1.5">
+              <GenreChips genres={play.genres} />
+            </div>
+          )}
           <div className="relative mt-2">
             <button type="button" onClick={() => setPicking((v) => !v)} className="btn-secondary inline-flex items-center gap-1.5 !px-2.5 !py-1 text-xs">
               <ListPlus size={14} />

@@ -15,6 +15,7 @@ import { usePageTitle } from '../../../../client/src/utils/pageTitle';
 import { albumArtUrl, music } from '../api';
 import { formatDay, formatDuration, formatLength } from '../format';
 import { libraryHref } from '../libraryLinks';
+import { GenreChips, GenreEditor } from '../GenreChips';
 import { ArtistLink, SongLink } from '../links';
 import { ListBadge, albumItemKey, songItemKey } from '../ListBadge';
 import { ListPicker } from '../ListPicker';
@@ -122,6 +123,21 @@ export default function AlbumPage() {
                     ` · first ${formatDay(current.first_played_at)} · last ${formatDay(current.last_played_at)}`}
                 </span>
               </p>
+              {current.genres && (
+                <GenreEditor
+                  key={current.album_ref}
+                  kind="album"
+                  itemRef={current.album_ref}
+                  value={current.genres}
+                  fallback={current.artist ? { label: `Using ${current.artist}'s`, genres: current.artist_genres } : undefined}
+                  onSaved={(genres) => setAlbum((a) => (a ? { ...a, genres } : a))}
+                />
+              )}
+              {!current.genres && current.artist_genres.length > 0 && (
+                <div className="mt-2">
+                  <GenreChips genres={current.artist_genres} label={`${current.artist}'s genres`} />
+                </div>
+              )}
               <div className="mt-2 flex flex-wrap gap-2">
                 {!unknown && (
                   <button

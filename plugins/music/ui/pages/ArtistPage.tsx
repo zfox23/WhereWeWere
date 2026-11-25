@@ -16,6 +16,7 @@ import { AlbumArt } from '../AlbumArt';
 import { formatDay, formatDuration } from '../format';
 import { libraryHref } from '../libraryLinks';
 import { ArtistLinks, SongLink } from '../links';
+import { GenreChips, GenreEditor } from '../GenreChips';
 import { ListBadge, songItemKey } from '../ListBadge';
 import { ChartCard } from '../insights/ChartCard';
 import { ClockCard } from '../insights/ListeningClock';
@@ -101,6 +102,21 @@ export default function ArtistPage() {
             <Link to={libraryHref('songs', current.name)} className="mt-1 inline-block text-xs font-medium text-primary-600 hover:underline">
               Show in library
             </Link>
+            <GenreEditor
+              key={current.name}
+              kind="artist"
+              itemRef={current.name}
+              value={current.genres}
+              onSaved={(genres) => setArtist((a) => (a ? { ...a, genres } : a))}
+            />
+            {/* What their plays actually count as: albums with genres of their own use those. */}
+            {current.play_genres.length > 0 &&
+              current.play_genres.map((g) => g.name).join('|') !== current.genres.genres.join('|') && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Across their plays:</span>
+                  <GenreChips genres={current.play_genres} max={8} label="Genres across their plays" />
+                </div>
+              )}
           </header>
 
           <StreaksAndPeaks daily={current.daily} rank={current.rank} rankOf={current.artists_total} rankNoun="artists" />

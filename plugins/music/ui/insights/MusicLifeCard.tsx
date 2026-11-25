@@ -1,7 +1,7 @@
 /**
  * "Soundtrack of your life": what you played around your other check-ins,
  * by the companion you were with, the kind of place you were at, or the mood
- * you logged. Pick a group to see its top artists and songs, either most
+ * you logged. Pick a group to see its top genres, artists and songs, either most
  * played or most distinctive (played there more than usual).
  */
 
@@ -10,7 +10,7 @@ import { Headphones } from 'lucide-react';
 import { MOOD_LABELS } from '../../../mood/ui/MoodIcons';
 import { music } from '../api';
 import { joinArtists } from '../format';
-import { ArtistLink, SongLink } from '../links';
+import { ArtistLink, GenreLink, SongLink } from '../links';
 import type { LifeBy, LifeGroup, LifeItem, LifeSoundtrack } from '../types';
 import { ChartCard, Toggle } from './ChartCard';
 
@@ -56,7 +56,7 @@ function ItemList({
   title: string;
   items: (LifeItem & { artists?: string[] })[];
   order: Order;
-  view: 'songs' | 'artists';
+  view: 'songs' | 'artists' | 'genres';
   detail?: (i: LifeItem & { artists?: string[] }) => string;
 }) {
   const shown = rankItems(items, order);
@@ -76,6 +76,8 @@ function ItemList({
                 <span className="min-w-0 truncate text-gray-900 dark:text-gray-100">
                   {view === 'songs' ? (
                     <SongLink songKey={(i as { song_key?: string }).song_key}>{i.name}</SongLink>
+                  ) : view === 'genres' ? (
+                    <GenreLink name={i.name} />
                   ) : (
                     <ArtistLink name={i.name} />
                   )}
@@ -172,7 +174,8 @@ export function MusicLifeCard({ from, to }: { from?: string; to?: string }) {
                   ]}
                 />
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <ItemList title="Genres" items={group.top_genres ?? []} order={order} view="genres" />
                 <ItemList title="Artists" items={group.top_artists} order={order} view="artists" />
                 <ItemList title="Songs" items={group.top_songs} order={order} view="songs" detail={(i) => joinArtists(i.artists)} />
               </div>

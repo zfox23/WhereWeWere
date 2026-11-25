@@ -18,6 +18,7 @@ import { query } from '../../../server/src/db';
 import { pluginTimestampUnion, userCheckinRefsSql } from '../../../server/src/plugins/registry';
 import { fullestArtistsSql, latestTitleSql } from './identity';
 import { getMusicSettings } from './scrobbles';
+import { playGenres } from './genreSql';
 
 export type LifeBy = 'companion' | 'place' | 'mood';
 export const LIFE_BY: LifeBy[] = ['companion', 'place', 'mood'];
@@ -50,6 +51,8 @@ export interface LifeGroup {
   plays: number;
   top_artists: LifeItem[];
   top_songs: (LifeItem & { artists: string[]; song_key: string })[];
+  /** A play counts toward each of its genres. */
+  top_genres: LifeItem[];
 }
 
 function anchorWindow(from: string | null, to: string | null): [Date | null, Date | null] {
@@ -130,20 +133,22 @@ export async function getLifeSoundtrack(
   if (anchors.length === 0) return { groups: [], gap_minutes: gap };
 
   const labels = new Map(anchors.map((a) => [a.key, a.label]));
+  const pg = playGenres('m');
   // $1 user, $2/$3 range, $4 anchor moments, $5 anchor groups, $6 gap minutes.
   const params = [userId, from, to, anchors.map((a) => a.t), anchors.map((a) => a.key), gap];
   const linked = `
     anc AS (SELECT ord, t, grp FROM unnest($4::timestamptz[], $5::text[]) WITH ORDINALITY AS a(t, grp, ord)),
     linked AS (
-      SELECT DISTINCT a.grp, m.id, m.song_key, m.title, m.artists, m.played_at
+      SELECT DISTINCT a.grp, m.id, m.song_key, m.title, m.artists, m.played_at, ${pg.genres} AS genres
       FROM anc a
       JOIN music_scrobbles m
         ON m.user_id = $1
        AND m.played_at BETWEEN a.t - make_interval(mins => $6::int) AND a.t + make_interval(mins => $6::int)
+      ${pg.join}
       WHERE TRUE ${PLAY_RANGE}
     )`;
 
-  const [groups, artists, songs, overall] = await Promise.all([
+  const [groups, artists, songs, genres, overall] = await Promise.all([
     query(
       `WITH ${linked}
        SELECT g.grp, g.plays,
@@ -177,6 +182,16 @@ export async function getLifeSoundtrack(
        SELECT grp, song_key, name, artists, plays FROM counted WHERE rn <= ${TOP_ITEMS}`,
       params,
     ),
+    query(
+      `WITH ${linked},
+       counted AS (
+         SELECT grp, genre, COUNT(*)::int AS plays,
+                ROW_NUMBER() OVER (PARTITION BY grp ORDER BY COUNT(*) DESC, genre) AS rn
+         FROM linked, unnest(genres) AS genre GROUP BY grp, genre
+       )
+       SELECT grp, genre AS name, plays FROM counted WHERE rn <= ${TOP_ITEMS}`,
+      params,
+    ),
     // Everything played in the period: the baseline for lift.
     query(
       `SELECT
@@ -186,12 +201,20 @@ export async function getLifeSoundtrack(
             WHERE m.user_id = $1 ${PLAY_RANGE} GROUP BY artist) x) AS artists,
          (SELECT COALESCE(jsonb_object_agg(song_key, n), '{}') FROM (
             SELECT song_key, COUNT(*)::int AS n FROM music_scrobbles m
-            WHERE m.user_id = $1 ${PLAY_RANGE} GROUP BY song_key) y) AS songs`,
+            WHERE m.user_id = $1 ${PLAY_RANGE} GROUP BY song_key) y) AS songs,
+         (SELECT COALESCE(jsonb_object_agg(genre, n), '{}') FROM (
+            SELECT genre, COUNT(*)::int AS n FROM music_scrobbles m ${pg.join}, unnest(${pg.genres}) AS genre
+            WHERE m.user_id = $1 ${PLAY_RANGE} GROUP BY genre) z) AS genres`,
       [userId, from, to],
     ),
   ]);
 
-  const base = overall.rows[0] as { total: number; artists: Record<string, number>; songs: Record<string, number> };
+  const base = overall.rows[0] as {
+    total: number;
+    artists: Record<string, number>;
+    songs: Record<string, number>;
+    genres: Record<string, number>;
+  };
   const lift = (n: number, groupPlays: number, overallN: number | undefined) =>
     groupPlays && base.total && overallN ? Math.round(((n / groupPlays) / (overallN / base.total)) * 100) / 100 : 0;
 
@@ -214,6 +237,9 @@ export async function getLifeSoundtrack(
           plays: s.plays,
           lift: lift(s.plays, g.plays, base.songs[s.song_key]),
         })),
+      top_genres: genres.rows
+        .filter((x: { grp: string }) => x.grp === g.grp)
+        .map((x: { name: string; plays: number }) => ({ name: x.name, plays: x.plays, lift: lift(x.plays, g.plays, base.genres[x.name]) })),
     })),
   };
 }

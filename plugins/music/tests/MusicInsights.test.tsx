@@ -9,11 +9,13 @@ import { DiscoveryChart, bucketLabel } from '../ui/insights/DiscoveryChart';
 const clockMock = vi.fn();
 const discoveryMock = vi.fn();
 const dailyMock = vi.fn();
+const streamMock = vi.fn();
 vi.mock('../ui/api', () => ({
   music: {
     listeningClock: (...args: unknown[]) => clockMock(...args),
     discovery: (...args: unknown[]) => discoveryMock(...args),
     dailyListening: (...args: unknown[]) => dailyMock(...args),
+    genreStream: (...args: unknown[]) => streamMock(...args),
   },
 }));
 

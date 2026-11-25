@@ -24,6 +24,7 @@ import AlbumPage from '../../plugins/music/ui/pages/AlbumPage';
 import PlayPage from '../../plugins/music/ui/pages/PlayPage';
 import SongPage from '../../plugins/music/ui/pages/SongPage';
 import ArtistPage from '../../plugins/music/ui/pages/ArtistPage';
+import GenrePage from '../../plugins/music/ui/pages/GenrePage';
 
 /** Check-in page for a specific plugin (create + edit via ?edit=<id>). */
 function PluginCheckInPage({ pluginId }: { pluginId: string }) {
@@ -126,6 +127,7 @@ export default function App() {
         <Route path="/music/plays/:id" element={<PlayPage />} />
         <Route path="/music/song" element={<SongPage />} />
         <Route path="/music/artist" element={<ArtistPage />} />
+        <Route path="/music/genre" element={<GenrePage />} />
         <Route path="/venues/:id" element={<VenueDetail />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/settings" element={<Settings />} />

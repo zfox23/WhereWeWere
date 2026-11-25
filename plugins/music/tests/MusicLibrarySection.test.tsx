@@ -10,6 +10,7 @@ vi.mock('../ui/api', () => ({
   music: {
     library: (...args: unknown[]) => libraryMock(...args),
     lists: () => Promise.resolve([]),
+    genres: () => Promise.resolve([{ name: 'trance', plays: 40 }, { name: 'house', plays: 9 }]),
   },
   albumArtUrl: (id: string) => `/art/${id}`,
 }));
@@ -128,6 +129,23 @@ describe('MusicLibrarySection', () => {
     renderSection();
     await waitFor(() => expect(libraryMock).toHaveBeenCalledWith('songs', undefined, undefined, { q: 'a', sort: 'name', dir: 'asc', limit: 100 }));
     expect((screen.getByLabelText('Filter library') as HTMLInputElement).value).toBe('a');
+  });
+
+  it('filters by genre on the server, from the picker or the URL, and keeps it in the URL', async () => {
+    const user = userEvent.setup();
+    renderSection();
+    const picker = (await screen.findByRole('combobox', { name: 'Filter by genre' })) as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['All genres', 'trance (40)', 'house (9)']);
+    await user.selectOptions(picker, 'house');
+    await waitFor(() => expect(libraryMock).toHaveBeenLastCalledWith('songs', undefined, undefined, expect.objectContaining({ genre: 'house' })));
+    expect(new URLSearchParams(window.location.search).get('genre')).toBe('house');
+    cleanup();
+
+    // A genre linked from elsewhere is selected even before the list has it.
+    window.history.replaceState(null, '', '/profile?tab=plugin:music&genre=polka');
+    renderSection();
+    await waitFor(() => expect(libraryMock).toHaveBeenLastCalledWith('songs', undefined, undefined, expect.objectContaining({ genre: 'polka' })));
+    expect(((await screen.findByRole('combobox', { name: 'Filter by genre' })) as HTMLSelectElement).value).toBe('polka');
   });
 
   it('keeps the URL clean while everything is at its default', async () => {

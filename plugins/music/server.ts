@@ -37,7 +37,22 @@ import { mountRankRoutes } from '../../server/src/services/lists/routes';
 import { suggest } from './services/suggest';
 import { getDailyListening, getDiscovery, getListeningClock } from './services/insights';
 import { getLifeSoundtrack, LIFE_BY, type LifeBy } from './services/life';
-import { getArtistDetail, getScopedTies, getSongDetail } from './services/detail';
+import { getArtistDetail, getGenreDetail, getScopedTies, getSongDetail, type Scope } from './services/detail';
+import {
+  cancelGenreBackfill,
+  exportGenres,
+  genreLookupEnabled,
+  getGenreBackfillStatus,
+  getGenreCounts,
+  getGenreStream,
+  getTopGenres,
+  importGenres,
+  listGenres,
+  lookupGenresSoon,
+  setUserGenres,
+  startGenreBackfill,
+} from './services/genres';
+import { normalizeGenre } from './services/genreProviders';
 import { parseScrobbleExport } from './services/importParser';
 import { parseLastfmCsv } from './services/lastfmCsv';
 import { findDuplicatePlays, removeDuplicatePlays } from './services/duplicates';
@@ -287,13 +302,14 @@ musicRouter.get('/stats', async (req: Request, res: Response) => {
     const from = dateParam(req.query.from);
     const to = dateParam(req.query.to);
     const limit = clampInt(req.query.limit, { fallback: 10, min: 1, max: 25 });
-    const [totals, top_songs, top_artists, top_albums] = await Promise.all([
+    const [totals, top_songs, top_artists, top_albums, top_genres] = await Promise.all([
       getTotals(currentUserId(), from, to),
       getLibrary(currentUserId(), 'songs', from, to, { limit }),
       getLibrary(currentUserId(), 'artists', from, to, { limit }),
       getLibrary(currentUserId(), 'albums', from, to, { limit }),
+      getTopGenres(currentUserId(), from, to, limit),
     ]);
-    res.json({ totals, top_songs: top_songs.rows, top_artists: top_artists.rows, top_albums: top_albums.rows });
+    res.json({ totals, top_songs: top_songs.rows, top_artists: top_artists.rows, top_albums: top_albums.rows, top_genres });
   } catch (err) {
     console.error('Error loading music stats:', err);
     res.status(500).json({ error: 'Failed to load stats' });
@@ -309,7 +325,7 @@ musicRouter.get('/library', async (req: Request, res: Response) => {
     const from = dateParam(req.query.from);
     const to = dateParam(req.query.to);
     const params = parseLibraryParams(req.query, { sorts: Object.keys(LIBRARY_SORTS), defaultSort: 'plays' });
-    res.json(await getLibrary(currentUserId(), view, from, to, params));
+    res.json(await getLibrary(currentUserId(), view, from, to, { ...params, genre: normalizeGenre(req.query.genre) }));
   } catch (err) {
     console.error('Error loading music library:', err);
     res.status(500).json({ error: 'Failed to load library' });
@@ -347,6 +363,8 @@ musicRouter.get('/artist', async (req: Request, res: Response) => {
     if (!name) return res.status(400).json({ error: 'name is required' });
     const artist = await getArtistDetail(currentUserId(), name);
     if (!artist) return res.status(404).json({ error: 'No plays by that artist' });
+    // Featured artists aren't in the backfill (plays take their first artist's genres); look them up on a visit.
+    if (artist.genres.lookup === null) lookupGenresSoon(currentUserId(), { artist: name });
     res.json(artist);
   } catch (err) {
     console.error('Error loading artist:', err);
@@ -354,13 +372,90 @@ musicRouter.get('/artist', async (req: Request, res: Response) => {
   }
 });
 
-// GET /ties?song_key | ?artist - companions, places and moods around a song's or artist's plays
+// GET /genre?name - a genre's totals, plays per day, hour and weekday, rank, artists, songs and albums
+musicRouter.get('/genre', async (req: Request, res: Response) => {
+  try {
+    const name = normalizeGenre(req.query.name);
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const genre = await getGenreDetail(currentUserId(), name);
+    if (!genre) return res.status(404).json({ error: 'No plays with that genre' });
+    res.json(genre);
+  } catch (err) {
+    console.error('Error loading genre:', err);
+    res.status(500).json({ error: 'Failed to load the genre' });
+  }
+});
+
+// GET /genres - every genre played, most played first
+musicRouter.get('/genres', async (_req: Request, res: Response) => {
+  try {
+    res.json(await listGenres(currentUserId()));
+  } catch (err) {
+    console.error('Error listing genres:', err);
+    res.status(500).json({ error: 'Failed to list genres' });
+  }
+});
+
+// PUT /genres {kind: 'album' | 'artist', ref, genres: string[] | null} - correct an album's or artist's genres (null: back to MusicBrainz's)
+musicRouter.put('/genres', async (req: Request, res: Response) => {
+  try {
+    const kind = req.body?.kind === 'album' || req.body?.kind === 'artist' ? (req.body.kind as 'album' | 'artist') : null;
+    const ref = typeof req.body?.ref === 'string' && req.body.ref.length <= 2000 ? req.body.ref : null;
+    const genres = req.body?.genres;
+    if (!kind || ref === null) return res.status(400).json({ error: 'kind and ref are required' });
+    if (genres !== null && !Array.isArray(genres)) return res.status(400).json({ error: 'genres must be a list or null' });
+    const result = await setUserGenres(currentUserId(), kind, ref, genres);
+    if (!result) return res.status(400).json({ error: 'That has no genres of its own' });
+    res.json(result);
+  } catch (err) {
+    console.error('Error saving genres:', err);
+    res.status(500).json({ error: 'Failed to save genres' });
+  }
+});
+
+musicRouter.get('/genres/status', async (_req: Request, res: Response) => {
+  try {
+    const userId = currentUserId();
+    res.json({ enabled: genreLookupEnabled(), counts: await getGenreCounts(userId), job: getGenreBackfillStatus(userId) });
+  } catch (err) {
+    console.error('Error loading genre status:', err);
+    res.status(500).json({ error: 'Failed to load genre status' });
+  }
+});
+
+musicRouter.post('/genres/backfill', async (req: Request, res: Response) => {
+  try {
+    if (!genreLookupEnabled()) return res.status(503).json({ error: 'Genre lookup is disabled' });
+    const userId = currentUserId();
+    if (getGenreBackfillStatus(userId).state === 'running') return res.status(409).json({ error: 'A lookup is already running' });
+    res.status(202).json(await startGenreBackfill(userId, { retryMissing: req.body?.retry_missing === true }));
+  } catch (err) {
+    console.error('Error starting genre lookup:', err);
+    res.status(500).json({ error: 'Failed to start genre lookup' });
+  }
+});
+
+musicRouter.post('/genres/backfill/cancel', (_req: Request, res: Response) => {
+  const userId = currentUserId();
+  cancelGenreBackfill(userId);
+  res.json(getGenreBackfillStatus(userId));
+});
+
+// GET /ties?song_key | ?artist | ?genre - companions, places and moods around a song's, artist's or genre's plays
 musicRouter.get('/ties', async (req: Request, res: Response) => {
   try {
     const songKey = songKeyParam(req.query.song_key);
     const artist = artistParam(req.query.artist);
-    if (!songKey && !artist) return res.status(400).json({ error: 'song_key or artist is required' });
-    res.json(await getScopedTies(currentUserId(), songKey ? { kind: 'song', songKey } : { kind: 'artist', name: artist as string }));
+    const genre = normalizeGenre(req.query.genre);
+    const scope: Scope | null = songKey
+      ? { kind: 'song', songKey }
+      : artist
+        ? { kind: 'artist', name: artist }
+        : genre
+          ? { kind: 'genre', name: genre }
+          : null;
+    if (!scope) return res.status(400).json({ error: 'song_key, artist or genre is required' });
+    res.json(await getScopedTies(currentUserId(), scope));
   } catch (err) {
     console.error('Error loading ties:', err);
     res.status(500).json({ error: 'Failed to load' });
@@ -411,6 +506,16 @@ musicRouter.get('/insights/discovery', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error loading discovery:', err);
     res.status(500).json({ error: 'Failed to load discovery' });
+  }
+});
+
+// GET /insights/genres?from&to - plays per genre per week, month or year (top genres and "Other")
+musicRouter.get('/insights/genres', async (req: Request, res: Response) => {
+  try {
+    res.json(await getGenreStream(currentUserId(), dateParam(req.query.from), dateParam(req.query.to)));
+  } catch (err) {
+    console.error('Error loading genres over time:', err);
+    res.status(500).json({ error: 'Failed to load genres' });
   }
 });
 
@@ -925,6 +1030,8 @@ export const server: CheckinTypeServerPlugin = {
       albums: await exportAlbums(user_id),
       // The user's own curation, in list order.
       lists: await exportLists(user_id),
+      // Genre lookups and the user's corrections to them.
+      genres: await exportGenres(user_id),
     };
   },
 
@@ -937,6 +1044,7 @@ export const server: CheckinTypeServerPlugin = {
       scrobbles?: unknown;
       albums?: unknown;
       lists?: unknown;
+      genres?: unknown;
     };
     const rows = Array.isArray(body.scrobbles) ? body.scrobbles : Array.isArray(payload) ? payload : [];
     const scrobbles = rows.flatMap((r) => {
@@ -971,6 +1079,7 @@ export const server: CheckinTypeServerPlugin = {
     await importAlbums(client ?? { query }, user_id, body.albums, filesDir);
     // Lists merge by name, items by identity; they don't count toward the scrobbles restored.
     await importLists(client ?? { query }, user_id, body.lists);
+    await importGenres(client ?? { query }, user_id, body.genres);
     return inserted;
   },
 
@@ -981,6 +1090,8 @@ export const server: CheckinTypeServerPlugin = {
     await run('DELETE FROM music_sessions WHERE user_id = $1', [user_id]);
     // A rebuildable cache; orphaned image files are collected on the next lookup.
     await run('DELETE FROM music_albums WHERE user_id = $1', [user_id]);
+    // Genre lookups go too, and with them the user's corrections (they belong to the deleted music).
+    await run('DELETE FROM music_genres WHERE user_id = $1', [user_id]);
     await run(`DELETE FROM companions WHERE checkin_type = '${PLUGIN_ID}' AND user_id = $1`, [user_id]);
     // Lists are the user's own curation, so Start Over removes them too (items cascade).
     await run('DELETE FROM music_lists WHERE user_id = $1', [user_id]);

@@ -85,11 +85,11 @@ describe('music insights', () => {
       const res = await get('discovery', { from: '2024-01-01', to: '2024-03-31' });
       expect(res.body.bucket).toBe('month');
       expect(res.body.buckets).toEqual([
-        { start: '2024-01-01', new_plays: 2, familiar_plays: 1, new_songs: 1, new_artists: 1 },
-        { start: '2024-02-01', new_plays: 0, familiar_plays: 0, new_songs: 0, new_artists: 0 },
-        { start: '2024-03-01', new_plays: 1, familiar_plays: 1, new_songs: 1, new_artists: 1 },
+        { start: '2024-01-01', new_plays: 2, familiar_plays: 1, new_songs: 1, new_artists: 1, new_genres: 0 },
+        { start: '2024-02-01', new_plays: 0, familiar_plays: 0, new_songs: 0, new_artists: 0, new_genres: 0 },
+        { start: '2024-03-01', new_plays: 1, familiar_plays: 1, new_songs: 1, new_artists: 1, new_genres: 0 },
       ]);
-      expect(res.body.totals).toEqual({ plays: 5, new_plays: 3, new_songs: 2, new_artists: 2 });
+      expect(res.body.totals).toEqual({ plays: 5, new_plays: 3, new_songs: 2, new_artists: 2, new_genres: 0 });
     });
 
     it('spans the whole history for all time, and is empty without plays', async () => {

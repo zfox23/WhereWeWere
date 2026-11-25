@@ -6,9 +6,15 @@ import AlbumPage, { releaseDateLabel } from '../ui/pages/AlbumPage';
 import { resetMusicLists } from '../ui/useMusicLists';
 
 const albumViewMock = vi.fn();
+const setGenresMock = vi.fn();
 vi.mock('../ui/api', () => ({
   albumArtUrl: (id: string, size = 'thumb') => `/art/${id}/${size}`,
-  music: { albumView: (...a: unknown[]) => albumViewMock(...a), lists: async () => [] },
+  music: {
+    albumView: (...a: unknown[]) => albumViewMock(...a),
+    lists: async () => [],
+    setGenres: (...a: unknown[]) => setGenresMock(...a),
+    genres: async () => [{ name: 'trance', plays: 9 }],
+  },
 }));
 
 const VIEW = {
@@ -24,6 +30,8 @@ const VIEW = {
   other_albums: [
     { album_ref: 'tri-state|above & beyond', name: 'Tri-State', art_id: null, plays: 7, unique_tracks: 4, last_played_at: '2024-02-01T00:00:00Z' },
   ],
+  genres: { genres: [], catalog_genres: [], edited: false, lookup: 'not_found' },
+  artist_genres: ['trance'],
 };
 
 const renderAt = (search: string) =>
@@ -103,5 +111,53 @@ describe('AlbumPage', () => {
     expect(releaseDateLabel('2011-06-14')).toBe('Jun 14, 2011');
     expect(releaseDateLabel('2011-06')).toBe('2011-06');
     expect(releaseDateLabel(null)).toBeNull();
+  });
+});
+
+describe('AlbumPage genres', () => {
+  beforeEach(() => resetMusicLists());
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it('shows the artist\'s genres while the album has none, and saves the album\'s own', async () => {
+    const user = userEvent.setup();
+    albumViewMock.mockResolvedValue(VIEW);
+    setGenresMock.mockResolvedValue({ genres: ['uplifting trance'], catalog_genres: [], edited: true, lookup: 'not_found' });
+    renderAt('?ref=group+therapy%7Cabove+%26+beyond');
+    const genres = await screen.findByRole('region', { name: 'Genres' });
+    expect(genres.textContent).toContain("Using Above & Beyond's:");
+    expect(within(genres).getByRole('link', { name: 'trance' }).getAttribute('href')).toBe('/music/genre?name=trance');
+    expect(genres.textContent).toContain('MusicBrainz has no genres for this');
+
+    await user.click(within(genres).getByRole('button', { name: 'Edit genres of this album' }));
+    // A typed genre is kept when Save is pressed without Enter.
+    await user.type(screen.getByRole('combobox', { name: 'Add a genre' }), 'Uplifting  Trance');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(setGenresMock).toHaveBeenCalledWith('album', 'group therapy|above & beyond', ['uplifting trance']);
+    const saved = await screen.findByRole('region', { name: 'Genres' });
+    expect(within(saved).getByRole('link', { name: 'uplifting trance' })).toBeTruthy();
+    expect(saved.textContent).toContain('Edited by you');
+  });
+
+  it('removes genres and goes back to MusicBrainz\'s', async () => {
+    const user = userEvent.setup();
+    albumViewMock.mockResolvedValue({ ...VIEW, genres: { genres: ['house'], catalog_genres: ['trance'], edited: true, lookup: 'found' } });
+    setGenresMock.mockResolvedValue({ genres: ['trance'], catalog_genres: ['trance'], edited: false, lookup: 'found' });
+    renderAt('?ref=group+therapy%7Cabove+%26+beyond');
+    await user.click(await screen.findByRole('button', { name: 'Edit genres of this album' }));
+    await user.click(screen.getByRole('button', { name: 'Remove house' }));
+    expect(screen.getByText("With no genres of its own, its plays use the artist's genres.")).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: "Use MusicBrainz's genres" }));
+    expect(setGenresMock).toHaveBeenCalledWith('album', 'group therapy|above & beyond', null);
+    expect(await screen.findByText('From MusicBrainz')).toBeTruthy();
+  });
+
+  it('has no editor for an artist\'s "Unknown album", only the artist\'s genres', async () => {
+    albumViewMock.mockResolvedValue({ ...VIEW, album_ref: '|above & beyond', matched: false, title: 'Unknown album', genres: null });
+    renderAt('?ref=%7Cabove+%26+beyond');
+    expect(await screen.findByRole('list', { name: "Above & Beyond's genres" })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit genres of this album' })).toBeNull();
   });
 });

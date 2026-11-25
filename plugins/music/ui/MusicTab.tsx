@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Disc3, Library, List, ListPlus, Loader2, Mic2, Music, Timer, Users } from 'lucide-react';
+import { BarChart3, Disc3, Library, List, ListPlus, Loader2, Mic2, Music, Tags, Timer, Users } from 'lucide-react';
 import type { PluginProfileTabProps } from 'wwp-shared';
 import { stats as statsApi } from '../../../client/src/api/client';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
@@ -32,10 +32,11 @@ import { ListeningCalendar } from './insights/ListeningCalendar';
 import { ListeningClock } from './insights/ListeningClock';
 import { DiscoveryChart } from './insights/DiscoveryChart';
 import { MusicLifeCard } from './insights/MusicLifeCard';
+import { GenreWaveChart } from './insights/GenreWaveChart';
 import { openMusicList, topListTitle } from './listTitle';
 import { refreshMusicLists } from './useMusicLists';
-import { ArtistLink, SongLink } from './links';
-import type { ListTarget, MusicAggregate, MusicLibraryView, MusicStats } from './types';
+import { ArtistLink, GenreLink, SongLink } from './links';
+import type { ListTarget, MusicAggregate, MusicLibraryView, MusicStats, TopGenre } from './types';
 
 function getMonthFromLocation(): string {
   const param = new URLSearchParams(window.location.search).get('musicMonth');
@@ -65,7 +66,7 @@ function getSectionFromLocation(): MusicSection {
 }
 
 /** Params that belong to the Library subtab. */
-const LIBRARY_PARAMS = ['musicView', 'q', 'sort', 'dir'];
+const LIBRARY_PARAMS = ['musicView', 'q', 'genre', 'sort', 'dir'];
 /** Params that belong to the Lists subtab. */
 const LISTS_PARAMS = ['musicList'];
 
@@ -172,6 +173,48 @@ function TopList({
           onClick={() => setShowAll((v) => !v)}
           className="mt-3 text-xs font-medium text-primary-600 hover:underline"
         >
+          {showAll ? 'Show fewer' : `Show ${rows.length - TOP_COLLAPSED} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Top genres of the period; a play counts toward each of its genres. */
+function TopGenres({ rows }: { rows: TopGenre[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? rows : rows.slice(0, TOP_COLLAPSED);
+  const max = Math.max(...rows.map((r) => r.plays), 1);
+  return (
+    <div className="bg-white/60 dark:bg-gray-900/60 rounded-2xl border border-white/40 dark:border-gray-700/40 shadow-sm shadow-black/3 p-4">
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
+        <Tags size={16} className="text-pink-500" />
+        Top genres
+      </h3>
+      {rows.length === 0 ? (
+        <p className="text-xs text-gray-500">No plays with genres in this period. Genres are looked up in Settings → Music.</p>
+      ) : (
+        <ol className="space-y-2">
+          {shown.map((row, i) => (
+            <li key={row.name} className="text-sm">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="min-w-0 truncate text-gray-900 dark:text-gray-100">
+                  <span className="tabular-nums text-gray-400">{i + 1}.</span> <GenreLink name={row.name} />
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {' '}· {row.artists.toLocaleString()} artist{row.artists === 1 ? '' : 's'}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs tabular-nums text-gray-500">{row.plays}</span>
+              </div>
+              <div className="mt-0.5 h-1 rounded-full bg-gray-100 dark:bg-gray-800">
+                <div className="h-1 rounded-full bg-pink-400/80" style={{ width: `${(row.plays / max) * 100}%` }} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {rows.length > TOP_COLLAPSED && (
+        <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-3 text-xs font-medium text-primary-600 hover:underline">
           {showAll ? 'Show fewer' : `Show ${rows.length - TOP_COLLAPSED} more`}
         </button>
       )}
@@ -354,16 +397,18 @@ export function MusicTab(_props: PluginProfileTabProps) {
               <StatCard icon={Disc3} label="Tracks" value={totals?.unique_tracks ?? 0} />
             </div>
 
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-4">
               <TopList title="Top songs" icon={Music} view="songs" rows={data?.top_songs ?? []} detail={(r) => joinArtists(r.artists)} withArt onMakeList={makeList('songs')} />
               <TopList title="Top artists" icon={Mic2} view="artists" rows={data?.top_artists ?? []} detail={() => ''} />
               <TopList title="Top albums" icon={Disc3} view="albums" rows={data?.top_albums ?? []} detail={(r) => joinArtists(r.artists)} withArt onMakeList={makeList('albums')} />
+              <TopGenres rows={data?.top_genres ?? []} />
             </div>
           </div>
 
           {/* Each chart loads on its own, so the totals above never wait for them. */}
           <div className="space-y-3">
             <ListeningCalendar defaultYear={calendarYear} />
+            <GenreWaveChart from={visibleRange.from || undefined} to={visibleRange.to || undefined} />
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <ListeningClock from={visibleRange.from || undefined} to={visibleRange.to || undefined} />
               <DiscoveryChart from={visibleRange.from || undefined} to={visibleRange.to || undefined} />

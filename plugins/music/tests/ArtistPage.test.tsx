@@ -28,6 +28,8 @@ const ARTIST: ArtistDetail = {
   clock: [{ dow: 1, hour: 9, plays: 500, seconds: 90_000 }],
   songs,
   albums: [{ album_ref: 'con todo el mundo|khruangbin', name: 'Con Todo El Mundo', art_id: 'a1', plays: 300, unique_tracks: 10, last_played_at: '2024-03-01T00:00:00Z' }],
+  genres: { genres: ['psychedelic rock'], catalog_genres: ['psychedelic rock'], edited: false, lookup: 'found' },
+  play_genres: [{ name: 'psychedelic rock', plays: 500 }],
 };
 
 const renderAt = (search: string) =>
