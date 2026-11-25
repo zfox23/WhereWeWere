@@ -7,9 +7,11 @@
 //      match wait in a review list (media_steam_games.status = 'unmatched').
 //   2. Raise media_items.time_played_minutes to Steam's total. A Steam total
 //      lower than the library's is ignored: time played never goes down.
-//   3. If Steam's total rose since the last sync, add an in_progress check-in
-//      for the minutes played, unless the user already logged a check-in for
-//      that game by hand since then. The first sync only records a baseline.
+//   3. Log one in_progress check-in per play session. Steam raises playtime
+//      while a game runs, so while the total keeps rising the session stays
+//      open; once a sync sees no rise for SESSION_IDLE_MS, one check-in
+//      records the whole session, unless the user logged a check-in for that
+//      game by hand during it. The first sync only records a baseline.
 // ============================================================================
 
 import type { PoolClient } from 'pg';
@@ -67,21 +69,43 @@ export async function getSteamSettings(userId: string): Promise<SteamSettings> {
 }
 
 /**
- * How many minutes an automatic check-in should record, or null for none.
+ * A session ends once a sync sees no playtime rise for this long. Shorter than
+ * the hourly sync, so the next hourly sync after play stops closes it; longer
+ * than the gap between Steam's playtime updates, so a "Sync now" click mid-game
+ * does not.
+ */
+export const SESSION_IDLE_MS = 45 * 60 * 1000;
+
+/**
+ * What a sync means for a game's play session:
+ *   idle     no session open; the baseline moves to the current total
+ *   playing  playtime rose since the last sync; keep the session open
+ *   waiting  no rise this sync, but too soon after the last one to call it over
+ *   ended    the session is over; check in `minutes` (current - baseline)
  * `previous` is Steam's total at the last sync (null when this game was not
  * seen before, i.e. a baseline).
  */
-export function autoCheckinMinutes(args: {
+export type SessionStep =
+  | { kind: 'idle' }
+  | { kind: 'playing' }
+  | { kind: 'waiting' }
+  | { kind: 'ended'; minutes: number };
+
+export function steamSessionStep(args: {
   previous: number | null;
   current: number;
+  baseline: number | null;
+  lastRiseAt: Date | null;
+  now: Date;
   matched: boolean;
-  manualCheckinSinceLastSync: boolean;
-}): number | null {
-  if (!args.matched || args.previous == null) return null;
-  const delta = args.current - args.previous;
-  if (delta <= 0) return null;
-  if (args.manualCheckinSinceLastSync) return null;
-  return delta;
+}): SessionStep {
+  if (!args.matched || args.previous == null) return { kind: 'idle' };
+  if (args.current > args.previous) return { kind: 'playing' };
+  if (args.baseline == null || args.current <= args.baseline) return { kind: 'idle' };
+  if (args.lastRiseAt && args.now.getTime() - args.lastRiseAt.getTime() < SESSION_IDLE_MS) {
+    return { kind: 'waiting' };
+  }
+  return { kind: 'ended', minutes: args.current - args.baseline };
 }
 
 /** The user's timezone at `at`, from their latest check-in of any type. */
@@ -109,6 +133,9 @@ interface SnapshotRow {
   playtime_minutes: number;
   status: 'matched' | 'unmatched' | 'ignored';
   media_item_id: string | null;
+  checkin_baseline_minutes: number | null;
+  session_started_at: Date | null;
+  session_last_rise_at: Date | null;
 }
 
 /**
@@ -222,7 +249,9 @@ export async function runSteamSync(userId: string, opts: SteamSyncOptions = {}):
     const lastSyncedAt: Date | null = state.rows[0]?.last_synced_at ?? null;
 
     const snapRows = await client.query(
-      'SELECT appid, playtime_minutes, status, media_item_id FROM media_steam_games WHERE user_id = $1',
+      `SELECT appid, playtime_minutes, status, media_item_id,
+              checkin_baseline_minutes, session_started_at, session_last_rise_at
+         FROM media_steam_games WHERE user_id = $1`,
       [userId],
     );
     const snapshot = new Map<number, SnapshotRow>(
@@ -250,16 +279,38 @@ export async function runSteamSync(userId: string, opts: SteamSyncOptions = {}):
       const itemId = links.get(game.appid) ?? null;
       const status = itemId ? 'matched' : prev?.status === 'ignored' ? 'ignored' : 'unmatched';
 
+      // A game first seen now has no earlier Steam total to compare against.
+      const previous = prev && lastSyncedAt ? prev.playtime_minutes : null;
+      const step = steamSessionStep({
+        previous,
+        current: game.playtimeMinutes,
+        baseline: prev?.checkin_baseline_minutes ?? null,
+        lastRiseAt: prev?.session_last_rise_at ?? null,
+        now: startedAt,
+        matched: itemId != null,
+      });
+      const open = step.kind === 'playing' || step.kind === 'waiting';
+      const session = {
+        baseline: open ? prev?.checkin_baseline_minutes ?? previous : game.playtimeMinutes,
+        startedAt: open ? prev?.session_started_at ?? lastSyncedAt : null,
+        lastRiseAt: step.kind === 'playing' ? startedAt : open ? prev?.session_last_rise_at ?? null : null,
+      };
+
       await client.query(
         `INSERT INTO media_steam_games
-           (user_id, appid, name, playtime_minutes, last_played_at, icon_url, status, media_item_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (user_id, appid, name, playtime_minutes, last_played_at, icon_url, status, media_item_id,
+            checkin_baseline_minutes, session_started_at, session_last_rise_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (user_id, appid) DO UPDATE SET
            name = EXCLUDED.name, playtime_minutes = EXCLUDED.playtime_minutes,
            last_played_at = EXCLUDED.last_played_at, icon_url = EXCLUDED.icon_url,
-           status = EXCLUDED.status, media_item_id = EXCLUDED.media_item_id, updated_at = NOW()`,
+           status = EXCLUDED.status, media_item_id = EXCLUDED.media_item_id,
+           checkin_baseline_minutes = EXCLUDED.checkin_baseline_minutes,
+           session_started_at = EXCLUDED.session_started_at,
+           session_last_rise_at = EXCLUDED.session_last_rise_at, updated_at = NOW()`,
         [userId, game.appid, game.name, game.playtimeMinutes, game.lastPlayedAt?.toISOString() ?? null,
-          game.iconUrl, status, itemId],
+          game.iconUrl, status, itemId, session.baseline, session.startedAt?.toISOString() ?? null,
+          session.lastRiseAt?.toISOString() ?? null],
       );
 
       if (!itemId) {
@@ -285,33 +336,26 @@ export async function runSteamSync(userId: string, opts: SteamSyncOptions = {}):
       );
       summary.time_updated += raised.rowCount ?? 0;
 
-      // A game first seen now has no earlier Steam total to compare against.
-      const previous = prev && lastSyncedAt ? prev.playtime_minutes : null;
-      let manual = false;
-      if (previous != null && game.playtimeMinutes > previous) {
-        const m = await client.query(
-          `SELECT 1 FROM media_checkins
-            WHERE user_id = $1 AND media_item_id = $2 AND external_event_id IS NULL AND created_at > $3
-            LIMIT 1`,
-          [userId, itemId, lastSyncedAt],
-        );
-        manual = m.rows.length > 0;
-      }
-      const minutes = autoCheckinMinutes({
-        previous, current: game.playtimeMinutes, matched: true, manualCheckinSinceLastSync: manual,
-      });
-      if (minutes != null) {
-        const at = game.lastPlayedAt ?? startedAt;
-        const timezone = await inferTimezone(client, userId, at);
-        const inserted = await client.query(
-          `INSERT INTO media_checkins
-             (user_id, media_item_id, checkin_type, checked_in_at, checkin_timezone, time_played_minutes, external_event_id)
-           VALUES ($1, $2, 'in_progress', $3, $4, $5, $6)
-           ON CONFLICT (user_id, external_event_id) WHERE external_event_id IS NOT NULL DO NOTHING`,
-          [userId, itemId, at.toISOString(), timezone, minutes, `steam:${game.appid}:${game.playtimeMinutes}`],
-        );
-        summary.checkins_created += inserted.rowCount ?? 0;
-      }
+      if (step.kind !== 'ended') continue;
+      // A check-in logged by hand during the session already covers it.
+      const manual = await client.query(
+        `SELECT 1 FROM media_checkins
+          WHERE user_id = $1 AND media_item_id = $2 AND external_event_id IS NULL AND created_at > $3
+          LIMIT 1`,
+        [userId, itemId, prev?.session_started_at ?? lastSyncedAt],
+      );
+      if (manual.rows.length > 0) continue;
+
+      const at = game.lastPlayedAt ?? prev?.session_last_rise_at ?? startedAt;
+      const timezone = await inferTimezone(client, userId, at);
+      const inserted = await client.query(
+        `INSERT INTO media_checkins
+           (user_id, media_item_id, checkin_type, checked_in_at, checkin_timezone, time_played_minutes, external_event_id)
+         VALUES ($1, $2, 'in_progress', $3, $4, $5, $6)
+         ON CONFLICT (user_id, external_event_id) WHERE external_event_id IS NOT NULL DO NOTHING`,
+        [userId, itemId, at.toISOString(), timezone, step.minutes, `steam:${game.appid}:${game.playtimeMinutes}`],
+      );
+      summary.checkins_created += inserted.rowCount ?? 0;
     }
 
     await client.query(

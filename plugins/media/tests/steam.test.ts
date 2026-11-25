@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getOwnedGames, parseSteamIdInput, resolveSteamId, SteamError } from '../services/steam';
-import { autoCheckinMinutes } from '../services/steamSync';
+import { steamSessionStep, SESSION_IDLE_MS } from '../services/steamSync';
 import { igdb, clearIgdbToken } from '../services/igdb';
 
 const fetchMock = vi.fn();
@@ -102,28 +102,36 @@ describe('getOwnedGames', () => {
   });
 });
 
-describe('autoCheckinMinutes', () => {
-  const base = { previous: 100, current: 195, matched: true, manualCheckinSinceLastSync: false };
+describe('steamSessionStep', () => {
+  const now = new Date('2026-11-25T12:00:00Z');
+  const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+  const base = { previous: 195, current: 195, baseline: 100, lastRiseAt: hourAgo, now, matched: true };
 
-  it('records the minutes played since the last sync', () => {
-    expect(autoCheckinMinutes(base)).toBe(95);
+  it('keeps the session open while playtime rises', () => {
+    expect(steamSessionStep({ ...base, previous: 150 })).toEqual({ kind: 'playing' });
+  });
+
+  it('ends the session once playtime stops rising, for the whole session', () => {
+    expect(steamSessionStep(base)).toEqual({ kind: 'ended', minutes: 95 });
+  });
+
+  it('waits when the last rise was too recent to call the session over', () => {
+    const recent = new Date(now.getTime() - SESSION_IDLE_MS + 60_000);
+    expect(steamSessionStep({ ...base, lastRiseAt: recent })).toEqual({ kind: 'waiting' });
   });
 
   it('records nothing on the first sync (no previous total)', () => {
-    expect(autoCheckinMinutes({ ...base, previous: null })).toBeNull();
+    expect(steamSessionStep({ ...base, previous: null, current: 300 })).toEqual({ kind: 'idle' });
   });
 
-  it('records nothing when a manual check-in was logged since the last sync', () => {
-    expect(autoCheckinMinutes({ ...base, manualCheckinSinceLastSync: true })).toBeNull();
+  it('is idle when nothing was played since the baseline', () => {
+    expect(steamSessionStep({ ...base, baseline: 195 })).toEqual({ kind: 'idle' });
+    expect(steamSessionStep({ ...base, current: 50, previous: 50 })).toEqual({ kind: 'idle' });
   });
 
-  it('records nothing when playtime did not rise', () => {
-    expect(autoCheckinMinutes({ ...base, current: 100 })).toBeNull();
-    expect(autoCheckinMinutes({ ...base, current: 50 })).toBeNull();
-  });
-
-  it('records nothing for an unmatched game', () => {
-    expect(autoCheckinMinutes({ ...base, matched: false })).toBeNull();
+  it('is idle for an unmatched game', () => {
+    expect(steamSessionStep({ ...base, matched: false })).toEqual({ kind: 'idle' });
+    expect(steamSessionStep({ ...base, previous: 150, matched: false })).toEqual({ kind: 'idle' });
   });
 });
 

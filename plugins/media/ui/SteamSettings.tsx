@@ -146,7 +146,8 @@ export function SteamSettings() {
       </h2>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
         Sync time played from your Steam library. A game&rsquo;s time played is only raised, never lowered,
-        and new play adds an &ldquo;in progress&rdquo; check-in unless you already logged one.
+        and each play session adds one &ldquo;in progress&rdquo; check-in once it ends (up to two hours
+        later), unless you already logged one.
       </p>
       <div className="space-y-3">
         <div>

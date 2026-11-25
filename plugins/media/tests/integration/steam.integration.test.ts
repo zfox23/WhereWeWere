@@ -190,43 +190,70 @@ describe('Steam integration', () => {
   });
 
   describe('auto check-ins', () => {
-    it('adds an in_progress check-in for new play after the first sync, once', async () => {
+    const HOUR = 60 * 60 * 1000;
+    // Syncs an hour apart, ending about now (manual check-ins get created_at = NOW()).
+    const t0 = Date.now() - 4 * HOUR;
+    const at = (hours: number) => ({ now: new Date(t0 + hours * HOUR) });
+    const hades = (minutes: number, lastPlayed?: number) => {
+      owned[STEAM_ID] = [{ appid: 1145360, name: 'Hades', playtime_forever: minutes, rtime_last_played: lastPlayed }];
+    };
+
+    it('adds one in_progress check-in per play session, once it ends', async () => {
       await connectSteam();
       const game = await createGame('Hades', { minutes: 0 });
-      owned[STEAM_ID] = [{ appid: 1145360, name: 'Hades', playtime_forever: 100 }];
-      await runSteamSync(DEFAULT_USER_ID);
+      hades(100);
+      await runSteamSync(DEFAULT_USER_ID, at(0));
       expect(await checkins(game)).toEqual([]);
 
-      const lastPlayed = 1_800_000_000;
-      owned[STEAM_ID] = [{ appid: 1145360, name: 'Hades', playtime_forever: 195, rtime_last_played: lastPlayed }];
-      const summary = await runSteamSync(DEFAULT_USER_ID);
+      // A long session: Steam's total rises across two hourly syncs.
+      hades(150);
+      expect((await runSteamSync(DEFAULT_USER_ID, at(1))).checkins_created).toBe(0);
+      hades(195);
+      expect((await runSteamSync(DEFAULT_USER_ID, at(2))).checkins_created).toBe(0);
+      expect(await checkins(game)).toEqual([]);
+      expect((await item(game)).time_played_minutes).toBe(195);
+
+      // A "Sync now" shortly after the last rise does not end the session yet.
+      expect((await runSteamSync(DEFAULT_USER_ID, at(2.2))).checkins_created).toBe(0);
+
+      // The total stopped rising: one check-in for the whole session.
+      const lastPlayed = Math.floor((t0 + 2 * HOUR) / 1000);
+      hades(195, lastPlayed);
+      const summary = await runSteamSync(DEFAULT_USER_ID, at(3));
       expect(summary.checkins_created).toBe(1);
       const rows = await checkins(game);
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ checkin_type: 'in_progress', time_played_minutes: 95, external_event_id: 'steam:1145360:195' });
       expect(new Date(rows[0].checked_in_at).getTime()).toBe(lastPlayed * 1000);
-      expect((await item(game)).time_played_minutes).toBe(195);
 
       // Nothing new played: nothing new recorded.
-      await runSteamSync(DEFAULT_USER_ID);
+      await runSteamSync(DEFAULT_USER_ID, at(4));
       expect(await checkins(game)).toHaveLength(1);
     });
 
-    it('skips the check-in when one was logged by hand since the last sync', async () => {
+    it('skips the check-in when one was logged by hand during the session', async () => {
       await connectSteam();
       const game = await createGame('Hades');
-      owned[STEAM_ID] = [{ appid: 1145360, name: 'Hades', playtime_forever: 100 }];
-      await runSteamSync(DEFAULT_USER_ID);
+      hades(100);
+      await runSteamSync(DEFAULT_USER_ID, at(0));
+      hades(160);
+      await runSteamSync(DEFAULT_USER_ID, at(1));
 
       const manual = await request(app).post(`/api/v1/media/items/${game}/checkins`)
         .send({ checkin_type: 'in_progress', timezone: 'UTC', time_played_minutes: 60 });
       expect(manual.status).toBe(201);
 
-      owned[STEAM_ID] = [{ appid: 1145360, name: 'Hades', playtime_forever: 160 }];
-      const summary = await runSteamSync(DEFAULT_USER_ID);
+      const later = (hours: number) => ({ now: new Date(Date.now() + hours * HOUR) });
+      const summary = await runSteamSync(DEFAULT_USER_ID, later(1));
       expect(summary.checkins_created).toBe(0);
       expect(await checkins(game)).toHaveLength(1);
       expect((await item(game)).time_played_minutes).toBe(160);
+
+      // The session is closed: later play starts a fresh one.
+      hades(200);
+      await runSteamSync(DEFAULT_USER_ID, later(2));
+      expect((await runSteamSync(DEFAULT_USER_ID, later(3))).checkins_created).toBe(1);
+      expect((await checkins(game)).map((r) => r.time_played_minutes)).toEqual([60, 40]);
     });
   });
 
