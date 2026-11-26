@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import GenrePage from '../ui/pages/GenrePage';
@@ -50,7 +50,8 @@ describe('GenrePage', () => {
     expect(genreMock).toHaveBeenCalledWith('progressive trance');
     expect(document.body.textContent).toContain('120 plays · 40 songs · 9 artists');
     expect(document.body.textContent).toContain('of 55 genres');
-    expect(document.title).toContain('progressive trance');
+    // The title is set in an effect, which can run just after the heading paints.
+    await waitFor(() => expect(document.title).toContain('progressive trance'));
     expect(within(screen.getByRole('list', { name: 'Artists' })).getByRole('link', { name: 'Above & Beyond' }).getAttribute('href')).toBe(
       '/music/artist?name=Above+%26+Beyond',
     );

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,7 +62,8 @@ describe('AlbumPage', () => {
     expect(screen.getByRole('button', { name: 'Add album to list' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(document.title).toContain('Group Therapy');
+    // The title is set in an effect, which can run just after the heading paints.
+    await waitFor(() => expect(document.title).toContain('Group Therapy'));
   });
 
   it('links the artist, and each played track to its song page', async () => {

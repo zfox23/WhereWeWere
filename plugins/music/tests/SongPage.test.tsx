@@ -79,7 +79,8 @@ describe('SongPage', () => {
     expect(screen.getByRole('link', { name: 'Discovery' }).getAttribute('href')).toBe('/music/album?ref=discovery%7Cdaft+punk');
     expect(document.body.textContent).toContain('#3');
     expect(document.body.textContent).toContain('of 1,200 songs');
-    expect(document.title).toContain('One More Time');
+    // The title is set in an effect, which can run just after the heading paints.
+    await waitFor(() => expect(document.title).toContain('One More Time'));
     await waitFor(() => expect(screen.getByText('Mar 1, 2024')).toBeTruthy());
     expect(songPlaysMock).toHaveBeenCalledWith('omt|daft punk', { limit: 100, from: undefined, to: undefined });
     const plays = within(screen.getByRole('list', { name: 'Plays' }));

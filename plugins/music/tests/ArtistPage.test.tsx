@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -57,7 +57,8 @@ describe('ArtistPage', () => {
     expect(artistMock).toHaveBeenCalledWith('Khruangbin');
     expect(document.body.textContent).toContain('500 plays');
     expect(document.body.textContent).toContain('of 300 artists');
-    expect(document.title).toContain('Khruangbin');
+    // The title is set in an effect, which can run just after the heading paints.
+    await waitFor(() => expect(document.title).toContain('Khruangbin'));
     const list = within(screen.getByRole('list', { name: 'Songs' }));
     expect(list.getByRole('link', { name: 'Song 0' }).getAttribute('href')).toBe('/music/song?key=s0%7Ckhruangbin');
     // Other credits link to their own pages.
