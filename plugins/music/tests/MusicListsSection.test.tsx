@@ -50,6 +50,8 @@ const api = {
   genres: vi.fn(async () => []),
 };
 vi.mock('../ui/api', () => ({
+  // Spotify isn't set up: its buttons and the Playlists subtab stay hidden.
+  spotify: { status: () => Promise.resolve({ configured: false, connected: false }) },
   albumArtUrl: (id: string) => `/art/${id}`,
   music: new Proxy({}, { get: (_t, k: string) => (...args: unknown[]) => (api as any)[k](...args) }),
 }));

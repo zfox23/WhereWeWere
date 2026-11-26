@@ -8,6 +8,8 @@ import { resetMusicLists } from '../ui/useMusicLists';
 const albumViewMock = vi.fn();
 const setGenresMock = vi.fn();
 vi.mock('../ui/api', () => ({
+  // Spotify isn't set up: its buttons and the Playlists subtab stay hidden.
+  spotify: { status: () => Promise.resolve({ configured: false, connected: false }) },
   albumArtUrl: (id: string, size = 'thumb') => `/art/${id}/${size}`,
   music: {
     albumView: (...a: unknown[]) => albumViewMock(...a),

@@ -5,6 +5,7 @@ The Music plugin stores your scrobbles in WhereWeWere and shows them in three pl
 - **Home timeline** — one item per *listening session* (plays less than 30 minutes apart), expandable to the track list. Sessions shorter than the minimum track count (default 3) stay off the timeline.
 - **Other check-in cards** — a footer with the last up to three songs played on or before the check-in, newest first. The oldest fades out when the session has earlier plays. Clicking it jumps to that listening session on the Home timeline, opened and highlighted. It appears only when the most recent play is within the session gap of the check-in and its session meets the timeline's minimum track count (otherwise there is no session card to jump to).
 - **Profile → Music** — totals, top songs/artists/albums and charts for the period chosen with the usual period selector, a library table and lists (see [Profile → Music](#profile--music)).
+- **Spotify** (optional) — Open in Spotify on song, album and artist pages, your Spotify playlists with your plays of their tracks, and lists exported as Spotify playlists (see [Spotify](#spotify)).
 
 Scrobbles arrive from [multi-scrobbler](https://github.com/FoxxMD/multi-scrobbler) or from a history import. Preferences (session gap, minimum tracks, timezone) live in **Settings → Music**.
 
@@ -103,7 +104,7 @@ The library table is a way in to the rest of your history:
 
 ## Lists
 
-Profile → Music has three subtabs, like Profile → Places: **Overview** (the period selector, totals and Top songs/artists/albums), **Library** (every song, artist and album, over all time) and **Lists**. Only Overview has the period selector.
+Profile → Music has three subtabs, like Profile → Places: **Overview** (the period selector, totals and Top songs/artists/albums), **Library** (every song, artist and album, over all time) and **Lists**, plus **Playlists** once Spotify is set up (see [Spotify](#spotify)). Only Overview has the period selector.
 
 Keep favorites, or any other lists, of songs and albums in the **Lists** subtab (make a list there, or from the picker below). It works like Places' lists: an index of your lists (with a cover mosaic, item count and last-updated date; rename, delete and create from there) that opens a ranked table.
 
@@ -152,6 +153,50 @@ Click the time beside any song in an expanded listening session on Home to open 
 - photos from that moment, when Immich is connected, like a place check-in.
 
 **Edit** reopens the check-in form filled in (title, artists, album, length, time in the play's own timezone, note, companions, saved location), and **Delete** removes the play. Both work on any play, including scrobbled ones, and regroup the listening sessions around the old and new time. A scrobbled play you delete is not re-added unless the scrobbler sends it again.
+
+## Spotify
+
+Spotify is optional. Each WhereWeWere user brings their own Spotify app, which keeps each app within Spotify's limit on the number of users an app in Development Mode may have.
+
+### Setting it up
+
+1. In the [Spotify developer dashboard](https://developer.spotify.com/dashboard), create an app and tick **Web API**. Since February 2026 the app's owner needs Spotify Premium.
+2. Add the **Redirect URI** shown in **Settings → Music → Spotify** to the app. It is `https://<your WhereWeWere address>/api/v1/music/spotify/callback`. Spotify only accepts `https` addresses (or `http://127.0.0.1`), so open WhereWeWere through its https address (for example behind your reverse proxy) before connecting.
+3. Under the app's **User Management**, add the Spotify account you will sign in with. Apps in Development Mode only work for accounts listed there.
+4. Paste the app's **Client ID** and **Client Secret** into Settings → Music → Spotify and save. They are checked with Spotify first.
+5. Press **Connect Spotify**, allow access on Spotify's page, and you return to Settings, where the first playlist sync starts.
+
+WhereWeWere asks to read your playlists (your own, followed and collaborative ones) and to create and change playlists (for exports). **Disconnect** signs out and keeps the app and the synced playlists; **Change app** replaces the credentials (a different Client ID signs you out); **Remove** forgets the app, the sign-in and the synced playlists.
+
+### Open in Spotify
+
+With the app saved (signing in isn't needed for this), song, album and artist pages get an **Open in Spotify** button. The first time a page is opened, Spotify's catalog is searched with the names your plays use; a match needs the same name (ignoring "(feat. X)" credits and remaster tags) and your play's first artist among its artists. The answer is remembered, so later visits don't search again. When nothing matches confidently, the button becomes **Search Spotify** and opens a Spotify search instead; "no match" is asked again after 30 days. Albums under "Unknown album" have no button. Links go to open.spotify.com, which hands off to the Spotify app where it is installed (or opens the web player), so they work without Premium.
+
+### Playlists
+
+**Profile → Music → Playlists** lists the playlists in your Spotify library in Spotify's own order (the order the Spotify Web API returns your library in; it can't see the client's "Recents" sort). The **Sort** menu also offers last modified, name, most played and last played, and remembers your choice on this device. Spotify has no "last modified" date, so it is the newest **date added** among the playlist's tracks.
+
+Each playlist shows its tracks, all-time plays of its songs, how many of its songs you've never played and when you last played one. Opening a playlist shows:
+
+- every track with its plays and last-played date (a played song opens its own page), sortable by playlist order, title, artist, date added, plays or last played;
+- **Most played**, **Forgotten** (songs you've played but not in the last 3, 6, 12 or 24 months) and **Top artists** (by your plays of their songs on the playlist);
+- plays of its songs over time.
+
+A track's plays are every play of the same song (see [What counts as "the same song"](#what-counts-as-the-same-song)), however it was scrobbled, and a song that appears twice on a playlist counts once in its totals.
+
+**Playlists you follow but don't own:** since February 2026 Spotify only gives Development Mode apps the tracks of playlists you own or collaborate on. Other playlists are listed with their name, owner and cover but no tracks or plays ("Tracks not shared").
+
+**Syncing:** the first sync runs right after connecting; after that playlists sync once a day, and **Sync now** (on the Playlists tab or in Settings) syncs straight away. A sync re-reads only the playlists that changed since the last one. Playlist covers are downloaded and served by WhereWeWere (in `DATA_DIR/spotify-covers/`), so your browser never loads images from Spotify. A sync that fails (Spotify unreachable, sign-in revoked) shows its error in Settings; if Spotify no longer accepts the sign-in you are signed out and asked to connect again.
+
+### Exporting a list to Spotify
+
+While Spotify is connected, an open list (Profile → Music → Lists) has **Export to Spotify**. It creates a private playlist named after the list, holding its songs and the tracks of its albums, in list order (ranked items first), each track once. WhereWeWere remembers the playlist, and the button becomes **Update on Spotify**, which replaces the playlist's tracks with the list's current ones. If you've removed that playlist from your Spotify library, the next export creates a new one. Songs and albums with no confident Spotify match are left out and listed under the button.
+
+### Backups, Start Over and privacy
+
+- **Backups** carry the Spotify matches and which playlist each list was exported to. They never carry the Client ID or Secret, your sign-in, or the synced playlists; after a restore, add the app and connect again, then sync.
+- **Start Over → All music data** removes the matches, the export links and the synced playlists; resetting Music's settings also forgets the Spotify app and sign-in.
+- **Privacy:** searches send song, album and artist names to Spotify. Syncing reads your playlists, and exporting writes a playlist. The Client Secret and tokens are stored in the database only.
 
 ## What counts as "the same song"
 

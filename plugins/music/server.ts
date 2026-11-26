@@ -82,6 +82,10 @@ import {
   getBackfillStatus,
   startBackfill,
 } from './services/albums';
+import { mountSpotifyRoutes } from './spotifyRoutes';
+import { exportLinks, importLinks } from './services/spotifyLinks';
+import { exportExports, importExports } from './services/spotifyExport';
+import { SPOTIFY_SYNC_JOB, spotifySyncJob, startSpotifyAutoSync } from './services/spotifySync';
 import { DEFAULT_MIN_SESSION_TRACKS, DEFAULT_SESSION_GAP_MINUTES, PLUGIN_ID } from './services/constants';
 import {
   getCounts,
@@ -709,6 +713,9 @@ musicRouter.delete('/lists/:id/items/:itemId', async (req: Request, res: Respons
 
 mountRankRoutes(musicRouter, listKit);
 
+// ---- Spotify: open in Spotify, playlists, exporting lists -------------------
+mountSpotifyRoutes(musicRouter);
+
 // One list's items with all-time plays of each.
 musicRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
   try {
@@ -965,6 +972,28 @@ export const server: CheckinTypeServerPlugin = {
   ],
   rootApi: { mount: API_MOUNT, router: scrobblerRouter },
 
+  // Spotify playlist sync: "Sync now" starts this job; a daily sync (started
+  // below) runs the same sync for every connected user.
+  jobs: [
+    {
+      jobType: SPOTIFY_SYNC_JOB,
+      handler: async (ctx) => {
+        const summary = await spotifySyncJob(currentUserId(), {
+          isCancelled: () => ctx.isCancelled(),
+          onProgress: (message) => ctx.updateProgress({ phase: 'spotify', message }),
+        });
+        await ctx.updateProgress({
+          phase: 'done',
+          message: `Synced ${summary.playlists} playlist${summary.playlists === 1 ? '' : 's'}` +
+            (summary.read > 0 ? `, read ${summary.tracks} tracks from ${summary.read} that changed.` : '; none had changed.'),
+          ...summary,
+        });
+      },
+    },
+  ],
+
+  onServerStart: () => startSpotifyAutoSync(),
+
   settingsKeys: [
     { name: 'scrobbler_key', type: 'string', label: 'Scrobbler key', uniquePerUser: true },
     { name: 'session_gap_minutes', type: 'number', label: 'Session gap (minutes)', default: DEFAULT_SESSION_GAP_MINUTES },
@@ -1032,6 +1061,10 @@ export const server: CheckinTypeServerPlugin = {
       lists: await exportLists(user_id),
       // Genre lookups and the user's corrections to them.
       genres: await exportGenres(user_id),
+      // Spotify matches and the Spotify playlists lists were exported to. The
+      // Spotify app, sign-in and synced playlists stay out of backups.
+      spotify_links: await exportLinks(user_id),
+      spotify_exports: await exportExports(user_id),
     };
   },
 
@@ -1045,6 +1078,8 @@ export const server: CheckinTypeServerPlugin = {
       albums?: unknown;
       lists?: unknown;
       genres?: unknown;
+      spotify_links?: unknown;
+      spotify_exports?: unknown;
     };
     const rows = Array.isArray(body.scrobbles) ? body.scrobbles : Array.isArray(payload) ? payload : [];
     const scrobbles = rows.flatMap((r) => {
@@ -1080,6 +1115,9 @@ export const server: CheckinTypeServerPlugin = {
     // Lists merge by name, items by identity; they don't count toward the scrobbles restored.
     await importLists(client ?? { query }, user_id, body.lists);
     await importGenres(client ?? { query }, user_id, body.genres);
+    await importLinks(client ?? { query }, user_id, body.spotify_links);
+    // After the lists: exports re-link by list name.
+    await importExports(client ?? { query }, user_id, body.spotify_exports);
     return inserted;
   },
 
@@ -1095,6 +1133,18 @@ export const server: CheckinTypeServerPlugin = {
     await run(`DELETE FROM companions WHERE checkin_type = '${PLUGIN_ID}' AND user_id = $1`, [user_id]);
     // Lists are the user's own curation, so Start Over removes them too (items cascade).
     await run('DELETE FROM music_lists WHERE user_id = $1', [user_id]);
+    // Spotify matches and synced playlists go with the music; the Spotify app
+    // and sign-in are settings (see resetSettings). Exports cascade with lists.
+    await run('DELETE FROM music_spotify_links WHERE user_id = $1', [user_id]);
+    await run('DELETE FROM music_spotify_playlists WHERE user_id = $1', [user_id]);
+    return result.rowCount ?? 0;
+  },
+
+  // Resetting Music's settings also forgets the Spotify app and sign-in (the
+  // synced playlists cascade).
+  resetSettings: async ({ user_id, client: txClient }) => {
+    const sql = 'DELETE FROM music_spotify_accounts WHERE user_id = $1';
+    const result = txClient ? await txClient.query(sql, [user_id]) : await query(sql, [user_id]);
     return result.rowCount ?? 0;
   },
 

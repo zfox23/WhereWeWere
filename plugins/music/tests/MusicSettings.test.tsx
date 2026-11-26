@@ -14,6 +14,8 @@ const refreshMock = vi.fn();
 const genreStatusMock = vi.fn();
 const genreStartMock = vi.fn();
 vi.mock('../ui/api', () => ({
+  // Spotify isn't set up: its buttons and the Playlists subtab stay hidden.
+  spotify: { status: () => Promise.resolve({ configured: false, connected: false }) },
   music: {
     settings: () => settingsMock(),
     updateSettings: (...args: unknown[]) => updateMock(...args),

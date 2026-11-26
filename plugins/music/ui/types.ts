@@ -539,3 +539,79 @@ export interface RemovedPlay {
   source: string | null;
   timezone: string | null;
 }
+
+// ---- Spotify --------------------------------------------------------------
+
+export interface SpotifyStatus {
+  /** The user's Spotify app (Client ID + Secret) is saved. */
+  configured: boolean;
+  /** The user has signed in to Spotify with it. */
+  connected: boolean;
+  client_id: string | null;
+  display_name: string | null;
+  spotify_user_id: string | null;
+  last_synced_at: string | null;
+  last_attempt_at: string | null;
+  last_error: string | null;
+  last_summary: { playlists: number; read: number; unavailable: number; tracks: number } | null;
+  playlists: number;
+  /** Path of the sign-in redirect, to be added to the app's origin. */
+  callback_path: string;
+}
+
+export interface SpotifyLink {
+  url: string;
+  /** True: opens the item itself; false: a Spotify search for it. */
+  matched: boolean;
+}
+
+export interface SpotifyPlaylist {
+  spotify_id: string;
+  position: number;
+  name: string;
+  description: string | null;
+  owner_name: string | null;
+  mine: boolean;
+  has_cover: boolean;
+  total_tracks: number | null;
+  tracks_available: boolean;
+  last_modified_at: string | null;
+  url: string;
+  plays: number;
+  played_songs: number;
+  unplayed_songs: number;
+  last_played_at: string | null;
+}
+
+export interface SpotifyPlaylistTrack {
+  position: number;
+  spotify_id: string | null;
+  url: string | null;
+  title: string;
+  artists: string[];
+  album: string | null;
+  duration_ms: number | null;
+  added_at: string | null;
+  is_local: boolean;
+  song_key: string;
+  plays: number;
+  first_played_at: string | null;
+  last_played_at: string | null;
+  album_ref: string | null;
+  art_id: string | null;
+}
+
+export interface SpotifyPlaylistDetail extends Omit<SpotifyPlaylist, 'plays' | 'played_songs' | 'unplayed_songs' | 'last_played_at'> {
+  tracks: SpotifyPlaylistTrack[];
+  daily: DayCount[];
+}
+
+export interface SpotifyExport {
+  list_id: string;
+  spotify_playlist_id: string;
+  url: string;
+  exported_at: string;
+  track_count: number;
+  unmatched: { kind: 'song' | 'album'; title: string; artists: string[] }[];
+  created?: boolean;
+}

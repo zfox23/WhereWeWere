@@ -17,6 +17,7 @@ import { RankableListDetail } from '../../../client/src/components/lists/Rankabl
 import { renderContender } from './RankByComparing';
 import { formatDay, formatDuration, joinArtists } from './format';
 import { refreshMusicLists, useMusicLists } from './useMusicLists';
+import { SpotifyExportButton } from './SpotifyExportButton';
 import type { ListItemWithStats, MusicList } from './types';
 
 const getId = (i: ListItemWithStats) => i.id;
@@ -134,6 +135,7 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
       getSubtitle={(i) => joinArtists(i.artists)}
       renderContender={renderContender}
       onRankingApplied={() => void refreshMusicLists()}
+      extraActions={<SpotifyExportButton listId={list.id} />}
     />
   );
 }

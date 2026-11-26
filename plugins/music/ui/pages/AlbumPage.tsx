@@ -25,6 +25,7 @@ import { PlaysOverTime } from '../insights/PlaysOverTime';
 import type { Bucket } from '../insights/timeline';
 import type { AlbumView, ListTarget } from '../types';
 import { AlbumGrid } from './AlbumGrid';
+import { SpotifyButton } from '../SpotifyButton';
 
 /** "2011-06-14" -> "Jun 14, 2011"; partial dates ("2011", "2011-06") are shown as they are. */
 export function releaseDateLabel(date: string | null): string | null {
@@ -156,6 +157,7 @@ export default function AlbumPage() {
                 >
                   Show in library
                 </Link>
+                {!unknown && <SpotifyButton target={{ kind: 'album', ref: current.album_ref }} />}
               </div>
               <ol className="mt-3 divide-y divide-gray-100 text-sm dark:divide-gray-800" aria-label="Tracks">
                 {current.tracks.map((t, i) => (

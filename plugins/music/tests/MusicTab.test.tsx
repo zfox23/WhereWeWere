@@ -13,6 +13,8 @@ const discoveryMock = vi.fn();
 const dailyMock = vi.fn();
 let listsData: any[] = [];
 vi.mock('../ui/api', () => ({
+  // Spotify isn't set up: its buttons and the Playlists subtab stay hidden.
+  spotify: { status: () => Promise.resolve({ configured: false, connected: false }) },
   music: {
     stats: (...args: unknown[]) => statsMock(...args),
     library: (...args: unknown[]) => libraryMock(...args),

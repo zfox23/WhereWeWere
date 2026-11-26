@@ -8,6 +8,8 @@ import type { ArtistDetail } from '../ui/types';
 const artistMock = vi.fn();
 const tiesMock = vi.fn();
 vi.mock('../ui/api', () => ({
+  // Spotify isn't set up: its buttons and the Playlists subtab stay hidden.
+  spotify: { status: () => Promise.resolve({ configured: false, connected: false }) },
   music: {
     artist: (...a: unknown[]) => artistMock(...a),
     ties: (...a: unknown[]) => tiesMock(...a),

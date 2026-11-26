@@ -26,6 +26,7 @@ import { TiesCard } from '../insights/TiesCard';
 import type { Bucket } from '../insights/timeline';
 import type { ArtistDetail } from '../types';
 import { AlbumGrid } from './AlbumGrid';
+import { SpotifyButton } from '../SpotifyButton';
 
 const SONGS_COLLAPSED = 15;
 const BUCKETS: Bucket[] = ['week', 'month', 'year'];
@@ -99,9 +100,12 @@ export default function ArtistPage() {
                 {` · first ${formatDay(current.first_played_at)} · last ${formatDay(current.last_played_at)}`}
               </span>
             </p>
-            <Link to={libraryHref('songs', current.name)} className="mt-1 inline-block text-xs font-medium text-primary-600 hover:underline">
-              Show in library
-            </Link>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <Link to={libraryHref('songs', current.name)} className="text-xs font-medium text-primary-600 hover:underline">
+                Show in library
+              </Link>
+              <SpotifyButton target={{ kind: 'artist', name: current.name }} />
+            </div>
             <GenreEditor
               key={current.name}
               kind="artist"

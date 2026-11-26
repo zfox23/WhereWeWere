@@ -33,6 +33,7 @@ import { StreaksAndPeaks } from '../insights/StreaksAndPeaks';
 import { TiesCard } from '../insights/TiesCard';
 import { bucketEnd, bucketLabel, bucketStart, weeksOfMonth, type Bucket, type BucketCount } from '../insights/timeline';
 import type { SongDetail, SongPlay } from '../types';
+import { SpotifyButton } from '../SpotifyButton';
 
 const PAGE_SIZE = 100;
 const BUCKETS: Bucket[] = ['week', 'month', 'year'];
@@ -236,6 +237,7 @@ export default function SongPage() {
                   <GenreChips genres={current.genres} />
                 </div>
               )}
+              <SpotifyButton target={{ kind: 'song', songKey }} className="mt-2" />
             </div>
           </header>
 

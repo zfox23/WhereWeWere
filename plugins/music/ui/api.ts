@@ -39,6 +39,11 @@ import type {
   GenreBackfillStatus,
   GenreStream,
   ItemGenres,
+  SpotifyExport,
+  SpotifyLink,
+  SpotifyPlaylist,
+  SpotifyPlaylistDetail,
+  SpotifyStatus,
 } from './types';
 
 function rangeQuery(from?: string, to?: string, extra: Record<string, string> = {}): string {
@@ -199,4 +204,34 @@ export const music = {
     request<{ scrobbler_key: string }>('/music/settings/regenerate-key', { method: 'POST' }),
   importScrobbles: (file: File) => uploadImport('/api/v1/music/import/scrobbles', file),
   importLastfm: (file: File) => uploadImport('/api/v1/music/import/lastfm', file),
+};
+
+/** Spotify: the user's app and sign-in, Open in Spotify links, playlists and list exports. */
+export const spotify = {
+  status: () => request<SpotifyStatus>('/music/spotify/status'),
+  saveCredentials: (clientId: string, clientSecret: string) =>
+    request<SpotifyStatus>('/music/spotify/credentials', {
+      method: 'PUT',
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    }),
+  remove: () => request<{ ok: true }>('/music/spotify', { method: 'DELETE' }),
+  /** The Spotify sign-in page to send the browser to. */
+  authorize: () =>
+    request<{ url: string }>('/music/spotify/authorize', { method: 'POST', body: JSON.stringify({ origin: window.location.origin }) }),
+  disconnect: () => request<{ ok: true }>('/music/spotify/disconnect', { method: 'POST' }),
+  link: (target: { kind: 'song'; songKey: string } | { kind: 'album'; ref: string } | { kind: 'artist'; name: string }) =>
+    request<SpotifyLink>(
+      `/music/spotify/link?${new URLSearchParams(
+        target.kind === 'song'
+          ? { kind: 'song', song_key: target.songKey }
+          : target.kind === 'album'
+            ? { kind: 'album', ref: target.ref }
+            : { kind: 'artist', name: target.name },
+      )}`,
+    ),
+  playlists: () => request<SpotifyPlaylist[]>('/music/spotify/playlists'),
+  playlist: (id: string) => request<SpotifyPlaylistDetail>(`/music/spotify/playlists/${encodeURIComponent(id)}`),
+  coverUrl: (id: string) => `/api/v1/music/spotify/playlists/${encodeURIComponent(id)}/cover`,
+  getExport: (listId: string) => request<SpotifyExport | null>(`/music/spotify/exports/${listId}`),
+  exportList: (listId: string) => request<SpotifyExport>(`/music/spotify/exports/${listId}`, { method: 'POST' }),
 };

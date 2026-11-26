@@ -1,13 +1,14 @@
 /**
- * Profile > Music, in three subtabs like Profile > Places (`musicSection` in
- * the URL): Overview (listening totals and top songs/artists/albums for the
- * selected period), Library (every song, artist and album, all time) and Lists.
+ * Profile > Music, in subtabs like Profile > Places (`musicSection` in the
+ * URL): Overview (listening totals and top songs/artists/albums for the
+ * selected period), Library (every song, artist and album, all time), Lists,
+ * and Playlists (Spotify, once it is set up in Settings → Music).
  * Only Overview has the period selector; its state lives in the URL
  * (`musicMonth` / `musicPeriod` / `musicWeek`).
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Disc3, Library, List, ListPlus, Loader2, Mic2, Music, Tags, Timer, Users } from 'lucide-react';
+import { BarChart3, Disc3, Library, List, ListMusic, ListPlus, Loader2, Mic2, Music, Tags, Timer, Users } from 'lucide-react';
 import type { PluginProfileTabProps } from 'wwp-shared';
 import { stats as statsApi } from '../../../client/src/api/client';
 import { PeriodRangeSelector } from '../../../client/src/components/PeriodRangeSelector';
@@ -28,6 +29,8 @@ import { AlbumLink } from './AlbumLink';
 import { ListBadge, albumItemKey, songItemKey } from './ListBadge';
 import { MusicLibrarySection } from './MusicLibrarySection';
 import { MusicListsSection } from './MusicListsSection';
+import { MusicPlaylistsSection } from './MusicPlaylistsSection';
+import { useSpotifyStatus } from './useSpotifyStatus';
 import { ListeningCalendar } from './insights/ListeningCalendar';
 import { ListeningClock } from './insights/ListeningClock';
 import { DiscoveryChart } from './insights/DiscoveryChart';
@@ -52,23 +55,26 @@ function getWeekFromLocation(): string {
   return isValidDateParam(param) ? param : getCurrentMonthIso().slice(0, 4) + '-01-01';
 }
 
-export type MusicSection = 'overview' | 'library' | 'lists';
+export type MusicSection = 'overview' | 'library' | 'lists' | 'playlists';
 
 const SECTIONS: { key: MusicSection; label: string; icon: React.ElementType }[] = [
   { key: 'overview', label: 'Overview', icon: BarChart3 },
   { key: 'library', label: 'Library', icon: Library },
   { key: 'lists', label: 'Lists', icon: List },
+  { key: 'playlists', label: 'Playlists', icon: ListMusic },
 ];
 
 function getSectionFromLocation(): MusicSection {
   const section = new URLSearchParams(window.location.search).get('musicSection');
-  return section === 'library' || section === 'lists' ? section : 'overview';
+  return section === 'library' || section === 'lists' || section === 'playlists' ? section : 'overview';
 }
 
 /** Params that belong to the Library subtab. */
 const LIBRARY_PARAMS = ['musicView', 'q', 'genre', 'sort', 'dir'];
 /** Params that belong to the Lists subtab. */
 const LISTS_PARAMS = ['musicList'];
+/** Params that belong to the Playlists subtab. */
+const PLAYLISTS_PARAMS = ['musicPlaylist'];
 
 const TOP_COLLAPSED = 10;
 
@@ -232,6 +238,9 @@ export function MusicTab(_props: PluginProfileTabProps) {
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [data, setData] = useState<MusicStats | null>(null);
   const [earliestDate, setEarliestDate] = useState<string | null>(null);
+  // Playlists come from Spotify: the subtab shows once Spotify is set up (or when a link opens it).
+  const spotifyStatus = useSpotifyStatus();
+  const sections = SECTIONS.filter((s) => s.key !== 'playlists' || spotifyStatus?.configured || section === 'playlists');
 
   // Back from a song, artist or album page returns to the same spot (once the Overview has loaded).
   useScrollRestoration(section !== 'overview' || initialLoaded);
@@ -311,7 +320,11 @@ export function MusicTab(_props: PluginProfileTabProps) {
     setOrDelete('musicWeek', selectedWeek, selectedWeek === weekDefault);
     setOrDelete('musicSection', section, section === 'overview');
     // The library's filters aren't meaningful (or wanted in a shared link) on the other subtabs.
-    const unwanted = [...(section !== 'library' ? LIBRARY_PARAMS : []), ...(section !== 'lists' ? LISTS_PARAMS : [])];
+    const unwanted = [
+      ...(section !== 'library' ? LIBRARY_PARAMS : []),
+      ...(section !== 'lists' ? LISTS_PARAMS : []),
+      ...(section !== 'playlists' ? PLAYLISTS_PARAMS : []),
+    ];
     for (const key of unwanted) {
       if (url.searchParams.has(key)) {
         url.searchParams.delete(key);
@@ -342,7 +355,7 @@ export function MusicTab(_props: PluginProfileTabProps) {
   return (
     <div className="space-y-6">
       <div className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-xl bg-gray-100 p-1 dark:bg-gray-800/60">
-        {SECTIONS.map(({ key, label, icon: Icon }) => (
+        {sections.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
@@ -422,6 +435,8 @@ export function MusicTab(_props: PluginProfileTabProps) {
       {section === 'library' && <MusicLibrarySection from="" to="" />}
 
       {section === 'lists' && <MusicListsSection />}
+
+      {section === 'playlists' && <MusicPlaylistsSection />}
     </div>
   );
 }
