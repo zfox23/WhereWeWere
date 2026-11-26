@@ -185,19 +185,17 @@ export interface GenreDetail {
   related: GenreCount[];
 }
 
-export interface GenreStreamBucket {
-  start: string;
-  /** Plays per band, in `GenreStream.genres` order. */
-  counts: number[];
-  other: number;
-  other_top: GenreCount[];
-}
-
 export interface GenreStream {
+  /** The grouping for the whole period; the chart groups finer when zoomed in. */
   bucket: DiscoveryBucketSize;
   /** The bands, most played first. */
   genres: string[];
-  buckets: GenreStreamBucket[];
+  /** The first day of the daily arrays, or null with no plays. */
+  first: string | null;
+  /** Plays per day for each band, one entry per day from `first`. */
+  daily: number[][];
+  /** Plays per day of every other genre. */
+  other_daily: number[];
   plays: number;
   plays_with_genres: number;
   /** Everything outside the bands over the whole period. */

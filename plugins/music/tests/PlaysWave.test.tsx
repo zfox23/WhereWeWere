@@ -20,20 +20,21 @@ function Where() {
 afterEach(cleanup);
 
 describe('seriesWave', () => {
-  it('puts every band and Other on one axis, from the first play of any to the last', () => {
-    const { buckets, wave } = seriesWave(SERIES, 'month');
-    expect(buckets.map((b) => b.start)).toEqual(['2024-01-01', '2024-02-01', '2024-03-01', '2024-04-01']);
+  it('lays every band and Other on one axis of days, from the first play of any to the last', () => {
+    const wave = seriesWave(SERIES)!;
+    expect(wave.first).toBe('2024-01-10');
     expect(wave.names).toEqual(['Song A', 'Song B']);
-    expect(wave.buckets).toEqual([
-      { counts: [3, 0], other: 1 },
-      { counts: [0, 1], other: 0 },
-      { counts: [2, 0], other: 0 },
-      { counts: [0, 0], other: 1 },
-    ]);
+    // Jan 10 to Apr 1: 22 + 29 + 31 + 1 days.
+    expect(wave.other).toHaveLength(83);
+    expect(wave.bands.every((b) => b.length === 83)).toBe(true);
+    expect(wave.bands[0][0]).toBe(3);
+    expect(wave.bands[0].reduce((n, v) => n + v, 0)).toBe(5);
+    expect(wave.bands[1][35]).toBe(1); // Feb 14
+    expect(wave.other[82]).toBe(1); // Apr 1
   });
 
-  it('is empty without plays', () => {
-    expect(seriesWave({ bands: [], other: { plays: 0, count: 0, daily: [] } }, 'year')).toEqual({ wave: { names: [], buckets: [] }, buckets: [] });
+  it('is nothing without plays', () => {
+    expect(seriesWave({ bands: [], other: { plays: 0, count: 0, daily: [] } })).toBeNull();
   });
 });
 

@@ -10,14 +10,24 @@ vi.mock('../ui/api', () => ({
   music: { genreStream: (...args: unknown[]) => streamMock(...args) },
 }));
 
+/** The same three months as plays per day: everything on the 10th of each. */
+const BUCKETED = {
+  names: ['trance', 'house'],
+  buckets: [
+    { counts: [6, 2], other: 2 },
+    { counts: [0, 4], other: 0 },
+    { counts: [3, 3], other: 1 },
+  ],
+};
+// Jan 1 to Mar 31: Jan 10 is day 9, Feb 10 day 40, Mar 10 day 69.
+const days = (on: Record<number, number>) => Array.from({ length: 91 }, (_, i) => on[i] ?? 0);
+
 const STREAM: GenreStream = {
   bucket: 'month',
   genres: ['trance', 'house'],
-  buckets: [
-    { start: '2024-01-01', counts: [6, 2], other: 2, other_top: [{ name: 'ambient', plays: 2 }] },
-    { start: '2024-02-01', counts: [0, 4], other: 0, other_top: [] },
-    { start: '2024-03-01', counts: [3, 3], other: 1, other_top: [{ name: 'techno', plays: 1 }] },
-  ],
+  first: '2024-01-01',
+  daily: [days({ 9: 6, 69: 3 }), days({ 9: 2, 40: 4, 69: 3 })],
+  other_daily: days({ 9: 2, 69: 1 }),
   plays: 20,
   plays_with_genres: 15,
   other: { plays: 3, genres: 2, top: [{ name: 'ambient', plays: 2 }, { name: 'techno', plays: 1 }] },
@@ -47,7 +57,7 @@ afterEach(cleanup);
 
 describe('layoutWave', () => {
   it('stacks the genre bands around a centre line, leaving Other out', () => {
-    const { bands, xs, y } = layoutWave({ names: STREAM.genres, buckets: STREAM.buckets }, 600, 200);
+    const { bands, xs, y } = layoutWave(BUCKETED, 600, 200);
     expect(xs).toEqual([0, 300, 600]);
     expect(bands).toHaveLength(2);
     // Eight genre plays in January: from -4 to +4, trance at the bottom.
@@ -158,13 +168,13 @@ describe('GenreWaveChart', () => {
   });
 
   it('points to Settings when nothing in the period has genres yet', async () => {
-    streamMock.mockResolvedValue({ ...STREAM, genres: [], buckets: [], plays: 20, plays_with_genres: 0 });
+    streamMock.mockResolvedValue({ ...STREAM, genres: [], daily: [], plays: 20, plays_with_genres: 0 });
     renderChart();
     expect(await screen.findByRole('link', { name: 'Settings → Music' })).toBeTruthy();
   });
 
   it('says when nothing was played', async () => {
-    streamMock.mockResolvedValue({ bucket: 'month', genres: [], buckets: [], plays: 0, plays_with_genres: 0 });
+    streamMock.mockResolvedValue({ bucket: 'month', genres: [], first: null, daily: [], other_daily: [], plays: 0, plays_with_genres: 0 });
     renderChart();
     expect(await screen.findByText('Nothing played in this period.')).toBeTruthy();
   });

@@ -380,23 +380,20 @@ export async function listGenres(userId: string): Promise<GenreCount[]> {
 
 /** Genres drawn as bands of their own; the rest are "Other", summed beside the chart. */
 export const STREAM_BANDS = 8;
-/** Genres named per bucket for what "Other" holds. */
-const OTHER_NAMED = 3;
 /** Genres named for what "Other" holds over the period. */
 const OTHER_NAMED_PERIOD = 5;
 
 export interface GenreStream {
+  /** The grouping for the whole period (weeks, months or years, by its length); the chart groups finer when zoomed. */
   bucket: DiscoveryBucket;
   /** The period's most played genres, most first: the bands, in order. */
   genres: string[];
-  buckets: {
-    start: string;
-    /** Plays per band, in `genres` order. */
-    counts: number[];
-    other: number;
-    /** The biggest genres inside `other` in this bucket. */
-    other_top: GenreCount[];
-  }[];
+  /** The first day of `daily` and `other_daily` (the period's first day), or null with no plays. */
+  first: string | null;
+  /** Plays per day for each band (in `genres` order), one entry per day from `first`, zeros included. */
+  daily: number[][];
+  /** Plays per day of every other genre, the same days. */
+  other_daily: number[];
   /** Plays in the period, and how many of them have a genre. */
   plays: number;
   plays_with_genres: number;
@@ -404,10 +401,13 @@ export interface GenreStream {
   other: { plays: number; genres: number; top: GenreCount[] };
 }
 
+const DAY_MS = 86_400_000;
+const dayNumber = (date: string) => Math.round(Date.parse(`${date}T00:00:00Z`) / DAY_MS);
+
 /**
- * Plays per main genre per week, month or year of the period (the same
- * bucket sizes as Discovery), for the top genres and "Other". Each play with
- * genres counts once, toward its first genre.
+ * Plays per main genre per day of the period, for the top genres and "Other".
+ * Each play with genres counts once, toward its first genre. Days are dense
+ * number arrays rather than objects: an all-time view is years of days.
  */
 export async function getGenreStream(userId: string, from: string | null, to: string | null): Promise<GenreStream> {
   const pg = playGenres('m');
@@ -421,51 +421,45 @@ export async function getGenreStream(userId: string, from: string | null, to: st
   );
   const { first, last, plays, with_genres: withGenres } = span.rows[0];
   const noOther = { plays: 0, genres: 0, top: [] };
-  if (!first || !last) return { bucket: 'month', genres: [], buckets: [], plays: 0, plays_with_genres: 0, other: noOther };
-  const bucket = discoveryBucket(from ?? first, to ?? last);
+  if (!first || !last) {
+    return { bucket: 'month', genres: [], first: null, daily: [], other_daily: [], plays: 0, plays_with_genres: 0, other: noOther };
+  }
   const start = from ?? first;
   const end = to ?? last;
+  const bucket = discoveryBucket(start, end);
 
-  // $1 user, $2/$3 range, $4 bucket unit, $5/$6 the series' first and last day.
   const r = await query(
-    `WITH counted AS (
-       SELECT date_trunc($4::text, (${localDay})::timestamp)::date AS start, (${pg.genres})[1] AS genre, COUNT(*)::int AS plays
-       FROM music_scrobbles m ${pg.join}
-       WHERE m.user_id = $1 ${range} AND cardinality(${pg.genres}) > 0
-       GROUP BY 1, 2
-     ),
-     buckets AS (
-       SELECT generate_series(date_trunc($4::text, ($5::date)::timestamp), date_trunc($4::text, ($6::date)::timestamp), ('1 ' || $4::text)::interval)::date AS start
-     )
-     SELECT b.start::text AS start,
-            COALESCE(jsonb_object_agg(c.genre, c.plays) FILTER (WHERE c.genre IS NOT NULL), '{}') AS counts
-     FROM buckets b LEFT JOIN counted c USING (start)
-     GROUP BY b.start ORDER BY b.start`,
-    [userId, from, to, bucket, start, end],
+    `SELECT ${localDay}::text AS day, (${pg.genres})[1] AS genre, COUNT(*)::int AS plays
+     FROM music_scrobbles m ${pg.join}
+     WHERE m.user_id = $1 ${range} AND cardinality(${pg.genres}) > 0
+     GROUP BY 1, 2`,
+    [userId, from, to],
   );
-  const rows = r.rows as { start: string; counts: Record<string, number> }[];
+  const rows = r.rows as { day: string; genre: string; plays: number }[];
   const totals = new Map<string, number>();
-  for (const row of rows) for (const [g, n] of Object.entries(row.counts)) totals.set(g, (totals.get(g) ?? 0) + n);
-  const genres = [...totals]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, STREAM_BANDS)
-    .map(([g]) => g);
-  const banded = new Set(genres);
-  const rest = [...totals].filter(([g]) => !banded.has(g)).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  for (const row of rows) totals.set(row.genre, (totals.get(row.genre) ?? 0) + row.plays);
+  const ranked = [...totals].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const genres = ranked.slice(0, STREAM_BANDS).map(([g]) => g);
+  const rest = ranked.slice(STREAM_BANDS);
+  const band = new Map(genres.map((g, i) => [g, i]));
+
+  const days = dayNumber(end) - dayNumber(start) + 1;
+  const daily = genres.map(() => new Array<number>(days).fill(0));
+  const otherDaily = new Array<number>(days).fill(0);
+  const s0 = dayNumber(start);
+  for (const row of rows) {
+    const i = dayNumber(row.day) - s0;
+    if (i < 0 || i >= days) continue;
+    const b = band.get(row.genre);
+    if (b === undefined) otherDaily[i] += row.plays;
+    else daily[b][i] += row.plays;
+  }
   return {
     bucket,
     genres,
-    buckets: rows.map((row) => {
-      const rest = Object.entries(row.counts)
-        .filter(([g]) => !banded.has(g))
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-      return {
-        start: row.start,
-        counts: genres.map((g) => row.counts[g] ?? 0),
-        other: rest.reduce((n, [, c]) => n + c, 0),
-        other_top: rest.slice(0, OTHER_NAMED).map(([name, n]) => ({ name, plays: n })),
-      };
-    }),
+    first: start,
+    daily,
+    other_daily: otherDaily,
     plays,
     plays_with_genres: withGenres,
     other: {

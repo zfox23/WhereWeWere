@@ -102,6 +102,15 @@ The library table is a way in to the rest of your history:
 - **Plays** (Songs view) opens every play of that song: its totals, a plays-per-month chart over its whole history, and every play newest first (date and time in the play's own timezone, album, length, where it came from). Click a play to open its own page. The home icon opens its listening session on Home.
 - **Last played** shows the day of the song's last listening session, as Home groups it, and opens that day on Home with the session expanded and highlighted. Sessions shorter than the minimum-tracks setting aren't on Home: you land on the right day, but nothing is highlighted. The play's own page, reached from **Plays**, always works. A ctrl- or middle-click opens the day in a new tab, without the highlight.
 
+### Zooming and panning the waves
+
+Both kinds of wave (Genres over time, and plays over time by song) zoom and pan along time:
+
+- **With a mouse or trackpad:** hold Ctrl (⌘ on a Mac) and scroll, or pinch on a trackpad, to zoom in or out around the pointer; drag to pan. A plain scroll still scrolls the page (the first time, a hint shows how to zoom). Hovering still opens the popup.
+- **On a touch screen:** pinch with two fingers to zoom, and move them together to pan. One finger held and slid still opens the popup, and a vertical swipe still scrolls the page.
+- **Grouping:** zoomed in, the chart groups more finely on its own (years, then months, weeks and days) so there's always enough to see; the Week / Month / Year choice (or, for genres, the period's length) is the grouping of the full view. The labels under the chart show the stretch in view, and the height fits what's visible.
+- The bands stay the same at any zoom. Zoom all the way out to see everything again; the zoom isn't remembered when you leave the page.
+
 ### Plays over time by song
 
 Album, artist and playlist pages, and each list, show plays over time as a wave (the same kind of chart as Genres over time): one band per most played song (on a list, per item, song or album), its thickness that song's plays per week, month or year (switch with **Week** / **Month** / **Year**). The eight most played get bands; the rest are summed in a line below the chart, and the caption says what share of all plays the bands cover. Hover, or hold a finger on the chart, for a popup with that moment's total plays, its biggest songs and the rest. Click a band to open its song (or, on a list, its album). On a list, a play of a song that is on the list counts for that song even when its album is on the list too. A song's own page keeps its bar chart: with one song there is nothing to split, and its bars pick which plays are listed below.

@@ -8,11 +8,19 @@
  * Hovering (or holding a finger on) the chart opens a popup beside the
  * crosshair, like the weather chart's, with that moment's total and mix.
  * Clicking a band can open what it stands for.
+ *
+ * Zoom and pan (time only): Ctrl/⌘ + scroll or a trackpad pinch zooms around
+ * the pointer and dragging pans; on a touch screen two fingers pinch and pan,
+ * while one finger still moves the popup. A plain scroll scrolls the page.
+ * Zoomed in, the grouping gets finer on its own (years → months → weeks →
+ * days); zooming all the way out is the full view again. The bands stay the
+ * same at any zoom, and the height fits what's visible.
  */
 
-import { useEffect, useMemo, useState, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { scrubHandlers } from './scrub';
+import { bucketEnd, bucketLabel, bucketStart, type Bucket } from './timeline';
 
 /**
  * The validated categorical order (light / dark steps), one slot per band in
@@ -93,12 +101,12 @@ export interface WaveLayout {
  * Stack the bands around a centre line ("silhouette"), scaled so the thickest
  * bucket fills the height. "Other" is not drawn.
  */
-export function layoutWave(data: WaveData, width = W, height = H): WaveLayout {
+export function layoutWave(data: WaveData, width = W, height = H, xs?: number[]): WaveLayout {
   const n = data.buckets.length;
   const series = data.names.map((_, g) => data.buckets.map((b) => b.counts[g] ?? 0));
   const totals = data.buckets.map((_, i) => series.reduce((s, band) => s + band[i], 0));
   const max = Math.max(...totals, 1);
-  const xs = n === 1 ? [0] : data.buckets.map((_, i) => (i / (n - 1)) * width);
+  const at = xs ?? (n === 1 ? [0] : data.buckets.map((_, i) => (i / (n - 1)) * width));
   const running = totals.map((t) => -t / 2);
   const bands = series.map((band) => {
     const lo = running.slice();
@@ -107,7 +115,7 @@ export function layoutWave(data: WaveData, width = W, height = H): WaveLayout {
   });
   // Leave a little room so the outer edges don't touch the frame.
   const k = (height - 8) / max;
-  return { xs, bands, y: (v) => height / 2 - v * k };
+  return { xs: at, bands, y: (v) => height / 2 - v * k };
 }
 
 function bandPath(layout: WaveLayout, band: number): string {
@@ -141,8 +149,115 @@ export function momentRows(data: WaveData, bucket: number, hovered: number | nul
   return { total, rows, rest: total - listed };
 }
 
+// ---------------------------------------------------------------------------
+// Days, groups and zoom
+// ---------------------------------------------------------------------------
+
+/** What the chart is given: plays per day, dense from `first`, for each band and the rest. */
+export interface WaveSeries {
+  /** The first day ('YYYY-MM-DD') of every array below. */
+  first: string;
+  names: string[];
+  /** Per band, plays per day; all arrays as long as `other`. */
+  bands: number[][];
+  other: number[];
+}
+
+export type WaveBucket = Bucket | 'day';
+
+const DAY_MS = 86_400_000;
+const dayNumber = (date: string) => Math.round(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) / DAY_MS);
+const dayString = (n: number) => new Date(n * DAY_MS).toISOString().slice(0, 10);
+
+/** Dense days from sparse per-day counts (several series on one axis). */
+export function denseSeries(names: string[], bands: { date: string; plays: number }[][], other: { date: string; plays: number }[]): WaveSeries | null {
+  const all = [...bands.flat(), ...other].map((d) => dayNumber(d.date));
+  if (all.length === 0) return null;
+  const first = Math.min(...all);
+  const days = Math.max(...all) - first + 1;
+  const fill = (daily: { date: string; plays: number }[]) => {
+    const out = new Array<number>(days).fill(0);
+    for (const d of daily) out[dayNumber(d.date) - first] += d.plays;
+    return out;
+  };
+  return { first: dayString(first), names, bands: bands.map(fill), other: fill(other) };
+}
+
+const startOf = (date: string, g: WaveBucket) => (g === 'day' ? date : bucketStart(date, g));
+const endOf = (start: string, g: WaveBucket) => (g === 'day' ? start : bucketEnd(start, g));
+
+export interface Grouped {
+  data: WaveData;
+  /** Each group's first and last day. */
+  ranges: { start: string; end: string }[];
+  /** Each group's middle, in days since 1970: where it is drawn. */
+  centers: number[];
+}
+
+/** The days grouped by `g`; a group sticking out past the data still counts only the days there are. */
+export function groupWave(series: WaveSeries, g: WaveBucket): Grouped {
+  const out: Grouped = { data: { names: series.names, buckets: [] }, ranges: [], centers: [] };
+  const first = dayNumber(series.first);
+  let current = '';
+  for (let i = 0; i < series.other.length; i++) {
+    const s = startOf(dayString(first + i), g);
+    if (s !== current) {
+      current = s;
+      const e = endOf(s, g);
+      out.ranges.push({ start: s, end: e });
+      out.centers.push((dayNumber(s) + dayNumber(e) + 1) / 2);
+      out.data.buckets.push({ counts: series.bands.map(() => 0), other: 0 });
+    }
+    const b = out.data.buckets[out.data.buckets.length - 1];
+    series.bands.forEach((band, k) => (b.counts[k] += band[i] ?? 0));
+    b.other += series.other[i] ?? 0;
+  }
+  return out;
+}
+
+const COARSE_TO_FINE: WaveBucket[] = ['year', 'month', 'week', 'day'];
+const GROUP_DAYS: Record<WaveBucket, number> = { year: 365.25, month: 30.44, week: 7, day: 1 };
+/** Fewest groups worth drawing before going finer. */
+export const MIN_POINTS = 8;
+/** The narrowest view, in days. */
+export const MIN_SPAN_DAYS = 14;
+
+/** The grouping for a view `spanDays` wide: `base` or finer, until there are enough groups to draw. */
+export function chooseBucket(base: Bucket, spanDays: number): WaveBucket {
+  let i = COARSE_TO_FINE.indexOf(base);
+  while (i < COARSE_TO_FINE.length - 1 && spanDays / GROUP_DAYS[COARSE_TO_FINE[i]] < MIN_POINTS) i++;
+  return COARSE_TO_FINE[i];
+}
+
+export interface View {
+  t0: number;
+  t1: number;
+}
+
+/** A view of `span` days starting at `t0`, kept inside [d0, d1]; null when it covers it all (the full view). */
+export function clampView(t0: number, span: number, d0: number, d1: number): View | null {
+  const full = d1 - d0;
+  if (full <= 0) return null;
+  const width = Math.max(Math.min(span, full), Math.min(MIN_SPAN_DAYS, full));
+  if (width >= full - 1e-6) return null;
+  const start = Math.min(Math.max(t0, d0), d1 - width);
+  return { t0: start, t1: start + width };
+}
+
+const label = (r: { start: string; end: string }, g: WaveBucket) =>
+  g === 'day'
+    ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${r.start}T00:00:00Z`))
+    : bucketLabel(r, g);
+
+/** Whether the scroll hint has been shown on this page load. */
+let hinted = false;
+export const resetZoomHint = () => {
+  hinted = false;
+};
+
 interface Hover {
-  bucket: number;
+  /** Index into the visible groups. */
+  index: number;
   /** Band index, or null between bands. */
   band: number | null;
   /** Where across the chart the crosshair is, 0..1, to place the popup beside it. */
@@ -150,45 +265,207 @@ interface Hover {
 }
 
 export function WaveChart({
-  data,
-  label,
+  series,
+  base,
+  caption,
   ariaLabel,
   otherLabel,
   bandHref,
 }: {
-  data: WaveData;
-  /** A bucket's name ("Mar 2024"), for the popup and the axis. */
-  label: (bucket: number) => string;
-  ariaLabel: string;
+  series: WaveSeries;
+  /** The grouping of the full view; zooming in goes finer. */
+  base: Bucket;
+  /** Above the chart, told the grouping in use. */
+  caption?: (g: WaveBucket) => ReactNode;
+  ariaLabel: (g: WaveBucket) => string;
   /** The popup's line for what isn't a band ("Other genres"). */
   otherLabel: string;
   /** Where clicking a band goes. */
   bandHref?: (band: number) => string | null;
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
+  const [view, setView] = useState<View | null>(null);
+  const [hint, setHint] = useState(false);
   const navigate = useNavigate();
-  const layout = useMemo(() => (data.buckets.length && data.names.length ? layoutWave(data) : null), [data]);
-  const n = data.buckets.length;
-  // New data (another period or grouping) starts without a hover.
-  useEffect(() => setHover(null), [data]);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // The full view's groups set the zoomable range: first group's middle to the last's.
+  const baseGroups = useMemo(() => groupWave(series, base), [series, base]);
+  const d0 = baseGroups.centers[0] ?? 0;
+  const d1 = baseGroups.centers[baseGroups.centers.length - 1] ?? 0;
+  const g: WaveBucket = view ? chooseBucket(base, view.t1 - view.t0) : base;
+  const groups = useMemo(() => (g === base ? baseGroups : groupWave(series, g)), [series, g, base, baseGroups]);
+
+  // New data or grouping starts at the full view, without a hover.
+  useEffect(() => {
+    setView(null);
+    setHover(null);
+  }, [series, base]);
+
+  const t0 = view?.t0 ?? d0;
+  const t1 = view?.t1 ?? d1;
+  const single = baseGroups.centers.length === 1;
+
+  // What's drawn: the groups in view and one beyond each edge, so bands run off the sides.
+  const visible = useMemo(() => {
+    const idx = groups.centers.map((c, i) => ({ c, i })).filter(({ c }) => c >= t0 - 1e-9 && c <= t1 + 1e-9).map(({ i }) => i);
+    if (idx.length === 0) return { from: 0, to: -1, inView: [] as number[] };
+    return { from: Math.max(0, idx[0] - 1), to: Math.min(groups.centers.length - 1, idx[idx.length - 1] + 1), inView: idx };
+  }, [groups, t0, t1]);
+  const slice = useMemo<WaveData>(
+    () => ({ names: groups.data.names, buckets: groups.data.buckets.slice(visible.from, visible.to + 1) }),
+    [groups, visible],
+  );
+  const xAt = (c: number) => (single ? W / 2 : ((c - t0) / (t1 - t0)) * W);
+  const xs = useMemo(
+    () => (single ? undefined : groups.centers.slice(visible.from, visible.to + 1).map(xAt)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, visible, t0, t1, single],
+  );
+  const layout = useMemo(() => (slice.buckets.length && slice.names.length ? layoutWave(slice, W, H, xs) : null), [slice, xs]);
+
+  // ---- Zoom and pan --------------------------------------------------------
+
+  const viewRef = useRef<View | null>(null);
+  viewRef.current = view;
+  const span = () => (viewRef.current ? viewRef.current.t1 - viewRef.current.t0 : d1 - d0);
+  const start = () => viewRef.current?.t0 ?? d0;
+  /** Zoom by `factor` (< 1 in), keeping the time under `fx` (0..1 across the chart) where it is. */
+  const zoomAt = (factor: number, fx: number) => {
+    const s = span();
+    const anchor = start() + fx * s;
+    const next = s * factor;
+    setView(clampView(anchor - fx * next, next, d0, d1));
+    setHover(null);
+  };
+  const panBy = (fraction: number, from: View | null) => {
+    if (!from) return;
+    setView(clampView(from.t0 - fraction * (from.t1 - from.t0), from.t1 - from.t0, d0, d1));
+  };
+
+  // Ctrl/⌘ + scroll (and trackpad pinches, which browsers send as Ctrl + scroll) zoom;
+  // a plain scroll scrolls the page, with a hint the first time.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || single) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const box = svg.getBoundingClientRect();
+        if (!box.width) return;
+        zoomAt(Math.exp(e.deltaY * 0.01), Math.min(1, Math.max(0, (e.clientX - box.left) / box.width)));
+      } else if (!hinted) {
+        hinted = true;
+        setHint(true);
+        window.setTimeout(() => setHint(false), 2500);
+      }
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d0, d1, single]);
+
+  const drag = useRef<{ x: number; from: View | null; moved: boolean } | null>(null);
+  const dragged = useRef(false);
+  const touches = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; mid: number; t0: number; span: number } | null>(null);
+
+  const fxOf = (e: PointerEvent<SVGSVGElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    return box.width ? (e.clientX - box.left) / box.width : 0;
+  };
+  const twoFingers = (box: DOMRect) => {
+    const [a, b] = [...touches.current.values()];
+    return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: ((a.x + b.x) / 2 - box.left) / box.width };
+  };
+
+  // ---- Hover ---------------------------------------------------------------
 
   const pick = (e: PointerEvent<SVGSVGElement>): Hover | null => {
-    if (!layout) return null;
+    if (!layout || visible.inView.length === 0) return null;
+    const fx = fxOf(e);
+    if (fx < 0 || fx > 1) return null;
     const box = e.currentTarget.getBoundingClientRect();
-    if (!box.width || !box.height) return null;
-    const raw = (e.clientX - box.left) / box.width;
-    if (raw < 0 || raw > 1) return null;
-    const bucket = n === 1 ? 0 : Math.round(raw * (n - 1));
-    // Which band is under the pointer, read against this bucket's edges.
-    const sy = ((e.clientY - box.top) / box.height) * H;
-    const band = layout.bands.findIndex((b) => sy <= layout.y(b.lo[bucket]) && sy >= layout.y(b.hi[bucket]));
-    const fx = n === 1 ? 0.5 : bucket / (n - 1);
-    return { bucket, band: band >= 0 ? band : null, fx };
+    // The group in view whose middle is nearest the pointer.
+    const at = single ? 0 : t0 + fx * (t1 - t0);
+    const nearest = visible.inView.reduce((best, i) => (Math.abs(groups.centers[i] - at) < Math.abs(groups.centers[best] - at) ? i : best));
+    const index = nearest - visible.from;
+    const sy = box.height ? ((e.clientY - box.top) / box.height) * H : -1;
+    const band = layout.bands.findIndex((b) => sy <= layout.y(b.lo[index]) && sy >= layout.y(b.hi[index]));
+    return { index, band: band >= 0 ? band : null, fx: single ? 0.5 : xAt(groups.centers[nearest]) / W };
   };
   const scrub = scrubHandlers<SVGSVGElement, Hover>(pick, setHover);
 
-  const current = hover && hover.bucket < n ? hover : null;
-  const moment = current ? momentRows(data, current.bucket, current.band) : null;
+  const handlers = {
+    style: scrub.style,
+    onPointerDown: (e: PointerEvent<SVGSVGElement>) => {
+      dragged.current = false;
+      if (e.pointerType === 'mouse') {
+        if (e.button === 0 && !single) {
+          drag.current = { x: e.clientX, from: viewRef.current, moved: false };
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        }
+        scrub.onPointerDown(e);
+        return;
+      }
+      touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.current.size === 2 && !single) {
+        const box = e.currentTarget.getBoundingClientRect();
+        if (box.width) pinch.current = { ...twoFingers(box), t0: start(), span: span() };
+        setHover(null);
+        return;
+      }
+      if (touches.current.size === 1) scrub.onPointerDown(e);
+    },
+    onPointerMove: (e: PointerEvent<SVGSVGElement>) => {
+      if (e.pointerType !== 'mouse' && touches.current.has(e.pointerId)) {
+        touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const p = pinch.current;
+        if (p && touches.current.size >= 2) {
+          const box = e.currentTarget.getBoundingClientRect();
+          const now = twoFingers(box);
+          const next = now.dist > 0 ? p.span * (p.dist / now.dist) : p.span;
+          // The time under the fingers' first midpoint follows their midpoint now.
+          const anchor = p.t0 + p.mid * p.span;
+          setView(clampView(anchor - now.mid * next, next, d0, d1));
+          return;
+        }
+      }
+      const d = drag.current;
+      if (e.pointerType === 'mouse' && d && e.buttons & 1) {
+        const box = e.currentTarget.getBoundingClientRect();
+        const dx = e.clientX - d.x;
+        if (!d.moved && Math.abs(dx) > 3) d.moved = true;
+        if (d.moved && box.width) {
+          dragged.current = true;
+          setHover(null);
+          panBy(dx / box.width, d.from);
+          return;
+        }
+      }
+      if (!pinch.current) scrub.onPointerMove(e);
+    },
+    onPointerUp: (e: PointerEvent<SVGSVGElement>) => {
+      touches.current.delete(e.pointerId);
+      if (touches.current.size < 2) pinch.current = null;
+      if (e.pointerType === 'mouse') drag.current = null;
+      scrub.onPointerUp(e);
+    },
+    onPointerCancel: (e: PointerEvent<SVGSVGElement>) => {
+      touches.current.delete(e.pointerId);
+      if (touches.current.size < 2) pinch.current = null;
+      drag.current = null;
+      scrub.onPointerCancel(e);
+    },
+    onPointerLeave: (e: PointerEvent<SVGSVGElement>) => {
+      if (!drag.current) scrub.onPointerLeave(e);
+    },
+  };
+
+  // ---- Drawing -------------------------------------------------------------
+
+  const current = hover && hover.index < slice.buckets.length ? hover : null;
+  const moment = current ? momentRows(slice, current.index, current.band) : null;
   // Beside the crosshair, on whichever side has room (as the weather chart does),
   // and never wider than that room, so it stays on screen on a phone.
   const popupStyle =
@@ -198,20 +475,26 @@ export function WaveChart({
         ? { right: `calc(${(1 - current.fx) * 100}% + 10px)`, maxWidth: `min(15rem, calc(${current.fx * 100}% - 12px))` }
         : { left: `calc(${current.fx * 100}% + 10px)`, maxWidth: `min(15rem, calc(${(1 - current.fx) * 100}% - 12px))` };
 
-  if (n === 0) return null;
+  if (baseGroups.centers.length === 0) return null;
+  const firstInView = visible.inView[0];
+  const lastInView = visible.inView[visible.inView.length - 1];
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? '');
+
   return (
     <>
+      {caption && <p className="text-xs text-gray-500 dark:text-gray-400">{caption(g)}</p>}
       <div className="relative mt-2">
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
-          className="block h-48 w-full"
+          className={`block h-48 w-full ${single ? '' : drag.current?.moved ? 'cursor-grabbing' : ''}`}
           role="img"
-          aria-label={ariaLabel}
-          {...scrub}
+          aria-label={ariaLabel(g)}
+          {...handlers}
         >
           {layout &&
-            data.names.map((name, i) => {
+            slice.names.map((name, i) => {
               const href = bandHref?.(i) ?? null;
               return (
                 <path
@@ -221,7 +504,14 @@ export function WaveChart({
                   strokeWidth={1.5}
                   vectorEffect="non-scaling-stroke"
                   opacity={current?.band == null || current.band === i ? 1 : 0.35}
-                  onClick={href ? () => navigate(href) : undefined}
+                  onClick={
+                    href
+                      ? () => {
+                          // A drag that pans the chart isn't a click on a band.
+                          if (!dragged.current) navigate(href);
+                        }
+                      : undefined
+                  }
                 >
                   <title>{name}</title>
                 </path>
@@ -240,6 +530,13 @@ export function WaveChart({
             />
           )}
         </svg>
+        {hint && (
+          <div role="note" className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 justify-center">
+            <span className="rounded-lg bg-gray-900/80 px-2.5 py-1 text-[11px] text-white dark:bg-gray-100/90 dark:text-gray-900">
+              {isMac ? '⌘' : 'Ctrl'} + scroll, or pinch, to zoom · drag to pan
+            </span>
+          </div>
+        )}
         {current && moment && (
           <div
             role="status"
@@ -247,7 +544,7 @@ export function WaveChart({
             style={popupStyle}
           >
             <div className="flex items-baseline justify-between gap-3">
-              <span className="font-semibold text-gray-800 dark:text-gray-100">{label(current.bucket)}</span>
+              <span className="font-semibold text-gray-800 dark:text-gray-100">{label(groups.ranges[visible.from + current.index], g)}</span>
               {moment.total > 0 && (
                 <span className="tabular-nums">
                   {moment.total.toLocaleString()} play{moment.total === 1 ? '' : 's'}
@@ -284,10 +581,12 @@ export function WaveChart({
           </div>
         )}
       </div>
-      <div className="mt-0.5 flex justify-between text-[10px] text-gray-400">
-        <span>{label(0)}</span>
-        {n > 1 && <span>{label(n - 1)}</span>}
-      </div>
+      {firstInView != null && (
+        <div className="mt-0.5 flex justify-between text-[10px] text-gray-400" aria-label="Showing">
+          <span>{label(groups.ranges[firstInView], g)}</span>
+          {lastInView !== firstInView && <span>{label(groups.ranges[lastInView], g)}</span>}
+        </div>
+      )}
     </>
   );
 }

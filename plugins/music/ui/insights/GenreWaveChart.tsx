@@ -16,8 +16,7 @@ import { music } from '../api';
 import { genrePath, GenreLink } from '../links';
 import type { GenreStream } from '../types';
 import { ChartCard } from './ChartCard';
-import { bucketLabel } from './DiscoveryChart';
-import { pct, WaveChart, type WaveData } from './WaveChart';
+import { pct, WaveChart, type WaveSeries } from './WaveChart';
 
 const plays = (n: number) => `${n.toLocaleString()} play${n === 1 ? '' : 's'}`;
 
@@ -43,7 +42,10 @@ export function GenreWaveChart({ from, to }: { from?: string; to?: string }) {
     };
   }, [from, to]);
 
-  const wave = useMemo<WaveData | null>(() => (data ? { names: data.genres, buckets: data.buckets } : null), [data]);
+  const wave = useMemo<WaveSeries | null>(
+    () => (data?.first ? { first: data.first, names: data.genres, bands: data.daily, other: data.other_daily } : null),
+    [data],
+  );
   const coverage = data && data.plays > 0 ? pct(data.plays_with_genres, data.plays) : 100;
   const other = data?.other;
 
@@ -63,14 +65,16 @@ export function GenreWaveChart({ from, to }: { from?: string; to?: string }) {
         </p>
       ) : (
         <>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Plays per {data.bucket} by each play's main genre (its first listed).
-            {coverage < 100 && ` ${coverage}% of plays have genres.`}
-          </p>
           <WaveChart
-            data={wave}
-            label={(i) => bucketLabel(data.buckets[i].start, data.bucket)}
-            ariaLabel={`Plays per ${data.bucket} of the top genres`}
+            series={wave}
+            base={data.bucket}
+            caption={(g) => (
+              <>
+                Plays per {g} by each play's main genre (its first listed).
+                {coverage < 100 && ` ${coverage}% of plays have genres.`}
+              </>
+            )}
+            ariaLabel={(g) => `Plays per ${g} of the top genres`}
             otherLabel="Other genres"
             bandHref={(i) => genrePath(data.genres[i])}
           />

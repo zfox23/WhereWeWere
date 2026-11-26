@@ -247,7 +247,10 @@ describe('music genres', () => {
       expect(stream.genres).toEqual(['trance', 'hardcore']);
       expect(stream.plays).toBe(5);
       expect(stream.plays_with_genres).toBe(5);
-      expect(stream.buckets).toEqual([{ start: '2024-04-29', counts: [4, 1], other: 0, other_top: [] }]);
+      // Plays per day from the period's first day, one array per band.
+      expect(stream.first).toBe('2024-05-01');
+      expect(stream.daily).toEqual([[4, 0], [0, 1]]);
+      expect(stream.other_daily).toEqual([0, 0]);
       expect(stream.other).toEqual({ plays: 0, genres: 0, top: [] });
     });
 
@@ -259,9 +262,10 @@ describe('music genres', () => {
       }
       const stream = (await request(app).get(api('/insights/genres'))).body;
       expect(stream.genres).toEqual(['trance', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6']);
-      expect(stream.buckets.reduce((n: number, b: { other: number }) => n + b.other, 0)).toBe(4);
-      // All in one week, which names its three biggest.
-      expect(stream.buckets.flatMap((b: { other_top: { name: string }[] }) => b.other_top.map((o) => o.name))).toEqual(['g7', 'g8', 'g9']);
+      // All time: from the first play (May 1) to the last (May 3). Hardcore on May 2, g7-g9 on May 3.
+      expect(stream.first).toBe('2024-05-01');
+      expect(stream.other_daily).toEqual([0, 1, 3]);
+      expect(stream.daily[1]).toEqual([0, 0, 1]);
       // The period's Other: what's outside the bands, biggest first.
       expect(stream.other).toEqual({
         plays: 4,
