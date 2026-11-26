@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GenreWaveChart, basisPath, layoutWave, momentRows } from '../ui/insights/GenreWaveChart';
+import { GenreWaveChart } from '../ui/insights/GenreWaveChart';
+import { basisPath, layoutWave, momentRows } from '../ui/insights/WaveChart';
 import type { GenreStream } from '../ui/types';
 
 const streamMock = vi.fn();
@@ -46,7 +47,7 @@ afterEach(cleanup);
 
 describe('layoutWave', () => {
   it('stacks the genre bands around a centre line, leaving Other out', () => {
-    const { bands, xs, y } = layoutWave(STREAM, 600, 200);
+    const { bands, xs, y } = layoutWave({ names: STREAM.genres, buckets: STREAM.buckets }, 600, 200);
     expect(xs).toEqual([0, 300, 600]);
     expect(bands).toHaveLength(2);
     // Eight genre plays in January: from -4 to +4, trance at the bottom.
@@ -60,7 +61,7 @@ describe('layoutWave', () => {
 
 describe('momentRows', () => {
   const many = {
-    genres: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+    names: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
     buckets: [{ start: '2024-01-01', counts: [8, 7, 6, 5, 4, 3, 2, 0], other: 5, other_top: [] }],
   };
 

@@ -21,6 +21,7 @@ vi.mock('../ui/api', () => ({
     lists: () => Promise.resolve(JSON.parse(JSON.stringify(listsData))),
     createListFromItems: (...args: unknown[]) => createFromMock(...args),
     listItems: () => Promise.resolve([]),
+    listSeries: () => Promise.resolve({ bands: [], other: { plays: 0, count: 0, daily: [] } }),
     rankSession: () => Promise.reject(new Error('none')),
     albumView: (...args: unknown[]) => albumViewMock(...args),
     listeningClock: (...args: unknown[]) => clockMock(...args),

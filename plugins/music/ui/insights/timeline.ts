@@ -47,17 +47,20 @@ export function bucketEnd(start: string, bucket: Bucket): string {
   return fromTime(Date.UTC(y, m, 0));
 }
 
-/** Plays per bucket from the first played to the last, empty buckets included. */
-export function bucketize(daily: DayCount[], bucket: Bucket): BucketCount[] {
-  if (daily.length === 0) return [];
+/**
+ * Plays per bucket from the first played to the last (or across `range`, so
+ * several series share one axis), empty buckets included.
+ */
+export function bucketize(daily: DayCount[], bucket: Bucket, range?: { first: string; last: string }): BucketCount[] {
+  if (daily.length === 0 && !range) return [];
   const counts = new Map<string, number>();
   for (const d of daily) {
     const s = bucketStart(d.date, bucket);
     counts.set(s, (counts.get(s) ?? 0) + d.plays);
   }
-  const last = bucketStart(daily[daily.length - 1].date, bucket);
+  const last = bucketStart(range?.last ?? daily[daily.length - 1].date, bucket);
   const out: BucketCount[] = [];
-  for (let s = bucketStart(daily[0].date, bucket); s <= last; s = addDays(bucketEnd(s, bucket), 1)) {
+  for (let s = bucketStart(range?.first ?? daily[0].date, bucket); s <= last; s = addDays(bucketEnd(s, bucket), 1)) {
     out.push({ start: s, end: bucketEnd(s, bucket), plays: counts.get(s) ?? 0 });
   }
   return out;

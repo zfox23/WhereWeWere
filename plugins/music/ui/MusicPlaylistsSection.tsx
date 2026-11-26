@@ -14,10 +14,10 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, ExternalLink, History, ListMusic, Loader2, Mic2, RefreshCw, Trophy } from 'lucide-react';
 import { spotify } from './api';
 import { AlbumArt } from './AlbumArt';
-import { ArtistLink, ArtistLinks, SongLink } from './links';
+import { ArtistLink, ArtistLinks, SongLink, songPath } from './links';
 import { formatDay, formatLength } from './format';
 import { ChartCard } from './insights/ChartCard';
-import { PlaysOverTime } from './insights/PlaysOverTime';
+import { PlaysWave } from './insights/PlaysWave';
 import type { Bucket } from './insights/timeline';
 import { useSpotifyStatus } from './useSpotifyStatus';
 import { useSpotifySync } from './useSpotifySync';
@@ -437,7 +437,7 @@ function PlaylistDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </p>
       ) : (
         <>
-          <PlaysOverTime daily={playlist.daily} bucket={bucket} onBucketChange={setBucket} title="Plays of its songs over time" />
+          <PlaysWave series={playlist.series} bandHref={songPath} bucket={bucket} onBucketChange={setBucket} title="Plays of its songs over time" />
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             <ChartCard title="Most played" icon={Trophy}>

@@ -15,12 +15,12 @@ import { music } from '../api';
 import { AlbumArt } from '../AlbumArt';
 import { formatDay, formatDuration } from '../format';
 import { libraryHref } from '../libraryLinks';
-import { ArtistLinks, SongLink } from '../links';
+import { ArtistLinks, SongLink, songPath } from '../links';
 import { GenreChips, GenreEditor } from '../GenreChips';
 import { ListBadge, songItemKey } from '../ListBadge';
 import { ChartCard } from '../insights/ChartCard';
 import { ClockCard } from '../insights/ListeningClock';
-import { PlaysOverTime } from '../insights/PlaysOverTime';
+import { PlaysWave } from '../insights/PlaysWave';
 import { StreaksAndPeaks } from '../insights/StreaksAndPeaks';
 import { TiesCard } from '../insights/TiesCard';
 import type { Bucket } from '../insights/timeline';
@@ -125,8 +125,9 @@ export default function ArtistPage() {
 
           <StreaksAndPeaks daily={current.daily} rank={current.rank} rankOf={current.artists_total} rankNoun="artists" />
 
-          <PlaysOverTime
-            daily={current.daily}
+          <PlaysWave
+            series={current.series}
+            bandHref={songPath}
             bucket={bucket}
             onBucketChange={(b) => setParam('bucket', b === 'month' ? null : b)}
           />

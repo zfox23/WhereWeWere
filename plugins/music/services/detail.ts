@@ -16,6 +16,7 @@ import { ANCHORS, LIFE_BY, type LifeBy } from './life';
 import { getMusicSettings } from './scrobbles';
 import { genresOfPlays, getItemGenres, listGenres, type GenreCount, type ItemGenres } from './genres';
 import { inGenreSql } from './genreSql';
+import { getPlaySeries, type PlaySeries } from './series';
 
 export type Scope =
   | { kind: 'song'; songKey: string }
@@ -233,6 +234,8 @@ export interface ArtistDetail {
   genres: ItemGenres;
   /** The genres their plays have, most plays first. */
   play_genres: GenreCount[];
+  /** Plays per day of their most played songs, for the wave chart. */
+  series: PlaySeries;
 }
 
 /** Songs returned on the artist page, most played first. */
@@ -255,7 +258,7 @@ export async function getArtistDetail(userId: string, name: string): Promise<Art
   const row = head.rows[0];
   if (!row) return null;
   const scope: Scope = { kind: 'artist', name };
-  const [rank, daily, clock, songs, albums, genres, playGenres] = await Promise.all([
+  const [rank, daily, clock, songs, albums, genres, playGenres, series] = await Promise.all([
     query(
       `SELECT COUNT(*) FILTER (WHERE n > $2)::int + 1 AS rank, COUNT(*)::int AS total
        FROM (SELECT COUNT(*) AS n FROM music_scrobbles m, unnest(m.artists) AS a(artist) WHERE m.user_id = $1 GROUP BY a.artist) s`,
@@ -291,6 +294,7 @@ export async function getArtistDetail(userId: string, name: string): Promise<Art
     ),
     getItemGenres(userId, 'artist', name),
     genresOfPlays(userId, '$2::text = ANY(m.artists)', [name]),
+    getPlaySeries(userId, '$2::text = ANY(m.artists)', [name]),
   ]);
   return {
     name,
@@ -303,6 +307,7 @@ export async function getArtistDetail(userId: string, name: string): Promise<Art
     albums: albums.rows,
     genres,
     play_genres: playGenres,
+    series,
   };
 }
 

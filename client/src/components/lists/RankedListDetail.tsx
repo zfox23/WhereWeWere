@@ -153,6 +153,7 @@ export function RankedListDetail<T>({
   removeMessage,
   onRemove,
   headerActions,
+  beforeItems,
 }: {
   list: { id: string; name: string };
   onBack: () => void;
@@ -174,6 +175,8 @@ export function RankedListDetail<T>({
   onRemove: (item: T) => Promise<unknown>;
   /** Extra controls on the header row, pushed to the right. */
   headerActions?: ReactNode;
+  /** Shown between the header row and the items, once there are items (e.g. a chart). */
+  beforeItems?: ReactNode;
 }) {
   const { items, loading, saving, persistOrder, removeItem } = state;
   return (
@@ -208,19 +211,22 @@ export function RankedListDetail<T>({
       ) : items.length === 0 ? (
         <p className="text-sm text-gray-400">{emptyText}</p>
       ) : (
-        <RankedListView
-          items={items}
-          getId={getId}
-          getRank={getRank}
-          getLabel={getLabel}
-          columns={columns}
-          renderCard={renderCard}
-          sortOptions={sortOptions}
-          compareBy={compareBy}
-          compareUnranked={compareUnranked}
-          onReorder={persistOrder}
-          onRemove={(item) => void removeItem(item, { message: removeMessage(item), call: () => onRemove(item) })}
-        />
+        <>
+          {beforeItems && <div className="mb-3">{beforeItems}</div>}
+          <RankedListView
+            items={items}
+            getId={getId}
+            getRank={getRank}
+            getLabel={getLabel}
+            columns={columns}
+            renderCard={renderCard}
+            sortOptions={sortOptions}
+            compareBy={compareBy}
+            compareUnranked={compareUnranked}
+            onReorder={persistOrder}
+            onRemove={(item) => void removeItem(item, { message: removeMessage(item), call: () => onRemove(item) })}
+          />
+        </>
       )}
     </div>
   );

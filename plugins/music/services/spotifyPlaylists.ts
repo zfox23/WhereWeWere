@@ -7,6 +7,7 @@
 
 import { query } from '../../../server/src/db';
 import { albumRefSql } from './identity';
+import { getPlaySeries, type PlaySeries } from './series';
 import type { DayCount } from './detail';
 
 export interface SpotifyPlaylistRow {
@@ -90,6 +91,8 @@ export interface SpotifyPlaylistDetail extends Omit<SpotifyPlaylistRow, 'plays' 
   tracks: SpotifyPlaylistTrack[];
   /** Plays of its songs per local day, oldest first. */
   daily: DayCount[];
+  /** Plays per day of its most played songs, for the wave chart. */
+  series: PlaySeries;
 }
 
 export async function getPlaylist(userId: string, playlistId: string): Promise<SpotifyPlaylistDetail | null> {
@@ -100,7 +103,7 @@ export async function getPlaylist(userId: string, playlistId: string): Promise<S
     [userId, playlistId],
   );
   if (!head.rows[0]) return null;
-  const [tracks, daily] = await Promise.all([
+  const [tracks, daily, series] = await Promise.all([
     query(
       `SELECT t.position, t.spotify_id, t.title, t.artists, t.album, t.duration_ms, t.added_at, t.is_local, t.song_key,
               COALESCE(st.plays, 0)::int AS plays, st.first_played_at, st.last_played_at, st.album_ref, a.id AS art_id
@@ -123,6 +126,11 @@ export async function getPlaylist(userId: string, playlistId: string): Promise<S
        GROUP BY 1 ORDER BY 1`,
       [userId, playlistId],
     ),
+    getPlaySeries(
+      userId,
+      'm.song_key IN (SELECT song_key FROM music_spotify_playlist_tracks WHERE user_id = $1 AND playlist_id = $2)',
+      [playlistId],
+    ),
   ]);
   const row = head.rows[0];
   return {
@@ -133,5 +141,6 @@ export async function getPlaylist(userId: string, playlistId: string): Promise<S
       url: t.spotify_id ? `https://open.spotify.com/track/${encodeURIComponent(t.spotify_id)}` : null,
     })),
     daily: daily.rows,
+    series,
   };
 }

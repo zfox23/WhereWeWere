@@ -12,6 +12,7 @@ import {
   type Db, type RankSessionStateDto,
 } from '../../../server/src/services/lists';
 import { albumRefSql, songKeySql, UNKNOWN_ALBUM } from './identity';
+import { getPlaySeries, type PlaySeries } from './series';
 
 export { cleanName, NameTakenError, InvalidNameError, MAX_NAME, validateRankSession };
 export type { Db, RankSessionStateDto };
@@ -110,6 +111,35 @@ export async function getListItems(userId: string, listId: string): Promise<List
   return all
     .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.position - b.position || a.id.localeCompare(b.id))
     .map(({ position: _position, ...item }) => item);
+}
+
+/**
+ * Plays per day of a list's most played items, for its wave chart; null when
+ * there is no such list. A play of a song that is on the list counts for the
+ * song, even when its album is on the list too.
+ */
+export async function getListSeries(userId: string, listId: string): Promise<PlaySeries | null> {
+  const list = await query(`SELECT 1 FROM music_lists WHERE id = $1 AND user_id = $2`, [listId, userId]);
+  if ((list.rowCount ?? 0) === 0) return null;
+  const items = `(SELECT item_key FROM music_list_items WHERE list_id = $2)`;
+  const songItem = `('song:' || ${songKeySql('m.')})`;
+  const albumItem = `('album:' || ${albumRefSql('m.')})`;
+  const series = await getPlaySeries(
+    userId,
+    `${songItem} IN ${items} OR ${albumItem} IN ${items}`,
+    [listId],
+    `CASE WHEN ${songItem} IN ${items} THEN ${songItem} ELSE ${albumItem} END`,
+  );
+  // Named as the list names them: an album item is its album, not its latest track.
+  const named = await query(`SELECT item_key, title, artists FROM music_list_items WHERE list_id = $1`, [listId]);
+  const byKey = new Map(named.rows.map((r: { item_key: string; title: string; artists: string[] }) => [r.item_key, r]));
+  return {
+    ...series,
+    bands: series.bands.map((b) => {
+      const item = byKey.get(b.key) as { title: string; artists: string[] } | undefined;
+      return item ? { ...b, name: item.title, artists: item.artists?.length ? item.artists : b.artists } : b;
+    }),
+  };
 }
 
 const touch = (listId: string) => kit.touch(listId);

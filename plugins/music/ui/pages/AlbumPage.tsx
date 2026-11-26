@@ -16,12 +16,12 @@ import { albumArtUrl, music } from '../api';
 import { formatDay, formatDuration, formatLength } from '../format';
 import { libraryHref } from '../libraryLinks';
 import { GenreChips, GenreEditor } from '../GenreChips';
-import { ArtistLink, SongLink } from '../links';
+import { ArtistLink, SongLink, songPath } from '../links';
 import { ListBadge, albumItemKey, songItemKey } from '../ListBadge';
 import { ListPicker } from '../ListPicker';
 import { useMusicLists } from '../useMusicLists';
 import { ChartCard } from '../insights/ChartCard';
-import { PlaysOverTime } from '../insights/PlaysOverTime';
+import { PlaysWave } from '../insights/PlaysWave';
 import type { Bucket } from '../insights/timeline';
 import type { AlbumView, ListTarget } from '../types';
 import { AlbumGrid } from './AlbumGrid';
@@ -212,8 +212,9 @@ export default function AlbumPage() {
           </div>
 
           {current.daily.length > 0 && (
-            <PlaysOverTime
-              daily={current.daily}
+            <PlaysWave
+              series={current.series}
+              bandHref={songPath}
               bucket={bucket}
               onBucketChange={(b) =>
                 setParams(

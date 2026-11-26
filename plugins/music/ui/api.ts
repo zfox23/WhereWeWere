@@ -44,6 +44,7 @@ import type {
   SpotifyPlaylist,
   SpotifyPlaylistDetail,
   SpotifyStatus,
+  PlaySeries,
 } from './types';
 
 function rangeQuery(from?: string, to?: string, extra: Record<string, string> = {}): string {
@@ -188,6 +189,8 @@ export const music = {
     request<{ saved: boolean }>(`/music/lists/${listId}/rank-session`, { method: 'PUT', body: JSON.stringify({ state }) }),
   discardRankSession: (listId: string) => request<{ deleted: boolean }>(`/music/lists/${listId}/rank-session`, { method: 'DELETE' }),
   listItems: (listId: string) => request<ListItemWithStats[]>(`/music/lists/${listId}/items`),
+  /** Plays per day of a list's most played items, for its wave chart. */
+  listSeries: (listId: string) => request<PlaySeries>(`/music/lists/${listId}/series`),
   // Drag-to-rank: these ids become ranks 1..n; everything else on the list is unranked.
   rankList: (listId: string, rankedIds: string[]) =>
     request<{ ranked_ids: string[] }>(`/music/lists/${listId}/ranks`, { method: 'PUT', body: JSON.stringify({ ranked_ids: rankedIds }) }),

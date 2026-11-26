@@ -27,6 +27,10 @@ const ARTIST: ArtistDetail = {
   name: 'Khruangbin', plays: 500, listened_seconds: 90_000, first_played_at: '2020-01-01T00:00:00Z', last_played_at: '2024-03-01T00:00:00Z',
   unique_songs: 20, rank: 2, artists_total: 300,
   daily: [{ date: '2020-01-01', plays: 300 }, { date: '2024-03-01', plays: 200 }],
+  series: {
+    bands: [{ key: 's0|khruangbin', name: 'Song 0', artists: ['Khruangbin'], plays: 40, daily: [{ date: '2020-01-01', plays: 40 }] }],
+    other: { plays: 460, count: 19, daily: [{ date: '2020-01-01', plays: 260 }, { date: '2024-03-01', plays: 200 }] },
+  },
   clock: [{ dow: 1, hour: 9, plays: 500, seconds: 90_000 }],
   songs,
   albums: [{ album_ref: 'con todo el mundo|khruangbin', name: 'Con Todo El Mundo', art_id: 'a1', plays: 300, unique_tracks: 10, last_played_at: '2024-03-01T00:00:00Z' }],
@@ -66,7 +70,9 @@ describe('ArtistPage', () => {
     expect(within(screen.getByRole('list', { name: 'Albums' })).getByRole('link', { name: /Con Todo El Mundo/ }).getAttribute('href')).toBe(
       '/music/album?ref=con+todo+el+mundo%7Ckhruangbin',
     );
-    expect(screen.getByRole('group', { name: 'Plays per month from Jan 2020 to Mar 2024' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Plays per month by song' })).toBeTruthy();
+    expect(screen.getByText('Plays per month of the 1 most played songs, 8% of all plays.')).toBeTruthy();
+    expect(screen.getByText('Other songs, not drawn: 460 plays of 19 more songs.')).toBeTruthy();
     expect(tiesMock).toHaveBeenCalledWith({ artist: 'Khruangbin' });
   });
 

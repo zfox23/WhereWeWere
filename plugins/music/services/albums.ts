@@ -21,6 +21,7 @@ import { config } from '../../../server/src/config';
 import { normalizeTitle, type AlbumMatch } from './albumMatch';
 import { getOtherAlbums, getScopedDaily, type ArtistAlbum, type DayCount } from './detail';
 import { getItemGenres, type ItemGenres } from './genres';
+import { getPlaySeries, type PlaySeries } from './series';
 import { albumRefSql, fullestArtistsSql, latestTitleSql, songKeySql, UNKNOWN_ALBUM } from './identity';
 import {
   ProviderUnavailableError,
@@ -564,6 +565,8 @@ export interface AlbumView {
   genres: ItemGenres | null;
   /** The album artist's genres, which plays fall back to while the album has none. */
   artist_genres: string[];
+  /** Plays per day of its most played songs, for the wave chart. */
+  series: PlaySeries;
 }
 
 /**
@@ -651,11 +654,13 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
   const albumName = matchedRow?.title ?? played.find((r) => r.album)?.album ?? null;
   const times = played.flatMap((r) => [new Date(r.first_played_at).getTime(), new Date(r.last_played_at).getTime()]);
   const realAlbum = !ref.startsWith('|');
-  const [daily, otherAlbums, genres, artistGenres] = await Promise.all([
+  const noSeries: PlaySeries = { bands: [], other: { plays: 0, count: 0, daily: [] } };
+  const [daily, otherAlbums, genres, artistGenres, series] = await Promise.all([
     played.length ? getScopedDaily(userId, { kind: 'album', refs }) : Promise.resolve([]),
     getOtherAlbums(userId, albumArtist, refs),
     realAlbum ? getItemGenres(userId, 'album', ref) : Promise.resolve(null),
     albumArtist.trim() ? getItemGenres(userId, 'artist', albumArtist) : Promise.resolve(null),
+    played.length ? getPlaySeries(userId, `${albumRefSql('m.')} = ANY($2::text[])`, [refs]) : Promise.resolve(noSeries),
   ]);
   return {
     album_ref: ref,
@@ -674,6 +679,7 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
     other_albums: otherAlbums,
     genres,
     artist_genres: artistGenres?.genres ?? [],
+    series,
   };
 }
 

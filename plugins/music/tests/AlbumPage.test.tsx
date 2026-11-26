@@ -29,6 +29,13 @@ const VIEW = {
     { position: 3, title: 'Alchemy', artists: ['Above & Beyond'], length: 280, plays: 1, song_key: 'alchemy|above & beyond' },
   ],
   daily: [{ date: '2024-01-05', plays: 3 }, { date: '2024-03-02', plays: 1 }],
+  series: {
+    bands: [
+      { key: 'sun & moon|above & beyond', name: 'Sun & Moon', artists: ['Above & Beyond'], plays: 3, daily: [{ date: '2024-01-05', plays: 3 }] },
+      { key: 'alchemy|above & beyond', name: 'Alchemy', artists: ['Above & Beyond'], plays: 1, daily: [{ date: '2024-03-02', plays: 1 }] },
+    ],
+    other: { plays: 0, count: 0, daily: [] },
+  },
   other_albums: [
     { album_ref: 'tri-state|above & beyond', name: 'Tri-State', art_id: null, plays: 7, unique_tracks: 4, last_played_at: '2024-02-01T00:00:00Z' },
   ],
@@ -81,7 +88,10 @@ describe('AlbumPage', () => {
     albumViewMock.mockResolvedValue(VIEW);
     renderAt('?ref=x');
     await screen.findByRole('heading', { name: /Group Therapy/ });
-    expect(screen.getByRole('group', { name: 'Plays per month from Jan 2024 to Mar 2024' })).toBeTruthy();
+    // A wave of its songs, each band opening the song.
+    const wave = screen.getByRole('img', { name: 'Plays per month by song' });
+    expect(wave.querySelectorAll('path')).toHaveLength(2);
+    expect(screen.getByText('Plays per month, by song.')).toBeTruthy();
     const more = screen.getByRole('region', { name: 'More by Above & Beyond' });
     expect(within(more).getByRole('link', { name: /Tri-State/ }).getAttribute('href')).toBe('/music/album?ref=tri-state%7Cabove+%26+beyond');
   });

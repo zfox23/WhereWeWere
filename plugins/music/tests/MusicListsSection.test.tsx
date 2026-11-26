@@ -48,6 +48,13 @@ const api = {
   library: vi.fn(),
   albumView: vi.fn(),
   genres: vi.fn(async () => []),
+  listSeries: vi.fn(async () => ({
+    bands: [
+      { key: 'album:a|x', name: 'Album A', artists: ['X'], plays: 12, daily: [{ date: '2024-03-01', plays: 12 }] },
+      { key: 'song:s|y', name: 'Song S', artists: ['Y'], plays: 7, daily: [{ date: '2024-04-01', plays: 7 }] },
+    ],
+    other: { plays: 0, count: 0, daily: [] },
+  })),
 };
 vi.mock('../ui/api', () => ({
   // Spotify isn't set up: its buttons and the Playlists subtab stay hidden.
@@ -147,6 +154,11 @@ describe('MusicListsSection', () => {
     expect(album).toMatch(/album/i);
     expect(album).toContain('12');
     expect(api.listItems).toHaveBeenCalledWith('l1');
+    // Above the table: its plays over time, one band per item.
+    const wave = await screen.findByRole('img', { name: 'Plays per month by item' });
+    expect(api.listSeries).toHaveBeenCalledWith('l1');
+    expect(wave.querySelectorAll('path')).toHaveLength(2);
+    expect(screen.getByText('Plays per month, by item.')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /Back to lists/ }));
     expect(await screen.findByText('Road trip')).toBeTruthy();

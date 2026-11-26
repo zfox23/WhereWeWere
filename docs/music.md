@@ -102,6 +102,10 @@ The library table is a way in to the rest of your history:
 - **Plays** (Songs view) opens every play of that song: its totals, a plays-per-month chart over its whole history, and every play newest first (date and time in the play's own timezone, album, length, where it came from). Click a play to open its own page. The home icon opens its listening session on Home.
 - **Last played** shows the day of the song's last listening session, as Home groups it, and opens that day on Home with the session expanded and highlighted. Sessions shorter than the minimum-tracks setting aren't on Home: you land on the right day, but nothing is highlighted. The play's own page, reached from **Plays**, always works. A ctrl- or middle-click opens the day in a new tab, without the highlight.
 
+### Plays over time by song
+
+Album, artist and playlist pages, and each list, show plays over time as a wave (the same kind of chart as Genres over time): one band per most played song (on a list, per item, song or album), its thickness that song's plays per week, month or year (switch with **Week** / **Month** / **Year**). The eight most played get bands; the rest are summed in a line below the chart, and the caption says what share of all plays the bands cover. Hover, or hold a finger on the chart, for a popup with that moment's total plays, its biggest songs and the rest. Click a band to open its song (or, on a list, its album). On a list, a play of a song that is on the list counts for that song even when its album is on the list too. A song's own page keeps its bar chart: with one song there is nothing to split, and its bars pick which plays are listed below.
+
 ## Lists
 
 Profile → Music has three subtabs, like Profile → Places: **Overview** (the period selector, totals and Top songs/artists/albums), **Library** (every song, artist and album, over all time) and **Lists**, plus **Playlists** once Spotify is set up (see [Spotify](#spotify)). Only Overview has the period selector.
@@ -180,7 +184,7 @@ Each playlist shows its tracks, all-time plays of its songs, how many of its son
 
 - every track with its plays and last-played date (a played song opens its own page), sortable by playlist order, title, artist, date added, plays or last played;
 - **Most played**, **Forgotten** (songs you've played but not in the last 3, 6, 12 or 24 months) and **Top artists** (by your plays of their songs on the playlist);
-- plays of its songs over time.
+- plays of its songs over time, as a wave of its most played songs (see [Plays over time by song](#plays-over-time-by-song)).
 
 A track's plays are every play of the same song (see [What counts as "the same song"](#what-counts-as-the-same-song)), however it was scrobbled, and a song that appears twice on a playlist counts once in its totals.
 

@@ -376,6 +376,10 @@ describe('music: Spotify', () => {
         { date: '2024-05-01', plays: 2 },
         { date: '2024-05-02', plays: 1 },
       ]);
+      // The same plays split by song, for the wave chart.
+      expect(res.body.series.bands.map((b: { name: string; plays: number }) => [b.name, b.plays])[0]).toEqual(['Sun & Moon', 2]);
+      expect(res.body.series.bands.reduce((n: number, b: { plays: number }) => n + b.plays, 0)).toBe(3);
+      expect(res.body.series.other.plays).toBe(0);
       expect((await request(app).get(api('/spotify/playlists/nope'))).status).toBe(404);
       expect((await request(app).get(api('/spotify/playlists/bad%20id'))).status).toBe(400);
     });

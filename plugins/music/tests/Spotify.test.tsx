@@ -171,6 +171,10 @@ describe('MusicPlaylistsSection', () => {
         track({ position: 1, title: 'Never Played', song_key: 'never', plays: 0 }),
       ],
       daily: [{ date: '2024-04-01', plays: 4 }],
+      series: {
+        bands: [{ key: 'sun', name: 'Sun & Moon', artists: ['Above & Beyond'], plays: 4, daily: [{ date: '2024-04-01', plays: 4 }] }],
+        other: { plays: 0, count: 0, daily: [] },
+      },
     });
     inRouter(<MusicPlaylistsSection />);
 

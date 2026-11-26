@@ -88,6 +88,7 @@ export interface ArtistDetail {
   genres: ItemGenres;
   /** The genres their plays have, most plays first. */
   play_genres: GenreCount[];
+  series: PlaySeries;
 }
 
 /** A companion, place category or mood a song or artist is played around. */
@@ -131,6 +132,22 @@ export interface TopGenre {
   listened_seconds: number;
   /** First-credited artists of its plays. */
   artists: number;
+}
+
+/** One of a group's most played songs (or a list's items), with its plays per day. */
+export interface SeriesBand {
+  /** A song key, or a list item key ('song:…' / 'album:…'). */
+  key: string;
+  name: string;
+  artists: string[];
+  plays: number;
+  daily: DayCount[];
+}
+
+/** A group's plays per day split by song (or list item): the most played, and the rest. */
+export interface PlaySeries {
+  bands: SeriesBand[];
+  other: { plays: number; count: number; daily: DayCount[] };
 }
 
 /** A genre and how many plays (of some group) carry it. */
@@ -316,6 +333,7 @@ export interface AlbumView {
   genres: ItemGenres | null;
   /** The album artist's genres, which plays fall back to while the album has none. */
   artist_genres: string[];
+  series: PlaySeries;
 }
 
 export interface ListItem {
@@ -606,6 +624,7 @@ export interface SpotifyPlaylistTrack {
 export interface SpotifyPlaylistDetail extends Omit<SpotifyPlaylist, 'plays' | 'played_songs' | 'unplayed_songs' | 'last_played_at'> {
   tracks: SpotifyPlaylistTrack[];
   daily: DayCount[];
+  series: PlaySeries;
 }
 
 export interface SpotifyExport {

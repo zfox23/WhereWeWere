@@ -65,6 +65,7 @@ import {
   deleteList,
   exportLists,
   getListItems,
+  getListSeries,
   getLists,
   importLists,
   removeItem,
@@ -724,6 +725,19 @@ musicRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
     const items = await getListItems(currentUserId(), listId);
     if (!items) return res.status(404).json({ error: 'List not found' });
     res.json(items);
+  } catch (err) {
+    listError(res, err, 'loading the list');
+  }
+});
+
+// Plays per day of a list's most played items, for its wave chart.
+musicRouter.get('/lists/:id/series', async (req: Request, res: Response) => {
+  try {
+    const listId = String(req.params.id);
+    if (!isUuid(listId)) return res.status(400).json({ error: 'Invalid list id' });
+    const series = await getListSeries(currentUserId(), listId);
+    if (!series) return res.status(404).json({ error: 'List not found' });
+    res.json(series);
   } catch (err) {
     listError(res, err, 'loading the list');
   }

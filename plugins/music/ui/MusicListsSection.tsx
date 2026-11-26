@@ -18,7 +18,10 @@ import { renderContender } from './RankByComparing';
 import { formatDay, formatDuration, joinArtists } from './format';
 import { refreshMusicLists, useMusicLists } from './useMusicLists';
 import { SpotifyExportButton } from './SpotifyExportButton';
-import type { ListItemWithStats, MusicList } from './types';
+import { PlaysWave } from './insights/PlaysWave';
+import type { Bucket } from './insights/timeline';
+import { albumPath, songPath } from './links';
+import type { ListItemWithStats, MusicList, PlaySeries } from './types';
 
 const getId = (i: ListItemWithStats) => i.id;
 const getRank = (i: ListItemWithStats) => i.rank;
@@ -105,6 +108,10 @@ const renderCard = (item: ListItemWithStats) => (
   </div>
 );
 
+/** A list item's page, from its key ('song:…' or 'album:…'). */
+const itemHref = (key: string) =>
+  key.startsWith('song:') ? songPath(key.slice(5)) : key.startsWith('album:') ? albumPath({ albumRef: key.slice(6) }) : null;
+
 function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
   const state = useRankedList<ListItemWithStats>({
     listId: list.id,
@@ -113,6 +120,20 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
     withRank: (i, rank) => ({ ...i, rank }),
     onChanged: () => void refreshMusicLists(),
   });
+  const [series, setSeries] = useState<PlaySeries | null>(null);
+  const [bucket, setBucket] = useState<Bucket>('month');
+  // Reloaded when items come or go; ranking alone doesn't change any plays.
+  const itemCount = state.items.length;
+  useEffect(() => {
+    let cancelled = false;
+    music
+      .listSeries(list.id)
+      .then((s) => !cancelled && setSeries(s))
+      .catch(() => !cancelled && setSeries(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [list.id, itemCount]);
 
   return (
     <RankableListDetail
@@ -136,6 +157,11 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
       renderContender={renderContender}
       onRankingApplied={() => void refreshMusicLists()}
       extraActions={<SpotifyExportButton listId={list.id} />}
+      beforeItems={
+        series && (series.bands.length > 0 || series.other.plays > 0) ? (
+          <PlaysWave series={series} bucket={bucket} onBucketChange={setBucket} noun="item" bandHref={itemHref} />
+        ) : undefined
+      }
     />
   );
 }
