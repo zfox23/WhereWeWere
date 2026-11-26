@@ -127,6 +127,7 @@ export default function ArtistPage() {
 
           <PlaysWave
             series={current.series}
+            rerank={(range) => music.series({ artist: current.name }, range)}
             bandHref={songPath}
             bucket={bucket}
             onBucketChange={(b) => setParam('bucket', b === 'month' ? null : b)}

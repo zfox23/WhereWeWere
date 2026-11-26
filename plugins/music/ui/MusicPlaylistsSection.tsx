@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, ExternalLink, History, ListMusic, Loader2, Mic2, RefreshCw, Trophy } from 'lucide-react';
-import { spotify } from './api';
+import { music, spotify } from './api';
 import { AlbumArt } from './AlbumArt';
 import { ArtistLink, ArtistLinks, SongLink, songPath } from './links';
 import { formatDay, formatLength } from './format';
@@ -437,7 +437,10 @@ function PlaylistDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </p>
       ) : (
         <>
-          <PlaysWave series={playlist.series} bandHref={songPath} bucket={bucket} onBucketChange={setBucket} title="Plays of its songs over time" />
+          <PlaysWave
+            series={playlist.series}
+            rerank={(range) => music.series({ playlist: playlist.spotify_id }, range)}
+            bandHref={songPath} bucket={bucket} onBucketChange={setBucket} title="Plays of its songs over time" />
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             <ChartCard title="Most played" icon={Trophy}>

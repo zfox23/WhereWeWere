@@ -254,6 +254,16 @@ describe('music genres', () => {
       expect(stream.other).toEqual({ plays: 0, genres: 0, top: [] });
     });
 
+    it('re-pick the genre bands by a window’s plays, keeping every day', async () => {
+      // On May 2 only Virtual Self (hardcore) played.
+      const stream = (await request(app).get(api('/insights/genres?from=2024-05-01&to=2024-05-02&rank_from=2024-05-02&rank_to=2024-05-02'))).body;
+      expect(stream.genres).toEqual(['hardcore', 'trance']);
+      expect(stream.daily).toEqual([[0, 1], [4, 0]]);
+      // A backwards window is ignored.
+      const ignored = (await request(app).get(api('/insights/genres?from=2024-05-01&to=2024-05-02&rank_from=2024-05-02&rank_to=2024-05-01'))).body;
+      expect(ignored.genres).toEqual(['trance', 'hardcore']);
+    });
+
     it('fold main genres past the eighth into Other, naming the biggest', async () => {
       // Ten more one-play artists, each with a main genre of their own.
       for (let n = 0; n < 10; n++) {

@@ -110,6 +110,7 @@ Both kinds of wave (Genres over time, and plays over time by song) zoom and pan 
 - **On a touch screen:** pinch with two fingers to zoom, and move them together to pan. One finger held and slid still opens the popup, and a vertical swipe still scrolls the page.
 - **Grouping:** zoomed in, the chart groups more finely on its own (years, then months, weeks and days) so there's always enough to see; the Week / Month / Year choice (or, for genres, the period's length) is the grouping of the full view. The labels under the chart show the stretch in view, and the height fits what's visible.
 - The bands stay the same at any zoom. Zoom all the way out to see everything again; the zoom isn't remembered when you leave the page.
+- **Top 8 for what's in view:** the list icon in the chart's header re-picks the bands as the eight most played in the stretch of time in view (the caption names it), keeping the zoom. They stay through zooming, panning and regrouping until you press it again; leaving or reloading the page, or picking another period on the Overview, goes back to the most played overall. Nothing is saved.
 
 ### Plays over time by song
 

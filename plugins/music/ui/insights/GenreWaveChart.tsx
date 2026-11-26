@@ -17,6 +17,7 @@ import { genrePath, GenreLink } from '../links';
 import type { GenreStream } from '../types';
 import { ChartCard } from './ChartCard';
 import { pct, WaveChart, type WaveSeries } from './WaveChart';
+import { rangeLabel, RerankButton, type ViewRange } from './RerankButton';
 
 const plays = (n: number) => `${n.toLocaleString()} play${n === 1 ? '' : 's'}`;
 
@@ -24,10 +25,14 @@ export function GenreWaveChart({ from, to }: { from?: string; to?: string }) {
   const [data, setData] = useState<GenreStream | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  /** The stretch in view, and the one the bands were last re-picked for (until the period changes). */
+  const [view, setView] = useState<ViewRange | null>(null);
+  const [rankedFor, setRankedFor] = useState<ViewRange | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setRankedFor(null);
     music
       .genreStream(from, to)
       .then((d) => {
@@ -47,10 +52,20 @@ export function GenreWaveChart({ from, to }: { from?: string; to?: string }) {
     [data],
   );
   const coverage = data && data.plays > 0 ? pct(data.plays_with_genres, data.plays) : 100;
+  const rerank = async (range: ViewRange) => {
+    const next = await music.genreStream(from, to, range);
+    setData(next);
+    setRankedFor(range);
+  };
   const other = data?.other;
 
   return (
-    <ChartCard title="Genres over time" icon={Waves} loading={loading}>
+    <ChartCard
+      title="Genres over time"
+      icon={Waves}
+      loading={loading}
+      controls={wave && data && data.plays_with_genres > 0 ? <RerankButton range={view} run={rerank} /> : undefined}
+    >
       {error ? (
         <p className="text-xs text-red-500">Couldn't load genres.</p>
       ) : !data || !wave || data.plays === 0 ? (
@@ -72,11 +87,13 @@ export function GenreWaveChart({ from, to }: { from?: string; to?: string }) {
               <>
                 Plays per {g} by each play's main genre (its first listed).
                 {coverage < 100 && ` ${coverage}% of plays have genres.`}
+                {rankedFor && ` Top genres for ${rangeLabel(rankedFor)}.`}
               </>
             )}
             ariaLabel={(g) => `Plays per ${g} of the top genres`}
             otherLabel="Other genres"
             bandHref={(i) => genrePath(data.genres[i])}
+            onViewRange={setView}
           />
           {other && other.plays > 0 && (
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">

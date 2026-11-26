@@ -214,6 +214,7 @@ export default function AlbumPage() {
           {current.daily.length > 0 && (
             <PlaysWave
               series={current.series}
+              rerank={(range) => music.series({ album_ref: current.album_ref }, range)}
               bandHref={songPath}
               bucket={bucket}
               onBucketChange={(b) =>

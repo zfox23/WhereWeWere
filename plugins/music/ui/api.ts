@@ -130,7 +130,17 @@ export const music = {
   startGenreBackfill: (retryMissing: boolean) =>
     request<GenreBackfillStatus>('/music/genres/backfill', { method: 'POST', body: JSON.stringify({ retry_missing: retryMissing }) }),
   cancelGenreBackfill: () => request<GenreBackfillStatus>('/music/genres/backfill/cancel', { method: 'POST' }),
-  genreStream: (from?: string, to?: string) => request<GenreStream>(`/music/insights/genres${rangeQuery(from, to)}`),
+  /** Genres over time; with `rank`, the bands are the genres most played in that window. */
+  genreStream: (from?: string, to?: string, rank?: { from: string; to: string }) =>
+    request<GenreStream>(`/music/insights/genres${rangeQuery(from, to, rank ? { rank_from: rank.from, rank_to: rank.to } : {})}`),
+  /** An album's, artist's, playlist's or list's plays over time, its bands the most played in `rank`. */
+  series: (
+    subject: { album_ref: string } | { artist: string } | { playlist: string } | { list: string },
+    rank: { from: string; to: string },
+  ) =>
+    request<PlaySeries>(
+      `/music/series?${new URLSearchParams({ ...(subject as Record<string, string>), rank_from: rank.from, rank_to: rank.to })}`,
+    ),
   /** Companions, places and moods around a song's, an artist's or a genre's plays. */
   ties: (scope: { songKey: string } | { artist: string } | { genre: string }) =>
     request<Ties>(

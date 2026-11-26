@@ -170,6 +170,24 @@ describe('WaveChart zoom and pan', () => {
     fireEvent.pointerUp(svg, { pointerId: 2, pointerType: 'touch' });
   });
 
+  it('keeps the zoom when only the bands change, and reports the stretch in view', () => {
+    const ranges: { from: string; to: string }[] = [];
+    const series = twoYears();
+    const view = (s: WaveSeries) => (
+      <MemoryRouter>
+        <WaveChart series={s} base="month" ariaLabel={(g) => `Wave per ${g}`} otherLabel="Other" onViewRange={(r) => ranges.push(r)} />
+      </MemoryRouter>
+    );
+    const { rerender } = render(view(series));
+    expect(ranges.at(-1)).toEqual({ from: '2023-01-01', to: '2024-12-31' });
+    ctrlWheel(chart(), 300, -150);
+    const zoomed = axis();
+    expect(ranges.at(-1)).not.toEqual({ from: '2023-01-01', to: '2024-12-31' });
+    // The same days, the bands swapped (re-picked for this stretch): still zoomed.
+    rerender(view({ ...series, names: ['B', 'A'], bands: [series.bands[1], series.bands[0]] }));
+    expect(axis()).toBe(zoomed);
+  });
+
   it('starts at the full view again when the grouping changes', () => {
     const { rerender } = renderWave();
     ctrlWheel(chart(), 300, -400);

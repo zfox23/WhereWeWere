@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GenreWaveChart } from '../ui/insights/GenreWaveChart';
@@ -165,6 +165,19 @@ describe('GenreWaveChart', () => {
     const chart = await screen.findByRole('img', { name: 'Plays per month of the top genres' });
     fireEvent.click(chart.querySelectorAll('path')[1]);
     expect(screen.getByTestId('where').textContent).toBe('/music/genre?name=house');
+  });
+
+  it('re-picks the genres for the stretch in view on request', async () => {
+    renderChart();
+    await screen.findByRole('img', { name: 'Plays per month of the top genres' });
+    streamMock.mockResolvedValueOnce({ ...STREAM, genres: ['house', 'trance'], daily: [STREAM.daily[1], STREAM.daily[0]] });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Show the top 8 for Jan 1, 2024 – Mar 31, 2024' }));
+    });
+    expect(streamMock).toHaveBeenLastCalledWith('2024-01-01', '2024-03-31', { from: '2024-01-01', to: '2024-03-31' });
+    expect(screen.getByText(/Top genres for Jan 1, 2024 – Mar 31, 2024\./)).toBeTruthy();
+    const chart = screen.getByRole('img', { name: 'Plays per month of the top genres' });
+    expect([...chart.querySelectorAll('path title')].map((t) => t.textContent)).toEqual(['house', 'trance']);
   });
 
   it('points to Settings when nothing in the period has genres yet', async () => {

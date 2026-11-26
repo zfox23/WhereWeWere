@@ -31,16 +31,29 @@ export interface PlaySeries {
   other: { plays: number; count: number; daily: DayCount[] };
 }
 
+/** Local dates (inclusive) whose plays pick the bands, instead of all of them. */
+export interface RankWindow {
+  from: string;
+  to: string;
+}
+
 /**
  * The plays of `m` matching `where` (values from $2 on; the user is $1),
- * split by `key` (an expression on `m`, songs by default).
+ * split by `key` (an expression on `m`, songs by default). The bands are the
+ * most played overall, or, with `rank`, the most played in that window (ties
+ * by plays overall); plays per day always cover everything.
  */
 export async function getPlaySeries(
   userId: string,
   where: string,
   values: unknown[],
   key: string = songKeySql('m.'),
+  rank?: RankWindow,
 ): Promise<PlaySeries> {
+  const params = [userId, ...values, ...(rank ? [rank.from, rank.to] : [])];
+  const fromParam = `$${values.length + 2}`;
+  const toParam = `$${values.length + 3}`;
+  const inWindow = rank ? `COUNT(*) FILTER (WHERE day BETWEEN ${fromParam}::date AND ${toParam}::date) DESC, ` : '';
   const plays = `
     p AS (
       SELECT ${key} AS key, m.title, m.artists, m.played_at, (m.played_at AT TIME ZONE m.timezone)::date AS day
@@ -48,17 +61,17 @@ export async function getPlaySeries(
     ),
     totals AS (
       SELECT key, COUNT(*)::int AS plays, ${latestTitleSql()} AS name, ${fullestArtistsSql()} AS artists,
-             ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, key) AS rn
+             ROW_NUMBER() OVER (ORDER BY ${inWindow}COUNT(*) DESC, key) AS rn
       FROM p GROUP BY key
     )`;
   const [totals, days] = await Promise.all([
-    query(`WITH ${plays} SELECT key, plays, name, artists, rn FROM totals ORDER BY rn`, [userId, ...values]),
+    query(`WITH ${plays} SELECT key, plays, name, artists, rn FROM totals ORDER BY rn`, params),
     query(
       `WITH ${plays}
        SELECT CASE WHEN t.rn <= ${SERIES_BANDS} THEN t.key END AS key, p.day::text AS date, COUNT(*)::int AS plays
        FROM p JOIN totals t USING (key)
        GROUP BY 1, 2 ORDER BY 2`,
-      [userId, ...values],
+      params,
     ),
   ]);
   const rows = totals.rows as { key: string; plays: number; name: string; artists: string[]; rn: string | number }[];

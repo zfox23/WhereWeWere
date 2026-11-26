@@ -7,12 +7,13 @@
  * gives each moment's full total.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Waves } from 'lucide-react';
 import type { PlaySeries } from '../types';
 import { ChartCard, Toggle } from './ChartCard';
 import type { Bucket } from './timeline';
 import { denseSeries, pct, WaveChart, type WaveSeries } from './WaveChart';
+import { rangeLabel, RerankButton, type ViewRange } from './RerankButton';
 
 const BUCKETS: { value: Bucket; label: string }[] = [
   { value: 'week', label: 'Week' },
@@ -30,12 +31,13 @@ export function seriesWave(series: PlaySeries): WaveSeries | null {
 }
 
 export function PlaysWave({
-  series,
+  series: given,
   bucket,
   onBucketChange,
   title = 'Plays over time',
   noun = 'song',
   bandHref,
+  rerank,
 }: {
   series: PlaySeries;
   bucket: Bucket;
@@ -45,7 +47,14 @@ export function PlaysWave({
   noun?: string;
   /** Where clicking a band goes, from its key. */
   bandHref?: (key: string) => string | null;
+  /** The same series with its bands the most played in a window; offers the button when given. */
+  rerank?: (range: ViewRange) => Promise<PlaySeries>;
 }) {
+  // Re-picked bands last until the button is pressed again or the page's series changes.
+  const [ranked, setRanked] = useState<{ series: PlaySeries; range: ViewRange } | null>(null);
+  const [view, setView] = useState<ViewRange | null>(null);
+  useEffect(() => setRanked(null), [given]);
+  const series = ranked?.series ?? given;
   const wave = useMemo(() => seriesWave(series), [series]);
   const drawn = series.bands.reduce((n, b) => n + b.plays, 0);
   const all = drawn + series.other.plays;
@@ -55,7 +64,14 @@ export function PlaysWave({
     <ChartCard
       title={title}
       icon={Waves}
-      controls={<Toggle label="Group plays by" value={bucket} onChange={onBucketChange} options={BUCKETS} />}
+      controls={
+        <div className="flex items-center gap-1">
+          {rerank && wave && (
+            <RerankButton range={view} run={async (range) => setRanked({ series: await rerank(range), range })} />
+          )}
+          <Toggle label="Group plays by" value={bucket} onChange={onBucketChange} options={BUCKETS} />
+        </div>
+      }
     >
       {!wave ? (
         <p className="text-xs text-gray-500">No plays yet.</p>
@@ -65,13 +81,14 @@ export function PlaysWave({
             series={wave}
             base={bucket}
             caption={(g) =>
-              series.other.plays > 0
-                ? `Plays per ${g} of the ${series.bands.length} most played ${nouns}, ${pct(drawn, all)}% of all plays.`
-                : `Plays per ${g}, by ${noun}.`
+              (series.other.plays > 0
+                ? `Plays per ${g} of the ${series.bands.length} most played ${nouns}${ranked ? ` for ${rangeLabel(ranked.range)}` : ''}, ${pct(drawn, all)}% of all plays.`
+                : `Plays per ${g}, by ${noun}.`)
             }
             ariaLabel={(g) => `Plays per ${g} by ${noun}`}
             otherLabel={`Other ${nouns}`}
             bandHref={bandHref ? (i) => bandHref(series.bands[i].key) : undefined}
+            onViewRange={setView}
           />
           {series.other.plays > 0 && (
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">

@@ -7,7 +7,7 @@
 
 import { query } from '../../../server/src/db';
 import { albumRefSql } from './identity';
-import { getPlaySeries, type PlaySeries } from './series';
+import { getPlaySeries, type PlaySeries, type RankWindow } from './series';
 import type { DayCount } from './detail';
 
 export interface SpotifyPlaylistRow {
@@ -95,6 +95,17 @@ export interface SpotifyPlaylistDetail extends Omit<SpotifyPlaylistRow, 'plays' 
   series: PlaySeries;
 }
 
+/** Plays per day of a playlist's most played songs (in `rank`'s window, with one). */
+export function getPlaylistSeries(userId: string, playlistId: string, rank?: RankWindow): Promise<PlaySeries> {
+  return getPlaySeries(
+    userId,
+    'm.song_key IN (SELECT song_key FROM music_spotify_playlist_tracks WHERE user_id = $1 AND playlist_id = $2)',
+    [playlistId],
+    undefined,
+    rank,
+  );
+}
+
 export async function getPlaylist(userId: string, playlistId: string): Promise<SpotifyPlaylistDetail | null> {
   const head = await query(
     `SELECT ${PLAYLIST_COLUMNS}
@@ -126,11 +137,7 @@ export async function getPlaylist(userId: string, playlistId: string): Promise<S
        GROUP BY 1 ORDER BY 1`,
       [userId, playlistId],
     ),
-    getPlaySeries(
-      userId,
-      'm.song_key IN (SELECT song_key FROM music_spotify_playlist_tracks WHERE user_id = $1 AND playlist_id = $2)',
-      [playlistId],
-    ),
+    getPlaylistSeries(userId, playlistId),
   ]);
   const row = head.rows[0];
   return {

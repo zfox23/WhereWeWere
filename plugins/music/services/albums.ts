@@ -574,6 +574,21 @@ export interface AlbumView {
  * cover id of a matched one). The user's own plays always drive it; a catalog
  * match only adds the cover, release info and the full tracklist.
  */
+/**
+ * The album refs that are one album: every local key that resolved to the
+ * same release (a soundtrack imported with a different artist per track is
+ * several keys), or just `ref`.
+ */
+export async function albumRefs(userId: string, ref: string): Promise<string[]> {
+  const r = await query(
+    `SELECT b.album_key FROM music_albums a
+     JOIN music_albums b ON b.user_id = a.user_id AND b.status = 'matched' AND b.provider = a.provider AND b.external_id = a.external_id
+     WHERE a.user_id = $1 AND a.album_key = $2 AND a.status = 'matched'`,
+    [userId, ref],
+  );
+  return r.rows.length ? r.rows.map((x: { album_key: string }) => x.album_key) : [ref];
+}
+
 export async function getAlbumView(userId: string, id: { ref?: string; artId?: string }): Promise<AlbumView | null> {
   let ref = id.ref ?? null;
   if (id.artId) {
@@ -590,12 +605,7 @@ export async function getAlbumView(userId: string, id: { ref?: string; artId?: s
   )).rows[0];
   // Every local key that resolved to this release counts (a soundtrack
   // imported with a different artist per track is several keys).
-  const refs: string[] = matchedRow
-    ? (await query(
-        `SELECT album_key FROM music_albums WHERE user_id = $1 AND status = 'matched' AND provider = $2 AND external_id = $3`,
-        [userId, matchedRow.provider, matchedRow.external_id],
-      )).rows.map((r: { album_key: string }) => r.album_key)
-    : [ref];
+  const refs = await albumRefs(userId, ref);
 
   const played = (await query(
     `SELECT ${songKeySql()} AS song_key, ${latestTitleSql()} AS title, ${fullestArtistsSql()} AS artists, COUNT(*)::int AS plays,

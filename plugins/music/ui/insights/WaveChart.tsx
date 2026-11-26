@@ -271,6 +271,7 @@ export function WaveChart({
   ariaLabel,
   otherLabel,
   bandHref,
+  onViewRange,
 }: {
   series: WaveSeries;
   /** The grouping of the full view; zooming in goes finer. */
@@ -282,6 +283,8 @@ export function WaveChart({
   otherLabel: string;
   /** Where clicking a band goes. */
   bandHref?: (band: number) => string | null;
+  /** Told the first and last day of the groups in view, whenever they change. */
+  onViewRange?: (range: { from: string; to: string }) => void;
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
   const [view, setView] = useState<View | null>(null);
@@ -296,11 +299,13 @@ export function WaveChart({
   const g: WaveBucket = view ? chooseBucket(base, view.t1 - view.t0) : base;
   const groups = useMemo(() => (g === base ? baseGroups : groupWave(series, g)), [series, g, base, baseGroups]);
 
-  // New data or grouping starts at the full view, without a hover.
+  // Other days or another grouping start at the full view. New bands over the
+  // same days (re-picked for the stretch in view) keep the zoom.
+  const domainKey = `${series.first}|${series.other.length}|${base}`;
   useEffect(() => {
     setView(null);
-    setHover(null);
-  }, [series, base]);
+  }, [domainKey]);
+  useEffect(() => setHover(null), [series, base]);
 
   const t0 = view?.t0 ?? d0;
   const t1 = view?.t1 ?? d1;
@@ -475,9 +480,16 @@ export function WaveChart({
         ? { right: `calc(${(1 - current.fx) * 100}% + 10px)`, maxWidth: `min(15rem, calc(${current.fx * 100}% - 12px))` }
         : { left: `calc(${current.fx * 100}% + 10px)`, maxWidth: `min(15rem, calc(${(1 - current.fx) * 100}% - 12px))` };
 
-  if (baseGroups.centers.length === 0) return null;
   const firstInView = visible.inView[0];
   const lastInView = visible.inView[visible.inView.length - 1];
+  const rangeFrom = firstInView != null ? groups.ranges[firstInView].start : null;
+  const rangeTo = lastInView != null ? groups.ranges[lastInView].end : null;
+  useEffect(() => {
+    if (rangeFrom && rangeTo) onViewRange?.({ from: rangeFrom, to: rangeTo });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeFrom, rangeTo]);
+
+  if (baseGroups.centers.length === 0) return null;
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? '');
 
   return (

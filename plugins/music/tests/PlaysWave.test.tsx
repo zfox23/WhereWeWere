@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PlaysWave, seriesWave } from '../ui/insights/PlaysWave';
 import type { PlaySeries } from '../ui/types';
 
@@ -74,5 +74,56 @@ describe('PlaysWave', () => {
     expect(popup.textContent).toContain('Jan 2024');
     expect(popup.textContent).toContain('4 plays');
     expect(within(popup).getAllByRole('listitem').map((r) => r.textContent)).toEqual(['Song A3 · 75%', 'Other songs1 · 25%']);
+  });
+});
+
+describe('PlaysWave top 8 for the stretch in view', () => {
+  const RANKED: PlaySeries = { ...SERIES, bands: [SERIES.bands[1], SERIES.bands[0]] };
+  const wave = (rerank: (r: { from: string; to: string }) => Promise<PlaySeries>, bucket: 'month' | 'week' = 'month') => (
+    <MemoryRouter>
+      <PlaysWave series={SERIES} bucket={bucket} onBucketChange={() => {}} rerank={rerank} />
+    </MemoryRouter>
+  );
+  const renderRanked = (rerank: (r: { from: string; to: string }) => Promise<PlaySeries>) => render(wave(rerank));
+  const bandNames = () => [...screen.getByRole('img', { name: /^Plays per \w+ by song$/ }).querySelectorAll('path title')].map((t) => t.textContent);
+
+  it('re-picks the bands for the stretch in view, and keeps them until pressed again', async () => {
+    const rerank = vi.fn().mockResolvedValue(RANKED);
+    const { rerender } = renderRanked(rerank);
+    expect(bandNames()).toEqual(['Song A', 'Song B']);
+    // The full view: January to April, as whole months.
+    const button = screen.getByRole('button', { name: 'Show the top 8 for Jan 1, 2024 – Apr 30, 2024' });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(rerank).toHaveBeenCalledWith({ from: '2024-01-01', to: '2024-04-30' });
+    expect(bandNames()).toEqual(['Song B', 'Song A']);
+    expect(screen.getByText(/most played songs for Jan 1, 2024 – Apr 30, 2024, 75% of all plays/)).toBeTruthy();
+    // Changing the grouping keeps them.
+    rerender(wave(rerank, 'week'));
+    expect(screen.getByRole('img', { name: 'Plays per week by song' })).toBeTruthy();
+    expect(bandNames()).toEqual(['Song B', 'Song A']);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Show the top 8/ }));
+    });
+    expect(rerank).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the bands and says so when re-picking fails', async () => {
+    renderRanked(vi.fn().mockRejectedValue(new Error('down')));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Show the top 8/ }));
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: /the last try failed/ })).toBeTruthy());
+    expect(bandNames()).toEqual(['Song A', 'Song B']);
+  });
+
+  it('has no button without a way to re-pick', () => {
+    render(
+      <MemoryRouter>
+        <PlaysWave series={SERIES} bucket="month" onBucketChange={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('button', { name: /Show the top 8/ })).toBeNull();
   });
 });

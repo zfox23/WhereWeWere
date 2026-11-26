@@ -12,7 +12,7 @@ import {
   type Db, type RankSessionStateDto,
 } from '../../../server/src/services/lists';
 import { albumRefSql, songKeySql, UNKNOWN_ALBUM } from './identity';
-import { getPlaySeries, type PlaySeries } from './series';
+import { getPlaySeries, type PlaySeries, type RankWindow } from './series';
 
 export { cleanName, NameTakenError, InvalidNameError, MAX_NAME, validateRankSession };
 export type { Db, RankSessionStateDto };
@@ -118,7 +118,7 @@ export async function getListItems(userId: string, listId: string): Promise<List
  * there is no such list. A play of a song that is on the list counts for the
  * song, even when its album is on the list too.
  */
-export async function getListSeries(userId: string, listId: string): Promise<PlaySeries | null> {
+export async function getListSeries(userId: string, listId: string, rank?: RankWindow): Promise<PlaySeries | null> {
   const list = await query(`SELECT 1 FROM music_lists WHERE id = $1 AND user_id = $2`, [listId, userId]);
   if ((list.rowCount ?? 0) === 0) return null;
   const items = `(SELECT item_key FROM music_list_items WHERE list_id = $2)`;
@@ -129,6 +129,7 @@ export async function getListSeries(userId: string, listId: string): Promise<Pla
     `${songItem} IN ${items} OR ${albumItem} IN ${items}`,
     [listId],
     `CASE WHEN ${songItem} IN ${items} THEN ${songItem} ELSE ${albumItem} END`,
+    rank,
   );
   // Named as the list names them: an album item is its album, not its latest track.
   const named = await query(`SELECT item_key, title, artists FROM music_list_items WHERE list_id = $1`, [listId]);

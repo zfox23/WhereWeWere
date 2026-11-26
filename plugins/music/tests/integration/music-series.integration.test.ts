@@ -67,6 +67,37 @@ describe('music plays over time by song', () => {
     expect(artist.series.other).toEqual({ plays: 0, count: 0, daily: [] });
   });
 
+  it('re-picks the bands by the plays in a window, keeping every day', async () => {
+    await seed();
+    const ref = (await query(`SELECT album_key FROM music_scrobbles LIMIT 1`)).rows[0].album_key;
+    // May 10 only has Track 0 (its 10th play); the rest keep their all-time order.
+    const windowed = (
+      await request(app).get(api(`/series?${new URLSearchParams({ album_ref: ref, rank_from: '2024-05-10', rank_to: '2024-05-10' })}`))
+    ).body;
+    expect(windowed.bands[0]).toMatchObject({ name: 'Track 0', plays: 11 });
+    // June 1 too: still Track 0, whose days run to June.
+    expect(windowed.bands[0].daily.at(-1)).toEqual({ date: '2024-06-01', plays: 1 });
+
+    // A song played only later: in a window of just its days, it leads the artist's bands.
+    await push('Late Song', undefined, ['Band'], T0 + 60 * DAY);
+    const artist = (
+      await request(app).get(api(`/series?${new URLSearchParams({ artist: 'Band', rank_from: '2024-06-30', rank_to: '2024-07-31' })}`))
+    ).body;
+    expect(artist.bands[0]).toMatchObject({ name: 'Late Song', plays: 1 });
+    expect(artist.bands.map((b: { name: string }) => b.name).slice(1, 3)).toEqual(['Track 0', 'Track 1']);
+    // It takes a band, so Tracks 7, 8 and 9 are Other.
+    expect(artist.other.count).toBe(3);
+  });
+
+  it('refuses a series without a window or a subject', async () => {
+    expect((await request(app).get(api('/series?artist=Band'))).status).toBe(400);
+    expect((await request(app).get(api('/series?artist=Band&rank_from=2024-06-01&rank_to=2024-05-01'))).status).toBe(400);
+    expect((await request(app).get(api('/series?rank_from=2024-05-01&rank_to=2024-05-02'))).status).toBe(400);
+    expect(
+      (await request(app).get(api('/series?list=00000000-0000-0000-0000-000000000000&rank_from=2024-05-01&rank_to=2024-05-02'))).status,
+    ).toBe(404);
+  });
+
   it('splits a list by its items, a song on the list taking its own plays from its album', async () => {
     await push('Song A', 'Album X', ['Band'], T0);
     await push('Song A', 'Album X', ['Band'], T0 + DAY);

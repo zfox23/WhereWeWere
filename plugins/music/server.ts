@@ -37,6 +37,9 @@ import { mountRankRoutes } from '../../server/src/services/lists/routes';
 import { suggest } from './services/suggest';
 import { getDailyListening, getDiscovery, getListeningClock } from './services/insights';
 import { getLifeSoundtrack, LIFE_BY, type LifeBy } from './services/life';
+import { getPlaySeries, type PlaySeries } from './services/series';
+import { getPlaylistSeries } from './services/spotifyPlaylists';
+import { albumRefSql } from './services/identity';
 import { getArtistDetail, getGenreDetail, getScopedTies, getSongDetail, type Scope } from './services/detail';
 import {
   cancelGenreBackfill,
@@ -80,6 +83,7 @@ import {
   getAlbumArtFile,
   getAlbumCounts,
   getAlbumView,
+  albumRefs,
   getBackfillStatus,
   startBackfill,
 } from './services/albums';
@@ -119,6 +123,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function dateParam(raw: unknown): string | null {
   return typeof raw === 'string' && DATE_RE.test(raw) ? raw : null;
+}
+
+/** A ranking window from `rank_from` / `rank_to` (both dates, in order), or undefined. */
+function rankParam(q: Request['query']): { from: string; to: string } | undefined {
+  const from = dateParam(q.rank_from);
+  const to = dateParam(q.rank_to);
+  return from && to && from <= to ? { from, to } : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -514,10 +525,11 @@ musicRouter.get('/insights/discovery', async (req: Request, res: Response) => {
   }
 });
 
-// GET /insights/genres?from&to - plays per genre per week, month or year (top genres and "Other")
+// GET /insights/genres?from&to[&rank_from&rank_to] - plays per main genre per day (top genres and "Other");
+// with rank_from/rank_to, the bands are the genres most played in that window
 musicRouter.get('/insights/genres', async (req: Request, res: Response) => {
   try {
-    res.json(await getGenreStream(currentUserId(), dateParam(req.query.from), dateParam(req.query.to)));
+    res.json(await getGenreStream(currentUserId(), dateParam(req.query.from), dateParam(req.query.to), rankParam(req.query)));
   } catch (err) {
     console.error('Error loading genres over time:', err);
     res.status(500).json({ error: 'Failed to load genres' });
@@ -727,6 +739,37 @@ musicRouter.get('/lists/:id/items', async (req: Request, res: Response) => {
     res.json(items);
   } catch (err) {
     listError(res, err, 'loading the list');
+  }
+});
+
+// GET /series?(album_ref | artist | playlist | list)&rank_from&rank_to - the plays-over-time wave of an album,
+// artist, playlist or list, its bands the most played in the window
+musicRouter.get('/series', async (req: Request, res: Response) => {
+  try {
+    const userId = currentUserId();
+    const rank = rankParam(req.query);
+    if (!rank) return res.status(400).json({ error: 'rank_from and rank_to are required (YYYY-MM-DD)' });
+    const ref = typeof req.query.album_ref === 'string' && req.query.album_ref.length <= 2000 ? req.query.album_ref : null;
+    const artist = artistParam(req.query.artist);
+    const playlist = typeof req.query.playlist === 'string' && /^[A-Za-z0-9]{1,64}$/.test(req.query.playlist) ? req.query.playlist : null;
+    const list = typeof req.query.list === 'string' && isUuid(req.query.list) ? req.query.list : null;
+    let series: PlaySeries | null;
+    if (ref !== null) {
+      series = await getPlaySeries(userId, `${albumRefSql('m.')} = ANY($2::text[])`, [await albumRefs(userId, ref)], undefined, rank);
+    } else if (artist) {
+      series = await getPlaySeries(userId, '$2::text = ANY(m.artists)', [artist], undefined, rank);
+    } else if (playlist) {
+      series = await getPlaylistSeries(userId, playlist, rank);
+    } else if (list) {
+      series = await getListSeries(userId, list, rank);
+      if (!series) return res.status(404).json({ error: 'List not found' });
+    } else {
+      return res.status(400).json({ error: 'album_ref, artist, playlist or list is required' });
+    }
+    res.json(series);
+  } catch (err) {
+    console.error('Error loading plays over time:', err);
+    res.status(500).json({ error: 'Failed to load plays over time' });
   }
 });
 

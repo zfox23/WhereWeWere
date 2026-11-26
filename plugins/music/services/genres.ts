@@ -409,7 +409,13 @@ const dayNumber = (date: string) => Math.round(Date.parse(`${date}T00:00:00Z`) /
  * Each play with genres counts once, toward its first genre. Days are dense
  * number arrays rather than objects: an all-time view is years of days.
  */
-export async function getGenreStream(userId: string, from: string | null, to: string | null): Promise<GenreStream> {
+export async function getGenreStream(
+  userId: string,
+  from: string | null,
+  to: string | null,
+  /** Local dates (inclusive) whose plays pick the bands, instead of the whole period's. */
+  rank?: { from: string; to: string },
+): Promise<GenreStream> {
   const pg = playGenres('m');
   const range = M_RANGE;
   const localDay = `(m.played_at AT TIME ZONE m.timezone)::date`;
@@ -438,9 +444,19 @@ export async function getGenreStream(userId: string, from: string | null, to: st
   const rows = r.rows as { day: string; genre: string; plays: number }[];
   const totals = new Map<string, number>();
   for (const row of rows) totals.set(row.genre, (totals.get(row.genre) ?? 0) + row.plays);
-  const ranked = [...totals].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  // With a window, its plays pick the bands; the period's plays break ties.
+  const windowed = new Map<string, number>();
+  if (rank) {
+    for (const row of rows) {
+      if (row.day >= rank.from && row.day <= rank.to) windowed.set(row.genre, (windowed.get(row.genre) ?? 0) + row.plays);
+    }
+  }
+  const ranked = [...totals].sort(
+    (a, b) => (windowed.get(b[0]) ?? 0) - (windowed.get(a[0]) ?? 0) || b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
   const genres = ranked.slice(0, STREAM_BANDS).map(([g]) => g);
-  const rest = ranked.slice(STREAM_BANDS);
+  // Other is still sorted by the period's plays, biggest first.
+  const rest = ranked.slice(STREAM_BANDS).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const band = new Map(genres.map((g, i) => [g, i]));
 
   const days = dayNumber(end) - dayNumber(start) + 1;

@@ -159,7 +159,14 @@ function ListDetail({ list, onBack }: { list: MusicList; onBack: () => void }) {
       extraActions={<SpotifyExportButton listId={list.id} />}
       beforeItems={
         series && (series.bands.length > 0 || series.other.plays > 0) ? (
-          <PlaysWave series={series} bucket={bucket} onBucketChange={setBucket} noun="item" bandHref={itemHref} />
+          <PlaysWave
+            series={series}
+            rerank={(range) => music.series({ list: list.id }, range)}
+            bucket={bucket}
+            onBucketChange={setBucket}
+            noun="item"
+            bandHref={itemHref}
+          />
         ) : undefined
       }
     />
