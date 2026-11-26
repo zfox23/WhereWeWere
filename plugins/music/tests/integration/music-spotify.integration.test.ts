@@ -47,6 +47,8 @@ let world: {
   items: Record<string, unknown[]>;
   inLibrary: boolean;
   refreshFails: boolean;
+  /** Playlists whose items answer with this instead (e.g. a rate limit). */
+  itemsFail: Record<string, Answer>;
 };
 
 function resetWorld() {
@@ -61,6 +63,7 @@ function resetWorld() {
     items: {},
     inLibrary: true,
     refreshFails: false,
+    itemsFail: {},
   };
 }
 
@@ -118,6 +121,7 @@ function answer(c: Call): Answer {
   if (p === '/me/library/contains') return { status: 200, body: [world.inLibrary] };
   const items = /^\/playlists\/([^/]+)\/items$/.exec(p);
   if (items && c.method === 'GET') {
+    if (world.itemsFail[items[1]]) return world.itemsFail[items[1]];
     const list = world.items[items[1]];
     return list ? { status: 200, body: { items: list, next: null } } : { status: 403, body: { error: { message: 'Forbidden' } } };
   }
@@ -391,6 +395,39 @@ describe('music: Spotify', () => {
       const rows = (await request(app).get(api('/spotify/playlists'))).body;
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ total_tracks: 1, plays: 2, unplayed_songs: 0 });
+    });
+
+    it("never asks for the tracks of playlists the user doesn't own", async () => {
+      await runSpotifySync(DEFAULT_USER_ID);
+      expect(callsTo('GET', '/v1/playlists/plFollowed/items')).toHaveLength(0);
+      expect(callsTo('GET', '/v1/playlists/plMine/items')).toHaveLength(1);
+    });
+
+    it('keeps a playlist’s tracks when reading them fails, and reads them again next time', async () => {
+      await runSpotifySync(DEFAULT_USER_ID);
+      world.playlists[0] = { ...world.playlists[0], snapshot_id: 's2' };
+      world.itemsFail.plMine = { status: 429, headers: { 'Retry-After': '3600' }, body: {} };
+      await expect(runSpotifySync(DEFAULT_USER_ID)).rejects.toThrow('Spotify is rate limiting requests; try again in about 60 minutes.');
+      world.itemsFail.plMine = { status: 403, body: { error: { message: 'Forbidden' } } };
+      await expect(runSpotifySync(DEFAULT_USER_ID)).rejects.toThrow(/Forbidden/);
+
+      const mine = () => request(app).get(api('/spotify/playlists')).then((r) => r.body[0]);
+      expect(await mine()).toMatchObject({ name: 'Trance', tracks_available: true, plays: 3, unplayed_songs: 2 });
+      expect((await request(app).get(api('/spotify/status'))).body.last_error).toMatch(/Forbidden/);
+
+      delete world.itemsFail.plMine;
+      world.items.plMine = world.items.plMine.slice(0, 2);
+      expect(await runSpotifySync(DEFAULT_USER_ID)).toMatchObject({ read: 1 });
+      expect(await mine()).toMatchObject({ tracks_available: true, total_tracks: 2, unplayed_songs: 0 });
+    });
+
+    it('re-reads the user’s own playlists that were left without tracks', async () => {
+      await runSpotifySync(DEFAULT_USER_ID);
+      // What a rate-limited sync used to leave behind: same snapshot, no tracks.
+      await query(`UPDATE music_spotify_playlists SET tracks_available = false WHERE spotify_id = 'plMine'`);
+      await query(`DELETE FROM music_spotify_playlist_tracks WHERE playlist_id = 'plMine'`);
+      expect(await runSpotifySync(DEFAULT_USER_ID)).toMatchObject({ read: 1, tracks: 4, unavailable: 1 });
+      expect((await request(app).get(api('/spotify/playlists'))).body[0]).toMatchObject({ tracks_available: true, plays: 3 });
     });
 
     it('runs as the spotify-sync job', async () => {

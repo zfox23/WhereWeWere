@@ -18,11 +18,14 @@ import sharp from 'sharp';
 import { pool, query } from '../../../server/src/db';
 import { config } from '../../../server/src/config';
 import { runAsUser } from '../../../server/src/auth/context';
-import { getAccount, spotifyApi, SpotifyError, userAccessToken, NOT_CONNECTED } from './spotifyApi';
+import { getAccount, spotifyApi, userAccessToken, NOT_CONNECTED } from './spotifyApi';
 
 export const SPOTIFY_SYNC_JOB = 'spotify-sync';
 
 const PAGE = 50;
+/** A pause between playlists, to stay clear of Spotify's rate limit. */
+const READ_GAP_MS = process.env.NODE_ENV === 'test' ? 0 : 300;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
 // Reading Spotify's answers (both the February 2026 shapes and the older ones)
@@ -221,34 +224,44 @@ export async function runSpotifySync(userId: string, opts: SpotifySyncOptions = 
       playlists.map((p) => p.spotify_id),
     ]);
 
+    // Re-read playlists that changed, and any of the user's own still without
+    // tracks (a sync that failed part-way, or the earlier behaviour that marked
+    // them unavailable on a transient error).
     const stale = await query(
-      `SELECT spotify_id, name, snapshot_id FROM music_spotify_playlists
-       WHERE user_id = $1 AND (tracks_snapshot_id IS NULL OR tracks_snapshot_id IS DISTINCT FROM snapshot_id)
-       ORDER BY position`,
+      `SELECT p.spotify_id, p.name, p.snapshot_id,
+              (p.collaborative OR p.owner_id IS NOT DISTINCT FROM a.spotify_user_id) AS mine
+       FROM music_spotify_playlists p JOIN music_spotify_accounts a ON a.user_id = p.user_id
+       WHERE p.user_id = $1
+         AND (p.tracks_snapshot_id IS NULL OR p.tracks_snapshot_id IS DISTINCT FROM p.snapshot_id
+              OR (NOT p.tracks_available AND (p.collaborative OR p.owner_id IS NOT DISTINCT FROM a.spotify_user_id)))
+       ORDER BY p.position`,
       [userId],
     );
+    const rows = stale.rows as { spotify_id: string; name: string; snapshot_id: string | null; mine: boolean }[];
+    const toRead = rows.filter((p) => p.mine);
     const summary: SpotifySyncSummary = { playlists: playlists.length, read: 0, unavailable: 0, tracks: 0 };
+
+    // Spotify only lists the tracks of the user's own and collaborative
+    // playlists (Development Mode); asking for the rest just spends requests
+    // against the rate limit.
+    for (const p of rows.filter((r) => !r.mine)) await replaceTracks(userId, p.spotify_id, p.snapshot_id, null);
+
     let i = 0;
-    for (const p of stale.rows as { spotify_id: string; name: string; snapshot_id: string | null }[]) {
+    for (const p of toRead) {
       if (isCancelled()) throw new Error('cancelled');
+      if (i > 0) await sleep(READ_GAP_MS);
       i++;
-      await progress(`Reading playlist ${i} of ${stale.rows.length}: ${p.name}`);
-      let tracks: PlaylistTrack[] | null;
-      try {
-        const entries = await allPages<unknown>(
-          token,
-          `/playlists/${encodeURIComponent(p.spotify_id)}/items?limit=${PAGE}&additional_types=track`,
-          isCancelled,
-        );
-        tracks = entries.map(parsePlaylistEntry).filter((t): t is PlaylistTrack => t !== null);
-        summary.read++;
-        summary.tracks += tracks.length;
-      } catch (err) {
-        // Not the user's playlist (Development Mode) or gone: metadata only.
-        if (!(err instanceof SpotifyError) || (err.upstream !== 403 && err.upstream !== 404)) throw err;
-        tracks = null;
-        summary.unavailable++;
-      }
+      await progress(`Reading playlist ${i} of ${toRead.length}: ${p.name}`);
+      // Any failure stops the sync and leaves this playlist's stored tracks as
+      // they were: a rate limit or outage must never look like "no tracks".
+      const entries = await allPages<unknown>(
+        token,
+        `/playlists/${encodeURIComponent(p.spotify_id)}/items?limit=${PAGE}&additional_types=track`,
+        isCancelled,
+      );
+      const tracks = entries.map(parsePlaylistEntry).filter((t): t is PlaylistTrack => t !== null);
+      summary.read++;
+      summary.tracks += tracks.length;
       await replaceTracks(userId, p.spotify_id, p.snapshot_id, tracks);
     }
     const unavailable = await query(

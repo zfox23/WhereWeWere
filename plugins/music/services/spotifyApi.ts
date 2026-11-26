@@ -281,7 +281,12 @@ export async function spotifyApi<T = unknown>(
         await sleep(wait * 1000);
         continue;
       }
-      throw new SpotifyError('Spotify is rate limiting requests; try again in a while.', 502, 429);
+      const minutes = Math.ceil(wait / 60);
+      throw new SpotifyError(
+        `Spotify is rate limiting requests; try again in ${minutes <= 1 ? 'a minute' : minutes < 120 ? `about ${minutes} minutes` : `about ${Math.round(minutes / 60)} hours`}.`,
+        502,
+        429,
+      );
     }
     if (res.status >= 500) {
       if (attempt < 2) {

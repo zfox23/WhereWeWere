@@ -184,9 +184,9 @@ Each playlist shows its tracks, all-time plays of its songs, how many of its son
 
 A track's plays are every play of the same song (see [What counts as "the same song"](#what-counts-as-the-same-song)), however it was scrobbled, and a song that appears twice on a playlist counts once in its totals.
 
-**Playlists you follow but don't own:** since February 2026 Spotify only gives Development Mode apps the tracks of playlists you own or collaborate on. Other playlists are listed with their name, owner and cover but no tracks or plays ("Tracks not shared").
+**Playlists you follow but don't own:** since February 2026 Spotify only gives Development Mode apps the tracks of playlists you own or collaborate on. Other playlists are listed with their name, owner and cover but no tracks or plays ("Tracks not shared"); WhereWeWere doesn't ask for their tracks, which saves requests against Spotify's rate limit.
 
-**Syncing:** the first sync runs right after connecting; after that playlists sync once a day, and **Sync now** (on the Playlists tab or in Settings) syncs straight away. A sync re-reads only the playlists that changed since the last one. Playlist covers are downloaded and served by WhereWeWere (in `DATA_DIR/spotify-covers/`), so your browser never loads images from Spotify. A sync that fails (Spotify unreachable, sign-in revoked) shows its error in Settings; if Spotify no longer accepts the sign-in you are signed out and asked to connect again.
+**Syncing:** the first sync runs right after connecting; after that playlists sync once a day, and **Sync now** (on the Playlists tab or in Settings) syncs straight away. A sync re-reads only the playlists that changed since the last one. Playlist covers are downloaded and served by WhereWeWere (in `DATA_DIR/spotify-covers/`), so your browser never loads images from Spotify. A sync that fails (Spotify unreachable or rate limiting, sign-in revoked) stops, shows its error in Settings, and changes nothing about playlists it hadn't finished; the next sync picks up where it stopped. A rate-limit error says how long Spotify asked you to wait. If Spotify no longer accepts the sign-in, you are signed out and asked to connect again.
 
 ### Exporting a list to Spotify
 
