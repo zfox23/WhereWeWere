@@ -4,7 +4,9 @@
  * month or year of the period (the same bucket sizes as Discovery). The
  * period's eight most played genres get bands; everything else is summed in a
  * line of text below the chart, since one band for dozens of small genres
- * would dwarf the rest. A play counts toward each of its genres.
+ * would dwarf the rest. Each play counts once, toward its main genre (its
+ * first: most votes on MusicBrainz, or first in the user's edit), so
+ * near-duplicates such as "electronic" and "edm" don't both swell the wave.
  *
  * Hovering (or holding a finger on) the chart opens a popup beside the
  * crosshair, like the weather chart's, with that moment's mix of genres;
@@ -224,7 +226,7 @@ export function GenreWaveChart({ from, to }: { from?: string; to?: string }) {
       ) : (
         <>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Plays per {data.bucket} for the period's top genres. A play counts toward each of its genres.
+            Plays per {data.bucket} by each play's main genre (its first listed).
             {coverage < 100 && ` ${coverage}% of plays have genres.`}
           </p>
           <div className="relative mt-2">

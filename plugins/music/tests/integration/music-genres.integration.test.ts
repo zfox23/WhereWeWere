@@ -240,30 +240,33 @@ describe('music genres', () => {
       expect(tracks.find((t) => t.title === 'Sun & Moon')?.genres).toEqual(['trance', 'progressive trance']);
     });
 
-    it('draw genres over time as the top bands and Other', async () => {
+    it('draw genres over time by each play’s main genre only', async () => {
       const stream = (await request(app).get(api('/insights/genres?from=2024-05-01&to=2024-05-02'))).body;
       expect(stream.bucket).toBe('week');
-      expect(stream.genres).toEqual(['trance', 'progressive trance', 'hardcore']);
+      // Group Therapy is "trance, progressive trance": its plays count once, as trance.
+      expect(stream.genres).toEqual(['trance', 'hardcore']);
       expect(stream.plays).toBe(5);
       expect(stream.plays_with_genres).toBe(5);
-      expect(stream.buckets).toEqual([{ start: '2024-04-29', counts: [4, 3, 1], other: 0, other_top: [] }]);
+      expect(stream.buckets).toEqual([{ start: '2024-04-29', counts: [4, 1], other: 0, other_top: [] }]);
       expect(stream.other).toEqual({ plays: 0, genres: 0, top: [] });
     });
 
-    it('fold genres past the eighth into Other, naming the biggest', async () => {
-      const genres = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
-      await request(app).put(api('/genres')).send({ kind: 'artist', ref: 'Virtual Self', genres });
+    it('fold main genres past the eighth into Other, naming the biggest', async () => {
+      // Ten more one-play artists, each with a main genre of their own.
+      for (let n = 0; n < 10; n++) {
+        await push(`Song ${n}`, undefined, [`Artist ${n}`], 2 * DAY + n * 300);
+        await request(app).put(api('/genres')).send({ kind: 'artist', ref: `Artist ${n}`, genres: [`g${n}`, 'ignored second'] });
+      }
       const stream = (await request(app).get(api('/insights/genres'))).body;
-      expect(stream.genres).toHaveLength(8);
-      expect(stream.genres.slice(0, 2)).toEqual(['trance', 'progressive trance']);
-      const total = stream.buckets.reduce((n: number, b: { other: number }) => n + b.other, 0);
-      expect(total).toBe(4);
-      expect(stream.buckets.flatMap((b: { other_top: { name: string }[] }) => b.other_top.map((o) => o.name))).toEqual(['g', 'h', 'i']);
+      expect(stream.genres).toEqual(['trance', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6']);
+      expect(stream.buckets.reduce((n: number, b: { other: number }) => n + b.other, 0)).toBe(4);
+      // All in one week, which names its three biggest.
+      expect(stream.buckets.flatMap((b: { other_top: { name: string }[] }) => b.other_top.map((o) => o.name))).toEqual(['g7', 'g8', 'g9']);
       // The period's Other: what's outside the bands, biggest first.
       expect(stream.other).toEqual({
         plays: 4,
         genres: 4,
-        top: [{ name: 'g', plays: 1 }, { name: 'h', plays: 1 }, { name: 'i', plays: 1 }, { name: 'j', plays: 1 }],
+        top: [{ name: 'g7', plays: 1 }, { name: 'g8', plays: 1 }, { name: 'g9', plays: 1 }, { name: 'hardcore', plays: 1 }],
       });
     });
 

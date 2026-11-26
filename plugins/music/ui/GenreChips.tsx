@@ -200,6 +200,9 @@ export function GenreEditor({
               ))}
             </datalist>
           </div>
+          {draft.length > 1 && (
+            <p className="text-[11px] text-gray-500">The first genre is the main one, used by Genres over time.</p>
+          )}
           {kind === 'album' && draft.length === 0 && (
             <p className="text-[11px] text-gray-500">With no genres of its own, its plays use the artist's genres.</p>
           )}

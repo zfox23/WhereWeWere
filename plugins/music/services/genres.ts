@@ -8,7 +8,10 @@
  * Music) or, for a newly arrived scrobble, in the background.
  *
  * Counting: a play counts in full toward each of its genres, so genre totals
- * can add up to more than the plays they came from.
+ * can add up to more than the plays they came from. Genres over time is the
+ * exception: there a play counts once, toward its main genre (the first:
+ * most votes on MusicBrainz, or first in the user's edit), so near-duplicates
+ * like "electronic" and "edm" on one album don't both swell the wave.
  */
 
 import { query } from '../../../server/src/db';
@@ -402,8 +405,9 @@ export interface GenreStream {
 }
 
 /**
- * Plays per genre per week, month or year of the period (the same bucket
- * sizes as Discovery), for the top genres and "Other".
+ * Plays per main genre per week, month or year of the period (the same
+ * bucket sizes as Discovery), for the top genres and "Other". Each play with
+ * genres counts once, toward its first genre.
  */
 export async function getGenreStream(userId: string, from: string | null, to: string | null): Promise<GenreStream> {
   const pg = playGenres('m');
@@ -425,9 +429,9 @@ export async function getGenreStream(userId: string, from: string | null, to: st
   // $1 user, $2/$3 range, $4 bucket unit, $5/$6 the series' first and last day.
   const r = await query(
     `WITH counted AS (
-       SELECT date_trunc($4::text, (${localDay})::timestamp)::date AS start, g AS genre, COUNT(*)::int AS plays
-       FROM music_scrobbles m ${pg.join} CROSS JOIN LATERAL unnest(${pg.genres}) AS g
-       WHERE m.user_id = $1 ${range}
+       SELECT date_trunc($4::text, (${localDay})::timestamp)::date AS start, (${pg.genres})[1] AS genre, COUNT(*)::int AS plays
+       FROM music_scrobbles m ${pg.join}
+       WHERE m.user_id = $1 ${range} AND cardinality(${pg.genres}) > 0
        GROUP BY 1, 2
      ),
      buckets AS (
