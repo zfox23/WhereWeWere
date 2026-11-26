@@ -375,10 +375,12 @@ export async function listGenres(userId: string): Promise<GenreCount[]> {
 
 // ---- Genres over time ----------------------------------------------------
 
-/** Genres drawn as bands of their own; the rest are "Other". */
+/** Genres drawn as bands of their own; the rest are "Other", summed beside the chart. */
 export const STREAM_BANDS = 8;
 /** Genres named per bucket for what "Other" holds. */
 const OTHER_NAMED = 3;
+/** Genres named for what "Other" holds over the period. */
+const OTHER_NAMED_PERIOD = 5;
 
 export interface GenreStream {
   bucket: DiscoveryBucket;
@@ -395,6 +397,8 @@ export interface GenreStream {
   /** Plays in the period, and how many of them have a genre. */
   plays: number;
   plays_with_genres: number;
+  /** Everything outside the bands over the whole period, shown beside the chart rather than in it. */
+  other: { plays: number; genres: number; top: GenreCount[] };
 }
 
 /**
@@ -412,7 +416,8 @@ export async function getGenreStream(userId: string, from: string | null, to: st
     [userId, from, to],
   );
   const { first, last, plays, with_genres: withGenres } = span.rows[0];
-  if (!first || !last) return { bucket: 'month', genres: [], buckets: [], plays: 0, plays_with_genres: 0 };
+  const noOther = { plays: 0, genres: 0, top: [] };
+  if (!first || !last) return { bucket: 'month', genres: [], buckets: [], plays: 0, plays_with_genres: 0, other: noOther };
   const bucket = discoveryBucket(from ?? first, to ?? last);
   const start = from ?? first;
   const end = to ?? last;
@@ -442,6 +447,7 @@ export async function getGenreStream(userId: string, from: string | null, to: st
     .slice(0, STREAM_BANDS)
     .map(([g]) => g);
   const banded = new Set(genres);
+  const rest = [...totals].filter(([g]) => !banded.has(g)).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   return {
     bucket,
     genres,
@@ -458,6 +464,11 @@ export async function getGenreStream(userId: string, from: string | null, to: st
     }),
     plays,
     plays_with_genres: withGenres,
+    other: {
+      plays: rest.reduce((n, [, c]) => n + c, 0),
+      genres: rest.length,
+      top: rest.slice(0, OTHER_NAMED_PERIOD).map(([name, plays]) => ({ name, plays })),
+    },
   };
 }
 

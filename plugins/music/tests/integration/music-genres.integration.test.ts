@@ -247,6 +247,7 @@ describe('music genres', () => {
       expect(stream.plays).toBe(5);
       expect(stream.plays_with_genres).toBe(5);
       expect(stream.buckets).toEqual([{ start: '2024-04-29', counts: [4, 3, 1], other: 0, other_top: [] }]);
+      expect(stream.other).toEqual({ plays: 0, genres: 0, top: [] });
     });
 
     it('fold genres past the eighth into Other, naming the biggest', async () => {
@@ -258,6 +259,12 @@ describe('music genres', () => {
       const total = stream.buckets.reduce((n: number, b: { other: number }) => n + b.other, 0);
       expect(total).toBe(4);
       expect(stream.buckets.flatMap((b: { other_top: { name: string }[] }) => b.other_top.map((o) => o.name))).toEqual(['g', 'h', 'i']);
+      // The period's Other: what's outside the bands, biggest first.
+      expect(stream.other).toEqual({
+        plays: 4,
+        genres: 4,
+        top: [{ name: 'g', plays: 1 }, { name: 'h', plays: 1 }, { name: 'i', plays: 1 }, { name: 'j', plays: 1 }],
+      });
     });
 
     it('count genres heard for the first time in Discovery', async () => {

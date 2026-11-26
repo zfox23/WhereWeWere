@@ -183,6 +183,8 @@ export interface GenreStream {
   buckets: GenreStreamBucket[];
   plays: number;
   plays_with_genres: number;
+  /** Everything outside the bands over the whole period. */
+  other: { plays: number; genres: number; top: GenreCount[] };
 }
 
 export interface GenreBackfillStatus {
