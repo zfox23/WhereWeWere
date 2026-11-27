@@ -189,7 +189,8 @@ describe('music metadata', () => {
     await push('Oceanic', 'Group Therapy', ['Zoë Johnston'], 900);
     useDeps(async () => match());
     await backfill();
-    const id = (await query(`SELECT id FROM music_albums LIMIT 1`)).rows[0].id;
+    // Each key gets its own row; take Above & Beyond's, whose ref the view should report.
+    const id = (await query(`SELECT id FROM music_albums WHERE album_key = 'group therapy|above & beyond'`)).rows[0].id;
     const res = await request(app).get('/api/v1/music/album-view').query({ art_id: id });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ title: 'Group Therapy', artist: 'Above & Beyond', release_date: '2011-06-14', label: 'Anjunabeats', plays: 4 });
