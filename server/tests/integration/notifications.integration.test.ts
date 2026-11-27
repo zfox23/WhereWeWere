@@ -9,10 +9,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 const sendNotification = vi.fn();
 vi.mock('web-push', () => ({
-  default: {
-    sendNotification: (...args: unknown[]) => sendNotification(...args),
-    generateVAPIDKeys: () => ({ publicKey: 'BTestPublicKey', privateKey: 'test-private-key' }),
-  },
+  sendNotification: (...args: unknown[]) => sendNotification(...args),
+  generateVAPIDKeys: () => ({ publicKey: 'BTestPublicKey', privateKey: 'test-private-key' }),
 }));
 
 import { createApp } from '../../src/index';

@@ -6,7 +6,7 @@
  * the plugin's `notifications_enabled` toggle is on.
  */
 
-import webpush from 'web-push';
+import * as webpush from 'web-push';
 import type { NotificationPayload } from 'wwp-shared';
 import { NOTIFICATIONS_ENABLED_KEY } from 'wwp-shared';
 import { query } from '../../db';

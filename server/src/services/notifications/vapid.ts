@@ -8,7 +8,7 @@
  * the public key, and a new key orphans every subscribed device.
  */
 
-import webpush from 'web-push';
+import * as webpush from 'web-push';
 import { query } from '../../db';
 import { config } from '../../config';
 

@@ -170,9 +170,11 @@ describe('GenreWaveChart', () => {
   it('re-picks the genres for the stretch in view on request', async () => {
     renderChart();
     await screen.findByRole('img', { name: 'Plays per month of the top genres' });
+    // The range reaches the button from the chart's effect, a render after the chart appears.
+    const rerank = await screen.findByRole('button', { name: 'Show the top 8 for Jan 1, 2024 – Mar 31, 2024' });
     streamMock.mockResolvedValueOnce({ ...STREAM, genres: ['house', 'trance'], daily: [STREAM.daily[1], STREAM.daily[0]] });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Show the top 8 for Jan 1, 2024 – Mar 31, 2024' }));
+      fireEvent.click(rerank);
     });
     expect(streamMock).toHaveBeenLastCalledWith('2024-01-01', '2024-03-31', { from: '2024-01-01', to: '2024-03-31' });
     expect(screen.getByText(/Top genres for Jan 1, 2024 – Mar 31, 2024\./)).toBeTruthy();
